@@ -393,7 +393,7 @@ $btnStart.FlatStyle = 'Flat'
 $form.Controls.Add($btnStart)
 
 $btnSafeStop = New-Object System.Windows.Forms.Button
-$btnSafeStop.Text = '안전 중지(F9) (회차 완료 후)'
+$btnSafeStop.Text = ("안전 중지(F9)" + [Environment]::NewLine + "(회차 완료 후)")
 $btnSafeStop.Location = New-Object System.Drawing.Point(171, 104)
 $btnSafeStop.Size = New-Object System.Drawing.Size(165, 38)
 $btnSafeStop.Enabled = $false
@@ -1442,7 +1442,7 @@ function Stop-AllRun {
   Set-UiRunning $false
   $script:stopRequested = $false
   $script:targetTime = $null
-  $btnSafeStop.Text = '안전 중지(F9) (회차 완료 후)'
+  $btnSafeStop.Text = ("안전 중지(F9)" + [Environment]::NewLine + "(회차 완료 후)")
   Remove-Item -LiteralPath $safeStopFlag -Force -ErrorAction SilentlyContinue
   # 화면 유지 신호 해제 (평소 절전 설정으로 복귀)
   [Win32.PowerState]::SetThreadExecutionState($script:esRelease) | Out-Null
@@ -1550,7 +1550,7 @@ $btnStart.Add_Click({
     if ($cleanup.Failed -gt 0) { Add-GuiLog "[경고] 기존 자동화 프로세스 $($cleanup.Failed)개를 종료하지 못했습니다 - 새 회차가 '중복 실행'으로 멈추면 작업 관리자에서 powershell.exe 를 직접 종료해 주세요." }
     # 지난 세션의 안전 중지 신호가 남아 있으면 제거 (남아 있으면 첫 회차가 조기 종료됨)
     Remove-Item -LiteralPath $safeStopFlag -Force -ErrorAction SilentlyContinue
-    $btnSafeStop.Text = '안전 중지(F9) (회차 완료 후)'
+    $btnSafeStop.Text = ("안전 중지(F9)" + [Environment]::NewLine + "(회차 완료 후)")
     # RDP 자동 전환은 config 의 rdp.autoConsoleRedirect 값을 따릅니다 (false = 예약 작업 제거)
     $rdpEnable = $true
     $cfgNow = Read-Config
@@ -1590,7 +1590,7 @@ $btnSafeStop.Add_Click({
     if ($script:stopRequested) {
       $script:stopRequested = $false
       Remove-Item -LiteralPath $safeStopFlag -Force -ErrorAction SilentlyContinue
-      $btnSafeStop.Text = '안전 중지(F9) (회차 완료 후)'
+      $btnSafeStop.Text = ("안전 중지(F9)" + [Environment]::NewLine + "(회차 완료 후)")
       $statusSuffix = ''
       if ($null -ne $script:targetTime) { $statusSuffix = " ($($script:targetTime.ToString('HH:mm')) 까지)" }
       $lblStatus.Text = "$($script:completedCycles + 1)회차 실행 중...$statusSuffix (안전 중지 취소됨)"
