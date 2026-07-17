@@ -324,6 +324,11 @@ $form.MinimumSize = New-Object System.Drawing.Size(616, 700)
 $form.MaximizeBox = $true
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+# 창/작업표시줄 아이콘: 스크립트 폴더에 app.ico 가 있으면 사용합니다 (exe가 실행 시 추출)
+$appIconPath = Join-Path $scriptRoot 'app.ico'
+if (Test-Path -LiteralPath $appIconPath) {
+  try { $form.Icon = New-Object System.Drawing.Icon($appIconPath) } catch { }
+}
 
 # --- 상태 표시 ---
 $lblStatus = New-Object System.Windows.Forms.Label
@@ -1757,6 +1762,60 @@ if ($script:configMigrated) {
 }
 $timer.Start()
 $hotkeyTimer.Start()
+# ===== 꿀비노기 허니 테마 (밝은 크림 + 꿀색) =====
+# 모든 컨트롤 생성이 끝난 뒤 한 번에 입힙니다 (컨트롤 생성/로직 코드는 손대지 않음).
+# 색 철학: 따뜻한 크림 배경 + 꿀색 강조 + 갈색 글자. 로그만 콘솔풍으로 어둡게.
+# 실행 중 색을 바꾸는 곳은 상태 라벨뿐이며(초록/빨강/파랑/주황) 밝은 배경에서 모두 잘 보입니다.
+$script:themeBack     = [System.Drawing.Color]::FromArgb(253, 248, 238)  # 창 배경 (크림)
+$script:themeControl  = [System.Drawing.Color]::FromArgb(255, 253, 247)  # 일반 버튼 (밝은 크림)
+$script:themeInput    = [System.Drawing.Color]::FromArgb(255, 255, 255)  # 입력 배경 (흰색)
+$script:themeLogBack  = [System.Drawing.Color]::FromArgb(40, 34, 24)     # 로그 배경 (진한 갈색 콘솔풍)
+$script:themeText     = [System.Drawing.Color]::FromArgb(66, 50, 22)     # 기본 글자 (진한 갈색)
+$script:themeMuted    = [System.Drawing.Color]::FromArgb(158, 138, 104)  # 흐린 글자
+$script:themeBorder   = [System.Drawing.Color]::FromArgb(226, 205, 160)  # 버튼 테두리 (연한 꿀색)
+$script:themeTitle    = [System.Drawing.Color]::FromArgb(191, 128, 7)    # 섹션 제목 (꿀 갈색)
+$script:themeHoney    = [System.Drawing.Color]::FromArgb(247, 181, 0)    # 꿀색 (강조)
+$script:themeHoneyInk = [System.Drawing.Color]::FromArgb(66, 45, 0)      # 꿀색 위 글자
+$script:themeDanger   = [System.Drawing.Color]::FromArgb(222, 105, 92)   # 위험(중지)
+
+function Apply-HoneyTheme {
+  param([System.Windows.Forms.Control]$Root)
+  foreach ($ctl in @($Root.Controls)) {
+    switch ($ctl.GetType().Name) {
+      'Button' {
+        $ctl.FlatStyle = 'Flat'
+        $ctl.FlatAppearance.BorderColor = $script:themeBorder
+        $ctl.FlatAppearance.BorderSize = 1
+        $ctl.BackColor = $script:themeControl
+        $ctl.ForeColor = $script:themeText
+      }
+      'GroupBox'    { $ctl.ForeColor = $script:themeTitle; $ctl.BackColor = $script:themeBack }
+      'Label'       { $ctl.ForeColor = $script:themeText }
+      'CheckBox'    { $ctl.ForeColor = $script:themeText }
+      'RadioButton' { $ctl.ForeColor = $script:themeText }
+      'Panel'       { $ctl.BackColor = $script:themeBack }
+      'NumericUpDown' { $ctl.BackColor = $script:themeInput; $ctl.ForeColor = $script:themeText }
+      'ComboBox'    { $ctl.BackColor = $script:themeInput; $ctl.ForeColor = $script:themeText }
+      'RichTextBox' { $ctl.BackColor = $script:themeLogBack; $ctl.BorderStyle = 'None' }
+    }
+    if ($ctl.Controls.Count -gt 0) { Apply-HoneyTheme -Root $ctl }
+  }
+}
+
+$form.BackColor = $script:themeBack
+Apply-HoneyTheme -Root $form
+# 강조색 지정 (일괄 적용 뒤 개별 덮어쓰기)
+$btnStart.BackColor = $script:themeHoney
+$btnStart.ForeColor = $script:themeHoneyInk
+$btnStart.FlatAppearance.BorderSize = 0
+$btnKill.BackColor = $script:themeDanger
+$btnKill.ForeColor = [System.Drawing.Color]::White
+$btnKill.FlatAppearance.BorderSize = 0
+$btnSafeStop.BackColor = [System.Drawing.Color]::FromArgb(250, 240, 218)
+$btnClearHelp.BackColor = $script:themeHoney
+$btnClearHelp.ForeColor = $script:themeHoneyInk
+$lblStatus.ForeColor = $script:themeTitle
+
 [void]$form.ShowDialog()
 $hotkeyTimer.Stop()
 $timer.Stop()
