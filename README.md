@@ -44,7 +44,6 @@
 | `mabinogi_run_once.ps1` | 1회차 실행 본체 — 클릭·OCR·키 입력 (exe에 내장됨) |
 | `config.json` | 설정 파일 (좌표·대기시간·키 등, 한국어 설명 포함) |
 | `rdp_redirect_console.ps1` | RDP 자동 전환 내부 스크립트 |
-| `build/` | exe 빌드 스크립트 (개발용) |
 
 - exe는 실행 시 스크립트를 `%LOCALAPPDATA%\MabinogiAuto`로 추출해 실행합니다.
 - exe 업데이트 시 좌표/구조는 자동 최신화되고 사용자 설정은 유지됩니다.
