@@ -1,0 +1,6 @@
+# IDE
+.idea/
+
+# 빌드 결과물 (바이너리는 GitHub Releases로 배포)
+MabinogiAuto.exe
+build/AssemblyInfo.generated.cs
