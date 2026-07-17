@@ -5,6 +5,8 @@
 
 게임 화면을 OCR(글자 인식)로 읽어 어비스/던전/사냥터를 자동으로 **입장 → 클리어 대기 → 보상 수령 → 재입장 반복**하는 자동화 도구입니다.
 
+### 📥 [최신 버전 다운로드](https://github.com/Myodong/Mabinogi_Mobile_auto/releases/latest)
+
 ---
 
 ## 빠른 시작
