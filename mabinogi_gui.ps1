@@ -144,7 +144,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '1.0.0'
+$appVersion = '1.0.2'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -1112,6 +1112,17 @@ $lblVersion.ForeColor = [System.Drawing.Color]::DimGray
 $lblVersion.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($lblVersion)
 
+# 새 버전 안내 링크 (평소 숨김 - 시작 시 최신 버전 확인에서 새 버전이 감지되면
+# 버전 표시 대신 이 링크가 나타나고, 클릭하면 GitHub 릴리스 페이지가 열립니다)
+$lnkUpdate = New-Object System.Windows.Forms.LinkLabel
+$lnkUpdate.Location = New-Object System.Drawing.Point(405, 812)
+$lnkUpdate.Size = New-Object System.Drawing.Size(160, 20)
+$lnkUpdate.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$lnkUpdate.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+$lnkUpdate.Visible = $false
+$lnkUpdate.Add_LinkClicked({ Start-Process 'https://github.com/Myodong/HoneyNogi/releases/latest' })
+$form.Controls.Add($lnkUpdate)
+
 $btnClearLog.Add_Click({
     $txtLog.Clear()
     # Clear() 후에는 확대 배율이 1.0으로 초기화되므로 다시 적용합니다
@@ -1836,6 +1847,46 @@ $btnSafeStop.BackColor = [System.Drawing.Color]::FromArgb(250, 240, 218)
 $btnClearHelp.BackColor = $script:themeHoney
 $btnClearHelp.ForeColor = $script:themeHoneyInk
 $lblStatus.ForeColor = $script:themeTitle
+$lnkUpdate.LinkColor = $script:themeTitle          # 새 버전 링크도 꿀 갈색으로
+
+# ============================================================
+#  최신 버전 확인 (GitHub 릴리스, 시작 시 1회)
+# ============================================================
+# 백그라운드 러닝스페이스에서 확인하므로 GUI가 멈추지 않고, 실패(오프라인/비공개
+# 저장소/요청 한도)는 조용히 무시하고 정상 시작합니다. 새 버전이 있으면 우하단
+# 버전 표시가 다운로드 링크로 바뀝니다. 무인 운용을 방해하지 않도록 팝업은
+# 절대 띄우지 않습니다.
+$script:updateCheckPs = [System.Management.Automation.PowerShell]::Create()
+[void]$script:updateCheckPs.AddScript({
+    try {
+      # PS 5.1 기본 설정에는 TLS 1.2가 빠져 있을 수 있어 추가합니다 (3072 = Tls12)
+      [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+      # User-Agent 헤더가 없으면 GitHub API가 요청을 거부합니다
+      $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/Myodong/HoneyNogi/releases/latest' `
+        -Headers @{ 'User-Agent' = 'HoneyNogi-UpdateCheck' } -TimeoutSec 5
+      return [string]$release.tag_name
+    } catch { return '' }
+  })
+$script:updateCheckAsync = $script:updateCheckPs.BeginInvoke()
+$script:updateTimer = New-Object System.Windows.Forms.Timer
+$script:updateTimer.Interval = 1000
+$script:updateTimer.Add_Tick({
+    if (-not $script:updateCheckAsync.IsCompleted) { return }
+    $script:updateTimer.Stop()
+    $tag = ''
+    try {
+      $checkResult = $script:updateCheckPs.EndInvoke($script:updateCheckAsync)
+      if ($checkResult -and $checkResult.Count -gt 0) { $tag = [string]$checkResult[0] }
+    } catch { }
+    try { $script:updateCheckPs.Dispose() } catch { }
+    $remoteVersion = $null
+    if (-not [System.Version]::TryParse(($tag -replace '^[vV]', ''), [ref]$remoteVersion)) { return }
+    if ($remoteVersion -le [System.Version]$appVersion) { return }
+    $lblVersion.Visible = $false
+    $lnkUpdate.Text = "새 버전 v$remoteVersion 다운로드"
+    $lnkUpdate.Visible = $true
+  })
+$script:updateTimer.Start()
 
 [void]$form.ShowDialog()
 $hotkeyTimer.Stop()
