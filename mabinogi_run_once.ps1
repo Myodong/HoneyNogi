@@ -54,7 +54,7 @@ if (Test-Path -LiteralPath $configPath) {
 #    아래 버전과 config.json 의 coordsVersion 을 반드시 함께 +1 하세요.
 #    (안 올리면 옛 config 의 좌표가 게이트를 통과해 이번 사고가 재발합니다.
 #     두 값이 어긋나면 빌드 스크립트가 실패하도록 검사합니다)
-$coordsVersionCurrent = 5
+$coordsVersionCurrent = 6
 $script:staleCoordsIgnored = $false
 if ($config -and ([int](Get-ConfigValue $config @('coordsVersion') 0)) -lt $coordsVersionCurrent) {
   if ($config.PSObject.Properties['ocrRegions'] -or $config.PSObject.Properties['clickPoints']) {
@@ -221,12 +221,22 @@ $rgDgCoinButton = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButton') @(38
 $rgDgCoinButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButtonAlt') @(400, 292, 130, 44)) # 은동전 보조: 좁은 영역 ('도전' 대응)
 $rgDgLootButton = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButton') @(388, 494, 130, 48))     # 더블 루팅 주: 좁은 영역 ('도전' 대응, 실측 검증)
 $rgDgLootButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButtonAlt') @(388, 493, 205, 50)) # 더블 루팅 보조: 넓은 영역 ('선택됨' 대응)
-# 스테이지 노드 클릭 좌표 (기준 1272x717 실측). 흐려진 층의 라벨은 OCR이 못 읽어서
-# 고정 좌표로 클릭하되, 클릭 후 진입 버튼 문구('N층 M구역')로 선택 결과를 검증합니다.
+# 스테이지 노드 클릭 좌표 (기준 1272x717, 2026-07-18 실측 캡처 기준으로 리베이스).
+# 지도는 세로 스크롤 패널이라 위치가 흐르므로, 클릭 전에 라벨을 읽어 오프셋을 보정하고
+# (Get-NdStageClickPoint), 클릭 후 진입 버튼 문구('N층 M구역')로 선택 결과를 검증합니다.
 $ndStagePoints = @{
-  '1-1' = @(206, 287); '1-2' = @(293, 287); '1-3' = @(397, 334)
-  '2-1' = @(206, 624); '2-2' = @(293, 624); '2-3' = @(397, 578)
+  '1-1' = @(196, 406); '1-2' = @(293, 406); '1-3' = @(385, 367)
+  '2-1' = @(249, 655); '2-2' = @(249, 571); '2-3' = @(353, 605)
 }
+# 지도 라벨 앵커: 위 기준 좌표와 같은 스크롤 상태에서 각 라벨 글자의 기준 y.
+# 지도가 밀리면 (읽힌 라벨 y - 기준 y)를 노드 좌표에 더해 보정합니다.
+# (작은 노드 라벨(1-1/1-2/2-1)은 OCR이 자주 못 읽지만 큰 카드/층 제목은 잘 읽힘 - 실측)
+$ndMapAnchorY = @{
+  '1층' = 259; '2층' = 503
+  '1-1' = 415; '1-2' = 415; '1-3' = 398
+  '2-1' = 664; '2-2' = 580; '2-3' = 637
+}
+$rgNdStageMap = @(40, 230, 520, 470)   # 스테이지 지도 라벨 판독 영역
 # ===== '사냥터' 카테고리 설정 - 특정 사냥터에 매이지 않는 범용 방식 =====
 # 사용자가 원하는 사냥터의 첫 화면(하단에 파티 찾기/입장하기)을 열어 두면 동작합니다.
 $htDifficulty   = [string](Get-ConfigValue $config @('huntingGround', 'difficulty') '일반')
@@ -259,6 +269,9 @@ $ptHtClose      = @(1228, 67)      # 첫 화면 우상단 닫기(X) - 은동전 
 
 # 진입 옵션 화면의 클릭 좌표 (기준 1272x717 실측)
 $ptDgStageEnter   = @(918, 655)    # 선택 화면의 'N층 M구역 진입' 버튼
+$ptDgBackArrow    = @(43, 67)      # 진입 옵션 화면 좌상단 '<' (선택 화면으로 한 단계 뒤로) - 2026-07-18 실측
+                                   # 주의: ESC는 한 단계 뒤로가 아니라 던전 UI 전체를 닫고 필드로 나감 (18:44 실측)
+$rgDgOptDifficulty = @(600, 95, 190, 50) # 진입 옵션 화면 상단 난이도 알약(일반/어려움) - 2026-07-18 실측
 $ptDgCoinButton   = @(463, 313)    # 은동전(소탕) 카드의 선택됨/도전 버튼
 $ptDgLootButton   = @(452, 517)    # 더블 루팅 카드의 선택됨/도전 버튼
 $ptDgChanceToggle = @(1183, 415)   # '우연한 만남' 토글 (초록 = 켜짐)
@@ -267,9 +280,15 @@ $ptDgEnterFinal   = @(1015, 655)   # '입장하기' 버튼
 # '던전에 입장하시겠습니까?' 확인 팝업 (도전 미수락 시 표시): '일주일 동안 보지 않기' 체크 후 입장
 $rgDgWeekPopup    = @(Get-ConfigValue $config @('ocrRegions', 'dgWeekPopup') @(450, 520, 380, 60)) # '일주일 동안 보지 않기' 문구 영역
 $ptDgConfirmEnter = @(742, 618)    # 확인 팝업의 '입장하기' 버튼
-# 클리어 후 결과 화면(전리품 + 나가기/다시 하기) - 2026-07-15 실측 검증
-$rgDgRetryBtn   = @(Get-ConfigValue $config @('ocrRegions', 'dgRetryButton') @(620, 625, 300, 60)) # '다시 하기' 버튼 영역
-$ptDgRetry      = @(757, 654)      # '다시 하기' 버튼 (반복 재입장)
+# 클리어 후 결과 화면의 버튼 구성 (2026-07-18 실측 - 스테이지/난이도에 따라 달라짐):
+#   1-1/1-2/2-1/2-2      = 나가기 / 다시 하기 / 다음 구역으로   (3버튼)
+#   1-3                  = 나가기 / 다시 하기 / 다음 층으로     (3버튼)
+#   일반 2-3             = 나가기 / 다시 하기 / 다음 난이도로   (3버튼)
+#   어려움(최종) 2-3     = 나가기 / 다시 하기                   (2버튼)
+# 3버튼일 때 다시 하기는 가운데(637,655)로 이동합니다. 그래서 클릭은 고정 좌표가 아니라
+# '다시 하기' 글자 탐색 지점을 쓰고('다음 ~로' 계열은 탐색어에 안 걸림), 영역은 두 배치를 모두 덮습니다.
+$rgDgRetryBtn   = @(Get-ConfigValue $config @('ocrRegions', 'dgRetryButton') @(540, 625, 340, 60)) # '다시 하기' 버튼 영역 (두 배치 커버)
+$ptDgRetry      = @(637, 655)      # '다시 하기' 예비 좌표 (글자 탐색 실패 시 - 3버튼 배치 기준)
 $ptDgResultExit = @(515, 654)      # 결과 화면 '나가기' 버튼 (안전 중지 시 사용)
 # 은동전 소탕 결과 화면: 전리품 공개(카드) 상태에서는 나가기/다시 하기가 아직 없고
 # 화면을 한 번 클릭해야 진행됩니다. '발견한 전리품' 라벨로 이 상태를 감지합니다.
@@ -1240,6 +1259,116 @@ function Find-GameTextPoint {
     $sourceGraphics.Dispose()
     $sourceCapture.Dispose()
   }
+}
+
+function Get-GameRegionOcrWords {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [int]$ReferenceX,
+    [int]$ReferenceY,
+    [int]$RegionWidth,
+    [int]$RegionHeight,
+    [int]$Scale = 3,
+    $Engine = $ocrKoreanEngine
+  )
+
+  # 영역을 한 번 OCR 해 모든 단어를 '기준 좌표(1272x717 환산)'와 함께 돌려줍니다.
+  # 여러 라벨을 한 번에 읽어 위치를 비교할 때 사용합니다 (예: 던전 스테이지 지도 스크롤 보정).
+  # 캡처 실패 시 빈 배열을 반환합니다.
+  $rect = New-Object HoneyNogiInput+RECT
+  if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
+    return @()
+  }
+  $width = $rect.Right - $rect.Left
+  $height = $rect.Bottom - $rect.Top
+  $cropLeft = $rect.Left + [int][Math]::Round($ReferenceX * $width / $referenceWidth)
+  $cropTop = $rect.Top + [int][Math]::Round($ReferenceY * $height / $referenceHeight)
+  $cropWidth = [int][Math]::Round($RegionWidth * $width / $referenceWidth)
+  $cropHeight = [int][Math]::Round($RegionHeight * $height / $referenceHeight)
+  $sourceCapture = New-Object System.Drawing.Bitmap $cropWidth, $cropHeight
+  $sourceGraphics = [System.Drawing.Graphics]::FromImage($sourceCapture)
+  $scaledCapture = New-Object System.Drawing.Bitmap ($RegionWidth * $Scale), ($RegionHeight * $Scale)
+  $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaledCapture)
+
+  try {
+    $captureFailed = $false
+    try {
+      $sourceGraphics.CopyFromScreen($cropLeft, $cropTop, 0, 0, $sourceCapture.Size)
+    } catch {
+      $captureFailed = $true
+    }
+    if (-not $captureFailed -and (Test-BlankCapture -Bitmap $sourceCapture)) {
+      if (-not (Test-DesktopRenderingAlive)) {
+        $captureFailed = $true
+      }
+    }
+    if ($captureFailed) {
+      Register-CaptureFailure
+      return @()
+    }
+    Register-CaptureSuccess
+    $scaledGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $scaledGraphics.DrawImage(
+      $sourceCapture,
+      (New-Object System.Drawing.Rectangle 0, 0, ($RegionWidth * $Scale), ($RegionHeight * $Scale)),
+      (New-Object System.Drawing.Rectangle 0, 0, $cropWidth, $cropHeight),
+      [System.Drawing.GraphicsUnit]::Pixel
+    )
+    $result = Invoke-OcrOnBitmap -Bitmap $scaledCapture -Engine $Engine
+    $words = @()
+    foreach ($line in $result.Lines) {
+      foreach ($word in $line.Words) {
+        $centerXScaled = $word.BoundingRect.X + ($word.BoundingRect.Width / 2)
+        $centerYScaled = $word.BoundingRect.Y + ($word.BoundingRect.Height / 2)
+        # 확대 배율만 되돌리면 기준 좌표가 됩니다 (창 크기와 무관)
+        $words += , @{
+          Text = ($word.Text -replace '\s', '')
+          X = $ReferenceX + [int][Math]::Round($centerXScaled / $Scale)
+          Y = $ReferenceY + [int][Math]::Round($centerYScaled / $Scale)
+        }
+      }
+    }
+    # 주의: ,$words 로 감싸 반환하면 호출부의 @()가 '배열을 담은 1칸짜리 배열'로 만들어
+    # foreach 가 단어가 아닌 배열 자체를 돌게 됩니다 (2026-07-18 18:07 실측 사고).
+    # 그냥 반환해 파이프라인이 단어 단위로 풀게 하고, 호출부에서 @()로 모읍니다.
+    return $words
+  } finally {
+    $scaledGraphics.Dispose()
+    $scaledCapture.Dispose()
+    $sourceGraphics.Dispose()
+    $sourceCapture.Dispose()
+  }
+}
+
+function Get-NdStageClickPoint {
+  param([System.Diagnostics.Process]$Game, [string]$Stage)
+
+  # 던전 스테이지 지도는 세로 스크롤 패널이라 노드 위치가 상태에 따라 위아래로 흐릅니다
+  # (2026-07-18 17:50 실측 사고: 고정 좌표가 스크롤 상태에 따라 옆 노드에 떨어져
+  # 1-2 대신 1-3이 선택됨). 매 시도마다 지도 라벨을 읽어 위치를 보정합니다:
+  #  1) 원하는 스테이지 라벨(예: '1-2')이 읽히면 그 지점을 그대로 클릭 (라벨은 노드 안)
+  #  2) 아니면 읽히는 다른 라벨/층 제목들로 세로 오프셋(현재 y - 기준 y)을 구해 보정
+  #  3) 아무 라벨도 안 읽히면 기준 좌표 그대로 (이후 진입 버튼 문구 검증이 잡아줌)
+  $basePoint = $ndStagePoints[$Stage]
+  $mapWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNdStageMap[0] -ReferenceY $rgNdStageMap[1] `
+      -RegionWidth $rgNdStageMap[2] -RegionHeight $rgNdStageMap[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $offsets = @()
+  foreach ($mapWord in $mapWords) {
+    if ($mapWord.Text -eq $Stage) {
+      return @([int]$mapWord.X, [int]$mapWord.Y)
+    }
+    if ($ndMapAnchorY.ContainsKey($mapWord.Text)) {
+      $offsets += ($mapWord.Y - $ndMapAnchorY[$mapWord.Text])
+    }
+  }
+  if ($offsets.Count -gt 0) {
+    $avgOffset = [int][Math]::Round(($offsets | Measure-Object -Average).Average)
+    if ([Math]::Abs($avgOffset) -gt 8) {
+      Write-RunLog "[던전] 스테이지 지도 스크롤 보정: 세로 ${avgOffset}px (라벨 $($offsets.Count)개 기준)"
+    }
+    return @([int]$basePoint[0], [int]($basePoint[1] + $avgOffset))
+  }
+  return $basePoint
 }
 
 function Get-EnterButtonText {
@@ -2376,14 +2505,77 @@ function Invoke-NormalDungeonCycle {
   $script:contentTag = '[던전]'
   Write-RunLog "[던전] 자동화 시작: 난이도 '$ndDifficulty', 스테이지 '$ndStage', 은동전 $(if ($ndUseCoin) { '사용' } else { '미사용' }), 더블 루팅 $(if ($ndDoubleLoot) { '켬' } else { '끔' }), 매칭 '$ndMatching'"
 
+  if (-not $ndStagePoints.ContainsKey($ndStage)) {
+    throw "알 수 없는 스테이지입니다: '$ndStage' (지원: $($ndStagePoints.Keys -join ', '))"
+  }
+  $stageParts = $ndStage -split '-'
+  $stageFloor = $stageParts[0]
+  $stageArea = $stageParts[1]
+
   # 0. 현재 화면 판별: 좌상단 제목이 'N구역'을 포함하면 이미 진입 옵션 화면입니다.
   #    선택 화면 제목에는 던전 이름과 '던전'이 들어갑니다. OCR이 이름 일부를 깨뜨리는
   #    경우까지 고려해 '던전'/'오드' 조각을 함께 봐서 느슨하게 확인합니다.
   #    선택/옵션 화면 둘 다 아니면, 던전 안에서 재시작한 경우인지 확인합니다
   #    (게임플레이 HUD + 퀘스트 추적기의 'N구역 클리어' 목표로 판별).
-  $titleText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-    -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  $readDgTitle = {
+    (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
+      -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  }
+  $titleText = & $readDgTitle
   $onOptionsScreen = $titleText.Contains('구역')
+
+  # 0-1. 옵션 화면이라면 제목의 스테이지(N층 M구역)가 설정과 같은지 확인합니다.
+  #      '다시 하기' 복귀 회차라면 항상 일치하지만, 사용자가 다른 스테이지의 옵션 화면을
+  #      열어 둔 채 시작하면 검증 없이 그 스테이지로 입장하는 사고가 됩니다
+  #      (2026-07-18 실측: 설정 1-3인데 2-3 옵션 화면에서 시작 → 그대로 2-3 입장).
+  #      OCR 숫자 오독으로 멀쩡한 복귀 회차를 되돌리는 일이 없도록 재확인까지 해서,
+  #      '다른 스테이지'가 명확히 읽힌 경우에만 선택 화면으로 되돌아갑니다.
+  if ($onOptionsScreen -and ($titleText -notmatch "${stageFloor}\D{1,2}${stageArea}구역")) {
+    Start-Sleep -Milliseconds 700
+    $titleText = & $readDgTitle
+    $titleStageWrong = $false
+    # 구분자('층')는 통째로 소실될 수 있어 {0,2}로 허용합니다 ('2층3구역'→'23구역').
+    # 잘못 판정해도 선택 화면으로 돌아가 다시 고르므로 결과는 항상 설정 스테이지가 됩니다.
+    if ($titleText -match "(\d)\D{0,2}(\d)구역") {
+      $titleStageWrong = -not (($Matches[1] -eq $stageFloor) -and ($Matches[2] -eq $stageArea))
+    }
+    if ($titleStageWrong) {
+      Write-RunLog "[던전] 시작: 진입 옵션 화면이 설정과 다른 스테이지입니다 (제목: '$titleText', 설정: ${ndStage}) - 선택 화면으로 되돌아갑니다"
+      # 상태 기반 뒤로 가기: 매번 화면을 먼저 판독하고, 옵션 화면('구역')이 그대로
+      # 보일 때만 좌상단 '<'를 클릭합니다. 전환 중이라 판독이 불명확하면 입력 없이
+      # 기다렸다가 재확인합니다 (복귀가 이미 성공했는데 판독이 한 번 흔들렸다고
+      # 여분의 입력을 쏘지 않기 위함 - 무조건 재클릭 금지 원칙).
+      # 주의: ESC/우상단 X는 한 단계 뒤로가 아니라 던전 UI 전체를 닫고 필드로
+      # 나가버립니다 (2026-07-18 18:44 실측 - 좌상단 '<'만 선택 화면으로 돌아감).
+      $backOk = $false
+      $backInputs = 0
+      for ($backTry = 1; $backTry -le 10; $backTry++) {
+        $titleText = & $readDgTitle
+        if (-not $titleText.Contains('구역')) {
+          if ($titleText.Contains('던전') -or $titleText.Contains('오드')) { $backOk = $true; break }
+          # 던전 UI 밖(필드 HUD)으로 나가버렸으면 더 조작하지 않고 아래 오류로 안내합니다
+          if (Test-HomeEndEscHud -Game $Game) { break }
+          Start-Sleep -Milliseconds 1500   # 전환 중/판독 불명확 - 입력 없이 재확인
+          continue
+        }
+        if ($backInputs -ge 4) { break }
+        $backInputs++
+        Focus-Game -Game $Game
+        Click-GamePoint -Game $Game -ReferenceX $ptDgBackArrow[0] -ReferenceY $ptDgBackArrow[1]
+        Write-RunLog "[던전] 선택 화면으로 뒤로 가기: 좌상단 < 클릭 (${backInputs}/4)"
+        Start-Sleep -Milliseconds 1500
+      }
+      if (-not $backOk) {
+        throw "설정(${ndStage})과 다른 스테이지의 진입 옵션 화면에서 선택 화면으로 돌아가지 못했습니다 (제목 영역 OCR: '$titleText'). 게임에서 원하는 던전의 구역 선택 화면을 열어 두고 다시 시작해 주세요."
+      }
+      Write-RunLog '[던전] 선택 화면 복귀 확인 - 난이도/스테이지 선택부터 진행합니다'
+      $onOptionsScreen = $false
+    } elseif ($titleText.Length -gt 0) {
+      # 재확인에서 설정과 일치했거나 숫자를 명확히 읽지 못한 경우: 새 판독 기준으로 진행
+      $onOptionsScreen = $titleText.Contains('구역')
+    }
+    # 재판독이 빈 문자열(일시 캡처 실패)이면 첫 판독(옵션 화면) 판정을 그대로 둡니다
+  }
   $insideAlready = $false
   $onResultScreen = $false
   if (-not $onOptionsScreen -and -not ($titleText.Contains('오드') -or $titleText.Contains('던전'))) {
@@ -2433,16 +2625,11 @@ function Invoke-NormalDungeonCycle {
 
   # 3. 스테이지 노드 클릭 후 '진입' 버튼 문구(N층 M구역)로 선택을 검증합니다.
   #    ('층'이 OCR에서 '츰' 등으로 읽히는 경우가 있어 층 글자는 느슨하게 확인)
-  if (-not $ndStagePoints.ContainsKey($ndStage)) {
-    throw "알 수 없는 스테이지입니다: '$ndStage' (지원: $($ndStagePoints.Keys -join ', '))"
-  }
-  $stagePoint = $ndStagePoints[$ndStage]
-  $stageParts = $ndStage -split '-'
-  $stageFloor = $stageParts[0]
-  $stageArea = $stageParts[1]
   $stageSelected = $false
   $enterText = ''
   for ($stageTry = 1; $stageTry -le 4; $stageTry++) {
+    # 지도가 스크롤로 흐를 수 있어 매 시도마다 라벨을 읽어 클릭 지점을 다시 계산합니다
+    $stagePoint = Get-NdStageClickPoint -Game $Game -Stage $ndStage
     Focus-Game -Game $Game
     Click-GamePoint -Game $Game -ReferenceX $stagePoint[0] -ReferenceY $stagePoint[1]
     Start-Sleep -Milliseconds 900
@@ -2468,6 +2655,21 @@ function Invoke-NormalDungeonCycle {
   }
   } else {
     Write-RunLog '[던전] 시작: 진입 옵션 화면 감지 - 옵션 설정부터 진행'
+    # 옵션 화면 상단에도 난이도 알약(일반/어려움)이 있어 여기서 바꿀 수 있습니다 (2026-07-18 실측).
+    # 다른 난이도로 열어 둔 채 시작해도 설정대로 가도록 설정 난이도를 한 번 눌러 확정합니다
+    # (이미 선택돼 있어도 다시 눌러 부작용 없음 - 선택 화면 2단계와 같은 방식.
+    #  이 화면의 선택 강조는 보라색 계열이라 금색 기준의 강조 사후 확인은 생략).
+    $optDifficultyKey = $ndDifficulty -replace '\s', ''
+    $optDifficultyPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptDifficulty[0] -ReferenceY $rgDgOptDifficulty[1] `
+      -RegionWidth $rgDgOptDifficulty[2] -RegionHeight $rgDgOptDifficulty[3] -Scale 4 -SearchText $optDifficultyKey -ExactText $optDifficultyKey
+    if ($optDifficultyPoint) {
+      Focus-Game -Game $Game
+      Click-ScreenPoint -X $optDifficultyPoint.X -Y $optDifficultyPoint.Y
+      Write-RunLog "[던전] 난이도 '$ndDifficulty' 확정 클릭 (옵션 화면)"
+      Start-Sleep -Milliseconds 900
+    } else {
+      Write-RunLog "[경고] 옵션 화면에서 난이도 '$ndDifficulty' 글자를 찾지 못했습니다 - 현재 선택된 난이도로 진행합니다"
+    }
   }
   Write-RunLog '[던전] 5. 진입 옵션 화면 확인'
 
@@ -2690,7 +2892,7 @@ function Invoke-NormalDungeonCycle {
   if (-not $onResultScreen) {
     Write-RunLog '[던전] 12. 결과 화면 대기 (엔딩 컷신은 자동으로 넘김)'
   }
-  $null = Wait-ForResultScreen -Game $Game -MissingMessage '던전 결과 화면(다시 하기 버튼)을 찾지 못했습니다.' `
+  $dgRetryPoint = Wait-ForResultScreen -Game $Game -MissingMessage '던전 결과 화면(다시 하기 버튼)을 찾지 못했습니다.' `
     -FindRetryButton { Find-DgRetryButtonPoint -Game $Game }
   Write-RunLog '[던전] 13. 결과 화면 확인 (나가기 / 다시 하기)'
 
@@ -2712,11 +2914,59 @@ function Invoke-NormalDungeonCycle {
     }
   }
   # '다시 하기'는 던전에 바로 들어가지 않고 진입 옵션 화면으로 돌아갑니다(도전을 다시 고를
-  # 기회를 줌). 옵션 화면이 다시 뜰 때까지 확인하며 재클릭한 뒤 이번 회차를 마치면,
-  # 다음 회차 워커가 '옵션 화면'을 인식해 은동전/더블 루팅 설정부터 이어갑니다.
-  Invoke-ClickUntil -Game $Game -Point $ptDgRetry -Description '다시 하기 → 진입 옵션 화면' -TimeoutSeconds 20 -Condition {
-    ((Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-        -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', '').Contains('구역')
+  # 기회를 줌). 옵션 화면이 뜨면 이번 회차를 마치고, 다음 회차 워커가 '옵션 화면'을
+  # 인식해 은동전/더블 루팅 설정부터 이어갑니다.
+  # 주의 (2026-07-18 17:04 실측 사고): 던전 밖에서 진행할 퀘스트가 있으면 다시 하기 뒤에
+  # '던전 탐험을 계속하시겠습니까?' 팝업(계속하기=ESC / 나가기=Space)이 끼어듭니다.
+  # 무조건 재클릭하면 그 자리가 팝업의 '나가기' 버튼이라 던전 밖으로 나가버리므로,
+  # '계속하'가 보이면 계속하기를 누르고, 재클릭은 결과 화면(다시 하기 버튼)이
+  # 그대로 보일 때만 합니다 (사냥터 '새 임무 선택'과 동일한 규칙).
+  # 3버튼 배치에서 옛 고정 좌표(757,654)는 '다음 구역으로' 자리라, 탐색으로 찾은
+  # '다시 하기' 글자 지점을 클릭합니다 (다른 스테이지로 넘어가는 오클릭 방지 - 실측).
+  Focus-Game -Game $Game
+  if ($dgRetryPoint) {
+    Click-ScreenPoint -X $dgRetryPoint.X -Y $dgRetryPoint.Y
+  } else {
+    Click-GamePoint -Game $Game -ReferenceX $ptDgRetry[0] -ReferenceY $ptDgRetry[1]
+  }
+  Write-RunLog "[던전] 14. '다시 하기' 클릭 - 옵션 화면 복귀 대기"
+  $optionsDeadline = (Get-Date).AddSeconds(40)
+  $backToOptions = $false
+  while ((Get-Date) -lt $optionsDeadline) {
+    Start-Sleep -Seconds 2
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      $optionsDeadline = (Get-Date).AddSeconds(40)
+      continue
+    }
+    if (((Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
+        -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', '').Contains('구역')) {
+      $backToOptions = $true
+      break
+    }
+    $centerNow = (Get-GameOcrText -Game $Game) -replace '\s', ''
+    if ($centerNow.Contains('계속하')) {
+      $contPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+        -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -SearchText '계속하'
+      Focus-Game -Game $Game
+      if ($contPoint) {
+        Click-ScreenPoint -X $contPoint.X -Y $contPoint.Y
+      } else {
+        Press-KeyOnce -VirtualKey ([byte]27)   # ESC = 계속하기 (버튼 지점을 못 찾은 경우 예비)
+      }
+      Write-RunLog "[던전] '던전 탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
+      Start-Sleep -Seconds 1
+      continue
+    }
+    $retryAgainPoint = Find-DgRetryButtonPoint -Game $Game
+    if ($retryAgainPoint) {
+      Write-RunLog "[던전] 결과 화면이 남아 있어 '다시 하기'를 다시 클릭합니다"
+      Focus-Game -Game $Game
+      Click-ScreenPoint -X $retryAgainPoint.X -Y $retryAgainPoint.Y
+    }
+  }
+  if (-not $backToOptions) {
+    throw '다시 하기 → 진입 옵션 화면 대기 시간이 초과됐습니다.'
   }
   Write-RunLog '[던전] 14. 다시 하기 → 옵션 화면 복귀 - 회차 완료'
   exit 0
@@ -2966,6 +3216,21 @@ function Invoke-HuntingGroundCycle {
     # 가방이 차면 '새 임무 선택' 뒤에 아이템 정리 화면(정리 대상 → Space 정리하기)이
     # 끼어듭니다 (2026-07-18 00:14 실측). 게임 내 정리 규칙대로 정리하고 계속합니다.
     $cleanupText = (Get-GameOcrText -Game $Game) -replace '\s', ''
+    # '탐험을 계속하시겠습니까?' 팝업(밖에서 진행할 퀘스트 안내)이 끼어들면 계속하기를
+    # 선택합니다 - 이 팝업에서 Space 는 '나가기'라 절대 Space 로 넘기면 안 됩니다.
+    if ($cleanupText.Contains('계속하')) {
+      $contPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+        -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -SearchText '계속하'
+      Focus-Game -Game $Game
+      if ($contPoint) {
+        Click-ScreenPoint -X $contPoint.X -Y $contPoint.Y
+      } else {
+        Press-KeyOnce -VirtualKey ([byte]27)   # ESC = 계속하기 (버튼 지점을 못 찾은 경우 예비)
+      }
+      Write-RunLog "[사냥터] '탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
+      Start-Sleep -Seconds 1
+      continue
+    }
     if ($cleanupText.Contains('정리')) {
       Focus-Game -Game $Game
       Press-KeyOnce -VirtualKey ([byte]32)   # Space = 정리하기
