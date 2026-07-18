@@ -81,6 +81,13 @@ $ptAbyssCard   = @(Get-ConfigValue $config @('clickPoints', 'abyssCard') @(956, 
 # 카드 클릭 좌표와 로그 문구가 그 던전 기준으로 바뀝니다. (UI에서 선택 시 자동 기록)
 $selectedDungeon = [string](Get-ConfigValue $config @('dungeons', 'selected') '허상의 정박지')
 if ([string]::IsNullOrWhiteSpace($selectedDungeon)) { $selectedDungeon = '허상의 정박지' }
+# 내장 최신 어비스 카드 좌표 (config.json profiles 와 동일 값 유지).
+# 좌표 버전 게이트가 발동하면 구버전 profiles.<던전>.card 대신 이 값을 씁니다.
+$builtinDungeonCards = @{
+  '허상의 정박지' = @(956, 157)
+  '광기의 동굴'   = @(956, 272)
+  '흩어진 물길'   = @(956, 387)
+}
 $dungeonCard = $ptAbyssCard
 $dungeonStage = 'full'   # full = 전체 자동화 / detail = 상세 화면 진입까지만(이후 미개발)
 $dungeonMatch = $selectedDungeon.Substring(0, [Math]::Min(2, $selectedDungeon.Length))  # 제목 확인용 키워드(기본: 이름 앞 2글자)
@@ -98,6 +105,14 @@ if ($dungeonProfiles) {
       $dungeonMatch = [string]$selectedProfile.Value.match
     }
   }
+}
+# 좌표 버전 게이트 보강 (2026-07-19 개선점): ocrRegions/clickPoints 는 위에서 통째로
+# 무시되지만 어비스 카드 좌표는 dungeons.profiles.<던전>.card 에도 있어 게이트를
+# 빠져나갔음. 게이트 발동 시 카드 좌표만 내장 최신값으로 대체하고, 사용자 선택값
+# (selected/stage/match)은 좌표가 아니므로 그대로 유지합니다.
+# (내장 목록에 없는 미래 던전이면 대체할 값이 없어 profiles 값을 그대로 씀 - 한계 명시)
+if ($script:staleCoordsIgnored -and $builtinDungeonCards.ContainsKey($selectedDungeon)) {
+  $dungeonCard = @($builtinDungeonCards[$selectedDungeon])
 }
 
 # 모든 던전의 제목 키워드 목록: "지금 화면이 (어느 던전이든) 상세 화면인가"를 판단할 때 사용
@@ -497,9 +512,16 @@ if (-not $ocrKoreanEngine) {
       # dism 출력 파일에서 마지막 진행률(%)을 읽습니다 (쓰는 중이라 공유 읽기로 열기)
       $pctText = ''
       try {
-        $fs = New-Object System.IO.FileStream($dismOut, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-        $sr = New-Object System.IO.StreamReader($fs)
-        $dismText = $sr.ReadToEnd(); $sr.Dispose(); $fs.Dispose()
+        # 읽기 도중 예외가 나도 핸들이 남지 않도록 finally 에서 해제합니다
+        # (StreamReader.Dispose 가 내부 FileStream 까지 닫으므로 sr 우선, 없으면 fs)
+        $fs = $null; $sr = $null
+        try {
+          $fs = New-Object System.IO.FileStream($dismOut, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+          $sr = New-Object System.IO.StreamReader($fs)
+          $dismText = $sr.ReadToEnd()
+        } finally {
+          if ($sr) { $sr.Dispose() } elseif ($fs) { $fs.Dispose() }
+        }
         $pctMatches = [regex]::Matches($dismText, '(\d{1,3}(?:\.\d)?)\s*%')
         if ($pctMatches.Count -gt 0) { $pctText = " $($pctMatches[$pctMatches.Count - 1].Groups[1].Value)%" }
       } catch { }
