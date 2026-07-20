@@ -404,18 +404,22 @@ $btnStart.ForeColor = [System.Drawing.Color]::White
 $btnStart.FlatStyle = 'Flat'
 $form.Controls.Add($btnStart)
 
+# 중지 버튼 2개는 평소 숨겨져 있다가 실행 중에만 시작 버튼 자리부터 나타납니다
+# (대기 중 중지 오클릭 / 실행 중 시작 오클릭 방지 - Set-UiRunning 이 전환)
 $btnSafeStop = New-Object System.Windows.Forms.Button
 $btnSafeStop.Text = ("안전 중지(F9)" + [Environment]::NewLine + "(회차 완료 후)")
-$btnSafeStop.Location = New-Object System.Drawing.Point(171, 104)
-$btnSafeStop.Size = New-Object System.Drawing.Size(165, 38)
+$btnSafeStop.Location = New-Object System.Drawing.Point(15, 104)
+$btnSafeStop.Size = New-Object System.Drawing.Size(210, 38)
 $btnSafeStop.Enabled = $false
+$btnSafeStop.Visible = $false
 $form.Controls.Add($btnSafeStop)
 
 $btnKill = New-Object System.Windows.Forms.Button
 $btnKill.Text = '즉시 중지(F10)'
-$btnKill.Location = New-Object System.Drawing.Point(342, 104)
-$btnKill.Size = New-Object System.Drawing.Size(105, 38)
+$btnKill.Location = New-Object System.Drawing.Point(231, 104)
+$btnKill.Size = New-Object System.Drawing.Size(150, 38)
 $btnKill.Enabled = $false
+$btnKill.Visible = $false
 $form.Controls.Add($btnKill)
 
 # 선택한 콘텐츠에 맞는 사용 설명서 팝업 (어비스 설명서 / 던전 설명서 - 카테고리에 따라 자동 전환)
@@ -1418,6 +1422,10 @@ function Set-UiRunning {
   $btnStart.Enabled = -not $IsRunning
   $btnSafeStop.Enabled = $IsRunning
   $btnKill.Enabled = $IsRunning
+  # 대기 중에는 시작만, 실행 중에는 중지 2개만 표시 (시작 자리에 중지가 나타남 - 오클릭 방지)
+  $btnStart.Visible = -not $IsRunning
+  $btnSafeStop.Visible = $IsRunning
+  $btnKill.Visible = $IsRunning
   $grpRepeat.Enabled = -not $IsRunning
   $grpContent.Enabled = -not $IsRunning
   $grpContentDetail.Enabled = -not $IsRunning
