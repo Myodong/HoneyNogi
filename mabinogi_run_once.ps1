@@ -2007,6 +2007,25 @@ function Invoke-EventSkipOrConfirm {
     Start-Sleep -Seconds 2
     return $true
   }
+  # 주간 협동 미션 리셋 팝업 (월요일 오전 6시 - 2026-07-20 06:03 실측: '새로운 한 주가
+  # 시작되었어요!' 전체 화면이 어비스 복귀를 막아 시간 초과. 알 수 없는 화면 X 후보들도
+  # 이 팝업의 버튼 위치와 달라 못 닫았음). 하단 버튼 줄 판독('닫기 협동 미션 참여하기')이
+  # 두 창 크기(1272/1908) 모두 또렷 - '협동'+'참여' 조합으로 감지하고 '닫기'를 클릭합니다.
+  $weeklyText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+    -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ($weeklyText.Contains('협동') -and $weeklyText.Contains('참여')) {
+    $weeklyClosePoint = Find-GameTextPoint -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+      -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -SearchText '닫기'
+    Focus-Game -Game $Game
+    if ($weeklyClosePoint) {
+      Click-ScreenPoint -X $weeklyClosePoint.X -Y $weeklyClosePoint.Y
+    } else {
+      Click-GamePoint -Game $Game -ReferenceX 495 -ReferenceY 654   # '닫기' 실측 예비 좌표 (두 창 크기 동일)
+    }
+    Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 닫기 클릭"
+    Start-Sleep -Seconds 2
+    return $true
+  }
   return $false
 }
 
