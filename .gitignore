@@ -5,5 +5,4 @@
 # 빌드 결과물 (바이너리는 GitHub Releases로 배포)
 build/
 HoneyNogi.exe
-요청사항.md
 version/
