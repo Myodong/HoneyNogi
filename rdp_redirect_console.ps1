@@ -1,6 +1,6 @@
 ﻿# Redirects disconnected RDP sessions to the physical console so that
 # screen rendering continues and the OCR-based automation keeps working.
-# Triggered automatically by the scheduled task 'MabinogiRDPToConsole'
+# Triggered automatically by the scheduled task 'HoneyNogiRDPToConsole'
 # whenever an RDP session disconnects (Event ID 24).
 $ErrorActionPreference = 'SilentlyContinue'
 $logDir = Join-Path $PSScriptRoot 'Log'
