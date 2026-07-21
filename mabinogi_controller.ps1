@@ -169,6 +169,7 @@ $Host.UI.RawUI.WindowTitle = '마비노기 모바일 반복 컨트롤러'
 # ===== 기존 자동화 프로세스 정리 =====
 # 실행기를 새로 켜면 이미 떠 있는 컨트롤러/워커를 모두 종료하고 새로 시작합니다.
 # (핫키가 안 듣는 고아 워커, 중복 컨트롤러 등을 한 번에 정리)
+$script:startupKilledAutomation = $false
 try {
   $automationPattern = 'mabinogi_controller\.ps1|mabinogi_run_once\.ps1'
   $existingProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
@@ -176,6 +177,7 @@ try {
   foreach ($existingProcess in $existingProcesses) {
     try {
       Stop-Process -Id $existingProcess.ProcessId -Force -ErrorAction Stop
+      $script:startupKilledAutomation = $true
       Write-ControllerStatus "기존 자동화 프로세스(PID $($existingProcess.ProcessId))를 종료하고 새로 시작합니다." Yellow
     } catch {
       Write-ControllerStatus "기존 프로세스(PID $($existingProcess.ProcessId)) 종료 실패: $($_.Exception.Message)" Red
@@ -194,8 +196,13 @@ try {
 # 설치 후에는 RDP 창을 그냥 닫아도 자동화가 계속 돕니다.
 # (이미 관리자 권한으로 실행 중이므로 추가 승인 없이 조용히 처리됩니다)
 try {
-  $redirectTaskName = 'MabinogiRDPToConsole'
+  $redirectTaskName = 'HoneyNogiRDPToConsole'
   $redirectScript = Join-Path $PSScriptRoot 'rdp_redirect_console.ps1'
+  $legacyTask = Get-ScheduledTask -TaskName 'MabinogiRDPToConsole' -ErrorAction SilentlyContinue
+  if ($legacyTask) {
+    Unregister-ScheduledTask -TaskName 'MabinogiRDPToConsole' -Confirm:$false
+    Write-Host '이전 이름의 RDP 자동 전환 작업을 정리했습니다.' -ForegroundColor DarkGray
+  }
   $existingTask = Get-ScheduledTask -TaskName $redirectTaskName -ErrorAction SilentlyContinue
 
   if ($autoConsoleRedirect -and -not $existingTask -and (Test-Path -LiteralPath $redirectScript)) {
@@ -226,12 +233,46 @@ using System.Runtime.InteropServices;
 public static class MabinogiControllerKeys {
   [DllImport("user32.dll")]
   public static extern short GetAsyncKeyState(int virtualKey);
+
+  [DllImport("user32.dll")]
+  public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+
+  [DllImport("user32.dll")]
+  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
 }
 '@
 
 $script:stopRequested = $false
 $script:exitRequested = $false
 $script:activeWorker = $null
+
+function Release-ControllerStuckInput {
+  # 워커 강제 종료가 키/마우스 누름과 뗌 사이에 걸려도 입력이 눌린 채 남지 않게 합니다.
+  try {
+    $releaseKeys = @(0x12, 32, 66, 82)  # ALT / Space / B / R
+    if ($cfg) {
+      if ($cfg.PSObject.Properties['afterEntry'] -and $cfg.afterEntry.PSObject.Properties['keys']) {
+        foreach ($entry in @($cfg.afterEntry.keys)) {
+          if ($entry.PSObject.Properties['key']) { $releaseKeys += [int]$entry.key }
+        }
+      }
+      if ($cfg.PSObject.Properties['revive']) {
+        if ($cfg.revive.PSObject.Properties['key']) { $releaseKeys += [int]$cfg.revive.key }
+        if ($cfg.revive.PSObject.Properties['resumeKey']) { $releaseKeys += [int]$cfg.revive.resumeKey }
+      }
+    }
+    foreach ($vk in ($releaseKeys | Sort-Object -Unique)) {
+      if ($vk -gt 0 -and $vk -le 255) {
+        [MabinogiControllerKeys]::keybd_event([byte]$vk, 0, 2, [UIntPtr]::Zero)
+      }
+    }
+    [MabinogiControllerKeys]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  } catch {}
+}
+
+if ($script:startupKilledAutomation) {
+  Release-ControllerStuckInput
+}
 
 function Get-ControllerHotkey {
   $f12State = [MabinogiControllerKeys]::GetAsyncKeyState(0x7B)
@@ -284,11 +325,23 @@ function Request-ImmediateExit {
   $script:exitRequested = $true
   Write-ControllerStatus 'Ctrl+F12 감지: 컨트롤러를 즉시 종료합니다.' Red
 
-  if ($script:activeWorker -and -not $script:activeWorker.HasExited) {
+  $workerToDispose = $script:activeWorker
+  $workerWasKilled = $false
+  if ($workerToDispose) {
     try {
-      $script:activeWorker.Kill()
-      $script:activeWorker.WaitForExit()
+      if (-not $workerToDispose.HasExited) {
+        $workerToDispose.Kill()
+        $workerToDispose.WaitForExit()
+        $workerWasKilled = $true
+      }
     } catch {}
+    finally {
+      try { $workerToDispose.Dispose() } catch {}
+      $script:activeWorker = $null
+    }
+  }
+  if ($workerWasKilled) {
+    Release-ControllerStuckInput
   }
   Invoke-ExitBeep
 }
@@ -323,10 +376,17 @@ function Invoke-OneCycle {
     Start-Sleep -Milliseconds 150
   }
 
-  $script:activeWorker.WaitForExit()
-  Show-WorkerLogUpdates -SeenLineCount ([ref]$seenLineCount)
-  $exitCode = $script:activeWorker.ExitCode
-  $script:activeWorker = $null
+  $finishedWorker = $script:activeWorker
+  $exitCode = 1
+  try {
+    $finishedWorker.WaitForExit()
+    Show-WorkerLogUpdates -SeenLineCount ([ref]$seenLineCount)
+    $exitCode = $finishedWorker.ExitCode
+  }
+  finally {
+    try { $finishedWorker.Dispose() } catch {}
+    $script:activeWorker = $null
+  }
 
   # 워커 종료 코드 계약: 0=회차 완료 / 2=중복 실행 / 3=미개발 구간 정지 / 4=조건 충족 정지
   # (은동전 소진 등) / 10=준비 실행(화면 복귀만 수행 - 회차로 세지 않음) / 그 외=오류

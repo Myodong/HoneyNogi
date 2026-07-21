@@ -1,5 +1,7 @@
 {
   "_설명": "꿀비노기(마비노기 모바일 자동화) 설정 파일입니다. 값만 바꾸고 저장하면 다음 실행부터 적용됩니다. '_설명' 항목은 스크립트가 무시하므로 자유롭게 참고하세요. 이 파일을 지우면 스크립트 내장 기본값으로 실행됩니다.",
+  "_configSchemaVersion": "설정 구조 버전. 새 설정 키/섹션을 기존 사용자 config에 안전하게 합칠 때 사용하며 좌표 버전과 별도로 관리합니다.",
+  "configSchemaVersion": 2,
   "_coordsVersion": "좌표(ocrRegions/clickPoints) 버전. 프로그램의 최신 좌표 버전보다 낮으면 이 파일의 좌표를 무시하고 내장 최신 좌표를 사용합니다 (게임 UI 개편 시 옛 좌표로 헛클릭하는 사고 방지). 좌표를 직접 수정했다면 프로그램 버전과 같게 유지하세요.",
   "coordsVersion": 6,
   "referenceResolution": {
@@ -74,11 +76,28 @@
     "stage": "1-1",
     "useSilverCoin": false,
     "doubleLoot": false,
-    "_continueWithoutCoin": "true면 은동전이 10개 미만(소탕 불가)일 때 소탕을 해제하고 미사용(도전)으로 계속 반복합니다",
+    "_continueWithoutCoin": "동전 소진 시(잔량 10 미만): true=미사용으로 진행 / false=멈춤",
     "continueWithoutCoin": false,
-    "_continueSweepOnly": "true면 은동전이 10~19개(더블 루팅 불가, 소탕은 가능)일 때 더블 루팅만 끄고 소탕(10개)으로 계속합니다. false면 이 경우에도 continueWithoutCoin 규칙을 따릅니다",
+    "_continueSweepOnly": "더블 루팅 불가 시(잔량 10~19): true=소탕만 진행 / false=멈춤",
     "continueSweepOnly": false,
     "matching": "우연한 만남"
+  },
+  "_customRepeat": "'던전 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. enabled 는 던전/어비스에서 공용으로 쓰는 커스텀 반복 선택 상태입니다. progress 는 이어가기용 진행 기록(자동 관리)이므로 직접 수정하지 마세요.",
+  "customRepeat": {
+    "enabled": false,
+    "_items": "각 항목: difficulty/stage/coin/doubleLoot + exhaustContinue(동전 소진 시 true=미사용으로 진행, false=멈춤) / noDoubleSweep(더블 루팅 불가 시 true=소탕만 진행, false=멈춤). 소진/더블 대응은 항목별 속성입니다",
+    "items": [],
+    "listRepeat": "infinite",
+    "listRepeatCount": 1,
+    "progress": null
+  },
+  "_abyssCustomRepeat": "'어비스 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. 이 섹션은 컨트롤 패널(GUI)이 관리하며 progress 는 이어가기용 진행 기록이므로 직접 수정하지 마세요.",
+  "abyssCustomRepeat": {
+    "_items": "각 항목: kind=abyss / mode(solo 또는 party) / difficulty / dungeon / matching. 혼자하기 항목의 matching 은 '없음'입니다.",
+    "items": [],
+    "listRepeat": "infinite",
+    "listRepeatCount": 1,
+    "progress": null
   },
   "timeoutsSeconds": {
     "_설명": "각 단계에서 화면을 기다리는 최대 시간(초)입니다. 초과하면 오류로 중단됩니다.",
@@ -545,6 +564,11 @@
     "_설명": "반복 실행 관련 설정입니다.",
     "_defaultCount": "횟수 지정 모드에서 숫자 입력 없이 Enter만 눌렀을 때 사용할 기본 반복 횟수",
     "defaultCount": 2
+  },
+  "ui": {
+    "_설명": "컨트롤 패널 표시 설정입니다.",
+    "_logFontSize": "로그 글자 크기(8~20). GUI에서 변경하면 자동 저장됩니다.",
+    "logFontSize": 9
   },
   "diagnostics": {
     "_설명": "오류 진단 관련 설정입니다.",
