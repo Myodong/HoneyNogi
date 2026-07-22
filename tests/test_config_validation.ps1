@@ -5,7 +5,8 @@ $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $root 'mabinogi_run_once.ps1') `
     -Names @('Add-ConfigValidationWarning', 'Resolve-ConfigCoordinateArray',
-      'Get-ConfigValue', 'Get-ConfigInteger')) {
+      'Get-ConfigValue', 'Resolve-ConfigInteger', 'Get-ConfigInteger',
+      'Resolve-ConfigBoolean', 'Get-ConfigBoolean')) {
   Invoke-Expression $definition
 }
 
@@ -31,6 +32,7 @@ $cfg = [pscustomobject]@{
   clickPoints = [pscustomobject]@{ good = @(50,60); bad = @(1) }
   ocrRegions = [pscustomobject]@{ good = @(10,20,30,40); bad = @(-1,20,30,40) }
   timeoutsSeconds = [pscustomobject]@{ ok = 30; negative = -1; text = '30'; fraction = 1.5 }
+  flags = [pscustomobject]@{ on = $true; off = $false; textFalse = 'false'; number = 0 }
 }
 Assert-Case 'Get-ConfigValue: 정상 클릭 좌표' ((@(Get-ConfigValue $cfg @('clickPoints','good') @(9,9))) -join ',') '50,60'
 Assert-Case 'Get-ConfigValue: 손상 클릭 좌표 폴백' ((@(Get-ConfigValue $cfg @('clickPoints','bad') @(9,9))) -join ',') '9,9'
@@ -40,6 +42,23 @@ Assert-Case '정수: 정상 범위' (Get-ConfigInteger $cfg @('timeoutsSeconds',
 Assert-Case '정수: 음수 폴백' (Get-ConfigInteger $cfg @('timeoutsSeconds','negative') 15 1 600) 15
 Assert-Case '정수: 문자열 폴백' (Get-ConfigInteger $cfg @('timeoutsSeconds','text') 15 1 600) 15
 Assert-Case '정수: 소수 폴백' (Get-ConfigInteger $cfg @('timeoutsSeconds','fraction') 15 1 600) 15
-Assert-Case '경고: 손상 값 기록됨' ($script:configValidationWarnings.Count -ge 8) $true
+Assert-Case '정수: Int32 초과도 예외 없이 폴백' `
+  (Resolve-ConfigInteger ([double]::MaxValue) 15 1 600 'huge') 15
+Assert-Case '불리언: true 유지' (Get-ConfigBoolean $cfg @('flags','on') $false) $true
+Assert-Case '불리언: false 유지' (Get-ConfigBoolean $cfg @('flags','off') $true) $false
+Assert-Case '불리언: 문자열 false를 참으로 오인하지 않고 폴백' `
+  (Get-ConfigBoolean $cfg @('flags','textFalse') $false) $false
+Assert-Case '불리언: 숫자를 불리언으로 오인하지 않고 폴백' `
+  (Get-ConfigBoolean $cfg @('flags','number') $true) $true
+Assert-Case '경고: 손상 값 기록됨' ($script:configValidationWarnings.Count -ge 11) $true
+
+# 사용자 편집 가능 설정은 원시 형 변환을 우회하지 않는다는 호출부 계약도 함께 고정합니다.
+$workerSource = Get-Content -LiteralPath (Join-Path $root 'mabinogi_run_once.ps1') -Raw -Encoding UTF8
+Assert-Case '호출부: Get-ConfigValue 직접 int 변환 없음' `
+  ([regex]::Matches($workerSource, '\[int\]\s*\(\s*Get-ConfigValue').Count) 0
+Assert-Case '호출부: Get-ConfigValue 직접 bool 변환 없음' `
+  ([regex]::Matches($workerSource, '\[bool\]\s*\(\s*Get-ConfigValue').Count) 0
+Assert-Case '호출부: afterEntry enabled 직접 bool 변환 없음' `
+  ([regex]::Matches($workerSource, '\[bool\]\s*\$entry\.enabled').Count) 0
 
 exit $fails

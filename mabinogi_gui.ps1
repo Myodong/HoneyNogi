@@ -46,6 +46,7 @@ if (-not $guiMutexAcquired) {
     '(기존 창이 안 보이면 작업 관리자에서 powershell.exe 를 확인하세요)',
     '꿀비노기', [System.Windows.Forms.MessageBoxButtons]::OK,
     [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+  try { $script:guiMutex.Dispose() } catch { }
   exit
 }
 
@@ -173,6 +174,13 @@ function Read-Config {
   return $null
 }
 
+function ConvertTo-StrictBoolean {
+  param($Value, [bool]$Default)
+  # PowerShell의 [bool]'false' 는 $true 이므로 JSON 불리언만 그대로 인정합니다.
+  if ($Value -is [bool]) { return [bool]$Value }
+  return $Default
+}
+
 function Get-KeyEntry {
   param($Config, [int]$KeyCode)
   if (-not $Config) { return $null }
@@ -181,7 +189,10 @@ function Get-KeyEntry {
   $keys = $afterEntry.Value.PSObject.Properties['keys']
   if (-not $keys) { return $null }
   foreach ($entry in @($keys.Value)) {
-    if ($entry.PSObject.Properties['key'] -and [int]$entry.key -eq $KeyCode) { return $entry }
+    if (-not $entry.PSObject.Properties['key']) { continue }
+    try {
+      if ([int]$entry.key -eq $KeyCode) { return $entry }
+    } catch { continue }
   }
   return $null
 }
@@ -232,6 +243,7 @@ function Update-ConfigToLatest {
   # '사용자가 바꾸는 설정'만 옮겨 담아 config.json 을 재생성합니다.
   # 이렇게 하면 업데이트 때 좌표/구조는 항상 최신이 되고 사용자 설정은 유지됩니다.
   # 반환: 이전을 수행했으면 $true
+  $script:configMigrationError = $null
   $defaultPath = Join-Path $scriptRoot 'config.default.json'
   if (-not (Test-Path -LiteralPath $defaultPath)) { return $false }
   try {
@@ -294,19 +306,24 @@ function Update-ConfigToLatest {
     # 3) 자동부활 on/off (키 코드/횟수 상한은 최신 기본값 유지)
     if ($usr.PSObject.Properties['revive'] -and $def.PSObject.Properties['revive'] -and
         $usr.revive.PSObject.Properties['enabled']) {
-      $def.revive.enabled = [bool]$usr.revive.enabled
+      $def.revive.enabled = ConvertTo-StrictBoolean $usr.revive.enabled $def.revive.enabled
     }
     # 4) 입장 후 키 입력의 켬/끔 (키 코드로 짝을 맞춰 이전)
     if ($usr.PSObject.Properties['afterEntry'] -and $def.PSObject.Properties['afterEntry']) {
       foreach ($defKey in @($def.afterEntry.keys)) {
         $matchKey = @($usr.afterEntry.keys) | Where-Object { $_.PSObject.Properties['key'] -and [int]$_.key -eq [int]$defKey.key } | Select-Object -First 1
-        if ($matchKey -and $matchKey.PSObject.Properties['enabled']) { $defKey.enabled = [bool]$matchKey.enabled }
+        if ($matchKey -and $matchKey.PSObject.Properties['enabled']) {
+          $defKey.enabled = ConvertTo-StrictBoolean $matchKey.enabled $defKey.enabled
+        }
       }
     }
 
     Save-Config $def
     return $true
-  } catch { return $false }
+  } catch {
+    $script:configMigrationError = $_.Exception.Message
+    return $false
+  }
 }
 
 # ----- 기존 자동화 프로세스 정리 -----
@@ -468,6 +485,7 @@ $script:crLoading = $false           # 커스텀 리스트뷰를 프로그램적
 $script:crSwitching = $false         # 카테고리 전환에 의한 커스텀 라디오 폴백/복원 중 가드 (enabled 보존)
 $script:customEnabledWish = $false   # 커스텀 반복 '선택 의도' - 던전 외 카테고리에서 라디오가 풀려도 보존 (config enabled 와 동기)
 $script:customProgressReset = $false # 업데이트 이전(Update-ConfigToLatest)에서 진행 기록을 초기화했는지 (시작 로그 안내용)
+$script:configMigrationError = $null # 설정 자동 이전 실패 원인 (실패와 '이전 불필요'를 구분해 시작 로그에 표시)
 $script:acrLockUpdating = $false     # 어비스 커스텀 방식·매칭 잠금 적용 중 재진입 가드 (라디오 Checked 변경 → 패널 갱신 → 재호출 방지)
 $script:acrLockOn = $false           # 어비스 방식·매칭이 리스트 값으로 잠겨 있는지 (비활성 라디오 툴팁 판정용)
 $script:acrTipShownFor = $null       # 현재 툴팁을 띄워 둔 잠긴 라디오 (같은 컨트롤에서 반복 호출 → 깜박임 방지)
@@ -2670,11 +2688,11 @@ function Load-SettingsToUi {
   }
   $spaceEntry = Get-KeyEntry $cfg 32
   $foodEntry = Get-KeyEntry $cfg 66
-  if ($spaceEntry -and $spaceEntry.PSObject.Properties['enabled']) { $chkSpace.Checked = [bool]$spaceEntry.enabled } else { $chkSpace.Checked = $true }
-  if ($foodEntry -and $foodEntry.PSObject.Properties['enabled']) { $chkFood.Checked = [bool]$foodEntry.enabled } else { $chkFood.Checked = $true }
+  if ($spaceEntry -and $spaceEntry.PSObject.Properties['enabled']) { $chkSpace.Checked = ConvertTo-StrictBoolean $spaceEntry.enabled $true } else { $chkSpace.Checked = $true }
+  if ($foodEntry -and $foodEntry.PSObject.Properties['enabled']) { $chkFood.Checked = ConvertTo-StrictBoolean $foodEntry.enabled $true } else { $chkFood.Checked = $true }
   # 자동부활 설정 복원 (revive 항목이 없던 예전 config 는 기본 켜짐)
   if ($cfg.PSObject.Properties['revive'] -and $cfg.revive.PSObject.Properties['enabled']) {
-    $chkRevive.Checked = [bool]$cfg.revive.enabled
+    $chkRevive.Checked = ConvertTo-StrictBoolean $cfg.revive.enabled $true
   } else {
     $chkRevive.Checked = $true
   }
@@ -2722,10 +2740,10 @@ function Load-SettingsToUi {
         '매우 어려움' { $rbHtVeryHard.Checked = $true }
         default       { $rbHtNormal.Checked = $true }
       }
-      $chkHtCoin.Checked = [bool]$ht.useOffering
-      $chkHtDoubleLoot.Checked = [bool]$ht.doubleLoot
+      $chkHtCoin.Checked = ConvertTo-StrictBoolean $ht.useOffering $false
+      $chkHtDoubleLoot.Checked = ConvertTo-StrictBoolean $ht.doubleLoot $false
       # '소탕만 계속'은 더블 루팅이 켜져 있을 때만 의미가 있으므로 함께 확인합니다
-      try { $chkHtLootFallback.Checked = ([bool]$ht.continueSweepOnly -and $chkHtDoubleLoot.Checked) } catch { $chkHtLootFallback.Checked = $false }
+      try { $chkHtLootFallback.Checked = ((ConvertTo-StrictBoolean $ht.continueSweepOnly $false) -and $chkHtDoubleLoot.Checked) } catch { $chkHtLootFallback.Checked = $false }
       if ([string]$ht.matching -eq '바로 입장') { $rbHtDirect.Checked = $true } else { $rbHtParty.Checked = $true }
     }
   } catch { }
@@ -2739,11 +2757,11 @@ function Load-SettingsToUi {
         if (-not $cboNdStage.Items.Contains($stageValue)) { [void]$cboNdStage.Items.Add($stageValue) }
         $cboNdStage.SelectedItem = $stageValue
       }
-      $chkNdCoin.Checked = [bool]$nd.useSilverCoin
-      $chkNdDoubleLoot.Checked = [bool]$nd.doubleLoot
-      try { $rbNdExhaustGo.Checked = [bool]$nd.continueWithoutCoin } catch { $rbNdExhaustStop.Checked = $true }
+      $chkNdCoin.Checked = ConvertTo-StrictBoolean $nd.useSilverCoin $false
+      $chkNdDoubleLoot.Checked = ConvertTo-StrictBoolean $nd.doubleLoot $false
+      try { $rbNdExhaustGo.Checked = ConvertTo-StrictBoolean $nd.continueWithoutCoin $false } catch { $rbNdExhaustStop.Checked = $true }
       # 두 번째 단계는 더블 루팅이 켜져 있을 때만 유효합니다.
-      try { $rbNdNoDoubleSweep.Checked = ([bool]$nd.continueSweepOnly -and $chkNdDoubleLoot.Checked) } catch { $rbNdNoDoubleStop.Checked = $true }
+      try { $rbNdNoDoubleSweep.Checked = ((ConvertTo-StrictBoolean $nd.continueSweepOnly $false) -and $chkNdDoubleLoot.Checked) } catch { $rbNdNoDoubleStop.Checked = $true }
       if ([string]$nd.matching -eq '우연한 만남') { $rbNdChance.Checked = $true } else { $rbNdFindParty.Checked = $true }
     }
   } catch { }
@@ -2758,10 +2776,12 @@ function Load-SettingsToUi {
         if ($cr.PSObject.Properties['items']) {
           foreach ($crSavedItem in @($cr.items)) {
             if ($null -eq $crSavedItem) { continue }
-            # 구버전(계약 v1) config 항목에는 exhaustContinue/noDoubleSweep 가 없음 - [bool]$null = false(멈춤)
+            # 구버전(계약 v1) config 항목에는 exhaustContinue/noDoubleSweep 가 없음 - 기본 false(멈춤)
             Add-CustomListRow -Difficulty ([string]$crSavedItem.difficulty) -Stage ([string]$crSavedItem.stage) `
-              -Coin ([bool]$crSavedItem.coin) -DoubleLoot ([bool]$crSavedItem.doubleLoot) `
-              -ExhaustContinue ([bool]$crSavedItem.exhaustContinue) -NoDoubleSweep ([bool]$crSavedItem.noDoubleSweep)
+              -Coin (ConvertTo-StrictBoolean $crSavedItem.coin $false) `
+              -DoubleLoot (ConvertTo-StrictBoolean $crSavedItem.doubleLoot $false) `
+              -ExhaustContinue (ConvertTo-StrictBoolean $crSavedItem.exhaustContinue $false) `
+              -NoDoubleSweep (ConvertTo-StrictBoolean $crSavedItem.noDoubleSweep $false)
           }
         }
         Update-CustomListNumbers
@@ -2771,7 +2791,7 @@ function Load-SettingsToUi {
         # 선택 의도 복원: 던전이 아닌 카테고리로 저장돼 있어도 enabled 는 의도로 보존하고,
         # 던전/어비스 카테고리일 때 라디오를 실제로 켭니다 (사냥터는 커스텀 미지원).
         $script:customEnabledWish = $false
-        if ($cr.PSObject.Properties['enabled'] -and [bool]$cr.enabled) { $script:customEnabledWish = $true }
+        if ($cr.PSObject.Properties['enabled'] -and (ConvertTo-StrictBoolean $cr.enabled $false)) { $script:customEnabledWish = $true }
         if ($script:customEnabledWish -and -not $rbCatHunting.Checked) { $rbCustomRepeat.Checked = $true }
       } finally { $script:crLoading = $false }
     }
@@ -3541,7 +3561,7 @@ $btnStart.Add_Click({
     $rdpEnable = $true
     $cfgNow = Read-Config
     if ($cfgNow -and $cfgNow.PSObject.Properties['rdp'] -and $cfgNow.rdp.PSObject.Properties['autoConsoleRedirect']) {
-      $rdpEnable = [bool]$cfgNow.rdp.autoConsoleRedirect
+      $rdpEnable = ConvertTo-StrictBoolean $cfgNow.rdp.autoConsoleRedirect $true
     }
     $rdpResult = Sync-RdpRedirectTask -Enable $rdpEnable
     if ($rdpResult -eq 'installed') { Add-GuiLog 'RDP 자동 전환이 설치됐습니다. RDP 창을 닫아도 계속 돕니다.' }
@@ -3620,7 +3640,7 @@ $btnSave.Add_Click({
       $rdpEnable = $true
       $cfgNow = Read-Config
       if ($cfgNow -and $cfgNow.PSObject.Properties['rdp'] -and $cfgNow.rdp.PSObject.Properties['autoConsoleRedirect']) {
-        $rdpEnable = [bool]$cfgNow.rdp.autoConsoleRedirect
+        $rdpEnable = ConvertTo-StrictBoolean $cfgNow.rdp.autoConsoleRedirect $true
       }
       $rdpResult = Sync-RdpRedirectTask -Enable $rdpEnable
       $lblSaveInfo.Text = "저장됨 ($(Get-Date -Format 'HH:mm:ss'))"
@@ -3853,6 +3873,9 @@ if ($script:configMigrated) {
     Add-GuiLog '[안내] 업데이트로 커스텀 반복 진행 기록을 초기화했습니다 (리스트는 유지 - 다음 시작은 처음부터)'
   }
 }
+if ($script:configMigrationError) {
+  Add-GuiLog "[경고] 설정 자동 이전 실패: $($script:configMigrationError) (기존 설정으로 계속합니다)"
+}
 $timer.Start()
 $hotkeyTimer.Start()
 # ===== 꿀비노기 허니 테마 (밝은 크림 + 꿀색) =====
@@ -3961,6 +3984,28 @@ $script:updateTimer.Add_Tick({
   })
 $script:updateTimer.Start()
 
-[void]$form.ShowDialog()
-$hotkeyTimer.Stop()
-$timer.Stop()
+try {
+  [void]$form.ShowDialog()
+} finally {
+  # 창을 닫을 때 폴링 타이머·업데이트 러닝스페이스·전역 뮤텍스를 명시적으로 정리합니다.
+  # 프로세스 종료에만 맡기면 업데이트 확인 중 닫은 직후 재실행 시 뮤텍스가 잠깐 남을 수 있습니다.
+  foreach ($uiTimer in @($hotkeyTimer, $timer, $script:updateTimer)) {
+    if ($uiTimer) {
+      try { $uiTimer.Stop() } catch { }
+      try { $uiTimer.Dispose() } catch { }
+    }
+  }
+  if ($script:updateCheckPs) {
+    try {
+      if ($script:updateCheckAsync -and -not $script:updateCheckAsync.IsCompleted) {
+        $script:updateCheckPs.Stop()
+      }
+    } catch { }
+    try { $script:updateCheckPs.Dispose() } catch { }
+  }
+  try { $form.Dispose() } catch { }
+  if ($guiMutexAcquired) {
+    try { $script:guiMutex.ReleaseMutex() } catch { }
+  }
+  try { $script:guiMutex.Dispose() } catch { }
+}

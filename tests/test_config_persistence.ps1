@@ -13,7 +13,7 @@ $guiPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'mabinogi_gui.ps1'
 $tokens = $null; $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw "GUI 파서 오류: $($parseErrors[0].Message)" }
-foreach ($name in @('Read-Config', 'Write-Utf8FileAtomic', 'Save-Config', 'Update-ConfigToLatest',
+  foreach ($name in @('Read-Config', 'ConvertTo-StrictBoolean', 'Write-Utf8FileAtomic', 'Save-Config', 'Update-ConfigToLatest',
     'Format-CustomItemToken', 'Get-CustomFingerprint', 'Get-CustomNextProgress',
     'Step-CustomProgress', 'Reset-CustomProgress')) {
   $fn = $ast.FindAll({
@@ -38,6 +38,10 @@ $defaultPath = [System.IO.Path]::Combine($testRoot, 'config.default.json')
 $utf8Bom = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $true
 
 try {
+  Assert-Case '엄격 불리언: JSON false 유지' (ConvertTo-StrictBoolean $false $true) $false
+  Assert-Case '엄격 불리언: 문자열 false는 기본값 사용' (ConvertTo-StrictBoolean 'false' $false) $false
+  Assert-Case '엄격 불리언: 숫자 0은 기본값 사용' (ConvertTo-StrictBoolean 0 $true) $true
+
   # 1) 대상 파일이 없을 때 생성 + 한글/BOM 보존
   Save-Config ([pscustomobject]@{ value = '첫 저장'; nested = [pscustomobject]@{ ok = $true } })
   $created = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -65,12 +69,21 @@ try {
     })
   Assert-Case '원자저장: 임시 파일 정리' $leftovers.Count 0
 
-  # 4) 좌표 버전이 같아도 구조 버전이 낮으면 마이그레이션하고 ui 값을 보존
+  # 4) 자동 이전 실패와 '이전 불필요'를 구분할 수 있도록 실패 원인을 보존
+  [System.IO.File]::WriteAllText($defaultPath, '{잘못된 JSON', $utf8Bom)
+  $migrationFailed = Update-ConfigToLatest
+  Assert-Case '구조이전: 잘못된 기본 설정은 false 반환' $migrationFailed $false
+  Assert-Case '구조이전: 실패 원인 보존' `
+    (-not [string]::IsNullOrWhiteSpace($script:configMigrationError)) $true
+
+  # 5) 좌표 버전이 같아도 구조 버전이 낮으면 마이그레이션하고 ui 값을 보존
   $defaultConfig = [pscustomobject]@{
     configSchemaVersion = 2
     coordsVersion = 6
     ui = [pscustomobject]@{ logFontSize = 9 }
     diagnostics = [pscustomobject]@{ keepScreenshots = 10 }
+    revive = [pscustomobject]@{ enabled = $false }
+    afterEntry = [pscustomobject]@{ keys = @([pscustomobject]@{ key = 32; enabled = $false }) }
     customRepeat = [pscustomobject]@{ progress = $null }
     abyssCustomRepeat = [pscustomobject]@{ items = @(); listRepeat = 'infinite'; listRepeatCount = 1; progress = $null }
   }
@@ -78,6 +91,8 @@ try {
     coordsVersion = 6
     ui = [pscustomobject]@{ logFontSize = 17 }
     diagnostics = [pscustomobject]@{ keepScreenshots = 7 }
+    revive = [pscustomobject]@{ enabled = 'true' }
+    afterEntry = [pscustomobject]@{ keys = @([pscustomobject]@{ key = 32; enabled = 'true' }) }
     customRepeat = [pscustomobject]@{ progress = $null }
   }
   [System.IO.File]::WriteAllText($defaultPath, ($defaultConfig | ConvertTo-Json -Depth 10), $utf8Bom)
@@ -89,8 +104,11 @@ try {
   Assert-Case '구조이전: 어비스 커스텀 기본 섹션 추가' ($null -ne $migrationResult.abyssCustomRepeat) $true
   Assert-Case '구조이전: ui.logFontSize 보존' $migrationResult.ui.logFontSize 17
   Assert-Case '구조이전: 다른 사용자 설정 보존' $migrationResult.diagnostics.keepScreenshots 7
+  Assert-Case '구조이전: 문자열 revive 불리언은 최신 기본값 유지' $migrationResult.revive.enabled $false
+  Assert-Case '구조이전: 문자열 키 불리언은 최신 기본값 유지' $migrationResult.afterEntry.keys[0].enabled $false
+  Assert-Case '구조이전: 성공 후 이전 오류 초기화' ($null -eq $script:configMigrationError) $true
 
-  # 5) 진행 저장 실패는 $null/false 로 호출부까지 전달되고 디스크 진행도는 바뀌지 않음
+  # 6) 진행 저장 실패는 $null/false 로 호출부까지 전달되고 디스크 진행도는 바뀌지 않음
   $item = [pscustomobject]@{
     difficulty = '일반'; stage = '1-1'; coin = $true; doubleLoot = $false
     exhaustContinue = $false; noDoubleSweep = $false
@@ -125,7 +143,7 @@ try {
   $afterReset = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   Assert-Case '진행초기화: 성공 시 progress null' ($null -eq $afterReset.customRepeat.progress) $true
 
-  # 6) 어비스 커스텀 진행은 던전 커스텀과 다른 섹션·지문을 사용하고 서로 건드리지 않음
+  # 7) 어비스 커스텀 진행은 던전 커스텀과 다른 섹션·지문을 사용하고 서로 건드리지 않음
   $abyssItem = [pscustomobject]@{
     kind = 'abyss'; mode = 'party'; difficulty = '어려움'; dungeon = '광기의 동굴'; matching = '우연한 만남'
   }

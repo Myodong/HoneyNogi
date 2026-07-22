@@ -85,22 +85,40 @@ function Get-ConfigValue {
   return $node
 }
 
-function Get-ConfigInteger {
-  param([object]$Root, [string[]]$Path, [int]$Default, [int]$Minimum, [int]$Maximum)
-  $raw = Get-ConfigValue -Root $Root -Path $Path -Default $Default
-  $value = $Default
-  $valid = -not ($raw -is [bool] -or $raw -is [string])
+function Resolve-ConfigInteger {
+  param($Value, [int]$Default, [int]$Minimum, [int]$Maximum, [string]$Name)
+  $valid = $null -ne $Value -and -not ($Value -is [bool] -or $Value -is [string])
   $number = 0.0
   if ($valid) {
-    try { $number = [double]$raw } catch { $valid = $false }
+    try { $number = [double]$Value } catch { $valid = $false }
   }
   if ($valid -and ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or
       $number -ne [Math]::Truncate($number))) { $valid = $false }
-  if ($valid) { $value = [int]$number }
-  if ($valid -and ($value -lt $Minimum -or $value -gt $Maximum)) { $valid = $false }
-  if ($valid) { return $value }
-  Add-ConfigValidationWarning "config '$($Path -join '.')' 값이 허용 범위($Minimum~$Maximum)를 벗어나 기본값 $Default 을 사용합니다"
+  # [int] 변환 전에 범위를 확인해야 Int32 바깥의 큰 값도 예외 없이 기본값으로 복구됩니다.
+  if ($valid -and ($number -lt $Minimum -or $number -gt $Maximum)) { $valid = $false }
+  if ($valid) { return [int]$number }
+  Add-ConfigValidationWarning "config '$Name' 값이 정수 형식/허용 범위($Minimum~$Maximum)를 벗어나 기본값 $Default 을 사용합니다"
   return $Default
+}
+
+function Get-ConfigInteger {
+  param([object]$Root, [string[]]$Path, [int]$Default, [int]$Minimum, [int]$Maximum)
+  $raw = Get-ConfigValue -Root $Root -Path $Path -Default $Default
+  return (Resolve-ConfigInteger -Value $raw -Default $Default -Minimum $Minimum -Maximum $Maximum `
+    -Name ($Path -join '.'))
+}
+
+function Resolve-ConfigBoolean {
+  param($Value, [bool]$Default, [string]$Name)
+  if ($Value -is [bool]) { return [bool]$Value }
+  Add-ConfigValidationWarning "config '$Name' 값이 true/false 형식이 아니라 기본값 $Default 을 사용합니다"
+  return $Default
+}
+
+function Get-ConfigBoolean {
+  param([object]$Root, [string[]]$Path, [bool]$Default)
+  $raw = Get-ConfigValue -Root $Root -Path $Path -Default $Default
+  return (Resolve-ConfigBoolean -Value $raw -Default $Default -Name ($Path -join '.'))
 }
 
 # ===== 커스텀 반복(리스트 방식) 판정 유틸 =====
@@ -590,9 +608,9 @@ $rgQuestTracker = @(Get-ConfigValue $config @('ocrRegions', 'questTracker') @(98
 
 # 캐릭터가 던전에서 먼 곳에 있어 상세 화면에 '이동하기'가 뜬 경우, 자동 이동으로
 # 던전에 도착(상세 화면이 다시 열리며 '입장하기' 표시)할 때까지 기다리는 최대 시간(초)
-$timeoutTravel = [int](Get-ConfigValue $config @('timeoutsSeconds', 'travelToDungeon') 180)
+$timeoutTravel = Get-ConfigInteger $config @('timeoutsSeconds', 'travelToDungeon') 180 1 3600
 # 던전 '파티 찾기' 매칭이 완료되어 던전에 입장할 때까지 기다리는 최대 시간(초)
-$timeoutPartyMatch = [int](Get-ConfigValue $config @('timeoutsSeconds', 'partyMatching') 300)
+$timeoutPartyMatch = Get-ConfigInteger $config @('timeoutsSeconds', 'partyMatching') 300 1 3600
 
 # 보스방 진입 컷신의 '장면 넘기기' 버튼 탐색 영역: 정확한 버튼 위치가 화면마다 다를 수
 # 있어 상단/하단 오른쪽 절반을 넓게 잡고, '넘기' 글자를 OCR로 찾아 그 위치를 클릭합니다.
@@ -606,10 +624,10 @@ $rgPopupClose = @(Get-ConfigValue $config @('ocrRegions', 'popupClose') @(380, 5
 # ===== '던전' 카테고리 설정 (전체 자동화 구현: 선택 → 옵션 → 입장 → 클리어 → 다시 하기 반복) =====
 $ndDifficulty    = [string](Get-ConfigValue $config @('normalDungeon', 'difficulty') '일반')
 $ndStage         = [string](Get-ConfigValue $config @('normalDungeon', 'stage') '1-1')
-$ndUseCoin       = [bool](Get-ConfigValue $config @('normalDungeon', 'useSilverCoin') $false)
-$ndDoubleLoot    = [bool](Get-ConfigValue $config @('normalDungeon', 'doubleLoot') $false)
-$ndCoinFallback  = [bool](Get-ConfigValue $config @('normalDungeon', 'continueWithoutCoin') $false)
-$ndLootFallback  = [bool](Get-ConfigValue $config @('normalDungeon', 'continueSweepOnly') $false)
+$ndUseCoin       = Get-ConfigBoolean $config @('normalDungeon', 'useSilverCoin') $false
+$ndDoubleLoot    = Get-ConfigBoolean $config @('normalDungeon', 'doubleLoot') $false
+$ndCoinFallback  = Get-ConfigBoolean $config @('normalDungeon', 'continueWithoutCoin') $false
+$ndLootFallback  = Get-ConfigBoolean $config @('normalDungeon', 'continueSweepOnly') $false
 $ndMatching      = [string](Get-ConfigValue $config @('normalDungeon', 'matching') '우연한 만남')
 
 # ===== 커스텀 반복 모드 (GUI가 환경변수로 이번 회차 항목을 전달) =====
@@ -706,9 +724,9 @@ $htDifficulty   = [string](Get-ConfigValue $config @('huntingGround', 'difficult
 # 은동전이 10개 미만이면 사냥터에서 나가서(우상단 X) 자동화를 마칩니다 (코드 4).
 # 단 continueSweepOnly(더블 루팅 불가 시 소탕만 계속)는 유지: 잔량 10~19개면
 # 더블 루팅만 끄고 소탕(10개)으로 계속합니다.
-$htUseCoin      = [bool](Get-ConfigValue $config @('huntingGround', 'useOffering') $false)
-$htDoubleLoot   = [bool](Get-ConfigValue $config @('huntingGround', 'doubleLoot') $false)
-$htLootFallback = [bool](Get-ConfigValue $config @('huntingGround', 'continueSweepOnly') $false)
+$htUseCoin      = Get-ConfigBoolean $config @('huntingGround', 'useOffering') $false
+$htDoubleLoot   = Get-ConfigBoolean $config @('huntingGround', 'doubleLoot') $false
+$htLootFallback = Get-ConfigBoolean $config @('huntingGround', 'continueSweepOnly') $false
 $htMatching     = [string](Get-ConfigValue $config @('huntingGround', 'matching') '파티찾기')
 # 사냥터 첫 화면의 영역/좌표 (2026-07-15 창백한 산 화면 실측 - 모든 사냥터 공통 배치)
 $rgHtDifficulty = @(Get-ConfigValue $config @('ocrRegions', 'htDifficulty') @(560, 100, 330, 45))  # 난이도 알약 (상단 중앙, 매우 어려움 3개 배치까지 커버)
@@ -849,12 +867,12 @@ $rgDgTributeCost = @(Get-ConfigValue $config @('ocrRegions', 'dgTributeCost') @(
 
 # 행동불능(사망) 자동 부활: 던전 클리어 대기 중 화면 중앙의 '남은 부활 횟수' 안내가
 # 보이면(=행동불능 상태), 남은 횟수가 있을 때 R키(여기서 부활)를 눌러 전투를 이어갑니다.
-$reviveEnabled     = [bool](Get-ConfigValue $config @('revive', 'enabled') $true)
-$reviveKey         = [int](Get-ConfigValue $config @('revive', 'key') 82)    # 82 = R ('여기서 부활' 단축키)
-$reviveMaxPerCycle = [int](Get-ConfigValue $config @('revive', 'maxPerCycle') 10)
+$reviveEnabled     = Get-ConfigBoolean $config @('revive', 'enabled') $true
+$reviveKey         = Get-ConfigInteger $config @('revive', 'key') 82 1 255    # 82 = R ('여기서 부활' 단축키)
+$reviveMaxPerCycle = Get-ConfigInteger $config @('revive', 'maxPerCycle') 10 0 1000
 # 부활 완료 후 전투를 다시 시작하는 키: 부활하면 자동전투가 꺼진 상태라 자동출발(Space)을
 # 다시 눌러야 전투가 이어집니다. 0 을 넣으면 누르지 않습니다.
-$reviveResumeKey   = [int](Get-ConfigValue $config @('revive', 'resumeKey') 32)   # 32 = Space
+$reviveResumeKey   = Get-ConfigInteger $config @('revive', 'resumeKey') 32 0 255   # 32 = Space
 # 행동불능 안내 영역: '행동불능 / 부활 제한 구역입니다 / 남은 부활 횟수 N/M' 문구가 표시되는 화면 중앙
 $rgDeathStatus     = @(Get-ConfigValue $config @('ocrRegions', 'deathStatus') @(500, 160, 290, 120))
 # 남은 부활 횟수가 없을 때 클릭할 '여신상에서 부활' 버튼 위치(OCR 탐색 실패 시 예비 좌표)
@@ -866,17 +884,17 @@ $rgReviveButtons   = @(Get-ConfigValue $config @('ocrRegions', 'reviveButtons') 
 # 꺼짐 = 나침반 아이콘(중심에 검은 점) / 켜짐 = 흰 사각형(정지 아이콘) → 픽셀로 구분합니다.
 $ptAutoHuntIcon    = @(Get-ConfigValue $config @('clickPoints', 'autoHuntIcon') @(1192, 637))
 
-$refocusEverySeconds = [int](Get-ConfigValue $config @('focus', 'refocusEverySeconds') 8)
-$refocusIdleSeconds  = [int](Get-ConfigValue $config @('focus', 'onlyWhenUserIdleSeconds') 15)
+$refocusEverySeconds = Get-ConfigInteger $config @('focus', 'refocusEverySeconds') 8 0 3600
+$refocusIdleSeconds  = Get-ConfigInteger $config @('focus', 'onlyWhenUserIdleSeconds') 15 0 3600
 
-$windowNormalize = [bool](Get-ConfigValue $config @('window', 'normalize') $true)
+$windowNormalize = Get-ConfigBoolean $config @('window', 'normalize') $true
 $windowMode      = [string](Get-ConfigValue $config @('window', 'mode') 'nearest')
-$windowX         = [int](Get-ConfigValue $config @('window', 'x') 0)
-$windowY         = [int](Get-ConfigValue $config @('window', 'y') 0)
-$windowWidth     = [int](Get-ConfigValue $config @('window', 'width') 1908)
-$windowHeight    = [int](Get-ConfigValue $config @('window', 'height') 1076)
+$windowX         = Get-ConfigInteger $config @('window', 'x') 0 -32768 32767
+$windowY         = Get-ConfigInteger $config @('window', 'y') 0 -32768 32767
+$windowWidth     = Get-ConfigInteger $config @('window', 'width') 1908 640 7680
+$windowHeight    = Get-ConfigInteger $config @('window', 'height') 1076 360 4320
 
-$afterEntryDelayMs = [int](Get-ConfigValue $config @('afterEntry', 'keyDelayMs') 500)
+$afterEntryDelayMs = Get-ConfigInteger $config @('afterEntry', 'keyDelayMs') 500 0 60000
 
 # 입장 후 누를 키 목록을 해석합니다. 새 형식({key, label, enabled})과
 # 예전 형식(숫자 목록 + keyLabels)을 모두 지원하며, enabled=false 인 키는 건너뜁니다.
@@ -895,18 +913,23 @@ for ($entryIndex = 0; $entryIndex -lt $rawAfterEntryKeys.Count; $entryIndex++) {
   if ($entry -is [System.Management.Automation.PSCustomObject] -and $entry.PSObject.Properties['key']) {
     $entryEnabled = $true
     if ($entry.PSObject.Properties['enabled'] -and $null -ne $entry.enabled) {
-      $entryEnabled = [bool]$entry.enabled
+      $entryEnabled = Resolve-ConfigBoolean -Value $entry.enabled -Default $true `
+        -Name "afterEntry.keys[$entryIndex].enabled"
     }
     if (-not $entryEnabled) { continue }
     $entryLabel = '키 입력'
     if ($entry.PSObject.Properties['label'] -and $entry.label) { $entryLabel = [string]$entry.label }
-    $afterEntryActions += @{ Key = [int]$entry.key; Label = $entryLabel }
+    $entryKey = Resolve-ConfigInteger -Value $entry.key -Default 0 -Minimum 1 -Maximum 255 `
+      -Name "afterEntry.keys[$entryIndex].key"
+    if ($entryKey -gt 0) { $afterEntryActions += @{ Key = $entryKey; Label = $entryLabel } }
   } else {
     $entryLabel = '키 입력'
     if ($entryIndex -lt $legacyKeyLabels.Count -and $legacyKeyLabels[$entryIndex]) {
       $entryLabel = [string]$legacyKeyLabels[$entryIndex]
     }
-    $afterEntryActions += @{ Key = [int]$entry; Label = $entryLabel }
+    $entryKey = Resolve-ConfigInteger -Value $entry -Default 0 -Minimum 1 -Maximum 255 `
+      -Name "afterEntry.keys[$entryIndex]"
+    if ($entryKey -gt 0) { $afterEntryActions += @{ Key = $entryKey; Label = $entryLabel } }
   }
 }
 
@@ -5492,7 +5515,7 @@ try {
 
         # 오래된 진단 스크린샷 정리: 최근 것만 남기고(기본 10개) 나머지는 삭제해
         # Log 폴더에 무한정 쌓이지 않게 합니다. config 의 diagnostics.keepScreenshots 로 조절.
-        $keepShots = [int](Get-ConfigValue $config @('diagnostics', 'keepScreenshots') 10)
+        $keepShots = Get-ConfigInteger $config @('diagnostics', 'keepScreenshots') 10 0 1000
         if ($keepShots -gt 0) {
           $oldShots = @(Get-ChildItem -LiteralPath $logDir -Filter 'error_*.png' -File -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepShots)
@@ -5539,7 +5562,7 @@ try {
     }
     Write-RunLog "[진단] 오류 로그 사본 저장: $diagLog"
     # 로그 사본도 스크린샷과 같은 보관 규칙(기본 10개)으로 정리합니다
-    $keepLogs = [int](Get-ConfigValue $config @('diagnostics', 'keepScreenshots') 10)
+    $keepLogs = Get-ConfigInteger $config @('diagnostics', 'keepScreenshots') 10 0 1000
     if ($keepLogs -gt 0) {
       $oldLogs = @(Get-ChildItem -LiteralPath $logDir -Filter 'error_*.log' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepLogs)
