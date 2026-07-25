@@ -690,6 +690,9 @@ if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
     $script:customOwnerJson = [string]$env:HONEYNOGI_CUSTOM_OWNER
   }
 }
+# 마지막 판 신호 (GUI가 사전 판정: 커스텀 N바퀴의 마지막 바퀴 마지막 항목 / 횟수 지정 마지막 회차).
+# 던전 흐름만 사용합니다 - 결과 화면에서 '다시 하기' 대신 '나가기'로 필드에 나가며 마칩니다.
+$script:dgLastRun = ([string]$env:HONEYNOGI_LAST_RUN -eq '1')
 # 던전 선택/옵션 화면의 OCR 영역들 (2026-07-15 실측 검증)
 $rgDgTitle      = @(Get-ConfigValue $config @('ocrRegions', 'dgTitle') @(30, 45, 250, 55))        # 좌상단 제목 (선택: '○○ 던전' / 옵션: 'N층 M구역') - 기본값은 config.json과 동일하게 유지
 $rgDgDifficulty = @(Get-ConfigValue $config @('ocrRegions', 'dgDifficulty') @(30, 165, 200, 50))  # 일반/어려움 알약
@@ -701,22 +704,236 @@ $rgDgCoinButton = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButton') @(38
 $rgDgCoinButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButtonAlt') @(400, 292, 130, 44)) # 은동전 보조: 좁은 영역 ('도전' 대응)
 $rgDgLootButton = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButton') @(388, 494, 130, 48))     # 더블 루팅 주: 좁은 영역 ('도전' 대응, 실측 검증)
 $rgDgLootButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButtonAlt') @(388, 493, 205, 50)) # 더블 루팅 보조: 넓은 영역 ('선택됨' 대응)
-# 스테이지 노드 클릭 좌표 (기준 1272x717, 2026-07-18 실측 캡처 기준으로 리베이스).
-# 지도는 세로 스크롤 패널이라 위치가 흐르므로, 클릭 전에 라벨을 읽어 오프셋을 보정하고
-# (Get-NdStageClickPoint), 클릭 후 진입 버튼 문구('N층 M구역')로 선택 결과를 검증합니다.
-$ndStagePoints = @{
-  '1-1' = @(196, 406); '1-2' = @(293, 406); '1-3' = @(385, 367)
-  '2-1' = @(249, 655); '2-2' = @(249, 571); '2-3' = @(353, 605)
+# ===== 던전 구역 지도 4유형 좌표 체계 (2026-07-24 확정 실측: 10던전 x 4화면 40장, 3중 교차 검증) =====
+# 구역 지도 배치는 던전·층마다 다르며 총 4유형입니다:
+#   A  = 가로형·소카드 하단  / B = 가로형·소카드 상단
+#   CR = 세로형(위=n-2, 아래=n-1) / CN = 세로형(위=n-1, 아래=n-2)
+# 같은 유형 안에서는 던전 간 좌표 편차가 ~1px라 유형 템플릿 + 던전·층→유형 매핑으로 좌표를 정합니다.
+# 선택 화면 좌표는 '1층 포커스' 상태 기준이며, 2층 포커스면 전체가 정확히 29px 위로 밀립니다
+# (10던전 전부 강체 이동 실측 - 연속 스크롤이 아니라 2상태뿐). 옵션 화면 지도는 밀림 없음.
+# 과거의 룬다 단일 좌표표 + 라벨 평균 오프셋 보정은 배치가 다른 던전의 라벨이 평균을 오염시켜
+# 폐기했습니다 (2026-07-22 피오드 실사고 - run_20260722_h20m55s16.log).
+$dgFocusShiftY = 29
+# 던전·층 → 배치 유형 매핑 (@(1층 유형, 2층 유형)). 미등록 던전은 라벨/기하 프로브로만 진행.
+$dgLayoutTable = @{
+  '룬다'      = @('A', 'CR');  '피오드'    = @('B', 'A');  '페카고분'  = @('B', 'A')
+  '페론고분'  = @('CR', 'A');  '바리1광구' = @('A', 'B');  '바리2광구' = @('B', 'A')
+  '마스던전'  = @('B', 'CN');  '라비던전'  = @('A', 'A');  '알비던전'  = @('A', 'B')
+  '키아던전'  = @('CR', 'A')
 }
-# 지도 라벨 앵커: 위 기준 좌표와 같은 스크롤 상태에서 각 라벨 글자의 기준 y.
-# 지도가 밀리면 (읽힌 라벨 y - 기준 y)를 노드 좌표에 더해 보정합니다.
-# (작은 노드 라벨(1-1/1-2/2-1)은 OCR이 자주 못 읽지만 큰 카드/층 제목은 잘 읽힘 - 실측)
-$ndMapAnchorY = @{
-  '1층' = 259; '2층' = 503
-  '1-1' = 415; '1-2' = 415; '1-3' = 398
-  '2-1' = 664; '2-2' = 580; '2-3' = 637
+# 난이도 2단계(일반/어려움) 던전 - 2026-07-24 실측: 10던전 중 룬다·피오드만 '매우 어려움' 없음.
+# '매우 어려움' 요청 + 2단계 던전이면 즉시 중단합니다 (없는 난이도로 오입장 방지 - Codex 리뷰 반영).
+$dgTwoTierDungeons = @('룬다', '피오드')
+# 제목 OCR 조각 → 던전 ID (오독 이형 실측 포함: 룬다→로다, 피오드→피오듸, 페론→페로).
+# 바리 광구는 숫자까지 명확해야 채택 - 숫자 소실 시 ID 불명으로 처리 (Codex 교차 합의).
+$dgNamePatterns = @(
+  # 오독 이형은 전부 2026-07-24~25 실기 검증 실측입니다 (첫 글자/둘째 글자가 자주 깨짐).
+  # '오드'는 약한 조각이지만 다른 던전명과 충돌하지 않고, '바리오드'류는 다중 매칭 가드가
+  # null 처리합니다 (Codex 합의).
+  @{ Id = '룬다';     Any = @('룬다', '로다', '른다', '분다', '닡다', '눛나') }
+  @{ Id = '피오드';   Any = @('피오', '깨오', '오드') }
+  @{ Id = '페카고분'; Any = @('페카', '패가') }
+  @{ Id = '페론고분'; Any = @('페론', '페로', '페혼', '페붇') }
+  @{ Id = '마스던전'; Any = @('마스', '마싀') }   # '마싀' = '마스'+'1층' 합쳐진 오독 ('마싀층2구역' 실측)
+  @{ Id = '라비던전'; Any = @('라비', '라바') }   # '라바' = 라비 오독 (실기 매 회차 관측)
+  @{ Id = '알비던전'; Any = @('알비') }
+  @{ Id = '키아던전'; Any = @('키아', '기아') }   # '기아' = 키아 오독 (실기 관측)
+)
+# 선택 화면 구역 라벨 중심 (유형별, 1층 포커스 기준. 라벨은 카드 안이라 클릭 유효점)
+# CN 1층은 실측 던전이 없어 CR 대칭값 (현재 CN 1층 던전 미발견 - 매핑에 없으면 사용되지 않음)
+$dgSelStagePoints = @{
+  'A'  = @{ '1-1' = @(206, 425); '1-2' = @(293, 425); '1-3' = @(397, 398)
+            '2-1' = @(206, 668); '2-2' = @(293, 668); '2-3' = @(397, 640) }
+  'B'  = @{ '1-1' = @(206, 338); '1-2' = @(293, 338); '1-3' = @(397, 394)
+            '2-1' = @(206, 580); '2-2' = @(293, 580); '2-3' = @(397, 637) }
+  'CR' = @{ '1-1' = @(249, 425); '1-2' = @(249, 337); '1-3' = @(353, 394)
+            '2-1' = @(249, 665); '2-2' = @(249, 580); '2-3' = @(353, 637) }
+  'CN' = @{ '1-1' = @(249, 337); '1-2' = @(249, 425); '1-3' = @(353, 394)
+            '2-1' = @(249, 580); '2-2' = @(249, 667); '2-3' = @(353, 640) }
+}
+# 옵션 화면 구역 라벨 중심 (유형별·구역 번호별 - 1층/2층 좌표 동일 실측, 밀림 없음)
+$dgOptStagePoints = @{
+  'A'  = @{ '1' = @(830, 326); '2' = @(918, 326); '3' = @(1022, 298) }
+  'B'  = @{ '1' = @(830, 238); '2' = @(918, 238); '3' = @(1022, 295) }
+  'CR' = @{ '1' = @(874, 326); '2' = @(874, 238); '3' = @(979, 295) }
+  'CN' = @{ '1' = @(874, 238); '2' = @(874, 326); '3' = @(979, 298) }
 }
 $rgNdStageMap = @(40, 230, 520, 470)   # 스테이지 지도 라벨 판독 영역
+
+function Get-DgDungeonIdFromTitle {
+  param([string]$TitleText)
+
+  # 선택('룬다 던전')/옵션('페카 고분 1층 1구역') 제목에서 던전 ID를 확정합니다.
+  # 정확히 한 던전만 매칭될 때만 채택하고, 다중 매칭·바리 광구 숫자 소실은 ID 불명($null)입니다.
+  # ID 불명은 '미등록 던전 확정'이 아니라 '모름'이며, 호출부는 라벨/기하 프로브로만 진행합니다.
+  $normalized = ([string]$TitleText) -replace '\s', ''
+  if ($normalized.Length -eq 0) { return $null }
+  $found = @()
+  foreach ($entry in $dgNamePatterns) {
+    foreach ($fragment in $entry.Any) {
+      if ($normalized.Contains([string]$fragment)) { $found += [string]$entry.Id; break }
+    }
+  }
+  if ($normalized.Contains('바리')) {
+    if ($normalized -match '([12])광') { $found += ('바리' + $Matches[1] + '광구') }
+    else { $found += '바리광구불명' }
+  }
+  $found = @($found | Select-Object -Unique)
+  if ($found.Count -ne 1) { return $null }
+  if ($found[0] -eq '바리광구불명') { return $null }
+  return [string]$found[0]
+}
+
+function Test-DgSelectionTitle {
+  param([string]$TitleText)
+
+  # 던전 선택 화면 제목 판정. 기존 '던전'/'오드' 조각만으로는 '페카 고분'/'페론 고분'/
+  # '바리 N광구'처럼 제목에 '던전'이 없는 던전을 인식하지 못해, 시작 전 화면 정리가
+  # 선택 화면을 '알 수 없는 화면'으로 오인하고 중앙/X 클릭으로 필드까지 이탈했습니다
+  # (2026-07-25 01:07 실기 재현). '고분'/'광구' 조각과 던전 ID 매칭(오독 이형 포함)을 추가.
+  # 옵션 화면('구역')은 선택 화면이 아니므로 먼저 제외합니다 ('피오드1층1구역'의 '오드' 오인 방지).
+  $normalized = ([string]$TitleText) -replace '\s', ''
+  if ($normalized.Length -eq 0) { return $false }
+  # 옵션 화면 제외: '구역'뿐 아니라 '층'도 선제외합니다 - 선택 화면 제목에는 '층'이 없고,
+  # '구역'이 '구멱' 등으로 깨진 옵션 제목('페카고분1층3구멱')이 선택 화면으로 오판되는 것 방지
+  # (Codex 리뷰 반영).
+  if ($normalized.Contains('구역') -or $normalized.Contains('층')) { return $false }
+  if ($normalized.Contains('던전') -or $normalized.Contains('오드') -or
+      $normalized.Contains('고분') -or $normalized.Contains('광구')) { return $true }
+  if (Get-DgDungeonIdFromTitle -TitleText $normalized) { return $true }
+  return $false
+}
+
+function Test-DgCardColor {
+  param([int]$R, [int]$G, [int]$B)
+
+  # 구역 카드 내부의 남색 판별식 (2026-07-24 40장 픽셀 실측으로 보정:
+  # 포커스 패널 카드 300/300 + 비포커스 패널의 어두운(딤) 카드 300/300 통과,
+  # 빈 공간·패널 배경 오탐 0/120 - 완벽 분리). 보라색 포커스 패널 배경(G가 R보다
+  # 크게 낮음)은 G >= R-10 조건에서 걸러집니다. 딤 카드 최저 실측 B=52.
+  return ((($B - $R) -ge 14) -and ($B -ge 50) -and ($G -ge ($R - 10)))
+}
+
+function Test-DgCardPixelAt {
+  param([System.Diagnostics.Process]$Game, [int]$ReferenceX, [int]$ReferenceY)
+
+  # 좌표에 실제 구역 카드가 있는지 픽셀로 확인합니다 (틀린 좌표 클릭 방지의 1차 관문).
+  # 라벨 중심 주변 5점(흰 글자·S 아이콘을 피하는 오프셋)을 표본해 3점 이상 남색이면 카드입니다.
+  $hits = 0
+  foreach ($offset in @(@(-28, -2), @(28, -2), @(-28, 8), @(28, 8), @(0, 13))) {
+    try {
+      $c = Get-GamePixel -Game $Game -ReferenceX ($ReferenceX + $offset[0]) -ReferenceY ($ReferenceY + $offset[1])
+    } catch { continue }
+    if (Test-DgCardColor -R $c.R -G $c.G -B $c.B) { $hits++ }
+  }
+  return ($hits -ge 3)
+}
+
+function ConvertTo-GameReferencePoint {
+  param([System.Diagnostics.Process]$Game, [System.Drawing.Point]$ScreenPoint)
+
+  # 화면 픽셀 좌표를 기준 좌표(1272x717)로 역환산합니다 (픽셀 검증이 기준 좌표를 받기 때문).
+  $rect = New-Object HoneyNogiInput+RECT
+  if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) { return $null }
+  $width = $rect.Right - $rect.Left
+  $height = $rect.Bottom - $rect.Top
+  if ($width -le 0 -or $height -le 0) { return $null }
+  return @(
+    [int][Math]::Round(($ScreenPoint.X - $rect.Left) * $referenceWidth / $width),
+    [int][Math]::Round(($ScreenPoint.Y - $rect.Top) * $referenceHeight / $height)
+  )
+}
+
+function Get-DgSelStagePoint {
+  param([string]$LayoutType, [string]$Stage, [int]$FocusFloor)
+
+  # 선택 화면 구역 라벨의 기대 좌표: 유형 템플릿 + 포커스 밀림(2층 포커스면 -29).
+  # focusDy는 항상 기준(1층 포커스) 좌표에서 직접 계산합니다 - 누적 적용 금지 (Codex 합의).
+  if ([string]::IsNullOrEmpty($LayoutType) -or -not $dgSelStagePoints.ContainsKey($LayoutType)) { return $null }
+  $table = $dgSelStagePoints[$LayoutType]
+  if (-not $table.ContainsKey([string]$Stage)) { return $null }
+  $point = $table[[string]$Stage]
+  $dy = 0
+  if ($FocusFloor -eq 2) { $dy = -$dgFocusShiftY }
+  return @([int]$point[0], [int]($point[1] + $dy))
+}
+
+function Select-DgDifficultyWord {
+  param($Words, [string]$Key, [int]$HardX = -1)
+
+  # 던전 난이도 알약의 클릭 단어를 고르는 순수 판정 (진리표 테스트 대상 - Codex 리뷰 반영):
+  #  - '매우어려움' → '매우' 단어를 채택 (OCR이 '매우'+'어려움' 두 단어로 읽음. '매우' 단어도
+  #    알약 안이라 클릭 유효 - 사냥터에서 실전 검증된 방식)
+  #  - '어려움' → 왼쪽 70px 안 같은 줄에 '매우' 단어가 있는 '어려움'은 건너뜀
+  #    ('매우 어려움'의 뒷단어를 어려움으로 오채택해 오난이도 입장하는 사고 방지)
+  #  - 그 외('일반' 등) → 단어 정확 일치
+  # HardX = 해당 영역에서 '어려움' 알약의 표준 x (기준좌표. 선택 140 / 옵션 724 실측):
+  # 앵커('일반'/'매우')가 하나도 안 읽혀도 단어 위치가 표준 자리 ±35px 면 단독 채택합니다.
+  # 어려움이 이미 선택된 상태에서는 '일반' 알약이 흐릿해 OCR이 못 읽는 경우가 많고(2026-07-25
+  # 피오드 실사고 - 앵커 없음으로 과잉 거부), '매우 어려움' 뒷단어는 표준 자리에서 110px 이상
+  # 떨어져 있어 위치 검증으로는 오채택될 수 없습니다.
+  # 반환: @{ X; Y } (기준 좌표) 또는 $null
+  if ($Key -eq '매우어려움') {
+    foreach ($word in $Words) {
+      if ([string]$word.Text -eq '매우') { return @{ X = [int]$word.X; Y = [int]$word.Y } }
+    }
+    return $null
+  }
+  foreach ($word in $Words) {
+    if ([string]$word.Text -ne $Key) { continue }
+    if ($Key -eq '어려움') {
+      # ① '매우'의 짝(오른쪽 70px 이내 같은 줄)이면 '매우 어려움'의 뒷단어 - 제외
+      $partOfVeryHard = $false
+      foreach ($other in $Words) {
+        if ([string]$other.Text -ne '매우') { continue }
+        $dx = [int]$word.X - [int]$other.X
+        if ($dx -gt 0 -and $dx -le 70 -and [Math]::Abs([int]$word.Y - [int]$other.Y) -le 14) {
+          $partOfVeryHard = $true
+          break
+        }
+      }
+      if ($partOfVeryHard) { continue }
+      # ② 기준 검증: '일반'의 40~110px 오른쪽(알약 간격 실측 71~72px)이거나 '매우' 토큰이
+      #    보이는(= 짝이 아님이 확인된) 경우, 또는 단어 위치가 표준 '어려움' 자리(HardX ±35px)
+      #    인 경우에만 채택. 어느 기준에도 안 맞는 단독 '어려움'은 매우 어려움의 뒷단어일 수
+      #    있어 채택하지 않습니다 (오난이도 입장 방지).
+      $anchorConfirmed = $false
+      foreach ($other in $Words) {
+        if ([string]$other.Text -eq '일반') {
+          $dx = [int]$word.X - [int]$other.X
+          if ($dx -ge 40 -and $dx -le 110 -and [Math]::Abs([int]$word.Y - [int]$other.Y) -le 14) {
+            $anchorConfirmed = $true
+            break
+          }
+        } elseif ([string]$other.Text -eq '매우') {
+          $anchorConfirmed = $true
+          break
+        }
+      }
+      if (-not $anchorConfirmed -and $HardX -ge 0 -and [Math]::Abs([int]$word.X - $HardX) -le 35) {
+        $anchorConfirmed = $true
+      }
+      if (-not $anchorConfirmed) { continue }
+    }
+    return @{ X = [int]$word.X; Y = [int]$word.Y }
+  }
+  return $null
+}
+
+function Find-DgDifficultyPoint {
+  param([System.Diagnostics.Process]$Game, [int[]]$Region, [string]$Label, [int]$HardX = -1)
+
+  # 던전 난이도 알약의 클릭 지점(화면 픽셀)을 찾습니다. 단어 목록 기반 판정으로
+  # '매우 어려움' 지원과 '어려움'↔'매우 어려움' 오채택 방지를 함께 처리합니다.
+  # HardX = 이 영역에서 '어려움' 알약의 표준 x (Select-DgDifficultyWord 주석 참고).
+  $key = ([string]$Label) -replace '\s', ''
+  $words = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
+      -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 4 -Engine $ocrKoreanEngine)
+  $refPoint = Select-DgDifficultyWord -Words $words -Key $key -HardX $HardX
+  if (-not $refPoint) { return $null }
+  $screenPoint = Get-ScaledScreenPoint -Game $Game -ReferenceX ([int]$refPoint.X) -ReferenceY ([int]$refPoint.Y)
+  return [System.Drawing.Point]::new([int]$screenPoint.X, [int]$screenPoint.Y)
+}
 # ===== '사냥터' 카테고리 설정 - 특정 사냥터에 매이지 않는 범용 방식 =====
 # 사용자가 원하는 사냥터의 첫 화면(하단에 파티 찾기/입장하기)을 열어 두면 동작합니다.
 $htDifficulty   = [string](Get-ConfigValue $config @('huntingGround', 'difficulty') '일반')
@@ -751,7 +968,7 @@ $ptHtClose      = @(1228, 67)      # 첫 화면 우상단 닫기(X) - 은동전 
 $ptDgStageEnter   = @(918, 655)    # 선택 화면의 'N층 M구역 진입' 버튼
 $ptDgBackArrow    = @(43, 67)      # 진입 옵션 화면 좌상단 '<' (선택 화면으로 한 단계 뒤로) - 2026-07-18 실측
                                    # 주의: ESC는 한 단계 뒤로가 아니라 던전 UI 전체를 닫고 필드로 나감 (18:44 실측)
-$rgDgOptDifficulty = @(600, 95, 190, 50) # 진입 옵션 화면 상단 난이도 알약(일반/어려움) - 2026-07-18 실측
+$rgDgOptDifficulty = @(600, 95, 320, 50) # 진입 옵션 화면 상단 난이도 알약 - 2026-07-24 확장: '매우 어려움'('매우' 단어 x≈796)까지 커버 (기존 190 폭은 x790에서 잘림)
 $ptDgCoinButton   = @(463, 313)    # 은동전(소탕) 카드의 선택됨/도전 버튼
 $ptDgLootButton   = @(452, 517)    # 더블 루팅 카드의 선택됨/도전 버튼
 $ptDgChanceToggle = @(1183, 415)   # '우연한 만남' 토글 (초록 = 켜짐)
@@ -777,36 +994,135 @@ $ptDgRetry      = @(637, 655)      # '다시 하기' 예비 좌표 (글자 탐�
 $rgDgOptStageMap = @(750, 170, 360, 210) # 옵션 화면 구역 지도 영역
 
 function Get-DgOptStageFallbackPoint {
-  param([string]$Stage)
+  param([string]$Stage, [string]$LayoutType)
 
+  # 옵션 화면 유형 템플릿 좌표 (2026-07-24 40장 확정 실측 - 유형 내 던전 간 편차 ~1px).
+  # 과거의 룬다 단일표(1층=A형, 2층=CR형 좌표)는 다른 배치 던전에서 카드 밖/다른 카드를
+  # 눌러 폐기했습니다. 유형을 모르면 좌표를 만들지 않습니다 (틀린 좌표 클릭 금지).
   # PSCustomObject 단일 객체로 반환해 PowerShell의 2요소 배열 풀림을 피합니다.
-  # 1층: 2026-07-20 옵션 화면 실측 / 2층: 2026-07-21 룬다 2-3 상세 화면 실측.
-  $points = @{
-    '1-1' = @(830, 308)
-    '1-2' = @(918, 310)
-    '1-3' = @(1022, 266)
-    '2-1' = @(875, 307)
-    '2-2' = @(875, 225)
-    '2-3' = @(980, 266)
-  }
-  if (-not $points.ContainsKey([string]$Stage)) { return $null }
-  $point = $points[[string]$Stage]
+  if ([string]::IsNullOrEmpty($LayoutType) -or -not $dgOptStagePoints.ContainsKey($LayoutType)) { return $null }
+  $stageParts = ([string]$Stage) -split '-'
+  if ($stageParts.Count -ne 2) { return $null }
+  $table = $dgOptStagePoints[$LayoutType]
+  if (-not $table.ContainsKey([string]$stageParts[1])) { return $null }
+  $point = $table[[string]$stageParts[1]]
   return [pscustomobject]@{ X = [int]$point[0]; Y = [int]$point[1] }
 }
 
-function Get-DgOptStageCardPoint {
-  # 다시 하기 옵션 화면에서 항목 구역 카드의 클릭 지점을 찾습니다.
-  # 반환: @{ Screen = (화면 픽셀 지점) } 또는 @{ Reference = @(기준X, 기준Y) } 단일 해시테이블
-  param([System.Diagnostics.Process]$Game, [string]$Stage)
-  $cardPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
-    -RegionWidth $rgDgOptStageMap[2] -RegionHeight $rgDgOptStageMap[3] `
-    -SearchText $Stage -ExactText $Stage -Scale 4
-  if ($cardPoint) { return @{ Screen = $cardPoint } }
-  $fallback = Get-DgOptStageFallbackPoint -Stage $Stage
-  if ($fallback) {
-    return @{ Reference = @([int]$fallback.X, [int]$fallback.Y) }
+function Get-DgOptLayoutTypeByPixels {
+  param([System.Diagnostics.Process]$Game)
+
+  # 미등록 던전의 옵션 화면 배치를 카드 픽셀로 판별합니다. 가로형 상/하 행은 88px 떨어져
+  # 분리가 명확합니다. 세로형(C)은 위/아래 카드의 의미 순서(CR/CN)를 픽셀로 알 수 없어
+  # 'C'만 반환하며, 호출부는 라벨 판독 없이는 진행하지 않습니다 (Codex 합의).
+  # 주의: 가로형에서 세로 열 지점(874)은 옆 카드와 표본이 겹칠 수 있어 행 판정을 우선합니다.
+  $rowBottom = (Test-DgCardPixelAt -Game $Game -ReferenceX 830 -ReferenceY 326) -and
+               (Test-DgCardPixelAt -Game $Game -ReferenceX 918 -ReferenceY 326)
+  $rowTop    = (Test-DgCardPixelAt -Game $Game -ReferenceX 830 -ReferenceY 238) -and
+               (Test-DgCardPixelAt -Game $Game -ReferenceX 918 -ReferenceY 238)
+  if ($rowBottom -and -not $rowTop) { return 'A' }
+  if ($rowTop -and -not $rowBottom) { return 'B' }
+  if (-not $rowTop -and -not $rowBottom) {
+    $colBoth = (Test-DgCardPixelAt -Game $Game -ReferenceX 874 -ReferenceY 238) -and
+               (Test-DgCardPixelAt -Game $Game -ReferenceX 874 -ReferenceY 326)
+    if ($colBoth) { return 'C' }
   }
   return $null
+}
+
+function Get-DgOptStageCardPoint {
+  # 옵션 화면에서 항목 구역 카드의 클릭 지점을 찾습니다 (2026-07-24 상태·기하 중심 재설계).
+  #  1) 카드 숫자 라벨 다중 배율 탐색(4→6→8 - 단일 배율은 화면마다 성패가 갈림, 40장 실측)
+  #     + 카드 픽셀 확인 (라벨 오독으로 엉뚱한 곳을 잡는 오탐 차단)
+  #  2) 던전·층→유형 매핑의 템플릿 좌표 + 카드 픽셀 확인
+  #  3) 미등록 던전: 행 픽셀 판별로 가로 상/하(A/B)만 지원 - 세로형은 순서 불명이라 정지
+  # 반환: @{ Screen = (화면 픽셀 지점) } 또는 @{ Reference = @(기준X, 기준Y) } / 실패 시 $null
+  param([System.Diagnostics.Process]$Game, [string]$Stage)
+  foreach ($labelScale in 4, 6, 8) {
+    $cardPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
+      -RegionWidth $rgDgOptStageMap[2] -RegionHeight $rgDgOptStageMap[3] `
+      -SearchText $Stage -ExactText $Stage -Scale $labelScale
+    if ($cardPoint) {
+      $refPoint = ConvertTo-GameReferencePoint -Game $Game -ScreenPoint $cardPoint
+      if ($refPoint -and (Test-DgCardPixelAt -Game $Game -ReferenceX $refPoint[0] -ReferenceY $refPoint[1])) {
+        return @{ Screen = $cardPoint }
+      }
+    }
+  }
+  $layoutType = $null
+  $stageParts = ([string]$Stage) -split '-'
+  if ($script:dgDungeonId -and $dgLayoutTable.ContainsKey([string]$script:dgDungeonId) -and $stageParts.Count -eq 2) {
+    $floorNum = 0
+    if ([int]::TryParse([string]$stageParts[0], [ref]$floorNum) -and $floorNum -ge 1 -and $floorNum -le 2) {
+      $layoutType = [string]($dgLayoutTable[[string]$script:dgDungeonId][$floorNum - 1])
+    }
+  }
+  if (-not $layoutType) {
+    $probedType = Get-DgOptLayoutTypeByPixels -Game $Game
+    if ($probedType -eq 'A' -or $probedType -eq 'B') {
+      $layoutType = $probedType
+      Write-RunLog "[던전] 미등록 던전 - 옵션 지도 배치를 픽셀로 판별: $probedType"
+    } elseif ($probedType -eq 'C') {
+      # 세로형의 순서 모호성(CR/CN)은 소카드 1/2에만 있습니다. 대카드(구역 3)는 두 순서에서
+      # 위치가 같아(979,295~298 - 중간값 297) 미등록이어도 진행합니다. 카드 픽셀 확인 실패나
+      # 소카드 목표는 기존대로 정지합니다 (2026-07-25 페론 고분 실기 과잉 정지 - Codex 합의).
+      if ($stageParts.Count -eq 2 -and [string]$stageParts[1] -eq '3' -and
+          (Test-DgCardPixelAt -Game $Game -ReferenceX 979 -ReferenceY 297)) {
+        Write-RunLog '[던전] 미등록 던전 세로형 - 대카드(구역 3)는 순서 무관 위치라 진행합니다'
+        return @{ Reference = @(979, 297) }
+      }
+      Write-RunLog '[던전] 미등록 던전의 세로형 지도 - 소카드 순서를 알 수 없어 라벨 없이는 클릭하지 않습니다'
+      return $null
+    }
+  }
+  if ($layoutType) {
+    $fallback = Get-DgOptStageFallbackPoint -Stage $Stage -LayoutType $layoutType
+    if ($fallback) {
+      if (-not (Test-DgCardPixelAt -Game $Game -ReferenceX $fallback.X -ReferenceY $fallback.Y)) {
+        # 유형이 실측 매핑 또는 행 프로브로 이미 확인된 상태라 픽셀 미확인이어도 좌표를
+        # 신뢰하고 시도합니다 (RDP 색 왜곡 대비 - 전환 실패는 제목 검증이 잡음).
+        Write-RunLog "[던전] 옵션 템플릿 좌표의 카드 픽셀 확인 실패 - 유형이 확인된 상태라 그대로 시도합니다"
+      }
+      return @{ Reference = @([int]$fallback.X, [int]$fallback.Y) }
+    }
+  }
+  return $null
+}
+
+function Resolve-DgObservedStage {
+  param([string[]]$MapTexts, [string]$TitleText)
+
+  # 제목 숫자가 깨졌을 때('피오듸층3구역' 실사고 - 던전 이름 끝 글자와 층 숫자가 합쳐짐)의
+  # 보조 판정 순수부 (진리표 테스트 대상): 층 = 지도 라벨 앞 숫자가 단일 층이고 표가
+  # 2개 이상일 때만, 구역 = 제목 꼬리 '(\d)구역'. 두 신호가 모두 명확할 때만 'N-M' 반환
+  # (Codex 합의: 라벨 1개 단독 확정 금지 + 요청 값과 전부 일치 시에만 성공 처리).
+  $floorVotes = @{}
+  foreach ($text in $MapTexts) {
+    if ([string]$text -match '^([12])-[123]$') {
+      $floorVotes[$Matches[1]] = [int]$floorVotes[$Matches[1]] + 1
+    }
+  }
+  if ($floorVotes.Keys.Count -ne 1) { return $null }   # 라벨 미판독 또는 층 혼재 - 불명
+  $observedFloor = [string]@($floorVotes.Keys)[0]
+  if ([int]$floorVotes[$observedFloor] -lt 2) { return $null }   # 표 1개로는 층 확정 금지
+  $areaMatches = [regex]::Matches((([string]$TitleText) -replace '\s', ''), '(\d)구역')
+  if ($areaMatches.Count -eq 0) { return $null }
+  $observedArea = [string]$areaMatches[$areaMatches.Count - 1].Groups[1].Value
+  return "$observedFloor-$observedArea"
+}
+
+function Get-DgOptObservedStage {
+  param([System.Diagnostics.Process]$Game, [string]$TitleText)
+
+  # 옵션 지도 라벨을 두 배율로 읽어 보조 판정 순수부에 넘깁니다 (같은 라벨이 두 배율에서
+  # 읽히면 표 2개 = 배율 합의로 인정).
+  $mapTexts = @()
+  foreach ($mapScale in 4, 6) {
+    $mapWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
+        -RegionWidth $rgDgOptStageMap[2] -RegionHeight $rgDgOptStageMap[3] -Scale $mapScale -Engine $ocrKoreanEngine)
+    foreach ($mapWord in $mapWords) { $mapTexts += [string]$mapWord.Text }
+  }
+  return (Resolve-DgObservedStage -MapTexts $mapTexts -TitleText $TitleText)
 }
 
 function Set-DgOptionStage {
@@ -819,17 +1135,50 @@ function Set-DgOptionStage {
 
   # 진입 옵션 화면에서 같은 층의 목표 구역 카드로 전환합니다. 커스텀 반복과 일반 던전의
   # 선택 화면 오클릭 복구가 같은 구현을 사용하며, 제목이 목표 구역으로 바뀐 것이 확인돼야 성공입니다.
+  # 제목 숫자가 계속 불명확하면(던전 이름에 따라 층 숫자가 합쳐지는 실사고) 지도 라벨 층 +
+  # 제목 꼬리 구역의 보조 판정을 1회 시도합니다.
   $titleText = & $ReadTitle
   $stageSwitched = $false
   $clicks = 0
+  $unclearReads = 0
+  $observedTried = $false
   for ($try = 1; $try -le 8; $try++) {
     $match = Test-CustomTitleStageMatch -TitleText $titleText -Stage $Stage
     if ($match -eq 'match') { $stageSwitched = $true; break }
     if ($match -ne 'mismatch') {
-      Start-Sleep -Milliseconds 1200
-      $titleText = & $ReadTitle
-      continue
+      $unclearReads++
+      # 제목이 '연속' 3회 불명확할 때 화면 상태별 1회만 보조 판정을 시도합니다 (mismatch/
+      # 클릭이 나오면 카운터·플래그 리셋 - 전환 중 화면 오확정 방지, Codex 리뷰 반영).
+      # 보조 판정이 '현재 = 목표'면 성공, '같은 층 다른 구역'이면 mismatch로 승격해 카드를
+      # 클릭하고, '다른 층'이면 이 화면에서 전환 불가라 안전 실패합니다.
+      $observedPromoted = $false
+      if ($unclearReads -ge 3 -and -not $observedTried) {
+        $observedTried = $true
+        $observedStage = Get-DgOptObservedStage -Game $Game -TitleText $titleText
+        if ($observedStage -eq $Stage) {
+          Write-RunLog "$LogTag 제목 숫자가 계속 불명확하지만 지도 라벨 층 + 제목 구역 보조 판정이 목표(${Stage})와 일치 - 전환 확인 (제목: '$titleText')"
+          $stageSwitched = $true
+          break
+        }
+        if ($observedStage) {
+          $observedFloorText = ([string]$observedStage -split '-')[0]
+          $targetFloorText = (([string]$Stage) -split '-')[0]
+          if ($observedFloorText -eq $targetFloorText) {
+            Write-RunLog "$LogTag 보조 판정: 현재 ${observedStage} - 같은 층의 다른 구역이라 카드 클릭으로 전환합니다 (제목: '$titleText')"
+            $observedPromoted = $true
+          } else {
+            Write-RunLog "$LogTag 보조 판정: 현재 ${observedStage} - 다른 층이라 이 화면에서는 전환할 수 없습니다 (제목: '$titleText')"
+            return [pscustomobject]@{ Ok = $false; Title = $titleText; Reason = 'wrong-floor' }
+          }
+        }
+      }
+      if (-not $observedPromoted) {
+        Start-Sleep -Milliseconds 1200
+        $titleText = & $ReadTitle
+        continue
+      }
     }
+    $unclearReads = 0
     if ($clicks -ge 3) { break }
     $clicks++
     $target = Get-DgOptStageCardPoint -Game $Game -Stage $Stage
@@ -846,6 +1195,8 @@ function Set-DgOptionStage {
     }
     Start-Sleep -Milliseconds 1100
     $titleText = & $ReadTitle
+    # 클릭으로 화면 상태가 바뀌었으므로 보조 판정은 새 상태에서 다시 1회 허용합니다
+    $observedTried = $false
   }
   return [pscustomobject]@{
     Ok     = $stageSwitched
@@ -2069,35 +2420,176 @@ function Get-GameRegionOcrWords {
   }
 }
 
-function Get-NdStageClickPoint {
-  param([System.Diagnostics.Process]$Game, [string]$Stage)
+function Get-DgLastRunExitStep {
+  param([bool]$HudVisible, [string]$QuestText, [string]$CenterText, [bool]$RetryVisible)
 
-  # 던전 스테이지 지도는 세로 스크롤 패널이라 노드 위치가 상태에 따라 위아래로 흐릅니다
-  # (2026-07-18 17:50 실측 사고: 고정 좌표가 스크롤 상태에 따라 옆 노드에 떨어져
-  # 1-2 대신 1-3이 선택됨). 매 시도마다 지도 라벨을 읽어 위치를 보정합니다:
-  #  1) 원하는 스테이지 라벨(예: '1-2')이 읽히면 그 지점을 그대로 클릭 (라벨은 노드 안)
-  #  2) 아니면 읽히는 다른 라벨/층 제목들로 세로 오프셋(현재 y - 기준 y)을 구해 보정
-  #  3) 아무 라벨도 안 읽히면 기준 좌표 그대로 (이후 진입 버튼 문구 검증이 잡아줌)
-  $basePoint = $ndStagePoints[$Stage]
+  # 마지막 판 '나가기' 확인 루프의 한 판독분 판정 (순수 - 진리표 테스트 대상, Codex 리뷰 반영):
+  #  'popup-exit'     = '던전 탐험을 계속하시겠습니까?' 팝업 - '탐험'+'계속하' 두 신호를 모두
+  #                     요구 (Space=나가기 입력이라 느슨한 단일 조각 매칭 금지)
+  #  'reclick'        = 결과 화면(다시 하기 버튼)이 그대로 - 나가기 재클릭
+  #  'field-evidence' = 필드 증거 1회 (게임플레이 HUD + 퀘스트 추적기에 던전 목표('구역') 없음.
+  #                     호출부는 연속 2회일 때만 확정 - 단발 OCR 오판 방지)
+  #  'wait'           = 판단 보류 (전환 중)
+  $center = ([string]$CenterText) -replace '\s', ''
+  if ($center.Contains('탐험') -and $center.Contains('계속하')) { return 'popup-exit' }
+  if ($RetryVisible) { return 'reclick' }
+  if ($HudVisible -and -not ((([string]$QuestText) -replace '\s', '').Contains('구역'))) { return 'field-evidence' }
+  return 'wait'
+}
+
+function Get-DgSelectionFocusFloor {
+  param([System.Diagnostics.Process]$Game)
+
+  # 선택 화면의 포커스(선택된) 층을 판별합니다. 근거: 하단 진입 버튼 'N층 M구역 진입'의
+  # 층 숫자 = 포커스 패널 (2026-07-24 40장 실측 20/20 일치 - 게임이 패널 포커스 시 그 층
+  # 구역을 자동 선택). 버튼 글자가 커서 신뢰도가 가장 높습니다. 애니메이션 중 이전 값이
+  # 잠깐 남을 수 있어 2회 연속 같은 값일 때만 채택합니다 (Codex 합의 - 안정 프레임 확인).
+  # 반환: 1 | 2 | 0(판별 실패)
+  $lastFloor = ''
+  for ($readNo = 1; $readNo -le 3; $readNo++) {
+    $enterText = Get-DgStageEnterButtonText -Game $Game
+    $floorText = ''
+    $stageShapes = [regex]::Matches(([string]$enterText), '(\d)\D{0,2}(\d)구역')
+    if ($stageShapes.Count -gt 0) {
+      $floorText = [string]$stageShapes[$stageShapes.Count - 1].Groups[1].Value
+    }
+    if ($floorText -eq '1' -or $floorText -eq '2') {
+      if ($lastFloor -eq $floorText) { return [int]$floorText }
+      $lastFloor = $floorText
+    } else {
+      $lastFloor = ''
+    }
+    Start-Sleep -Milliseconds 350
+  }
+  return 0
+}
+
+function Get-NdStageClickPoint {
+  param([System.Diagnostics.Process]$Game, [string]$Stage, [string[]]$ExcludeTypes = @())
+
+  # 던전 선택 화면의 구역 클릭 지점 (2026-07-24 상태·기하 중심 재설계 - 40장 실측 근거):
+  #  1) 목표 라벨 정확 일치 + 카드 픽셀 확인 → 그 자리 클릭 (교차 확인된 최선)
+  #  2) 던전 ID를 알면: 유형 템플릿 + 포커스 밀림(1층 포커스 0 / 2층 포커스 -29) + 카드 픽셀 확인.
+  #     템플릿 자리에 카드가 없으면 반대 포커스 후보를 기하로 확인(카드 있음 + 카드 아래는 빈 공간).
+  #  3) 미등록 던전: 라벨 배율 5 재시도 후, 유형 후보(A→B→CR→CN) 중 카드가 실제 있는 지점을
+  #     시도 - 클릭 후 진입 버튼 검증이 잡고, 오선택된 후보는 호출부가 ExcludeTypes 로 제외.
+  # 과거의 라벨 평균 오프셋 스크롤 보정은 폐기 (배치가 다른 라벨이 평균을 오염 - 2026-07-22 실사고.
+  # 밀림은 연속 스크롤이 아니라 포커스 2상태뿐임이 실측 확정).
+  # 반환: @{ Point = @(x, y); Source = '설명' } 또는 $null(확정 좌표 없음 - 틀린 좌표로 클릭 금지)
   $mapWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNdStageMap[0] -ReferenceY $rgNdStageMap[1] `
       -RegionWidth $rgNdStageMap[2] -RegionHeight $rgNdStageMap[3] -Scale 3 -Engine $ocrKoreanEngine)
-  $offsets = @()
   foreach ($mapWord in $mapWords) {
-    if ($mapWord.Text -eq $Stage) {
-      return @([int]$mapWord.X, [int]$mapWord.Y)
-    }
-    if ($ndMapAnchorY.ContainsKey($mapWord.Text)) {
-      $offsets += ($mapWord.Y - $ndMapAnchorY[$mapWord.Text])
+    if ([string]$mapWord.Text -eq [string]$Stage) {
+      if (Test-DgCardPixelAt -Game $Game -ReferenceX ([int]$mapWord.X) -ReferenceY ([int]$mapWord.Y)) {
+        return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨' }
+      }
     }
   }
-  if ($offsets.Count -gt 0) {
-    $avgOffset = [int][Math]::Round(($offsets | Measure-Object -Average).Average)
-    if ([Math]::Abs($avgOffset) -gt 8) {
-      Write-RunLog "[던전] 스테이지 지도 스크롤 보정: 세로 ${avgOffset}px (라벨 $($offsets.Count)개 기준)"
-    }
-    return @([int]$basePoint[0], [int]($basePoint[1] + $avgOffset))
+  $stageParts = ([string]$Stage) -split '-'
+  if ($stageParts.Count -ne 2) { return $null }
+  $floorNum = 0
+  if (-not [int]::TryParse([string]$stageParts[0], [ref]$floorNum) -or $floorNum -lt 1 -or $floorNum -gt 2) { return $null }
+  $layoutType = $null
+  if ($script:dgDungeonId -and $dgLayoutTable.ContainsKey([string]$script:dgDungeonId)) {
+    $layoutType = [string]($dgLayoutTable[[string]$script:dgDungeonId][$floorNum - 1])
   }
-  return $basePoint
+  $focusFloor = Get-DgSelectionFocusFloor -Game $Game
+  if ($layoutType) {
+    if ($focusFloor -lt 1) { return $null }   # 포커스 불명 - 좌표를 만들지 않음 (안전 정지 유도)
+    $point = Get-DgSelStagePoint -LayoutType $layoutType -Stage $Stage -FocusFloor $focusFloor
+    if ($point -and (Test-DgCardPixelAt -Game $Game -ReferenceX $point[0] -ReferenceY $point[1])) {
+      return @{ Point = $point; Source = "템플릿:$layoutType" }
+    }
+    # 템플릿 자리 픽셀 확인 실패: 포커스 오판 가능성 - 반대 포커스 후보를 기하로 확인.
+    # (카드 아래 우측(x+28, y+25)은 진짜 라벨 위치일 때만 카드 밖 - 두 상태 구분점)
+    $altFocus = 1
+    if ($focusFloor -eq 1) { $altFocus = 2 }
+    $altPoint = Get-DgSelStagePoint -LayoutType $layoutType -Stage $Stage -FocusFloor $altFocus
+    if ($altPoint -and (Test-DgCardPixelAt -Game $Game -ReferenceX $altPoint[0] -ReferenceY $altPoint[1]) -and
+        -not (Test-DgCardPixelAt -Game $Game -ReferenceX ($altPoint[0] + 28) -ReferenceY ($altPoint[1] + 25))) {
+      Write-RunLog "[던전] 포커스 판별($focusFloor)과 달리 반대 상태 좌표에서 카드 확인 - 기하 확인 좌표 사용"
+      return @{ Point = $altPoint; Source = "템플릿보정:$layoutType" }
+    }
+    # 실측 검증된 매핑의 템플릿이므로 픽셀 미확인이어도 좌표는 신뢰하고 시도합니다
+    # (RDP 색 왜곡 등으로 판별식이 어긋나는 환경 대비 - 오클릭은 진입 버튼 검증이 잡음).
+    if ($point) {
+      Write-RunLog "[던전] 템플릿 좌표의 카드 픽셀 확인 실패 - 좌표는 실측 매핑이라 그대로 시도합니다"
+      return @{ Point = $point; Source = "템플릿(픽셀 미확인):$layoutType" }
+    }
+    return $null
+  }
+  # 미등록 던전(ID 불명 포함): 라벨을 더 큰 배율로 한 번 더 시도
+  $mapWordsRetry = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNdStageMap[0] -ReferenceY $rgNdStageMap[1] `
+      -RegionWidth $rgNdStageMap[2] -RegionHeight $rgNdStageMap[3] -Scale 5 -Engine $ocrKoreanEngine)
+  foreach ($mapWord in $mapWordsRetry) {
+    if ([string]$mapWord.Text -eq [string]$Stage) {
+      if (Test-DgCardPixelAt -Game $Game -ReferenceX ([int]$mapWord.X) -ReferenceY ([int]$mapWord.Y)) {
+        return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨(배율5)' }
+      }
+    }
+  }
+  if ($focusFloor -lt 1) { return $null }
+  # 유형 후보 순서 시도: 카드가 실제로 있는 지점만 채택. 오선택은 진입 버튼 검증이 잡고,
+  # 호출부가 오선택된 후보 유형을 ExcludeTypes로 넘겨 같은 후보를 반복 클릭하지 않습니다
+  # (Codex 리뷰 반영 - Attempt 회전만으로는 같은 통과 후보가 반복 반환되는 문제 수정).
+  # CR/CN은 같은 자리의 라벨 반전이라 제외 순환이 두 순서를 모두 시도하게 됩니다.
+  foreach ($candidateType in @('A', 'B', 'CR', 'CN')) {
+    if ($ExcludeTypes -contains $candidateType) { continue }
+    $point = Get-DgSelStagePoint -LayoutType $candidateType -Stage $Stage -FocusFloor $focusFloor
+    if ($point -and (Test-DgCardPixelAt -Game $Game -ReferenceX $point[0] -ReferenceY $point[1])) {
+      return @{ Point = $point; Source = "미등록후보:$candidateType" }
+    }
+  }
+  return $null
+}
+
+function Write-DgStageDiagnostics {
+  param([System.Diagnostics.Process]$Game, [string]$Context, [string]$MapKind = 'selection')
+
+  # 구역 선택 실패로 조건부 정지(코드 4)하기 전, 원인 분석용 진단 세트를 남깁니다.
+  # 코드 4는 오류 catch를 타지 않아 기존에는 캡처가 없어서 제보 로그만으로 배치·원인을
+  # 확인할 수 없었습니다 (2026-07-22 실사고 교훈). 스크린샷은 error_* 명명/보관 정책 공유.
+  try {
+    $diagStamp = Get-Date -Format 'yyyyMMdd_\hHH\mmm\sss'
+    if ($Game) {
+      $diagRect = New-Object HoneyNogiInput+RECT
+      if ([HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$diagRect)) {
+        $diagW = $diagRect.Right - $diagRect.Left
+        $diagH = $diagRect.Bottom - $diagRect.Top
+        if ($diagW -gt 0 -and $diagH -gt 0) {
+          $diagShot = Join-Path $logDir "error_$diagStamp.png"
+          $diagBmp = New-Object System.Drawing.Bitmap $diagW, $diagH
+          $diagGfx = [System.Drawing.Graphics]::FromImage($diagBmp)
+          try {
+            $diagGfx.CopyFromScreen($diagRect.Left, $diagRect.Top, 0, 0, $diagBmp.Size)
+            $diagBmp.Save($diagShot, [System.Drawing.Imaging.ImageFormat]::Png)
+            Write-RunLog "[진단] $Context - 화면 캡처 저장: $diagShot"
+          } finally {
+            $diagGfx.Dispose()
+            $diagBmp.Dispose()
+          }
+          $keepShots = Get-ConfigInteger $config @('diagnostics', 'keepScreenshots') 10 0 1000
+          if ($keepShots -gt 0) {
+            $oldShots = @(Get-ChildItem -LiteralPath $logDir -Filter 'error_*.png' -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepShots)
+            foreach ($old in $oldShots) {
+              Remove-Item -LiteralPath $old.FullName -Force -ErrorAction SilentlyContinue
+            }
+          }
+        }
+      }
+    }
+    $diagRegion = $rgNdStageMap
+    if ($MapKind -eq 'option') { $diagRegion = $rgDgOptStageMap }
+    $diagWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $diagRegion[0] -ReferenceY $diagRegion[1] `
+        -RegionWidth $diagRegion[2] -RegionHeight $diagRegion[3] -Scale 3 -Engine $ocrKoreanEngine)
+    $wordDump = (@($diagWords | ForEach-Object { "$($_.Text)($($_.X),$($_.Y))" }) -join ' ')
+    Write-RunLog "[진단] $Context - 지도 OCR 원문: $wordDump"
+    Write-RunLog "[진단] $Context - 진입 버튼 OCR: '$(Get-DgStageEnterButtonText -Game $Game)'"
+    Write-RunLog "[진단] $Context - 던전 ID: '$([string]$script:dgDungeonId)'"
+  } catch {
+    Write-RunLog "[진단] 진단 수집 실패: $($_.Exception.Message)"
+  }
 }
 
 function Get-EnterButtonText {
@@ -2692,7 +3184,7 @@ function Test-KnownScreen {
   # 던전 선택('~던전')/진입 옵션('N층 M구역') 화면 - 던전 카테고리도 이벤트 넘기기를 거치므로 필요
   $dgTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
     -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-  if ($dgTitle.Contains('구역') -or $dgTitle.Contains('던전') -or $dgTitle.Contains('오드')) { return $true }
+  if ($dgTitle.Contains('구역') -or (Test-DgSelectionTitle -TitleText $dgTitle)) { return $true }
   # 사냥터 첫 화면 (하단 '입장하기'/'임무 시작' 버튼)
   if (Find-HtEntryButtonPoint -Game $Game) { return $true }
   # 사냥터 결과 화면 (나가기/머무르기/새 임무 선택) - 이걸 모르는 화면으로 보고 중앙을
@@ -3217,7 +3709,7 @@ function Confirm-DifficultySelected {
     }
   }
   if ($Strict) {
-    Write-RunLog "[완료] 난이도 '$Label' 선택 강조를 확인하지 못해 진행하지 않습니다"
+    Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리)"
   } else {
     Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 - 현재 상태로 진행합니다"
   }
@@ -3233,19 +3725,18 @@ function Set-DgOptionDifficulty {
 
   # 진입 옵션 화면의 난이도 알약을 OCR로 찾고 클릭한 뒤, 선택 화면과 같은 채도 높은
   # 테두리 판정으로 실제 선택 상태를 확인합니다. Confirm-DifficultySelected 가 첫 클릭
-  # 좌표만 재사용하므로 '어려움'이 '매우 어려움' 조각에 걸리는 재탐색 오클릭도 없습니다.
-  $key = $Label -replace '\s', ''
+  # 좌표만 재사용하므로 재탐색 오클릭이 없고, 첫 탐색도 단어 목록 판정
+  # (Select-DgDifficultyWord)이라 '어려움'이 '매우 어려움' 뒷단어에 걸리지 않습니다.
   $point = $null
   for ($findTry = 1; $findTry -le 3; $findTry++) {
-    $point = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptDifficulty[0] -ReferenceY $rgDgOptDifficulty[1] `
-      -RegionWidth $rgDgOptDifficulty[2] -RegionHeight $rgDgOptDifficulty[3] -Scale 4 -SearchText $key -ExactText $key
+    $point = Find-DgDifficultyPoint -Game $Game -Region $rgDgOptDifficulty -Label $Label -HardX 724
     if ($point) { break }
     Write-RunLog "[던전] 옵션 화면에서 난이도 '$Label' 글자를 찾지 못했습니다 - 잠시 후 재탐색 (${findTry}/3)"
     Start-Sleep -Milliseconds 1200
   }
   if (-not $point) {
     if ($Strict) {
-      Write-RunLog "[완료] 옵션 화면에서 난이도 '$Label' 글자를 찾지 못해 진행하지 않습니다 (오난이도 판 방지)"
+      Write-RunLog "[경고] 옵션 화면에서 난이도 '$Label' 글자를 3회 모두 찾지 못했습니다 (호출부가 오류 처리)"
     } else {
       Write-RunLog "[경고] 옵션 화면에서 난이도 '$Label' 글자를 찾지 못했습니다 - 현재 선택된 난이도로 진행합니다"
     }
@@ -3412,7 +3903,7 @@ function Invoke-DgBackToSelection {
   for ($backTry = 1; $backTry -le 10; $backTry++) {
     $titleText = & $ReadTitle
     if (-not $titleText.Contains('구역')) {
-      if ($titleText.Contains('던전') -or $titleText.Contains('오드')) { $backOk = $true; break }
+      if (Test-DgSelectionTitle -TitleText $titleText) { $backOk = $true; break }
       # 던전 UI 밖(필드 HUD)으로 나가버렸으면 더 조작하지 않고 호출부 오류로 안내합니다
       if (Test-HomeEndEscHud -Game $Game) { break }
       Start-Sleep -Milliseconds 1500   # 전환 중/판독 불명확 - 입력 없이 재확인
@@ -3488,12 +3979,15 @@ function Invoke-NormalDungeonCycle {
     }
   }
 
-  if (-not $ndStagePoints.ContainsKey($ndStage)) {
-    throw "알 수 없는 스테이지입니다: '$ndStage' (지원: $($ndStagePoints.Keys -join ', '))"
+  if (-not $dgSelStagePoints['A'].ContainsKey($ndStage)) {
+    throw "알 수 없는 스테이지입니다: '$ndStage' (지원: $($dgSelStagePoints['A'].Keys -join ', '))"
   }
   $stageParts = $ndStage -split '-'
   $stageFloor = $stageParts[0]
   $stageArea = $stageParts[1]
+  # '매우 어려움' 요청 여부: 없는 난이도로 오입장하는 사고를 막기 위해 모드와 무관하게
+  # 탐색·확정 실패를 치명 처리하는 데 씁니다 (Codex 리뷰 반영)
+  $ndVeryHardTarget = ((($ndDifficulty -replace '\s', '')) -eq '매우어려움')
 
   # 0. 현재 화면 판별: 좌상단 제목이 'N구역'을 포함하면 이미 진입 옵션 화면입니다.
   #    선택 화면 제목에는 던전 이름과 '던전'이 들어갑니다. OCR이 이름 일부를 깨뜨리는
@@ -3507,11 +4001,67 @@ function Invoke-NormalDungeonCycle {
   $titleText = & $readDgTitle
   $onOptionsScreen = $titleText.Contains('구역')
 
+  # 던전 ID 확정 (상태·기하 중심 좌표 체계의 상태 ID): 선택/옵션 제목 모두에 던전 이름이
+  # 포함되므로 시작 시 1회 판별합니다. 불명이면 '미등록 확정'이 아니라 '모름'으로 두고,
+  # 이후 좌표는 라벨/기하 프로브로만 만들어집니다 (Codex 합의 - ID 불명 상태 분리).
+  $script:dgDungeonId = Get-DgDungeonIdFromTitle -TitleText $titleText
+  if ($script:dgDungeonId) {
+    Write-RunLog "[던전] 던전 판별: $($script:dgDungeonId) (제목: '$titleText')"
+  } else {
+    Write-RunLog "[던전] 던전 이름을 확정하지 못했습니다 (제목: '$titleText') - 라벨·기하 확인 좌표로만 진행합니다"
+  }
+  # '매우 어려움' 요청인데 2단계(일반/어려움) 던전으로 판별되면 시작하지 않습니다
+  if ($ndVeryHardTarget -and $script:dgDungeonId -and ($dgTwoTierDungeons -contains [string]$script:dgDungeonId)) {
+    throw "던전 '$($script:dgDungeonId)'에는 '매우 어려움' 난이도가 없습니다 - 난이도 설정을 확인해 주세요."
+  }
+
   # 완료 마커 복구 전용 회차에서 옵션/선택 화면이 이미 보이면 이전 워커의 마무리 입력은
   # 성공했고 화면 전환 확인만 실패했던 경우입니다. 완료 항목을 다시 입장하지 않고 코드 0으로
   # GUI에 복구 완료를 알립니다. GUI는 그때 현재 항목을 딱 한 번 전진시킵니다.
   if ($script:customMode -and $script:customRecoveryOnly) {
-    $recoveryOnSelection = ($titleText.Contains('던전') -or $titleText.Contains('오드'))
+    $recoveryOnSelection = (Test-DgSelectionTitle -TitleText $titleText)
+    # 마지막 판 복구: 마무리가 '나가기 → 필드'라서 옵션/선택 화면이 아니라 필드가 목표 화면입니다.
+    # 필드 상태(HUD + 던전 목표 없음, 연속 2회)면 재입장 없이 복구 완료 처리하고, 나가기 팝업에서
+    # 끊긴 경우는 나가기(Space)를 이어서 처리합니다 (Codex 리뷰 반영 - 기존 로직은 필드를
+    # '던전 화면 아님' 오류로 처리해 마지막 판 복구가 항상 실패).
+    if ($script:dgLastRun -and -not $onOptionsScreen -and -not $recoveryOnSelection) {
+      $recoveryFieldStreak = 0
+      $recoveryPopupHandled = $false
+      for ($recoveryProbe = 1; $recoveryProbe -le 8; $recoveryProbe++) {
+        $probeFailed = $false
+        $probeHud = Test-HomeEndEscHud -Game $Game
+        if ($script:screenCaptureFailing) { $probeFailed = $true }
+        $probeQuest = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+          -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
+        if ($script:screenCaptureFailing) { $probeFailed = $true }
+        $probeCenter = Get-GameOcrText -Game $Game
+        if ($script:screenCaptureFailing) { $probeFailed = $true }
+        if ($probeFailed) { Start-Sleep -Milliseconds 1500; continue }
+        $recoveryStep = Get-DgLastRunExitStep -HudVisible $probeHud -QuestText $probeQuest `
+          -CenterText $probeCenter -RetryVisible $false
+        if ($recoveryStep -eq 'field-evidence') {
+          $recoveryFieldStreak++
+          if ($recoveryFieldStreak -ge 2) {
+            Write-RunLog '[커스텀] 마지막 판 마무리 복구 - 필드 복귀가 이미 완료된 상태 확인, 재입장 없이 복구 완료'
+            exit 0
+          }
+        } elseif ($recoveryStep -eq 'popup-exit') {
+          $recoveryFieldStreak = 0
+          Focus-Game -Game $Game
+          Press-KeyOnce -VirtualKey ([byte]32)
+          Write-RunLog "[던전] '던전 탐험을 계속하시겠습니까?' 팝업 - 나가기(Space) 선택 (마지막 판 복구)"
+          $recoveryPopupHandled = $true
+        } elseif ($recoveryPopupHandled) {
+          # 팝업 처리 직후의 전환(로딩/페이드)은 'wait'로 읽힙니다 - 끊지 않고 필드 확인을
+          # 계속합니다 (Codex 조건: 팝업 처리 후 즉시 break 금지)
+          $recoveryFieldStreak = 0
+        } else {
+          # 팝업 처리 전의 미지 상태는 기존 복구 흐름(결과 화면 복구 등)에 맡깁니다
+          break
+        }
+        Start-Sleep -Milliseconds 1500
+      }
+    }
     $recoveryFinishAction = Get-CustomFinishAction -Item $script:customItem -Next $script:customNext
     $recoveryReadyAction = Get-CustomRecoveryReadyAction -RecoveryOnly $true `
       -OnOptionsScreen $onOptionsScreen -OnSelectionScreen $recoveryOnSelection -FinishAction $recoveryFinishAction
@@ -3549,10 +4099,25 @@ function Invoke-NormalDungeonCycle {
       $titleText = & $readDgTitle
       $titleMatch = Test-CustomTitleStageMatch -TitleText $titleText -Stage $ndStage
     }
-    # 층 비교는 구역이 명확히 '다르다'고 읽힌 경우에만 의미가 있습니다 (unclear 는 안전측 go-back)
+    # 층 비교는 구역이 명확히 '다르다'고 읽힌 경우에만 의미가 있습니다
     $titleFloorSame = $false
     if ($titleMatch -eq 'mismatch') {
       $titleFloorSame = ((Test-CustomTitleFloorMatch -TitleText $titleText -Stage $ndStage) -eq 'match')
+    } elseif ($titleMatch -eq 'unclear') {
+      # 재판독까지 불명확: 지도 라벨 층 + 제목 꼬리 구역 보조 판정으로 현재 구역을 추정합니다.
+      # 층 숫자 유실('피오듸층1구역', 2026-07-25 00:09 실기 재발)이 go-back으로 빠지면
+      # '<'가 없는 다시 하기 옵션 화면에서 복귀 실패로 정지하므로, 같은 층이 확인되면
+      # stay 경로로 보냅니다. 보조 판정도 불명이면 기존 안전측(go-back)을 유지합니다.
+      $observedStart = Get-DgOptObservedStage -Game $Game -TitleText $titleText
+      if ($observedStart) {
+        Write-RunLog "[커스텀] 제목 숫자 불명확 - 보조 판정으로 현재 구역 ${observedStart} 추정 (제목: '$titleText')"
+        if ($observedStart -eq $ndStage) {
+          $titleMatch = 'match'
+        } else {
+          $titleMatch = 'mismatch'
+          $titleFloorSame = ((([string]$observedStart -split '-')[0]) -eq [string](Get-CustomStageFloor -Stage $ndStage))
+        }
+      }
     }
     $startAction = Get-CustomOptionStartAction -TitleStageMatches ($titleMatch -eq 'match') -SameAsPrev $false `
       -TitleFloorMatches $titleFloorSame
@@ -3568,11 +4133,12 @@ function Invoke-NormalDungeonCycle {
       $switchResult = Set-DgOptionStage -Game $Game -Stage $ndStage -ReadTitle $readDgTitle -LogTag '[커스텀]'
       $titleText = [string]$switchResult.Title
       if (-not $switchResult.Ok) {
+        Write-DgStageDiagnostics -Game $Game -Context "커스텀 시작 구역 ${ndStage} 전환 실패" -MapKind 'option'
         if ([string]$switchResult.Reason -eq 'not-found') {
-          Write-RunLog "[완료] 옵션 화면에서 구역 ${ndStage} 카드를 찾지 못해 진행하지 않습니다 - 던전 구역 선택 화면을 열어 두고 다시 시작해 주세요"
+          Write-RunLog "[완료] 옵션 화면에서 구역 ${ndStage} 카드를 찾지 못해 진행하지 않습니다 (미해금이거나 화면 인식 실패) - 던전 구역 선택 화면을 열어 두고 다시 시작해 주세요"
           exit 4
         }
-        Write-RunLog "[완료] 옵션 화면에서 구역 ${ndStage} 전환을 확인하지 못해 진행하지 않습니다 (제목: '$titleText') - 던전 구역 선택 화면을 열어 두고 다시 시작해 주세요"
+        Write-RunLog "[완료] 옵션 화면에서 구역 ${ndStage} 전환을 확인하지 못해 진행하지 않습니다 (제목: '$titleText' - 화면 인식 문제 가능) - 던전 구역 선택 화면을 열어 두고 다시 시작해 주세요"
         exit 4
       }
       Write-RunLog "[커스텀] 구역 ${ndStage} 전환 확인 (제목: '$titleText') - 이어서 난이도를 맞춥니다"
@@ -3586,8 +4152,8 @@ function Invoke-NormalDungeonCycle {
       }
       $customOptDiffAdjusted = Set-DgOptionDifficulty -Game $Game -Label $ndDifficulty -Strict
       if (-not $customOptDiffAdjusted) {
-        Write-RunLog "[완료] 옵션 화면에서 난이도 '$ndDifficulty' 선택을 확정하지 못해 진행하지 않습니다 (오난이도 판 방지)"
-        exit 4
+        # 화면 인식 실패 = 오류 (자동 재시작 1회 + 오류 세트 저장 - 2026-07-25 사용자 지적)
+        throw "옵션 화면에서 난이도 '$ndDifficulty' 선택을 확정하지 못했습니다 - 화면 인식 실패로 중단합니다 (오난이도 판 방지)."
       }
     } elseif ($startAction -eq 'go-back') {
       # 다른 층(제목 재판독까지 불명확한 경우 포함): 선택 화면으로 복귀해 새로 고릅니다.
@@ -3624,7 +4190,8 @@ function Invoke-NormalDungeonCycle {
         $switchResult = Set-DgOptionStage -Game $Game -Stage $ndStage -ReadTitle $readDgTitle -LogTag '[던전]'
         $titleText = [string]$switchResult.Title
         if (-not $switchResult.Ok) {
-          $switchFailure = if ([string]$switchResult.Reason -eq 'not-found') { '카드를 찾지 못했습니다' } else { "전환을 확인하지 못했습니다 (제목: '$titleText')" }
+          $switchFailure = if ([string]$switchResult.Reason -eq 'not-found') { '카드를 찾지 못했습니다 (미해금이거나 화면 인식 실패)' } else { "전환을 확인하지 못했습니다 (제목: '$titleText' - 화면 인식 문제 가능)" }
+          Write-DgStageDiagnostics -Game $Game -Context "시작 옵션 화면 구역 ${ndStage} 전환 실패" -MapKind 'option'
           if ($script:customMode) {
             Write-RunLog "[완료] 옵션 화면에서 구역 ${ndStage} $switchFailure - 잘못된 구역 입장을 막기 위해 자동화를 정지합니다"
             exit 4
@@ -3653,7 +4220,7 @@ function Invoke-NormalDungeonCycle {
   }
   $insideAlready = $false
   $onResultScreen = $false
-  if (-not $onOptionsScreen -and -not ($titleText.Contains('오드') -or $titleText.Contains('던전'))) {
+  if (-not $onOptionsScreen -and -not (Test-DgSelectionTitle -TitleText $titleText)) {
     # 던전 안에서만 퀘스트 추적기에 'N층 M구역 클리어' 목표가 표시됩니다.
     # ('던전' 키워드는 필드의 주간 퀘스트("심층 던전 클리어" 등)와 겹쳐 오인하므로 '구역'만 사용)
     $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
@@ -3700,16 +4267,17 @@ function Invoke-NormalDungeonCycle {
   if (-not $onOptionsScreen) {
   Write-RunLog '[던전] 던전 선택 화면 확인'
 
-  # 2. 난이도 클릭 (일반/어려움 - 이미 선택돼 있어도 다시 눌러 확정, 부작용 없음)
+  # 2. 난이도 클릭 (일반/어려움/매우 어려움 - 이미 선택돼 있어도 다시 눌러 확정, 부작용 없음)
+  #    단어 목록 기반 판정(Select-DgDifficultyWord)으로 '매우 어려움'(두 단어로 읽힘)을
+  #    지원하고, '어려움'이 '매우 어려움'의 뒷단어에 걸리는 오채택을 차단합니다.
   #    커스텀 반복에서는 '경고 후 진행'을 격상합니다: 오난이도 판이 항목 완료로 계상되면
   #    난이도별 첫 클리어 보상을 잃는 사고라, 탐색/검증을 재시도하고 끝내 확인이 안 되면
-  #    진행하지 않고 조건부 정지(코드 4)합니다.
-  $difficultyKey = $ndDifficulty -replace '\s', ''
+  #    진행하지 않고 조건부 정지(코드 4)합니다. '매우 어려움' 요청은 비커스텀에서도
+  #    실패 시 중단합니다 - 없는 난이도로 오입장하는 사고 방지 (Codex 리뷰 반영).
   if ($script:customMode) {
     $diffOk = $false
     for ($diffTry = 1; $diffTry -le 3; $diffTry++) {
-      $difficultyPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgDifficulty[0] -ReferenceY $rgDgDifficulty[1] `
-        -RegionWidth $rgDgDifficulty[2] -RegionHeight $rgDgDifficulty[3] -Scale 4 -SearchText $difficultyKey -ExactText $difficultyKey
+      $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX 140
       if (-not $difficultyPoint) {
         Write-RunLog "[커스텀] 난이도 '$ndDifficulty' 글자를 찾지 못했습니다 - 잠시 후 재탐색 (${diffTry}/3)"
         Start-Sleep -Milliseconds 1200
@@ -3725,20 +4293,24 @@ function Invoke-NormalDungeonCycle {
       Start-Sleep -Milliseconds 800
     }
     if (-not $diffOk) {
-      # 커스텀 엄격 모드: 선택 강조가 끝내 확인되지 않으면 입장하지 않습니다.
-      Write-RunLog "[완료] 난이도 '$ndDifficulty' 선택을 확인하지 못해 진행하지 않습니다 (오난이도 판 방지)"
-      exit 4
+      # 화면 인식 실패는 '조건부 정상 정지'가 아니라 오류입니다 - 오류로 던져야 자동 재시작
+      # 1회와 오류 스크린샷 세트가 남습니다 (2026-07-25 사용자 지적. 오난이도 판 방지는 동일)
+      throw "난이도 '$ndDifficulty' 선택을 확인하지 못했습니다 - 화면 인식 실패로 중단합니다 (오난이도 판 방지)."
     }
   } else {
-  $difficultyPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgDifficulty[0] -ReferenceY $rgDgDifficulty[1] `
-    -RegionWidth $rgDgDifficulty[2] -RegionHeight $rgDgDifficulty[3] -Scale 4 -SearchText $difficultyKey -ExactText $difficultyKey
+  $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX 140
   if ($difficultyPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
     Write-RunLog "[던전] 난이도 '$ndDifficulty' 클릭"
     Start-Sleep -Milliseconds 900
     # 사후 검증: 클릭이 빗나가 다른 난이도로 바뀌지 않았는지 선택 강조로 확인 (첫 좌표 재사용)
-    Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $ndDifficulty | Out-Null
+    $diffConfirmed = Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $ndDifficulty -Strict:$ndVeryHardTarget
+    if ($ndVeryHardTarget -and -not $diffConfirmed) {
+      throw "'매우 어려움' 선택 강조를 확인하지 못했습니다 - 오난이도 입장을 막기 위해 중단합니다."
+    }
+  } elseif ($ndVeryHardTarget) {
+    throw "'매우 어려움' 글자를 찾지 못했습니다 - 이 던전에 없는 난이도일 수 있어 진행하지 않습니다."
   } else {
     Write-RunLog "[경고] 난이도 '$ndDifficulty' 글자를 찾지 못했습니다 - 현재 선택된 난이도로 진행합니다"
   }
@@ -3749,14 +4321,29 @@ function Invoke-NormalDungeonCycle {
   # '<'로 선택 화면에 복귀한 뒤 한 번 더 시도합니다. 어느 경로든 목표 제목 확인 전 실제 입장 금지.
   $selectionReady = $false
   $enterText = ''
+  $stagePlanMissing = $false
+  $stageLabelSeen = $false
   $selectionResult = [pscustomobject]@{ Action = 'unclear'; CurrentFloor = ''; CurrentArea = ''; CurrentStage = '' }
+  $triedCandidateTypes = @()
   for ($selectionRound = 1; $selectionRound -le 2 -and -not $selectionReady; $selectionRound++) {
     $stageSelected = $false
+    $triedCandidateTypes = @()
+    $stagePlan = $null
     for ($stageTry = 1; $stageTry -le 4; $stageTry++) {
-      # 지도가 스크롤/선택 카드 확장으로 흐를 수 있어 매 시도마다 클릭 지점을 다시 계산합니다.
-      $stagePoint = Get-NdStageClickPoint -Game $Game -Stage $ndStage
+      # 포커스/선택 상태가 클릭마다 바뀔 수 있어 매 시도마다 클릭 지점을 다시 계산합니다.
+      # 오선택된 미등록 배치 후보는 제외 목록으로 넘겨 같은 후보를 반복 클릭하지 않습니다.
+      $stagePlan = Get-NdStageClickPoint -Game $Game -Stage $ndStage -ExcludeTypes $triedCandidateTypes
+      if (-not $stagePlan) {
+        # 확정 좌표 없음(후보 소진 포함): 틀린 좌표로 클릭하지 않고 안전 정지로 넘어갑니다.
+        # 이전 시도의 오선택 판정이 남아 옵션 복구로 새지 않도록 판정도 초기화합니다 (Codex 리뷰).
+        $stagePlanMissing = $true
+        $selectionResult = [pscustomobject]@{ Action = 'unclear'; CurrentFloor = ''; CurrentArea = ''; CurrentStage = '' }
+        break
+      }
+      if ([string]$stagePlan.Source -like '라벨*') { $stageLabelSeen = $true }
       Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $stagePoint[0] -ReferenceY $stagePoint[1]
+      Click-GamePoint -Game $Game -ReferenceX $stagePlan.Point[0] -ReferenceY $stagePlan.Point[1]
+      Write-RunLog "[던전] 구역 ${ndStage} 클릭 ($($stagePlan.Source))"
       Start-Sleep -Milliseconds 900
       $enterText = Get-DgStageEnterButtonText -Game $Game
       $selectionResult = Get-DgSelectionRecoveryAction -EnterText $enterText -TargetStage $ndStage
@@ -3765,8 +4352,22 @@ function Invoke-NormalDungeonCycle {
         break
       }
       # 현재 구역이 명확히 읽혔으면 같은 좌표를 반복 클릭하지 않고 복구 경로로 즉시 전환합니다.
-      if ($selectionResult.Action -eq 'same-floor' -or $selectionResult.Action -eq 'different-floor') { break }
+      # 단 미등록 던전의 배치 후보 클릭이 다른 구역을 잡은 경우는 선택 화면이 그대로이므로
+      # 그 후보 유형을 제외하고 다음 배치 후보를 계속 시도합니다 (Codex 리뷰 반영).
+      if ($selectionResult.Action -eq 'same-floor' -or $selectionResult.Action -eq 'different-floor') {
+        if ([string]$stagePlan.Source -like '미등록후보*') {
+          $misselectType = ([string]$stagePlan.Source -split ':')[1]
+          if ($misselectType) { $triedCandidateTypes += [string]$misselectType }
+          Write-RunLog "[던전] 배치 후보($misselectType) 클릭이 다른 구역($($selectionResult.CurrentStage))을 선택했습니다 - 다음 배치 후보로 계속"
+          continue
+        }
+        break
+      }
     }
+
+    # 미등록 배치 후보의 오선택은 옵션 복구를 태우지 않습니다 - 후보 자체가 추정이라
+    # 복구 루프 대신 다음 후보/안전 정지가 맞습니다 (Codex 리뷰 반영).
+    $planWasCandidate = ($stagePlan -and ([string]$stagePlan.Source -like '미등록후보*'))
 
     if ($stageSelected) {
       Write-RunLog "[던전] 구역 $ndStage 선택 확인 (진입 버튼: ${stageFloor}층 ${stageArea}구역 진입)"
@@ -3782,7 +4383,7 @@ function Invoke-NormalDungeonCycle {
       break
     }
 
-    if ($selectionResult.Action -eq 'same-floor') {
+    if ($selectionResult.Action -eq 'same-floor' -and -not $planWasCandidate) {
       Write-RunLog "[던전] 구역 ${ndStage} 클릭 대신 같은 층의 $($selectionResult.CurrentStage)이 선택됐습니다 - 옵션 화면에서 목표 구역으로 변경합니다"
       Invoke-ClickUntil -Game $Game -Point $ptDgStageEnter -Description '같은 층 오선택 구역의 진입 옵션 화면' -TimeoutSeconds 20 -Condition {
         ((& $readDgTitle) -replace '\s', '').Contains('구역')
@@ -3798,15 +4399,16 @@ function Invoke-NormalDungeonCycle {
         $selectionReady = $true
         break
       }
-      $switchFailure = if ([string]$switchResult.Reason -eq 'not-found') { '카드를 찾지 못했습니다' } else { "전환을 확인하지 못했습니다 (제목: '$titleText')" }
+      $switchFailure = if ([string]$switchResult.Reason -eq 'not-found') { '카드를 찾지 못했습니다 (미해금이거나 화면 인식 실패)' } else { "전환을 확인하지 못했습니다 (제목: '$titleText' - 화면 인식 문제 가능)" }
+      Write-DgStageDiagnostics -Game $Game -Context "옵션 화면 구역 ${ndStage} 전환 실패" -MapKind 'option'
       if ($script:customMode) {
-        Write-RunLog "[완료] 옵션 화면에서 구역 ${ndStage} $switchFailure - 미해금 추정으로 자동화를 정지합니다"
+        Write-RunLog "[완료] 옵션 화면에서 구역 ${ndStage} $switchFailure - 잘못된 구역 입장을 막기 위해 자동화를 정지합니다"
         exit 4
       }
       throw "옵션 화면에서 구역 ${ndStage} $switchFailure - 잘못된 구역 입장을 막기 위해 중단합니다."
     }
 
-    if ($selectionResult.Action -eq 'different-floor' -and $selectionRound -lt 2) {
+    if ($selectionResult.Action -eq 'different-floor' -and -not $planWasCandidate -and $selectionRound -lt 2) {
       Write-RunLog "[던전] 구역 ${ndStage} 클릭 대신 다른 층의 $($selectionResult.CurrentStage)이 선택됐습니다 - 옵션 화면에서 뒤로 나간 뒤 다시 선택합니다"
       Invoke-ClickUntil -Game $Game -Point $ptDgStageEnter -Description '다른 층 오선택 구역의 진입 옵션 화면' -TimeoutSeconds 20 -Condition {
         ((& $readDgTitle) -replace '\s', '').Contains('구역')
@@ -3826,11 +4428,23 @@ function Invoke-NormalDungeonCycle {
     break
   }
   if (-not $selectionReady) {
+    # (B) 오진단 분리: 원인과 무관하게 '미해금 추정'으로 단정하던 문구를 상황별로 나누고,
+    # 코드 4에도 진단 세트(캡처+원시 OCR)를 남깁니다 (2026-07-22 좌표 문제를 미해금으로
+    # 안내해 원인 추적을 막았던 실사고 교훈).
+    $selectionFailure = if ($triedCandidateTypes.Count -gt 0) {
+      "미등록 던전의 배치 후보($($triedCandidateTypes -join ', ') 시도)로 구역 ${ndStage}를 선택하지 못했습니다 (진입 버튼 문구: '$enterText')"
+    } elseif ($stagePlanMissing) {
+      if ($stageLabelSeen) { "구역 ${ndStage} 카드 위치를 다시 확정하지 못했습니다 (화면 인식 문제 가능)" }
+      else { "구역 ${ndStage} 카드를 찾지 못했습니다 (미해금이거나 화면 인식 실패)" }
+    } else {
+      "구역 ${ndStage} 선택이 확인되지 않습니다 (진입 버튼 문구: '$enterText')"
+    }
+    Write-DgStageDiagnostics -Game $Game -Context "구역 ${ndStage} 선택 실패" -MapKind 'selection'
     if ($script:customMode) {
-      Write-RunLog "[완료] 구역 ${ndStage}를 선택·복구하지 못했습니다 (진입 버튼 문구: '$enterText') - 미해금 추정으로 자동화를 정지합니다"
+      Write-RunLog "[완료] $selectionFailure - 잘못된 구역 입장을 막기 위해 자동화를 정지합니다"
       exit 4
     }
-    throw "구역 $ndStage 선택·복구가 확인되지 않습니다 (진입 버튼 문구: '$enterText'). 잘못된 구역 입장을 막기 위해 중단합니다."
+    throw "$selectionFailure. 잘못된 구역 입장을 막기 위해 중단합니다."
   }
   } else {
     Write-RunLog '[던전] 시작: 진입 옵션 화면 감지 - 옵션 설정부터 진행'
@@ -3842,10 +4456,16 @@ function Invoke-NormalDungeonCycle {
   if ($customOptDiffAdjusted) {
     Write-RunLog "[던전] 난이도 '$ndDifficulty' 확정은 커스텀 시작 단계에서 완료 - 추가 클릭 생략"
   } else {
-    $optDifficultyOk = Set-DgOptionDifficulty -Game $Game -Label $ndDifficulty -Strict:$script:customMode
-    if ($script:customMode -and -not $optDifficultyOk) {
-      Write-RunLog "[완료] 옵션 화면에서 난이도 '$ndDifficulty' 선택을 확정하지 못해 진행하지 않습니다 (오난이도 판 방지)"
-      exit 4
+    # '매우 어려움' 요청은 비커스텀에서도 확정 실패를 치명 처리합니다 (없는 난이도 오입장 방지)
+    $optDifficultyOk = Set-DgOptionDifficulty -Game $Game -Label $ndDifficulty -Strict:($script:customMode -or $ndVeryHardTarget)
+    if (-not $optDifficultyOk) {
+      if ($script:customMode) {
+        # 화면 인식 실패 = 오류 (자동 재시작 1회 + 오류 세트 저장 - 2026-07-25 사용자 지적)
+        throw "옵션 화면에서 난이도 '$ndDifficulty' 선택을 확정하지 못했습니다 - 화면 인식 실패로 중단합니다 (오난이도 판 방지)."
+      }
+      if ($ndVeryHardTarget) {
+        throw "옵션 화면에서 '매우 어려움' 선택을 확정하지 못했습니다 - 오난이도 입장을 막기 위해 중단합니다."
+      }
     }
   }
   Write-RunLog '[던전] 진입 옵션 화면 확인'
@@ -4159,6 +4779,93 @@ function Invoke-NormalDungeonCycle {
   # 14. 안전 중지가 예약돼 있으면 나가기로 마치고, 아니면 다시 하기로 곧장 재입장합니다.
   Invoke-SafeStopExitIfRequested -Game $Game
 
+  # 14-0. 마지막 판(GUI가 HONEYNOGI_LAST_RUN 으로 사전 판정: 커스텀 N바퀴의 마지막 바퀴
+  #       마지막 항목 / 횟수 지정 마지막 회차 - 2026-07-25 사용자 요청)이면 '나가기'로 필드에
+  #       나가며 마칩니다. 이후 회차가 없어 옵션 화면에 머물 이유가 없고, 나가기의 '자동 복귀
+  #       불가' 문제(계약 v4에서 폐기된 이유)는 마지막 판에는 해당하지 않습니다.
+  #       시간 지정/무한/안전 중지는 마지막 판을 사전에 알 수 없어 기존 그대로이며,
+  #       수동 정리 모드(코드 10 - 같은 항목을 새로 시작)는 제외합니다.
+  #       은동전 잔량 검사(14-1)보다 앞: 마지막 판에는 '다음 판' 잔량 판단이 무의미 (Codex 합의).
+  if ($script:dgLastRun -and -not $script:customCleanupOnly) {
+    # '나가기' 글자 탐색 우선 (2버튼/3버튼 배치 모두 커버하는 영역), 실패 시 실측 예비 좌표
+    Focus-Game -Game $Game
+    $lastExitPoint = Find-GameTextPoint -Game $Game -ReferenceX 440 -ReferenceY 625 -RegionWidth 260 -RegionHeight 60 `
+      -SearchText '나가' -ExactText '나가기'
+    if ($lastExitPoint) {
+      Click-ScreenPoint -X $lastExitPoint.X -Y $lastExitPoint.Y
+    } else {
+      Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
+    }
+    Write-RunLog "[던전] 마지막 판 완료 - '나가기'로 필드에 나가며 자동화를 마칩니다"
+    $fieldDeadline = (Get-Date).AddSeconds(40)
+    $fieldStreak = 0
+    $fieldReached = $false
+    while ((Get-Date) -lt $fieldDeadline) {
+      Start-Sleep -Seconds 2
+      if ($script:screenCaptureFailing) {
+        Test-SafeStopDuringCaptureFail
+        $fieldDeadline = (Get-Date).AddSeconds(40)
+        continue
+      }
+      # 판독 도중 캡처 실패는 누적 래치로 잡습니다 - 뒤 판독이 성공하면 전역 플래그가
+      # 지워져 중간 실패를 놓칠 수 있음 (Codex 조건: 실패 누적)
+      $probeFailed = $false
+      $probeHud = Test-HomeEndEscHud -Game $Game
+      if ($script:screenCaptureFailing) { $probeFailed = $true }
+      $probeQuest = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+        -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
+      if ($script:screenCaptureFailing) { $probeFailed = $true }
+      $probeCenter = Get-GameOcrText -Game $Game
+      if ($script:screenCaptureFailing) { $probeFailed = $true }
+      $probeRetry = [bool](Find-DgRetryButtonPoint -Game $Game)
+      if ($script:screenCaptureFailing) { $probeFailed = $true }
+      # 판독 도중 캡처 실패가 있었으면 이번 판독분은 신뢰하지 않습니다
+      if ($probeFailed) { continue }
+      $exitStep = Get-DgLastRunExitStep -HudVisible $probeHud -QuestText $probeQuest `
+        -CenterText $probeCenter -RetryVisible $probeRetry
+      if ($exitStep -eq 'field-evidence') {
+        # 단발 OCR 오판 방지: 연속 2회 확인될 때만 필드로 확정 (Codex 조건)
+        $fieldStreak++
+        if ($fieldStreak -ge 2) {
+          $fieldReached = $true
+          break
+        }
+        continue
+      }
+      $fieldStreak = 0
+      if ($exitStep -eq 'popup-exit') {
+        # '던전 탐험을 계속하시겠습니까?' 팝업: 목적이 '나감'이므로 나가기(Space)를 선택합니다
+        # (다시 하기 경로의 ESC=계속하기와 반대. '탐험'+'계속하' 두 신호 확인 시에만 입력)
+        Focus-Game -Game $Game
+        Press-KeyOnce -VirtualKey ([byte]32)
+        Write-RunLog "[던전] '던전 탐험을 계속하시겠습니까?' 팝업 - 나가기(Space) 선택"
+        Start-Sleep -Seconds 1
+        continue
+      }
+      if ($exitStep -eq 'reclick') {
+        # 결과 화면(다시 하기 버튼)이 그대로 보일 때만 상태 기반 재클릭
+        Write-RunLog "[던전] 결과 화면이 남아 있어 '나가기'를 다시 클릭합니다"
+        Focus-Game -Game $Game
+        $lastExitRetry = Find-GameTextPoint -Game $Game -ReferenceX 440 -ReferenceY 625 -RegionWidth 260 -RegionHeight 60 `
+          -SearchText '나가' -ExactText '나가기'
+        if ($lastExitRetry) {
+          Click-ScreenPoint -X $lastExitRetry.X -Y $lastExitRetry.Y
+        } else {
+          Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
+        }
+      }
+    }
+    if ($fieldReached) {
+      Write-RunLog '[던전] 필드 복귀 확인 - 회차 완료'
+    } else {
+      # 판은 클리어 확정 상태(완료 마커 기록됨) - 코드 1로 던지면 GUI 오류 재시작이 완료된
+      # 마지막 판을 재실행할 위험이 있어, 진단만 남기고 정상 종료합니다 (Codex 합의)
+      Write-DgStageDiagnostics -Game $Game -Context '마지막 판 나가기 후 필드 미확인' -MapKind 'selection'
+      Write-RunLog '[경고] 나가기 후 필드 복귀를 확인하지 못했습니다 - 판은 완료 상태라 그대로 마칩니다'
+    }
+    exit 0
+  }
+
   # 14-1. 다음 판의 은동전 잔량이 선택한 소진 대응에서 '멈춤' 조건이면 나가기를 누르고
   #       '조건에 따른 정상 정지'(코드 4)로 마칩니다. 결과 화면 우상단 재화 표시줄에서
   #       잔량을 읽습니다 ('은동전이 부족해요' 말풍선이 뜨는 상황 - 실측 검증).
@@ -4221,7 +4928,7 @@ function Invoke-NormalDungeonCycle {
             continue
           }
           $floorTitleNow = & $readDgTitle
-          if ($floorTitleNow.Contains('구역') -or $floorTitleNow.Contains('던전') -or $floorTitleNow.Contains('오드')) {
+          if ($floorTitleNow.Contains('구역') -or (Test-DgSelectionTitle -TitleText $floorTitleNow)) {
             $movedToNextFloor = $true
             break
           }

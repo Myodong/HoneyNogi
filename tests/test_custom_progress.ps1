@@ -165,6 +165,7 @@ Assert-Case '압축: 계약 예시 4항목' (Get-CustomListCompact @($itemA, $it
 Assert-Case '압축: 코인만+소진 진행 = (10,진)' (Get-CustomListCompact @(@{ difficulty='일반'; stage='1-1'; coin=$true; doubleLoot=$false; exhaustContinue=$true; noDoubleSweep=$false })) '1.일1-1(10,진)'
 Assert-Case '압축: 더블+소탕만+소진 멈춤 = (20,소·멈)' (Get-CustomListCompact @(@{ difficulty='어려움'; stage='2-2'; coin=$true; doubleLoot=$true; exhaustContinue=$false; noDoubleSweep=$true })) '1.어2-2(20,소·멈)'
 Assert-Case '압축: 구버전 항목(뒤 2필드 부재) = 멈춤 취급' (Get-CustomListCompact @(@{ difficulty='일반'; stage='1-2'; coin=$true; doubleLoot=$false })) '1.일1-2(10,멈)'
+Assert-Case '압축: 매우 어려움 = 매 (2026-07-25 표기 버그 수정)' (Get-CustomListCompact @(@{ difficulty='매우 어려움'; stage='1-1'; coin=$false; doubleLoot=$false })) '1.매1-1(0)'
 
 # ---------- 진리표 ⑦ 리스트 행 표기 규칙 + 역해석 왕복 (round-trip) ----------
 # 행 표기 규칙: 소진 시 = coin 아니면 — / 더블+멈춤이면 —(도달 불가) / 진행·멈춤,

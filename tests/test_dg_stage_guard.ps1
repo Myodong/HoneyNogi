@@ -33,23 +33,37 @@ foreach ($case in $selectionCases) {
   Assert-Case "$($case.N): 현재 구역" $result.CurrentStage $case.C
 }
 
-# 옵션 화면 구역 지도는 층마다 실제 배치가 다릅니다. 특히 2-1은 2026-07-21 오류 캡처에서
-# 기존 1층 예비 좌표(830,308)가 카드 왼쪽 빈 곳을 눌렀던 사례를 그대로 고정합니다.
+# 옵션 화면 구역 카드 좌표는 배치 4유형 템플릿에서 나옵니다 (2026-07-24 40장 확정 실측 -
+# 유형 내 던전 간 편차 ~1px). 2026-07-22 실사고: 룬다 단일표가 배치가 다른 피오드에서
+# 카드 밖 빈 공간을 눌렀음 → 유형을 모르면 좌표를 만들지 않는 계약으로 개정.
+$dgOptStagePoints = @{
+  'A'  = @{ '1' = @(830, 326); '2' = @(918, 326); '3' = @(1022, 298) }
+  'B'  = @{ '1' = @(830, 238); '2' = @(918, 238); '3' = @(1022, 295) }
+  'CR' = @{ '1' = @(874, 326); '2' = @(874, 238); '3' = @(979, 295) }
+  'CN' = @{ '1' = @(874, 238); '2' = @(874, 326); '3' = @(979, 298) }
+}
 $optionFallbackCases = @(
-  @{ N = '1층 1구역 기존 좌표 유지'; S = '1-1'; X = 830;  Y = 308 }
-  @{ N = '1층 2구역 기존 좌표 유지'; S = '1-2'; X = 918;  Y = 310 }
-  @{ N = '1층 3구역 기존 좌표 유지'; S = '1-3'; X = 1022; Y = 266 }
-  @{ N = '2층 1구역 실측 좌표';      S = '2-1'; X = 875;  Y = 307 }
-  @{ N = '2층 2구역 실측 좌표';      S = '2-2'; X = 875;  Y = 225 }
-  @{ N = '2층 3구역 실측 좌표';      S = '2-3'; X = 980;  Y = 266 }
+  @{ N = 'A형(가로·하단) 1-1';  S = '1-1'; T = 'A';  X = 830;  Y = 326 }
+  @{ N = 'A형 2-2 (피오드 2층 사고 재발 방지)'; S = '2-2'; T = 'A'; X = 918; Y = 326 }
+  @{ N = 'B형(가로·상단) 1-1';  S = '1-1'; T = 'B';  X = 830;  Y = 238 }
+  @{ N = 'B형 1-3';             S = '1-3'; T = 'B';  X = 1022; Y = 295 }
+  @{ N = 'CR형 2-2 = 위 카드';  S = '2-2'; T = 'CR'; X = 874;  Y = 238 }
+  @{ N = 'CR형 2-1 = 아래 카드'; S = '2-1'; T = 'CR'; X = 874; Y = 326 }
+  @{ N = 'CN형 2-1 = 위 카드 (마스 - CR과 상하 반전)'; S = '2-1'; T = 'CN'; X = 874; Y = 238 }
+  @{ N = 'CN형 2-2 = 아래 카드'; S = '2-2'; T = 'CN'; X = 874; Y = 326 }
+  @{ N = 'CR형 2-3 대카드';     S = '2-3'; T = 'CR'; X = 979;  Y = 295 }
 )
 foreach ($case in $optionFallbackCases) {
-  $point = Get-DgOptStageFallbackPoint -Stage $case.S
+  $point = Get-DgOptStageFallbackPoint -Stage $case.S -LayoutType $case.T
   Assert-Case "$($case.N): X" $point.X $case.X
   Assert-Case "$($case.N): Y" $point.Y $case.Y
 }
-Assert-Case '지원하지 않는 층·구역은 좌표 없음' `
-  ($null -eq (Get-DgOptStageFallbackPoint -Stage '3-1')) $true
+Assert-Case '유형 없이는 좌표 없음 (틀린 좌표 클릭 금지)' `
+  ($null -eq (Get-DgOptStageFallbackPoint -Stage '1-1' -LayoutType '')) $true
+Assert-Case '모르는 유형은 좌표 없음' `
+  ($null -eq (Get-DgOptStageFallbackPoint -Stage '1-1' -LayoutType 'X')) $true
+Assert-Case '지원하지 않는 구역은 좌표 없음' `
+  ($null -eq (Get-DgOptStageFallbackPoint -Stage '1-9' -LayoutType 'A')) $true
 
 Assert-Case '던전 진입 게이트: 목표 1-1 버튼 허용' `
   (Test-DgStageEnterTextMatches -EnterText '1층 1구역 진입' -Stage '1-1') $true
@@ -74,7 +88,11 @@ Assert-Case '같은 층은 옵션 화면 공용 전환기 사용' `
 Assert-Case '다른 층은 옵션 화면에서 뒤로 복귀 후 재시도' `
   ($workerSource -match "Action -eq 'different-floor'[\s\S]{0,1800}Invoke-DgBackToSelection[\s\S]{0,600}continue") $true
 Assert-Case '선택·복구 후 옵션 화면에서 목표 난이도 재확정' `
-  ($workerSource -match "if \(-not \`$selectionReady\)[\s\S]{0,1200}Set-DgOptionDifficulty -Game \`$Game -Label \`$ndDifficulty") $true
+  ($workerSource -match "if \(-not \`$selectionReady\)[\s\S]{0,2600}Set-DgOptionDifficulty -Game \`$Game -Label \`$ndDifficulty") $true
+Assert-Case '구역 선택 실패 시 진단 세트 저장 (코드 4 오진단 방지)' `
+  ($workerSource -match "if \(-not \`$selectionReady\)[\s\S]{0,1600}Write-DgStageDiagnostics") $true
+Assert-Case '미해금 단정 문구 제거 (원인별 분리)' `
+  ($workerSource.Contains('미해금 추정으로')) $false
 Assert-Case '처음 연 옵션 화면도 같은 층이면 뒤로 가지 않고 구역 카드 전환' `
   ($workerSource -match "titleFloorVerdict -eq 'match'[\s\S]{0,1400}Set-DgOptionStage") $true
 Assert-Case '커스텀도 같은 옵션 화면 전환기 사용' `
@@ -109,17 +127,8 @@ foreach ($c in $cases) {
   else { "FAIL '{0}' -> {1} (기대 {2})" -f $c.T, $verdict, $c.E; $fails++ }
 }
 
-# 선택 화면 복귀 성공 판정 ('구역' 없고 '던전'/'오드' 있음)
-$backCases = @(
-  @{ T = '글라스기브넨던전'; E = $true }
-  @{ T = '바리오드'; E = $true }
-  @{ T = '1층3구역'; E = $false }
-  @{ T = ''; E = $false }
-)
-foreach ($c in $backCases) {
-  $t = $c.T
-  $backOk = (-not $t.Contains('구역')) -and ($t.Contains('던전') -or $t.Contains('오드'))
-  if ($backOk -eq $c.E) { "OK  복귀판정 '{0}' -> {1}" -f $c.T, $backOk }
-  else { "FAIL 복귀판정 '{0}' -> {1} (기대 {2})" -f $c.T, $backOk, $c.E; $fails++ }
-}
+# 선택 화면 복귀/판정 진리표는 Test-DgSelectionTitle 로 추출되어
+# test_dg_layout_system.ps1 로 이전했습니다 (2026-07-25 고분·광구 제목 대응).
+Assert-Case '복귀 판정은 전용 함수 사용' `
+  ($workerSource.Contains('if (Test-DgSelectionTitle -TitleText $titleText) { $backOk = $true; break }')) $true
 exit $fails

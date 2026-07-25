@@ -108,8 +108,8 @@ Check-Pattern '같은 컨트롤에서 툴팁 재호출 안 함 (깜박임 방지
   'if \(\$script:acrTipShownFor -ne \$tipHit\)[\s\S]{0,200}\$toolTip\.Show\('
 Check-Pattern '패널 이탈 시 툴팁 숨김' `
   'Add_MouseLeave\(\$acrLockTipLeave\)'
-Check-Pattern '툴팁 문구' `
-  '리스트의 방식·매칭과 같아야 합니다\. 바꾸려면 리스트를 비워 주세요\.'
+Check-Pattern '툴팁 문구 (2026-07-25 셀 편집 도입으로 안내 갱신)' `
+  '리스트의 방식·매칭과 같아야 합니다\. 리스트의 방식/매칭 칸을 클릭하면 전체를 한 번에 바꿀 수 있습니다\.'
 Check-Pattern '추가 후 잠금 갱신' `
   '\$btnAcrAdd\.Add_Click\(\{[\s\S]{0,900}Update-AbyssInputLock'
 Check-Pattern '삭제 후 잠금 갱신' `

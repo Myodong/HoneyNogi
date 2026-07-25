@@ -145,7 +145,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '1.1.1'
+$appVersion = '1.1.2'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -881,6 +881,14 @@ $rbNdHard.Location = New-Object System.Drawing.Point(128, 2)
 $rbNdHard.Size = New-Object System.Drawing.Size(75, 22)
 $pnlNdDifficulty.Controls.Add($rbNdHard)
 
+# 매우 어려움은 일부 던전에만 있습니다 (2026-07-24 실측: 10던전 중 8곳 - 룬다·피오드 제외).
+# 없는 던전에서 선택하면 글자 탐색 실패 → 선택 확정 검증이 막아 잘못 입장하지 않습니다.
+$rbNdVeryHard = New-Object System.Windows.Forms.RadioButton
+$rbNdVeryHard.Text = '매우 어려움'
+$rbNdVeryHard.Location = New-Object System.Drawing.Point(213, 2)
+$rbNdVeryHard.Size = New-Object System.Drawing.Size(105, 22)
+$pnlNdDifficulty.Controls.Add($rbNdVeryHard)
+
 # 2줄: 스테이지 (1-1 ~ 2-3 드롭다운. 새 스테이지가 나오면 목록에 추가)
 $pnlNdStage = New-Object System.Windows.Forms.Panel
 $pnlNdStage.Location = New-Object System.Drawing.Point(15, 52)
@@ -1131,14 +1139,14 @@ $grpContentDetail.Controls.Add($pnlCrInput)
 
 $cboCrDifficulty = New-Object System.Windows.Forms.ComboBox
 $cboCrDifficulty.Location = New-Object System.Drawing.Point(0, 1)
-$cboCrDifficulty.Size = New-Object System.Drawing.Size(75, 24)
+$cboCrDifficulty.Size = New-Object System.Drawing.Size(92, 24)   # '매우 어려움' 표시 폭 (2026-07-24)
 $cboCrDifficulty.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-foreach ($crDifficultyName in @('일반', '어려움')) { [void]$cboCrDifficulty.Items.Add($crDifficultyName) }
+foreach ($crDifficultyName in @('일반', '어려움', '매우 어려움')) { [void]$cboCrDifficulty.Items.Add($crDifficultyName) }
 $cboCrDifficulty.SelectedIndex = 0
 $pnlCrInput.Controls.Add($cboCrDifficulty)
 
 $cboCrStage = New-Object System.Windows.Forms.ComboBox
-$cboCrStage.Location = New-Object System.Drawing.Point(85, 1)
+$cboCrStage.Location = New-Object System.Drawing.Point(102, 1)
 $cboCrStage.Size = New-Object System.Drawing.Size(70, 24)
 $cboCrStage.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 foreach ($crChapter in 1..2) {
@@ -1149,13 +1157,13 @@ $pnlCrInput.Controls.Add($cboCrStage)
 
 $chkCrCoin = New-Object System.Windows.Forms.CheckBox
 $chkCrCoin.Text = '은동전'
-$chkCrCoin.Location = New-Object System.Drawing.Point(165, 2)
+$chkCrCoin.Location = New-Object System.Drawing.Point(182, 2)
 $chkCrCoin.Size = New-Object System.Drawing.Size(70, 22)
 $pnlCrInput.Controls.Add($chkCrCoin)
 
 $chkCrDouble = New-Object System.Windows.Forms.CheckBox
 $chkCrDouble.Text = '더블 루팅'
-$chkCrDouble.Location = New-Object System.Drawing.Point(240, 2)
+$chkCrDouble.Location = New-Object System.Drawing.Point(257, 2)
 $chkCrDouble.Size = New-Object System.Drawing.Size(90, 22)
 $chkCrDouble.Visible = $false   # 은동전 체크 시에만 표시 (단일 모드 chkNdCoin 과 동일한 동작)
 $pnlCrInput.Controls.Add($chkCrDouble)
@@ -1241,11 +1249,11 @@ $lvCrList.HideSelection = $false
 $lvCrList.Visible = $false
 [void]$lvCrList.Columns.Add('', 28)
 [void]$lvCrList.Columns.Add('#', 32)
-[void]$lvCrList.Columns.Add('난이도', 62)
+[void]$lvCrList.Columns.Add('난이도', 78)   # '매우 어려움'까지 표시 (2026-07-24)
 [void]$lvCrList.Columns.Add('구역', 52)
 [void]$lvCrList.Columns.Add('은동전', 62)
-[void]$lvCrList.Columns.Add('소진 시', 86)
-[void]$lvCrList.Columns.Add('더블 불가 시', 96)
+[void]$lvCrList.Columns.Add('소진 시', 78)
+[void]$lvCrList.Columns.Add('더블 불가 시', 88)
 $grpContentDetail.Controls.Add($lvCrList)
 
 # 0번(체크) 열 머리글 클릭 = 전체 선택/해제. WinForms ListView 에는 실제 머리글 체크박스가
@@ -1554,7 +1562,7 @@ $pnlAcrMatching.Controls.Add($rbAcrPartyLead)
 # WinForms 는 비활성 컨트롤에 마우스 이벤트를 주지 않아 SetToolTip 이 통하지 않으므로,
 # 부모 패널의 MouseMove 로 커서가 어느 라디오 영역에 있는지 직접 판정해 띄웁니다.
 # 같은 컨트롤 위에서는 Show 를 다시 부르지 않아 깜박이지 않습니다(2026-07-22 실기 반영).
-$acrLockTipText = '리스트의 방식·매칭과 같아야 합니다. 바꾸려면 리스트를 비워 주세요.'
+$acrLockTipText = '리스트의 방식·매칭과 같아야 합니다. 리스트의 방식/매칭 칸을 클릭하면 전체를 한 번에 바꿀 수 있습니다.'
 $acrLockTipMove = {
   param($tipSender, $tipArgs)
   if (-not $script:acrLockOn) { return }
@@ -1585,6 +1593,60 @@ foreach ($acrTipPanel in @($pnlAcrInput, $pnlAcrMatching)) {
   $acrTipPanel.Add_MouseLeave($acrLockTipLeave)
 }
 
+# ============================================================
+#  커스텀 리스트 셀 편집 오버레이 (2026-07-25): 셀 클릭 → 그 자리 드롭다운으로 수정.
+#  에디터는 드롭다운이 열려 있는 동안만 존재합니다 (닫히면 즉시 숨김 - 스크롤/리사이즈
+#  동기화 문제 원천 제거). 적용은 SelectionChangeCommitted 에서 '예약'(BeginInvoke)만 하고
+#  DropDownClosed 는 숨기기만 합니다 (ESC/외부 클릭은 커밋 없이 닫힘 - Codex 설계 합의).
+# ============================================================
+$script:cellEditCombo = New-Object System.Windows.Forms.ComboBox
+$script:cellEditCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+$script:cellEditCombo.Visible = $false
+$script:cellEditContext = $null
+$script:cellEditSession = 0
+
+$script:cellEditCombo.Add_SelectionChangeCommitted({
+    $commitContext = $script:cellEditContext
+    if (-not $commitContext -or $commitContext.Applied) { return }
+    $commitContext.Applied = $true
+    $commitContext.Value = [string]$script:cellEditCombo.SelectedItem
+    # 이벤트 연쇄가 끝난 뒤 적용. 예약 시점의 세션을 클로저로 캡처해 오래된 callback 이
+    # 새 편집 세션의 컨텍스트를 건드리지 못하게 합니다 (Codex 지적).
+    $commitSession = [int]$commitContext.Session
+    $null = $script:cellEditCombo.BeginInvoke([Action] ({ Invoke-CellEditApply -ExpectedSession $commitSession }.GetNewClosure()))
+  })
+$script:cellEditCombo.Add_DropDownClosed({
+    # 숨기기만 - 컨텍스트는 지우지 않습니다 (커밋된 편집의 지연 적용이 사용)
+    Hide-CellEditCombo
+  })
+
+$cellEditMouseUp = {
+  param($clickSender, $clickArgs)
+  if ($clickArgs.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+  if ($script:crLoading -or $script:running) { return }
+  if (-not $clickSender.Enabled -or -not $clickSender.Visible) { return }
+  $cellHit = $clickSender.HitTest($clickArgs.X, $clickArgs.Y)
+  if (-not $cellHit.Item -or -not $cellHit.SubItem) { return }
+  $cellColumn = $cellHit.Item.SubItems.IndexOf($cellHit.SubItem)
+  if ($cellColumn -lt 2) { return }   # 체크박스/# 열은 편집 대상 아님
+  $cellRow = $cellHit.Item.Index
+  if ($clickSender -eq $lvCrList) {
+    $cellItems = @(Get-CustomItemsFromList)
+    if ($cellRow -ge $cellItems.Count) { return }
+    $cellPlan = Get-CrCellEditPlan -ColumnIndex $cellColumn -Item $cellItems[$cellRow]
+  } else {
+    $cellItems = @(Get-AbyssCustomItemsFromList)
+    if ($cellRow -ge $cellItems.Count) { return }
+    $cellPlan = Get-AcrCellEditPlan -ColumnIndex $cellColumn -Item $cellItems[$cellRow]
+  }
+  if (-not $cellPlan) { return }
+  Show-CellEditCombo -ListView $clickSender -RowIndex $cellRow -ColumnIndex $cellColumn `
+    -Options ([string[]]$cellPlan.Options) -Current ([string]$cellPlan.Current)
+}
+# 주의: 이벤트 연결은 각 ListView 가 '생성된 뒤'에 합니다 - $lvAcrList 는 이 아래에서
+# 생성되므로 여기서는 던전 리스트만 연결하고, 어비스는 생성 직후에 연결합니다 (Codex 지적).
+$lvCrList.Add_MouseUp($cellEditMouseUp)
+
 $lvAcrList = New-Object System.Windows.Forms.ListView
 $lvAcrList.Location = New-Object System.Drawing.Point(15, 52)
 $lvAcrList.Size = New-Object System.Drawing.Size(420, 150)
@@ -1602,6 +1664,7 @@ $lvAcrList.Visible = $false
 [void]$lvAcrList.Columns.Add('어비스 던전', 110)
 [void]$lvAcrList.Columns.Add('매칭', 90)
 $grpContentDetail.Controls.Add($lvAcrList)
+$lvAcrList.Add_MouseUp($cellEditMouseUp)   # 셀 편집 - 생성 직후 연결 (위 던전 리스트와 공용 핸들러)
 
 $lvAcrList.Add_ColumnClick({
     param($acrClickSender, $acrClickArgs)
@@ -2185,7 +2248,9 @@ function Get-CustomListCompact {
         [string]$compactItem.dungeon, $matchingText)
       continue
     }
-    $difficultyChar = $(if ([string]$compactItem.difficulty -eq '어려움') { '어' } else { '일' })
+    $difficultyChar = $(switch ([string]$compactItem.difficulty) {
+        '어려움' { '어' } '매우 어려움' { '매' } default { '일' }
+      })
     $exhaustChar = $(if ([bool]$compactItem.exhaustContinue) { '진' } else { '멈' })
     $suffix = if (-not [bool]$compactItem.coin) { '(0)' }
     elseif (-not [bool]$compactItem.doubleLoot) { ('(10,{0})' -f $exhaustChar) }
@@ -2260,26 +2325,342 @@ function Get-CustomTransitionIssues {
 # ============================================================
 #  커스텀 반복 - 리스트뷰/설정/진행 기록 헬퍼 (UI·config 접근)
 # ============================================================
+# ============================================================
+#  커스텀 리스트 셀 편집 - 오버레이 표시/적용 (2026-07-25)
+# ============================================================
+function Hide-CellEditCombo {
+  $script:cellEditCombo.Visible = $false
+  if ($script:cellEditCombo.Parent) { $script:cellEditCombo.Parent.Controls.Remove($script:cellEditCombo) }
+}
+
+function Show-CellEditCombo {
+  param($ListView, [int]$RowIndex, [int]$ColumnIndex, [string[]]$Options, [string]$Current)
+  $script:cellEditSession++
+  $ListView.EnsureVisible($RowIndex)   # 부분 노출 셀 대비 - bounds 를 읽기 전에 행을 화면 안으로
+  $cellBounds = $ListView.Items[$RowIndex].SubItems[$ColumnIndex].Bounds
+  # ListView 자식으로 붙여 셀 좌표계를 그대로 사용합니다 (좌표 변환 불필요)
+  $ListView.Controls.Add($script:cellEditCombo)
+  $script:cellEditCombo.SetBounds($cellBounds.X, $cellBounds.Y, [Math]::Max($cellBounds.Width, 48), $cellBounds.Height)
+  $script:cellEditCombo.DropDownWidth = [Math]::Max($cellBounds.Width, 170)   # '함께하기 · 파티(파티장)' 등 긴 문구 대응
+  $script:cellEditCombo.Items.Clear()
+  foreach ($comboOption in $Options) { [void]$script:cellEditCombo.Items.Add($comboOption) }
+  $script:cellEditCombo.SelectedItem = $Current
+  $script:cellEditContext = @{
+    List = $ListView; RowIndex = $RowIndex; ColumnIndex = $ColumnIndex
+    Session = $script:cellEditSession; Applied = $false; Value = ''
+  }
+  $script:cellEditCombo.Visible = $true
+  $script:cellEditCombo.BringToFront()
+  [void]$script:cellEditCombo.Focus()
+  # Visible/Focus 가 자리잡은 뒤 드롭다운을 여는 편이 안정적. 예약 시점 세션을 캡처해
+  # 그 사이 상태가 바뀌었으면(다른 편집 시작/숨김/실행 시작) 열지 않습니다 (Codex 지적).
+  $openSession = [int]$script:cellEditSession
+  $null = $script:cellEditCombo.BeginInvoke([Action] ({
+        if ([int]$script:cellEditSession -ne $openSession) { return }
+        if (-not $script:cellEditCombo.Visible -or -not $script:cellEditCombo.Parent) { return }
+        if ($script:running) { return }
+        $script:cellEditCombo.DroppedDown = $true
+      }.GetNewClosure()))
+}
+
+function Invoke-CellEditApply {
+  # SelectionChangeCommitted 가 예약한 적용 실행부. 지연 실행 사이에 행이 사라졌거나
+  # 세션이 바뀐 경우를 방어합니다. 검증이 전부 통과한 뒤에만 컨텍스트를 제거합니다 -
+  # 오래된 예약이 새 세션의 컨텍스트를 지우지 못하게 (Codex 지적).
+  param([int]$ExpectedSession = -1)
+  $applyContext = $script:cellEditContext
+  if (-not $applyContext -or -not $applyContext.Applied) { return }
+  if ($ExpectedSession -ge 0 -and [int]$applyContext.Session -ne $ExpectedSession) { return }
+  if ([int]$applyContext.Session -ne [int]$script:cellEditSession) { return }
+  $script:cellEditContext = $null
+  $applyList = $applyContext.List
+  if ($applyContext.RowIndex -lt 0 -or $applyContext.RowIndex -ge $applyList.Items.Count) { return }
+  if ($applyList -eq $lvCrList) {
+    Invoke-CrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
+  } else {
+    Invoke-AcrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
+  }
+}
+
+function Invoke-CrCellEdit {
+  # 던전 리스트 행 단위 셀 편집 적용: 정규화 → 행 텍스트 갱신 → 저장(실패 시 원복) →
+  # 전환 규칙 경고 (이동(↑↓)과 동일 취급 - 차단하지 않고 시작 게이트가 최종 방어).
+  param([int]$RowIndex, [int]$ColumnIndex, [string]$Value)
+  $editItems = @(Get-CustomItemsFromList)
+  if ($RowIndex -ge $editItems.Count) { return }
+  $beforeItem = $editItems[$RowIndex]
+  $afterItem = Set-CrItemCellValue -Item $beforeItem -ColumnIndex $ColumnIndex -Value $Value
+  if (([string]$beforeItem.difficulty -eq [string]$afterItem.difficulty) -and
+      ([string]$beforeItem.stage -eq [string]$afterItem.stage) -and
+      ([bool]$beforeItem.coin -eq [bool]$afterItem.coin) -and
+      ([bool]$beforeItem.doubleLoot -eq [bool]$afterItem.doubleLoot) -and
+      ([bool]$beforeItem.exhaustContinue -eq [bool]$afterItem.exhaustContinue) -and
+      ([bool]$beforeItem.noDoubleSweep -eq [bool]$afterItem.noDoubleSweep)) { return }
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try { Set-CustomListRowTexts -Row $lvCrList.Items[$RowIndex] -Item $afterItem } finally { $script:crLoading = $prevLoading }
+  $script:lastCustomSaveOk = $true
+  if ($script:uiReady) { Save-CustomRepeatToConfig }
+  if (-not $script:lastCustomSaveOk) {
+    # 저장 실패: 화면과 config 이 어긋나지 않게 행을 원복하고 은동전 합계도 되돌립니다
+    # (저장 시도 중 변경된 행 기준으로 합계가 이미 갱신됐음 - Codex 지적)
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try { Set-CustomListRowTexts -Row $lvCrList.Items[$RowIndex] -Item $beforeItem } finally { $script:crLoading = $prevLoading }
+    Update-CustomCoinTotalLabel
+    Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
+    return
+  }
+  Add-GuiLog ('[안내] 항목 {0} 수정: {1} → {2}' -f ($RowIndex + 1),
+    (Get-CustomItemLabel -Item $beforeItem), (Get-CustomItemLabel -Item $afterItem))
+  # 전환 규칙 사전 경고 ([추가]와 같은 로그 - 최종 차단은 시작 게이트)
+  $editRepeat = $(if ($rbCrCount.Checked) { 'count' } else { 'infinite' })
+  $editIssues = @(Get-CustomTransitionIssues -Items @(Get-CustomItemsFromList) `
+      -ListRepeat $editRepeat -ListRepeatCount ([int]$numCrLaps.Value))
+  foreach ($editIssue in $editIssues) {
+    $editWrapTag = $(if ([bool]$editIssue.Wrap) { ' [바퀴 순환: 마지막 → 첫 항목]' } else { '' })
+    Add-GuiLog ('[경고] {0} → {1}{2}: {3} - 이대로는 시작할 수 없습니다 (순서 조정 또는 항목 수정으로 해소해 주세요).' -f `
+        $editIssue.From, $editIssue.To, $editWrapTag, $editIssue.Reason)
+  }
+}
+
+function Invoke-AcrCellEdit {
+  # 어비스 리스트 셀 편집 적용. 난이도/어비스 던전은 행 단위, 방식/매칭은 통일 규칙에 따라
+  # 리스트 전체 일괄 변경입니다. 함께→혼자 전환으로 지옥 난이도가 강등될 때는 사전 확인창을
+  # 띄웁니다 (원래 난이도를 잃는 변경 - 사용자 버튼 조작 즉답 팝업이라 무인 운용과 무관).
+  param([int]$RowIndex, [int]$ColumnIndex, [string]$Value)
+  $editItems = @(Get-AbyssCustomItemsFromList)
+  if ($RowIndex -ge $editItems.Count) { return }
+  if ($ColumnIndex -eq 3 -or $ColumnIndex -eq 4) {
+    $beforeItem = $editItems[$RowIndex]
+    $afterItem = [pscustomobject]@{
+      kind = 'abyss'; mode = [string]$beforeItem.mode
+      difficulty = $(if ($ColumnIndex -eq 3) { $Value } else { [string]$beforeItem.difficulty })
+      dungeon = $(if ($ColumnIndex -eq 4) { $Value } else { [string]$beforeItem.dungeon })
+      matching = [string]$beforeItem.matching
+    }
+    if (([string]$beforeItem.difficulty -eq [string]$afterItem.difficulty) -and
+        ([string]$beforeItem.dungeon -eq [string]$afterItem.dungeon)) { return }
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try { Set-AbyssListRowTexts -Row $lvAcrList.Items[$RowIndex] -Item $afterItem } finally { $script:crLoading = $prevLoading }
+    $script:lastCustomSaveOk = $true
+    if ($script:uiReady) { Save-CustomRepeatToConfig }
+    if (-not $script:lastCustomSaveOk) {
+      $prevLoading = $script:crLoading
+      $script:crLoading = $true
+      try { Set-AbyssListRowTexts -Row $lvAcrList.Items[$RowIndex] -Item $beforeItem } finally { $script:crLoading = $prevLoading }
+      Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
+      return
+    }
+    Add-GuiLog ('[안내] 어비스 항목 {0} 수정: {1}/{2}' -f ($RowIndex + 1), [string]$afterItem.difficulty, [string]$afterItem.dungeon)
+    return
+  }
+  if ($ColumnIndex -ne 2 -and $ColumnIndex -ne 5) { return }
+  # 방식(2)/매칭(5) = 리스트 전체 일괄 변경 (통일 규칙 유지)
+  $globalTarget = $(if ($ColumnIndex -eq 2) { ConvertFrom-AcrModeOption -OptionText $Value }
+    else { @{ Mode = 'party'; Matching = $Value } })
+  if (-not $globalTarget) { return }
+  $convertResult = Convert-AcrItemsForGlobalSetting -Items $editItems -Mode ([string]$globalTarget.Mode) -Matching ([string]$globalTarget.Matching)
+  $convertedItems = @($convertResult.Items)
+  $isSame = ($convertedItems.Count -eq $editItems.Count)
+  if ($isSame) {
+    for ($sameIndex = 0; $sameIndex -lt $editItems.Count; $sameIndex++) {
+      if (([string]$editItems[$sameIndex].mode -ne [string]$convertedItems[$sameIndex].mode) -or
+          ([string]$editItems[$sameIndex].difficulty -ne [string]$convertedItems[$sameIndex].difficulty) -or
+          ([string]$editItems[$sameIndex].matching -ne [string]$convertedItems[$sameIndex].matching)) { $isSame = $false; break }
+    }
+  }
+  if ($isSame) { return }
+  if ([int]$convertResult.DowngradeCount -gt 0) {
+    $downgradeText = ("혼자하기로 바꾸면 함께하기 전용 난이도(지옥)를 쓸 수 없어`n" +
+      "지옥 난이도 항목 {0}건이 '매우 어려움'으로 바뀝니다.`n`n계속할까요?" -f [int]$convertResult.DowngradeCount)
+    $downgradeAnswer = [System.Windows.Forms.MessageBox]::Show($downgradeText, '커스텀 반복 - 난이도 변경 확인',
+      [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+    if ($downgradeAnswer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+  }
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try {
+    for ($applyIndex = 0; $applyIndex -lt $lvAcrList.Items.Count -and $applyIndex -lt $convertedItems.Count; $applyIndex++) {
+      Set-AbyssListRowTexts -Row $lvAcrList.Items[$applyIndex] -Item $convertedItems[$applyIndex]
+    }
+  } finally { $script:crLoading = $prevLoading }
+  $script:lastCustomSaveOk = $true
+  if ($script:uiReady) { Save-CustomRepeatToConfig }
+  if (-not $script:lastCustomSaveOk) {
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try {
+      for ($revertIndex = 0; $revertIndex -lt $lvAcrList.Items.Count -and $revertIndex -lt $editItems.Count; $revertIndex++) {
+        Set-AbyssListRowTexts -Row $lvAcrList.Items[$revertIndex] -Item $editItems[$revertIndex]
+      }
+    } finally { $script:crLoading = $prevLoading }
+    Update-AbyssInputLock
+    Add-GuiLog '[경고] 방식·매칭 일괄 변경 저장에 실패해 리스트를 되돌렸습니다.'
+    return
+  }
+  Update-AbyssInputLock
+  $modeLabel = $(if ([string]$globalTarget.Mode -eq 'party') { "함께하기/$([string]$globalTarget.Matching)" } else { '혼자하기' })
+  $downgradeTag = $(if ([int]$convertResult.DowngradeCount -gt 0) { " (지옥 → 매우 어려움 강등 $([int]$convertResult.DowngradeCount)건)" } else { '' })
+  Add-GuiLog ('[안내] 어비스 리스트 방식·매칭 전체 변경: {0}항목 → {1}{2}' -f $convertedItems.Count, $modeLabel, $downgradeTag)
+}
+
+# ============================================================
+#  커스텀 리스트 셀 편집 판정 (2026-07-25) - 순수 함수 (진리표 테스트 대상)
+#  셀 클릭 → 오버레이 드롭다운으로 값 변경. 어비스의 방식/매칭 열은 통일 규칙 때문에
+#  '리스트 전체 일괄 변경' 진입점으로 동작합니다 (Codex 설계 합의).
+# ============================================================
+function Get-CrCellEditPlan {
+  # 던전 리스트 셀 편집 계획: 편집 가능하면 @{ Options; Current }, 아니면 $null.
+  # 소진 시 열은 소진 분기에 도달 가능한 조합(coin && (!double || noDoubleSweep))에서만,
+  # 더블 불가 시 열은 더블 루팅 항목에서만 편집할 수 있습니다 ('—' 표기 상태는 편집 무의미).
+  param([int]$ColumnIndex, $Item)
+  switch ($ColumnIndex) {
+    2 { return @{ Options = @('일반', '어려움', '매우 어려움'); Current = [string]$Item.difficulty } }
+    3 { return @{ Options = @('1-1', '1-2', '1-3', '2-1', '2-2', '2-3'); Current = [string]$Item.stage } }
+    4 {
+      $planCurrent = $(if ([bool]$Item.coin -and [bool]$Item.doubleLoot) { '20개' } elseif ([bool]$Item.coin) { '10개' } else { '0개' })
+      return @{ Options = @('0개', '10개', '20개'); Current = $planCurrent }
+    }
+    5 {
+      if (-not [bool]$Item.coin) { return $null }
+      if ([bool]$Item.doubleLoot -and -not [bool]$Item.noDoubleSweep) { return $null }
+      $planCurrent = $(if ([bool]$Item.exhaustContinue) { '진행' } else { '멈춤' })
+      return @{ Options = @('진행', '멈춤'); Current = $planCurrent }
+    }
+    6 {
+      if (-not [bool]$Item.doubleLoot) { return $null }
+      $planCurrent = $(if ([bool]$Item.noDoubleSweep) { '소탕만' } else { '멈춤' })
+      return @{ Options = @('소탕만', '멈춤'); Current = $planCurrent }
+    }
+  }
+  return $null
+}
+
+function Set-CrItemCellValue {
+  # 선택값을 항목에 적용하고 [추가]와 동일한 일관성 정규화를 수행합니다
+  # (coin=false → 전부 false / double 아니면 noDouble=false / 더블+멈춤이면 exhaust=false).
+  param($Item, [int]$ColumnIndex, [string]$Value)
+  $newDifficulty = [string]$Item.difficulty
+  $newStage = [string]$Item.stage
+  $newCoin = [bool]$Item.coin
+  $newDouble = [bool]$Item.doubleLoot
+  $newExhaust = [bool]$Item.exhaustContinue
+  $newNoDouble = [bool]$Item.noDoubleSweep
+  switch ($ColumnIndex) {
+    2 { $newDifficulty = $Value }
+    3 { $newStage = $Value }
+    4 { $newCoin = ($Value -ne '0개'); $newDouble = ($Value -eq '20개') }
+    5 { $newExhaust = ($Value -eq '진행') }
+    6 { $newNoDouble = ($Value -eq '소탕만') }
+  }
+  $newDouble = ($newCoin -and $newDouble)
+  $newNoDouble = ($newDouble -and $newNoDouble)
+  $newExhaust = ($newCoin -and $newExhaust -and ((-not $newDouble) -or $newNoDouble))
+  return [pscustomobject]@{
+    difficulty = $newDifficulty; stage = $newStage; coin = $newCoin; doubleLoot = $newDouble
+    exhaustContinue = $newExhaust; noDoubleSweep = $newNoDouble
+  }
+}
+
+function Get-AcrCellEditPlan {
+  # 어비스 리스트 셀 편집 계획. Scope='row'(행 단위: 난이도/어비스 던전) 또는
+  # 'all'(리스트 전체 일괄: 방식/매칭 - 통일 규칙). 혼자하기 항목의 매칭 열은 편집 불가.
+  # 방식 열은 방식+매칭을 한 번에 고르는 원자 옵션 4개 (혼자→함께 전환 시 매칭 명시 선택 보장).
+  param([int]$ColumnIndex, $Item)
+  $planMode = $(if ([string]$Item.mode -eq 'party') { 'party' } else { 'solo' })
+  switch ($ColumnIndex) {
+    2 {
+      $planCurrent = $(if ($planMode -eq 'party') { "함께하기 · $([string]$Item.matching)" } else { '혼자하기' })
+      return @{ Options = @('혼자하기', '함께하기 · 우연한 만남', '함께하기 · 파티 찾기', '함께하기 · 파티(파티장)')
+                Current = $planCurrent; Scope = 'all' }
+    }
+    3 {
+      $planOptions = @('게임 그대로', '입문', '어려움', '매우 어려움')
+      if ($planMode -eq 'party') {
+        for ($hellLevel = 1; $hellLevel -le 10; $hellLevel++) { $planOptions += "지옥$hellLevel" }
+      }
+      return @{ Options = $planOptions; Current = [string]$Item.difficulty; Scope = 'row' }
+    }
+    4 { return @{ Options = @('허상의 정박지', '광기의 동굴', '흩어진 물길'); Current = [string]$Item.dungeon; Scope = 'row' } }
+    5 {
+      if ($planMode -ne 'party') { return $null }
+      return @{ Options = @('우연한 만남', '파티 찾기', '파티(파티장)'); Current = [string]$Item.matching; Scope = 'all' }
+    }
+  }
+  return $null
+}
+
+function ConvertFrom-AcrModeOption {
+  # 방식 열 드롭다운 표시 문구 → 구조화 키 (파싱 대신 고정 매핑 - Codex 합의)
+  param([string]$OptionText)
+  switch ([string]$OptionText) {
+    '혼자하기'                { return @{ Mode = 'solo'; Matching = '없음' } }
+    '함께하기 · 우연한 만남'   { return @{ Mode = 'party'; Matching = '우연한 만남' } }
+    '함께하기 · 파티 찾기'     { return @{ Mode = 'party'; Matching = '파티 찾기' } }
+    '함께하기 · 파티(파티장)'  { return @{ Mode = 'party'; Matching = '파티(파티장)' } }
+  }
+  return $null
+}
+
+function Convert-AcrItemsForGlobalSetting {
+  # 방식/매칭 리스트 일괄 변환 (순수). 함께→혼자 전환 시 함께하기 전용 난이도(지옥N)는
+  # '매우 어려움'으로 강등하고 강등 건수를 반환합니다 (호출부가 1건 이상이면 사전 확인창).
+  # 반환: 단일 해시테이블 @{ Items = [array]; DowngradeCount = N } (PS 5.1 배열 풀림 방지)
+  param($Items, [string]$Mode, [string]$Matching)
+  $convertedItems = @()
+  $downgradeCount = 0
+  foreach ($convertItem in @($Items)) {
+    if ($null -eq $convertItem) { continue }
+    $convertDifficulty = [string]$convertItem.difficulty
+    if ($Mode -ne 'party' -and $convertDifficulty -like '지옥*') {
+      $convertDifficulty = '매우 어려움'
+      $downgradeCount++
+    }
+    $convertedItems += [pscustomobject]@{
+      kind = 'abyss'; mode = $Mode; difficulty = $convertDifficulty
+      dungeon = [string]$convertItem.dungeon
+      matching = $(if ($Mode -eq 'party') { $Matching } else { '없음' })
+    }
+  }
+  return @{ Items = $convertedItems; DowngradeCount = $downgradeCount }
+}
+
+function Set-CustomListRowTexts {
+  # 던전 리스트 1행의 표시 텍스트를 항목 값으로 갱신합니다 - 표시 규칙의 단일 소스
+  # ([추가]와 셀 편집이 공용. 읽기는 Get-CustomItemsFromList 가 이 문자열을 역해석하므로
+  # 표기 변경 시 함께 수정):
+  # 은동전 열 = 더블 루팅까지면 '20개', 소탕만이면 '10개', 미사용이면 '0개'.
+  # 소진 시 열 = 은동전 미사용 '—' / 더블+멈춤 '—'(소진 분기 도달 불가) / 그 외 진행·멈춤.
+  # 더블 불가 시 열 = 더블 루팅 아니면 '—' / noDoubleSweep 이면 '소탕만', 아니면 '멈춤'.
+  param($Row, $Item)
+  $rowCoin = [bool]$Item.coin
+  $rowDouble = [bool]$Item.doubleLoot
+  $rowExhaust = [bool]$Item.exhaustContinue
+  $rowNoDouble = [bool]$Item.noDoubleSweep
+  $Row.SubItems[2].Text = [string]$Item.difficulty
+  $Row.SubItems[3].Text = [string]$Item.stage
+  $Row.SubItems[4].Text = $(if ($rowCoin -and $rowDouble) { '20개' } elseif ($rowCoin) { '10개' } else { '0개' })
+  $Row.SubItems[5].Text = $(if (-not $rowCoin) { '—' }
+    elseif ($rowDouble -and -not $rowNoDouble) { '—' }
+    elseif ($rowExhaust) { '진행' } else { '멈춤' })
+  $Row.SubItems[6].Text = $(if (-not $rowDouble) { '—' }
+    elseif ($rowNoDouble) { '소탕만' } else { '멈춤' })
+}
+
 function Add-CustomListRow {
   # 리스트뷰에 항목 1행 추가 (열: 체크빈칸 / # / 난이도 / 구역 / 은동전 판당 소모량 / 소진 시 / 더블 불가 시).
-  # 은동전 열은 더블 루팅까지면 '20개', 소탕만이면 '10개', 미사용이면 '0개' 로 통합 표기.
-  # 소진 시 열: 은동전 미사용이면 '—' / 더블+멈춤이면 '—'(소진 분기 도달 불가) / 그 외 진행·멈춤.
-  # 더블 불가 시 열: 더블 루팅이 아니면 '—' / noDoubleSweep 이면 '소탕만', 아니면 '멈춤'.
-  # (읽기는 Get-CustomItemsFromList 가 이 문자열들을 그대로 역해석하므로 표기 변경 시 함께 수정)
+  # 표시 규칙은 Set-CustomListRowTexts 가 단일 소스입니다.
   param([string]$Difficulty, [string]$Stage, [bool]$Coin, [bool]$DoubleLoot,
     [bool]$ExhaustContinue, [bool]$NoDoubleSweep)
-  $exhaustText = if (-not $Coin) { '—' }
-  elseif ($DoubleLoot -and -not $NoDoubleSweep) { '—' }
-  elseif ($ExhaustContinue) { '진행' } else { '멈춤' }
-  $noDoubleText = if (-not $DoubleLoot) { '—' }
-  elseif ($NoDoubleSweep) { '소탕만' } else { '멈춤' }
   $row = New-Object System.Windows.Forms.ListViewItem('')
   [void]$row.SubItems.Add([string]($lvCrList.Items.Count + 1))
-  [void]$row.SubItems.Add($Difficulty)
-  [void]$row.SubItems.Add($Stage)
-  [void]$row.SubItems.Add($(if ($Coin -and $DoubleLoot) { '20개' } elseif ($Coin) { '10개' } else { '0개' }))
-  [void]$row.SubItems.Add($exhaustText)
-  [void]$row.SubItems.Add($noDoubleText)
+  for ($fillIndex = 2; $fillIndex -le 6; $fillIndex++) { [void]$row.SubItems.Add('') }
+  Set-CustomListRowTexts -Row $row -Item ([pscustomobject]@{
+      difficulty = $Difficulty; stage = $Stage; coin = $Coin; doubleLoot = $DoubleLoot
+      exhaustContinue = $ExhaustContinue; noDoubleSweep = $NoDoubleSweep
+    })
   [void]$lvCrList.Items.Add($row)
 }
 
@@ -2332,17 +2713,28 @@ function Get-CustomItemsFromList {
   return $items
 }
 
+function Set-AbyssListRowTexts {
+  # 어비스 리스트 1행의 표시 텍스트를 항목 값으로 갱신합니다 - 표시 규칙의 단일 소스
+  # ([추가]와 셀 편집 공용. Get-AbyssCustomItemsFromList 가 역해석하므로 표기 변경 시 함께 수정)
+  param($Row, $Item)
+  $rowMode = $(if ([string]$Item.mode -eq 'party' -or [string]$Item.mode -eq '함께하기') { 'party' } else { 'solo' })
+  $rowMatching = [string]$Item.matching
+  $Row.SubItems[2].Text = $(if ($rowMode -eq 'party') { '함께하기' } else { '혼자하기' })
+  $Row.SubItems[3].Text = [string]$Item.difficulty
+  $Row.SubItems[4].Text = [string]$Item.dungeon
+  $Row.SubItems[5].Text = $(if ($rowMode -eq 'party' -and -not [string]::IsNullOrWhiteSpace($rowMatching) -and $rowMatching -ne '없음') { $rowMatching } else { '—' })
+}
+
 function Add-AbyssCustomListRow {
   param([string]$Mode, [string]$Difficulty, [string]$Dungeon, [string]$Matching)
   $normalizedMode = $(if ($Mode -eq 'party' -or $Mode -eq '함께하기') { 'party' } else { 'solo' })
-  $modeText = $(if ($normalizedMode -eq 'party') { '함께하기' } else { '혼자하기' })
-  $matchingText = $(if ($normalizedMode -eq 'party' -and -not [string]::IsNullOrWhiteSpace($Matching)) { $Matching } else { '—' })
   $row = New-Object System.Windows.Forms.ListViewItem('')
   [void]$row.SubItems.Add([string]($lvAcrList.Items.Count + 1))
-  [void]$row.SubItems.Add($modeText)
-  [void]$row.SubItems.Add($Difficulty)
-  [void]$row.SubItems.Add($Dungeon)
-  [void]$row.SubItems.Add($matchingText)
+  for ($fillIndex = 2; $fillIndex -le 5; $fillIndex++) { [void]$row.SubItems.Add('') }
+  Set-AbyssListRowTexts -Row $row -Item ([pscustomobject]@{
+      kind = 'abyss'; mode = $normalizedMode; difficulty = $Difficulty; dungeon = $Dungeon
+      matching = $(if ($normalizedMode -eq 'party') { $Matching } else { '없음' })
+    })
   [void]$lvAcrList.Items.Add($row)
 }
 
@@ -2549,6 +2941,9 @@ function Set-AbyssCustomRepeatOnConfig {
 
 function Save-CustomRepeatToConfig {
   # 던전/어비스 커스텀 설정 공용 즉시 저장 경로.
+  # 성공 여부를 $script:lastCustomSaveOk 로 남깁니다 (반환값으로 바꾸면 기존 호출부 전체가
+  # 파이프라인 오염 방어를 해야 해서 부채널 사용 - 셀 편집이 실패 시 원복에 사용).
+  $script:lastCustomSaveOk = $false
   $cfg = Read-Config
   if (-not $cfg) {
     Add-GuiLog '[경고] config.json 을 읽지 못해 커스텀 반복 설정을 저장하지 못했습니다.'
@@ -2556,7 +2951,10 @@ function Save-CustomRepeatToConfig {
   }
   Set-CustomRepeatOnConfig -Config $cfg
   Set-AbyssCustomRepeatOnConfig -Config $cfg
-  try { Save-Config $cfg }
+  try {
+    Save-Config $cfg
+    $script:lastCustomSaveOk = $true
+  }
   catch {
     Add-GuiLog "[경고] 커스텀 반복 설정 저장 실패: $($_.Exception.Message)"
   }
@@ -2574,6 +2972,17 @@ function Update-CustomCoinTotalLabel {
   } else {
     $lblCrCoinTotal.Text = ('바퀴당 은동전 {0:N0}개' -f $perLap)
   }
+}
+
+function Test-CustomLastRun {
+  param([string]$ListRepeat, [int]$ListRepeatCount, [int]$Lap, [int]$Index, [int]$Total)
+
+  # '마지막 판' 판정 (2026-07-25 마지막 판 나가기 기능): 횟수(count) 모드에서 마지막 바퀴의
+  # 마지막 항목일 때만 true. 무한 반복은 마지막이 없습니다. 워커가 이 신호를 받으면 던전
+  # 결과 화면에서 '다시 하기' 대신 '나가기'로 필드에 나가며 자동화를 마칩니다.
+  if ($ListRepeat -ne 'count') { return $false }
+  if ($ListRepeatCount -lt 1 -or $Total -lt 1) { return $false }
+  return (($Lap -ge $ListRepeatCount) -and ($Index -ge ($Total - 1)))
 }
 
 function Get-CustomCurrentContext {
@@ -2674,7 +3083,8 @@ function Clear-CustomEnv {
   # (HONEYNOGI_REPEAT_INFO 는 기존 변수라 매 회차 덮어쓰므로 정리 불필요)
   foreach ($envName in @('HONEYNOGI_CUSTOM_ITEM', 'HONEYNOGI_CUSTOM_PREV', 'HONEYNOGI_CUSTOM_NEXT',
       'HONEYNOGI_CUSTOM_RESTART', 'HONEYNOGI_CUSTOM_RECOVERY', 'HONEYNOGI_CUSTOM_POSITION',
-      'HONEYNOGI_CUSTOM_LIST', 'HONEYNOGI_CUSTOM_MARKER', 'HONEYNOGI_CUSTOM_OWNER')) {
+      'HONEYNOGI_CUSTOM_LIST', 'HONEYNOGI_CUSTOM_MARKER', 'HONEYNOGI_CUSTOM_OWNER',
+      'HONEYNOGI_LAST_RUN')) {
     Remove-Item -LiteralPath "Env:\$envName" -ErrorAction SilentlyContinue
   }
 }
@@ -2751,7 +3161,11 @@ function Load-SettingsToUi {
   try {
     $nd = $cfg.normalDungeon
     if ($nd) {
-      if ([string]$nd.difficulty -eq '어려움') { $rbNdHard.Checked = $true } else { $rbNdNormal.Checked = $true }
+      switch ([string]$nd.difficulty) {
+        '어려움' { $rbNdHard.Checked = $true }
+        '매우 어려움' { $rbNdVeryHard.Checked = $true }
+        default { $rbNdNormal.Checked = $true }
+      }
       $stageValue = [string]$nd.stage
       if ($stageValue) {
         if (-not $cboNdStage.Items.Contains($stageValue)) { [void]$cboNdStage.Items.Add($stageValue) }
@@ -2914,7 +3328,7 @@ function Save-SettingsFromUi {
   # 던전 설정 저장 (전체 자동화: 선택 → 옵션 → 입장 → 클리어 → 다시 하기 반복)
   $ndSettings = [pscustomobject]@{
     '_설명'       = "'던전' 카테고리 전용 설정입니다 (던전 전체 자동화 - 은동전/더블 루팅/매칭 포함)"
-    difficulty    = $(if ($rbNdHard.Checked) { '어려움' } else { '일반' })
+    difficulty    = $(if ($rbNdVeryHard.Checked) { '매우 어려움' } elseif ($rbNdHard.Checked) { '어려움' } else { '일반' })
     stage         = [string]$cboNdStage.SelectedItem
     useSilverCoin = [bool]$chkNdCoin.Checked
     doubleLoot    = [bool]($chkNdCoin.Checked -and $chkNdDoubleLoot.Checked)
@@ -3006,6 +3420,17 @@ function Set-UiRunning {
   $grpRepeat.Enabled = -not $IsRunning
   $grpContent.Enabled = -not $IsRunning
   $grpContentDetail.Enabled = -not $IsRunning
+  if ($IsRunning) {
+    # 실행 시작 시: 커밋된(적용 대기) 편집은 즉시 완료하고, 미커밋 편집만 폐기합니다
+    # (Codex 지적 - 사용자가 고른 값이 실행 직전에 유실되지 않게)
+    $pendingCellEdit = $script:cellEditContext
+    if ($pendingCellEdit -and [bool]$pendingCellEdit.Applied) {
+      Invoke-CellEditApply
+    } else {
+      $script:cellEditContext = $null
+    }
+    Hide-CellEditCombo
+  }
 }
 
 function Test-TimeAllowsNextCycle {
@@ -3082,6 +3507,11 @@ function Start-NextCycle {
     $env:HONEYNOGI_CUSTOM_OWNER = New-CustomMarkerOwnerJson -Context $customContext
     $repeatModeText = $(if ($customContext.ListRepeat -eq 'count') { "$($customContext.ListRepeatCount)바퀴" } else { '무한' })
     $env:HONEYNOGI_REPEAT_INFO = "커스텀 반복(항목 $($customContext.Total)개, $($customContext.Lap)바퀴째 $($customContext.Index + 1)번, $repeatModeText)"
+    # 마지막 판 신호: N바퀴 모드의 마지막 바퀴 마지막 항목이면 워커가 결과 화면에서
+    # '나가기'로 필드에 나가며 마칩니다 (마무리 복구 회차도 같은 컨텍스트로 자연 판정)
+    $env:HONEYNOGI_LAST_RUN = $(if (Test-CustomLastRun -ListRepeat ([string]$customContext.ListRepeat) `
+        -ListRepeatCount ([int]$customContext.ListRepeatCount) -Lap ([int]$customContext.Lap) `
+        -Index ([int]$customContext.Index) -Total ([int]$customContext.Total)) { '1' } else { '' })
     # 일반 회차는 이전 마커를 삭제하고 시작합니다. 마무리 복구 회차는 현재 항목이 이미 클리어됐다는
     # 근거이자 GUI 재시작 복구 정보이므로 같은 소유자의 마커를 보존합니다.
     # 일반 회차에서 삭제 실패(파일 잠금 등) 시에는 이번 회차 마커를 무시해 오계상을 막습니다.
@@ -3102,6 +3532,10 @@ function Start-NextCycle {
     } elseif ($script:targetCycles -gt 0) {
       "횟수 지정(${cycleNumber}/$($script:targetCycles)회차)"
     } else { '무한 반복' }
+    # 마지막 판 신호: 횟수 지정의 마지막 회차만. 시간 지정/무한은 마지막을 사전에 알 수 없어
+    # 기존(옵션 화면 잔류) 그대로입니다. (Clear-CustomEnv 가 이전 값을 지웠으므로 명시 설정)
+    $env:HONEYNOGI_LAST_RUN = $(if (($null -eq $script:targetTime) -and ($script:targetCycles -gt 0) -and
+        ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
   }
   $script:worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList $arguments -PassThru
   if ($customContext) {
@@ -3452,7 +3886,7 @@ $btnStart.Add_Click({
           foreach ($acrGateIssue in $acrGateIssues) {
             Add-GuiLog ('[경고] {0}번({1} 매칭 ''{2}''): {3}' -f $acrGateIssue.Index, $acrGateIssue.Mode, $acrGateIssue.Matching, $acrGateIssue.Reason)
           }
-          Add-GuiLog '[안내] 리스트를 비우고 원하는 방식·매칭으로 다시 추가해 주세요.'
+          Add-GuiLog '[안내] 리스트의 방식/매칭 칸을 클릭해 전체를 한 번에 바꾸거나, 리스트를 비우고 다시 추가해 주세요.'
           $script:customActive = $false
           return
         }
