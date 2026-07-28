@@ -5,7 +5,9 @@
 # 캡처 폴더가 없는 PC(다른 개발/제보 환경)에서는 건너뜁니다 (스킵 = 실패 아님).
 $ErrorActionPreference = 'Stop'
 $fails = 0
-$captureDir = 'C:\Users\User\Desktop\새 폴더'
+# 확정 실측 캡처는 저장소 던전이미지\던전 에 보관합니다 (2026-07-28 이동 - 바탕화면 임시
+# 폴더는 정리됨). 저장소 폴더가 없으면(부분 클론 등) 건너뜁니다 (스킵 = 실패 아님).
+$captureDir = Join-Path (Split-Path -Parent $PSScriptRoot) '던전이미지\던전'
 if (-not (Test-Path -LiteralPath $captureDir)) {
   "SKIP 확정 실측 캡처 폴더가 없어 오프라인 재현 검증을 건너뜁니다: $captureDir"
   exit 0

@@ -40,8 +40,10 @@ Check-Pattern '어비스 목록을 별도 config 섹션에 저장' `
   'function Set-AbyssCustomRepeatOnConfig[\s\S]{0,1800}abyssCustomRepeat'
 Check-Pattern '어비스 진행 초기화 활성·전용 섹션 연결' `
   '\$btnAcrReset\.Enabled\s*=\s*\$true[\s\S]{0,900}Reset-CustomProgress\s+-SectionName\s+''abyssCustomRepeat'''
+# 2026-07-28 심층던전 추가로 3분기(abyss/deep/기본)가 됐습니다 - 어비스가 abyssCustomRepeat 를
+# 고르고 기본이 customRepeat 인 계약만 고정합니다 (중간 elseif 는 허용)
 Check-Pattern '시작 시 어비스 진행 섹션 선택' `
-  '\$script:customConfigSection\s*=\s*\$\(if\s*\(\$rbCatAbyss\.Checked\)\s*\{\s*''abyssCustomRepeat''\s*\}\s*else\s*\{\s*''customRepeat''\s*\}\)'
+  '\$script:customConfigSection\s*=\s*\$\(if\s*\(\$rbCatAbyss\.Checked\)\s*\{\s*''abyssCustomRepeat''\s*\}[\s\S]{0,160}else\s*\{\s*''customRepeat''\s*\}\)'
 Check-Pattern '던전·어비스 완료 마커 파일 분리' `
   '\$customAbyssMarkerFile\s*=\s*Join-Path[^\r\n]*abyss_custom_done\.marker[\s\S]+\$script:customMarkerFile\s*=\s*\$\(if\s*\(\$rbCatAbyss\.Checked\)'
 Check-Absent '자동화 실행 미지원 표기 제거' '자동화 실행 미지원'
