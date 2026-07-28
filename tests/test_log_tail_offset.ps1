@@ -67,8 +67,10 @@ Check-Equal '오류 이미지·로그가 동일한 시각 기본 이름 공유' 
    $workerRaw.Contains('Join-Path $logDir "$diagBaseName.png"') -and
    $workerRaw.Contains('Join-Path $logDir "$diagBaseName.log"')) $true
 $matchingNotice = "[안내] '커스텀 반복'은 설정과 무관하게 '우연한 만남'으로 진행합니다."
+# 2026-07-28 심층던전 추가: 던전/심층 커스텀 시작 분기가 각각 1회씩 기록 (소스 2곳,
+# 실행 시에는 카테고리별로 한 번만 출력됨)
 Check-Equal '커스텀 매칭 안내는 GUI 시작 시 한 번만 기록' `
-  ([regex]::Matches($guiRaw, [regex]::Escape($matchingNotice)).Count) 1
+  ([regex]::Matches($guiRaw, [regex]::Escape($matchingNotice)).Count) 2
 Check-Equal '커스텀 시작 안내에서 불필요한 던전 구분 설명 제거' `
   ($guiRaw.Contains("Add-GuiLog '[안내] 커스텀 반복: 시작 시 열어 둔 던전 하나에서 리스트 순서대로 동작합니다.'")) $true
 Check-Equal '커스텀 시작 안내의 이전 괄호 문구 제거' `
@@ -83,8 +85,9 @@ Check-Equal '워커의 중복 커스텀 항목 시작 로그 제거' `
   ($workerRaw.Contains('Write-RunLog "[커스텀] $customPosLabel 항목 시작 -')) $false
 Check-Equal '워커의 회차별 커스텀 매칭 안내 제거' `
   ($workerRaw.Contains('Write-RunLog "[커스텀] 매칭은 설정과 무관하게 ''우연한 만남''으로 진행합니다')) $false
+# 2026-07-28 심층던전 추가: 시작 태그가 모드 변수([던전]/[심층] = $script:contentTag)로 바뀜
 Check-Equal '던전 시작 로그는 간결한 항목 라벨과 매칭만 표시' `
-  ($workerRaw.Contains('Write-RunLog "[던전] 자동화 시작: $(Format-CustomItemLabel -Item $dungeonRunItem), 매칭 ''$ndMatching''"')) $true
+  ($workerRaw.Contains('Write-RunLog "$($script:contentTag) 자동화 시작: $(Format-CustomItemLabel -Item $dungeonRunItem), 매칭 ''$ndMatching''"')) $true
 Check-Equal '던전 선택 로그는 스테이지 대신 구역으로 표시' `
   ($workerRaw.Contains('Write-RunLog "[던전] 구역 $ndStage 선택 확인 (진입 버튼: ${stageFloor}층 ${stageArea}구역 진입)"')) $true
 Check-Equal '던전 공물 소모량 확인 로그 간소화' `

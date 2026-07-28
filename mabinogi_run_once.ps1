@@ -192,10 +192,11 @@ function Format-CustomItemLabel {
 
   # 로그용 항목 표기: '어려움 1-3 (은동전·더블 루팅)' / '일반 2-1 (은동전)' / '일반 2-1'.
   # 회차 시작 로그와 조건부 정지(코드 4) 로그들이 공용으로 씁니다.
+  # 심층 모드는 재화 표기만 마족공물로 바꿉니다 (더블 루팅 조합은 심층에 없음 - Codex 지적)
   if (-not $Item) { return '(항목 없음)' }
   $label = "$($Item.Difficulty) $($Item.Stage)"
   if ($Item.Coin -and $Item.Double) { return "$label (은동전·더블 루팅)" }
-  if ($Item.Coin) { return "$label (은동전)" }
+  if ($Item.Coin) { return "$label ($(if ($deepMode) { '마족공물' } else { '은동전' }))" }
   return $label
 }
 
@@ -361,7 +362,9 @@ function Get-CustomRecoveryReadyAction {
 }
 
 function Get-CustomCoinDecision {
-  param([bool]$UseCoin, [bool]$DoubleLoot, $Balance, [bool]$ExhaustContinue, [bool]$NoDoubleSweep)
+  param([bool]$UseCoin, [bool]$DoubleLoot, $Balance, [bool]$ExhaustContinue, [bool]$NoDoubleSweep,
+    [int]$SweepCost = 10, [int]$FullCost = 20, [string]$CurrencyName = '은동전',
+    [string]$ExhaustLabel = '동전 소진 시')   # 사유 문구의 GUI 라디오 라벨 (심층 = '공물 소진 시')
 
   # 던전 공용 은동전 소진 대응 판정(기존 함수명은 테스트/호환을 위해 유지):
   #  - 은동전 미사용이면 검사 없이 진행
@@ -382,33 +385,33 @@ function Get-CustomCoinDecision {
   }
   $bal = [int]$Balance
   if ($wantLoot) {
-    if ($bal -ge 20) {
+    if ($bal -ge $FullCost) {
       return @{ Action = 'proceed'; Coin = $true; Loot = $true; Reason = '' }
     }
-    if ($bal -ge 10) {
+    if ($bal -ge $SweepCost) {
       if (-not $NoDoubleSweep) {
         return @{ Action = 'stop'; Coin = $true; Loot = $false
-                  Reason = "은동전 잔량 ${bal}개 (더블 루팅 포함 20개 필요) - '더블 루팅 불가 시' 설정(멈춤)에 따라 자동화를 정지합니다" }
+                  Reason = "${CurrencyName} 잔량 ${bal}개 (더블 루팅 포함 ${FullCost}개 필요) - '더블 루팅 불가 시' 설정(멈춤)에 따라 자동화를 정지합니다" }
       }
       return @{ Action = 'proceed'; Coin = $true; Loot = $false
-                Reason = "은동전 잔량 ${bal}개 (더블 루팅 포함 20개 필요) - '더블 루팅 불가 시' 설정(소탕만 진행)에 따라 더블 루팅만 끄고 진행합니다" }
+                Reason = "${CurrencyName} 잔량 ${bal}개 (더블 루팅 포함 ${FullCost}개 필요) - '더블 루팅 불가 시' 설정(소탕만 진행)에 따라 더블 루팅만 끄고 진행합니다" }
     }
     if ($ExhaustContinue) {
       return @{ Action = 'proceed'; Coin = $false; Loot = $false
-                Reason = "은동전 잔량 ${bal}개 (소탕에 10개 필요) - '동전 소진 시' 설정(미사용으로 진행)에 따라 소탕을 해제하고 진행합니다" }
+                Reason = "${CurrencyName} 잔량 ${bal}개 (소탕에 ${SweepCost}개 필요) - '${ExhaustLabel}' 설정(미사용으로 진행)에 따라 소탕을 해제하고 진행합니다" }
     }
     return @{ Action = 'stop'; Coin = $false; Loot = $false
-              Reason = "은동전 소진(잔량 ${bal}개, 필요 10개) - '동전 소진 시' 설정(멈춤)에 따라 자동화를 정지합니다" }
+              Reason = "${CurrencyName} 소진(잔량 ${bal}개, 필요 ${SweepCost}개) - '${ExhaustLabel}' 설정(멈춤)에 따라 자동화를 정지합니다" }
   }
-  if ($bal -ge 10) {
+  if ($bal -ge $SweepCost) {
     return @{ Action = 'proceed'; Coin = $true; Loot = $false; Reason = '' }
   }
   if ($ExhaustContinue) {
     return @{ Action = 'proceed'; Coin = $false; Loot = $false
-              Reason = "은동전 잔량 ${bal}개 (소탕에 10개 필요) - '동전 소진 시' 설정(미사용으로 진행)에 따라 소탕을 해제하고 진행합니다" }
+              Reason = "${CurrencyName} 잔량 ${bal}개 (소탕에 ${SweepCost}개 필요) - '${ExhaustLabel}' 설정(미사용으로 진행)에 따라 소탕을 해제하고 진행합니다" }
   }
   return @{ Action = 'stop'; Coin = $false; Loot = $false
-            Reason = "은동전 소진(잔량 ${bal}개, 필요 10개) - '동전 소진 시' 설정(멈춤)에 따라 자동화를 정지합니다" }
+            Reason = "${CurrencyName} 소진(잔량 ${bal}개, 필요 ${SweepCost}개) - '${ExhaustLabel}' 설정(멈춤)에 따라 자동화를 정지합니다" }
 }
 
 $config = $null
@@ -457,6 +460,9 @@ $timeoutHud         = Get-ConfigInteger $config @('timeoutsSeconds', 'homeEndEsc
 $timeoutAbyssMenu   = Get-ConfigInteger $config @('timeoutsSeconds', 'abyssMenu') 15 1 600
 $timeoutAbyssSelect = Get-ConfigInteger $config @('timeoutsSeconds', 'abyssSelectionScreen') 15 1 600
 $contentCategory = [string](Get-ConfigValue $config @('contentCategory') 'abyss')
+# 심층던전 모드: 던전과 화면 구조·좌표가 동일해 던전 사이클을 공유하고, 차이(재화·라벨·
+# 난이도·제목 조각)만 데이터로 치환합니다 (2026-07-27 Codex 합의 - 아래 심층 데이터 구역 참고)
+$deepMode = ($contentCategory -eq 'deepdungeon')
 
 $ptAbyssCard   = @(Get-ConfigValue $config @('clickPoints', 'abyssCard') @(956, 157))
 
@@ -630,6 +636,19 @@ $ndCoinFallback  = Get-ConfigBoolean $config @('normalDungeon', 'continueWithout
 $ndLootFallback  = Get-ConfigBoolean $config @('normalDungeon', 'continueSweepOnly') $false
 $ndMatching      = [string](Get-ConfigValue $config @('normalDungeon', 'matching') '우연한 만남')
 
+# ===== '심층던전' 카테고리 설정 (던전 사이클 공유 - $nd* 를 심층 값으로 덮어씀) =====
+# 재화 = 마족공물(소탕 카드가 어려움 1개/매우 어려움 2개 소모, 해제 시 무료 입장 - 사용자
+# 실측 확정). 더블 루팅 없음. 난이도는 어려움 고정 + '주간 매우 어려움'(단일 구역) 선택형.
+if ($deepMode) {
+  $ndDifficulty   = [string](Get-ConfigValue $config @('deepDungeon', 'difficulty') '어려움')
+  $ndStage        = [string](Get-ConfigValue $config @('deepDungeon', 'stage') '1-1')
+  $ndUseCoin      = Get-ConfigBoolean $config @('deepDungeon', 'useTribute') $false
+  $ndDoubleLoot   = $false
+  $ndCoinFallback = Get-ConfigBoolean $config @('deepDungeon', 'continueWithoutTribute') $false
+  $ndLootFallback = $false
+  $ndMatching     = [string](Get-ConfigValue $config @('deepDungeon', 'matching') '우연한 만남')
+}
+
 # ===== 커스텀 반복 모드 (GUI가 환경변수로 이번 회차 항목을 전달) =====
 # 던전은 기존 6조각 토큰으로 $nd* 설정을 덮어쓰고, 어비스는 A 접두 5조각 토큰으로
 # 선택 던전/입장 방식/난이도/매칭을 덮어씁니다. 완료 마커·진행 위치·재시작 환경변수는 공용입니다.
@@ -648,7 +667,9 @@ $script:customListText = ''
 $script:customMarkerPath = ''
 $script:customOwnerJson = ''
 if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
-  if ($contentCategory -eq 'dungeon') {
+  if ($contentCategory -eq 'dungeon' -or $deepMode) {
+    # 심층 커스텀은 던전 6조각 토큰을 그대로 재사용합니다 (난이도 '어려움' 고정,
+    # Coin=마족공물 소탕, Double=항상 false - 아래 심층 강제 규칙 참고. Codex 합의)
     $script:customItem = ConvertFrom-CustomItemSpec -Spec ([string]$env:HONEYNOGI_CUSTOM_ITEM)
     if ($null -eq $script:customItem) {
       $script:customSpecInvalid = $true
@@ -670,6 +691,13 @@ if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
       $ndCoinFallback = [bool]$script:customItem.ExhaustContinue
       $ndLootFallback = [bool]$script:customItem.NoDoubleSweep
       $ndMatching     = '우연한 만남'   # 1차 릴리스 제한: 매칭 설정 무관 강제
+      if ($deepMode) {
+        # 심층 강제 규칙: 난이도 어려움 고정(주간 매우 어려움은 일반 반복 전용 - 리스트 제외),
+        # 더블 루팅 없음. 잘못된 토큰 값이 흘러 들어와도 여기서 정규화합니다 (Codex 합의).
+        $ndDifficulty = '어려움'
+        $ndDoubleLoot = $false
+        $ndLootFallback = $false
+      }
     }
   } elseif ($contentCategory -eq 'abyss') {
     $script:customItem = $script:abyssCustomPreparsed
@@ -759,6 +787,79 @@ $dgOptStagePoints = @{
   'CN' = @{ '1' = @(874, 238); '2' = @(874, 326); '3' = @(979, 298) }
 }
 $rgNdStageMap = @(40, 230, 520, 470)   # 스테이지 지도 라벨 판독 영역
+
+# ===== 심층던전 모드 데이터 (2026-07-27 확정 실측: 9던전 43장, 이슈 문서 참고) =====
+# 심층은 던전과 좌표 그리드가 픽셀 단위로 동일합니다 (선택/옵션 지도, 포커스 29px 포함).
+# 신규 배치는 키아의 L형 2종뿐이고, 내부 스테이지 표현은 '1-1'을 유지하며 'D' 접두는
+# 화면 라벨 계층에서만 변환합니다 (Codex 합의 - 제목/층 파싱 함수 전체 무변경 재사용).
+$dgSelStagePoints['L1'] = @{ '1-1' = @(266, 426); '1-2' = @(266, 338); '1-3' = @(354, 338)
+                             '2-1' = @(266, 668); '2-2' = @(354, 668); '2-3' = @(354, 581) }   # 2층 키는 L2 값 (키아 전용 - 방어용)
+$dgSelStagePoints['L2'] = @{ '1-1' = @(266, 426); '1-2' = @(266, 338); '1-3' = @(354, 338)     # 1층 키는 L1 값 (방어용)
+                             '2-1' = @(266, 668); '2-2' = @(354, 668); '2-3' = @(354, 581) }
+$dgOptStagePoints['L1'] = @{ '1' = @(891, 326); '2' = @(891, 239); '3' = @(979, 238) }
+$dgOptStagePoints['L2'] = @{ '1' = @(891, 326); '2' = @(979, 326); '3' = @(979, 239) }
+$ddLayoutTable = @{
+  '페카고분'  = @('B', 'A');  '북쪽폐허'  = @('A', 'A');  '남쪽폐허'  = @('CR', 'B')
+  '알비던전'  = @('A', 'B');  '키아던전'  = @('L1', 'L2'); '라비던전'  = @('A', 'A')
+  '마스던전'  = @('B', 'CN'); '바리1광구' = @('A', 'B');  '바리2광구' = @('B', 'A')
+}
+# 심층 제목 조각 → 던전 ID (오독 이형은 2026-07-27 실측: 페카→메카, 키아→기아, 폐허→폐하는
+# 북쪽/남쪽 첫 단어로 구분되어 조각에 불필요). 바리 광구 숫자 가드는 공용 함수에 내장.
+$ddNamePatterns = @(
+  @{ Id = '페카고분';  Any = @('페카', '패가', '메카') }
+  @{ Id = '북쪽폐허';  Any = @('북쪽') }
+  @{ Id = '남쪽폐허';  Any = @('남쪽') }
+  @{ Id = '알비던전';  Any = @('알비') }
+  @{ Id = '키아던전';  Any = @('키아', '기아') }
+  @{ Id = '라비던전';  Any = @('라비', '라바') }
+  @{ Id = '마스던전';  Any = @('마스', '마싀') }
+)
+# 알약 '어려움' 표준 x (Select-DgDifficultyWord 의 HardX): 심층은 '어려움'이 첫 알약
+# 자리라 던전(선택 140/옵션 724)과 다름 (실측: 선택 (78,186), 옵션 (660,120)).
+$dgSelHardX = 140
+$dgOptHardX = 724
+# 주간 매우 어려움 단일 카드 좌표 (실측): 선택 화면 카드 라벨 (310,382), 옵션 지도 단일 카드 (941,284)
+$ddWeeklyCardPoint = @(310, 382)
+$ddWeeklyOptCardPoint = @(941, 284)
+# 던전 사이클이 쓰는 재화 상수 (심층이면 마족공물로 치환 - 수량은 난이도 기준.
+# 커스텀 항목 오버라이드가 이 위에서 끝나므로 여기서 계산하는 $ndDifficulty 가 최종값)
+$dgSweepCost = 10
+$dgFullCost = 20
+$dgCurrencyName = '은동전'
+$dgExhaustLabel = '동전 소진 시'
+$dgValidCosts = @(10, 20)
+if ($deepMode) {
+  # 모드 테이블 치환: 이후 모든 소비 함수(던전 판별/선택 화면 판정/좌표 산출)가 심층 기준으로 동작.
+  # 2단계 가드($dgTwoTierDungeons)는 심층에서 미사용(어려움 고정)이라 비웁니다.
+  $dgLayoutTable = $ddLayoutTable
+  $dgNamePatterns = $ddNamePatterns
+  $dgTwoTierDungeons = @()
+  # 마족공물: 소탕 = 어려움 1개 / 매우 어려움 2개, 더블 루팅 없음 (사용자 실측 확정)
+  $dgSweepCost = $(if ($ndDifficulty -eq '매우 어려움') { 2 } else { 1 })
+  $dgFullCost = $dgSweepCost
+  $dgCurrencyName = '마족공물'
+  $dgExhaustLabel = '공물 소진 시'
+  $dgValidCosts = @(1, 2)
+  $dgSelHardX = 78
+  $dgOptHardX = 660
+  # 공물 잔량 표시 영역 (옵션 화면 우상단, 2026-07-27 실측: 아이콘+숫자 중심 (1088,67) -
+  # 은동전과 재화줄 구성이 달라 영역을 교체. Get-DgCoinBalance 가 마지막 숫자 그룹을 읽음)
+  $rgDgCoinBalance = @(1056, 45, 64, 44)
+}
+
+function Get-DgMapLabelText {
+  param([string]$Text)
+  # 지도 라벨 OCR 원문 → 내부 스테이지 표기('1-1')로 정규화합니다.
+  # 던전 모드는 원문 그대로(trim만), 심층 모드는 'D' 접두 제거 + 실측 오독 3종만 관용:
+  # 'DI-n'→'D1-n'(1이 대문자 I), 전체 패턴 일치 시 '0'→'D'('02-3' 실측), 최종 화이트리스트
+  # D[12]-[123] 통과분만 인정 (전역 치환 금지 - Codex 합의).
+  $label = ([string]$Text).Trim()
+  if (-not $deepMode) { return $label }
+  if ($label -cmatch '^DI-([123])$') { $label = 'D1-' + $Matches[1] }
+  elseif ($label -match '^0([12])-([123])$') { $label = 'D' + $Matches[1] + '-' + $Matches[2] }
+  if ($label -match '^D([12]-[123])$') { return [string]$Matches[1] }
+  return $label
+}
 
 function Get-DgDungeonIdFromTitle {
   param([string]$TitleText)
@@ -1038,14 +1139,26 @@ function Get-DgOptStageCardPoint {
   #  3) 미등록 던전: 행 픽셀 판별로 가로 상/하(A/B)만 지원 - 세로형은 순서 불명이라 정지
   # 반환: @{ Screen = (화면 픽셀 지점) } 또는 @{ Reference = @(기준X, 기준Y) } / 실패 시 $null
   param([System.Diagnostics.Process]$Game, [string]$Stage)
+  # 심층 모드는 화면 라벨이 'D1-1' 형태 + 실측 오독('DI-1'/'02-3')이 있어 후보를 함께 탐색합니다
+  $labelCandidates = @([string]$Stage)
+  if ($deepMode) {
+    $labelCandidates = @('D' + $Stage)
+    $deepParts = ([string]$Stage) -split '-'
+    if ($deepParts.Count -eq 2) {
+      if ([string]$deepParts[0] -eq '1') { $labelCandidates += ('DI-' + $deepParts[1]) }
+      $labelCandidates += ('0' + $Stage)
+    }
+  }
   foreach ($labelScale in 4, 6, 8) {
-    $cardPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
-      -RegionWidth $rgDgOptStageMap[2] -RegionHeight $rgDgOptStageMap[3] `
-      -SearchText $Stage -ExactText $Stage -Scale $labelScale
-    if ($cardPoint) {
-      $refPoint = ConvertTo-GameReferencePoint -Game $Game -ScreenPoint $cardPoint
-      if ($refPoint -and (Test-DgCardPixelAt -Game $Game -ReferenceX $refPoint[0] -ReferenceY $refPoint[1])) {
-        return @{ Screen = $cardPoint }
+    foreach ($labelCandidate in $labelCandidates) {
+      $cardPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
+        -RegionWidth $rgDgOptStageMap[2] -RegionHeight $rgDgOptStageMap[3] `
+        -SearchText $labelCandidate -ExactText $labelCandidate -Scale $labelScale
+      if ($cardPoint) {
+        $refPoint = ConvertTo-GameReferencePoint -Game $Game -ScreenPoint $cardPoint
+        if ($refPoint -and (Test-DgCardPixelAt -Game $Game -ReferenceX $refPoint[0] -ReferenceY $refPoint[1])) {
+          return @{ Screen = $cardPoint }
+        }
       }
     }
   }
@@ -1114,13 +1227,14 @@ function Resolve-DgObservedStage {
 function Get-DgOptObservedStage {
   param([System.Diagnostics.Process]$Game, [string]$TitleText)
 
-  # 옵션 지도 라벨을 두 배율로 읽어 보조 판정 순수부에 넘깁니다 (같은 라벨이 두 배율에서
-  # 읽히면 표 2개 = 배율 합의로 인정).
+  # 옵션 지도 라벨을 세 배율로 읽어 보조 판정 순수부에 넘깁니다 (같은 라벨이 두 배율에서
+  # 읽히면 표 2개 = 배율 합의로 인정). 배율 3 포함 - 2026-07-26 실사고: 피오드 옵션1층은
+  # S4=1개/S6=0개인데 S3는 소카드까지 읽혀서(진단 덤프 실측) 4·6만으로는 표가 부족했음.
   $mapTexts = @()
-  foreach ($mapScale in 4, 6) {
+  foreach ($mapScale in 3, 4, 6) {
     $mapWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
         -RegionWidth $rgDgOptStageMap[2] -RegionHeight $rgDgOptStageMap[3] -Scale $mapScale -Engine $ocrKoreanEngine)
-    foreach ($mapWord in $mapWords) { $mapTexts += [string]$mapWord.Text }
+    foreach ($mapWord in $mapWords) { $mapTexts += (Get-DgMapLabelText -Text $mapWord.Text) }   # 심층 D라벨 정규화 포함
   }
   return (Resolve-DgObservedStage -MapTexts $mapTexts -TitleText $TitleText)
 }
@@ -1130,7 +1244,8 @@ function Set-DgOptionStage {
     [System.Diagnostics.Process]$Game,
     [string]$Stage,
     [scriptblock]$ReadTitle,
-    [string]$LogTag = '[던전]'
+    [string]$LogTag = '[던전]',
+    [switch]$AssumeMismatchFirst
   )
 
   # 진입 옵션 화면에서 같은 층의 목표 구역 카드로 전환합니다. 커스텀 반복과 일반 던전의
@@ -1147,14 +1262,25 @@ function Set-DgOptionStage {
     if ($match -eq 'match') { $stageSwitched = $true; break }
     if ($match -ne 'mismatch') {
       $unclearReads++
-      # 제목이 '연속' 3회 불명확할 때 화면 상태별 1회만 보조 판정을 시도합니다 (mismatch/
-      # 클릭이 나오면 카운터·플래그 리셋 - 전환 중 화면 오확정 방지, Codex 리뷰 반영).
+      # 제목이 '연속' 3회 불명확할 때 보조 판정을 시도합니다. 판정이 '나온' 경우에만 화면
+      # 상태별 1회 잠금(mismatch/클릭이 나오면 카운터·플래그 리셋 - 전환 중 화면 오확정 방지,
+      # Codex 리뷰 반영), 불명(null)이면 잠그지 않고 다음 회차에 재시도합니다.
       # 보조 판정이 '현재 = 목표'면 성공, '같은 층 다른 구역'이면 mismatch로 승격해 카드를
       # 클릭하고, '다른 층'이면 이 화면에서 전환 불가라 안전 실패합니다.
       $observedPromoted = $false
-      if ($unclearReads -ge 3 -and -not $observedTried) {
-        $observedTried = $true
+      if ($AssumeMismatchFirst -and $clicks -eq 0) {
+        # 호출부(커스텀 시작 분기)가 이미 보조 판정으로 '같은 층의 다른 구역'을 확정한 호출:
+        # 제목이 불명확해도 첫 클릭은 진행합니다. 같은 층에서 목표 카드 클릭은 멱등이라
+        # (이미 목표 구역이어도 재선택일 뿐 무해) 상태 기반 클릭 정책에 어긋나지 않고,
+        # 전환 확인은 이후 제목/보조 판정으로 동일하게 검증합니다. (2026-07-26 실사고:
+        # 내부 보조 판정까지 불명이면 클릭 한 번 없이 8회 대기만 하다 정지했음)
+        Write-RunLog "$LogTag 제목 불명확 - 시작 보조 판정(같은 층 다른 구역)에 따라 카드 클릭을 진행합니다 (제목: '$titleText')"
+        $observedPromoted = $true
+      } elseif ($unclearReads -ge 3 -and -not $observedTried) {
         $observedStage = Get-DgOptObservedStage -Game $Game -TitleText $titleText
+        # 판정이 '나온' 경우에만 상태별 1회 잠금 - 불명(null)이면 다음 회차에 재시도합니다
+        # (2026-07-26 실사고: 1회 불명 후 잠겨서 남은 회차 내내 보조 판정이 다시 돌지 않았음)
+        if ($observedStage) { $observedTried = $true }
         if ($observedStage -eq $Stage) {
           Write-RunLog "$LogTag 제목 숫자가 계속 불명확하지만 지도 라벨 층 + 제목 구역 보조 판정이 목표(${Stage})와 일치 - 전환 확인 (제목: '$titleText')"
           $stageSwitched = $true
@@ -1228,6 +1354,9 @@ $reviveResumeKey   = Get-ConfigInteger $config @('revive', 'resumeKey') 32 0 255
 $rgDeathStatus     = @(Get-ConfigValue $config @('ocrRegions', 'deathStatus') @(500, 160, 290, 120))
 # 남은 부활 횟수가 없을 때 클릭할 '여신상에서 부활' 버튼 위치(OCR 탐색 실패 시 예비 좌표)
 $ptStatueRevive    = @(Get-ConfigValue $config @('clickPoints', 'statueRevive') @(968, 610))
+# 파티 전멸('전멸하였습니다') 화면의 '여신상에서 부활' 버튼 예비 좌표 - 세이브 지점 재도전.
+# 개인 행동불능 화면과 버튼 배치가 달라 별도 좌표 (2026-07-28 오류 캡처 실측: '여신상에서' 중심)
+$ptWipeStatueRevive = @(Get-ConfigValue $config @('clickPoints', 'wipeStatueRevive') @(986, 670))
 # 부활 버튼들이 표시되는 우하단 영역: 버튼 배치가 남은 횟수에 따라 달라지므로
 # 이 영역 안에서 '여신상' 글자를 OCR로 찾아 실제 위치를 클릭합니다.
 $rgReviveButtons   = @(Get-ConfigValue $config @('ocrRegions', 'reviveButtons') @(700, 570, 555, 135))
@@ -2479,7 +2608,7 @@ function Get-NdStageClickPoint {
   $mapWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNdStageMap[0] -ReferenceY $rgNdStageMap[1] `
       -RegionWidth $rgNdStageMap[2] -RegionHeight $rgNdStageMap[3] -Scale 3 -Engine $ocrKoreanEngine)
   foreach ($mapWord in $mapWords) {
-    if ([string]$mapWord.Text -eq [string]$Stage) {
+    if ((Get-DgMapLabelText -Text $mapWord.Text) -eq [string]$Stage) {
       if (Test-DgCardPixelAt -Game $Game -ReferenceX ([int]$mapWord.X) -ReferenceY ([int]$mapWord.Y)) {
         return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨' }
       }
@@ -2522,7 +2651,7 @@ function Get-NdStageClickPoint {
   $mapWordsRetry = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNdStageMap[0] -ReferenceY $rgNdStageMap[1] `
       -RegionWidth $rgNdStageMap[2] -RegionHeight $rgNdStageMap[3] -Scale 5 -Engine $ocrKoreanEngine)
   foreach ($mapWord in $mapWordsRetry) {
-    if ([string]$mapWord.Text -eq [string]$Stage) {
+    if ((Get-DgMapLabelText -Text $mapWord.Text) -eq [string]$Stage) {
       if (Test-DgCardPixelAt -Game $Game -ReferenceX ([int]$mapWord.X) -ReferenceY ([int]$mapWord.Y)) {
         return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨(배율5)' }
       }
@@ -2733,6 +2862,7 @@ function Wait-ForDungeonClearScreen {
   $autoHuntPresses = 0           # 자동사냥 꺼짐 감시가 자동출발 키를 누른 횟수(로그 정리용)
   $pollCounter = 0               # 팝업(2회)/컷신(3회) 확인 주기 조절용
   $useStatueRevive = $false      # 부활 재료 부족이 확인되면 이후 부활을 여신상으로 전환
+  $wipeButtonMisses = 0          # 전멸 감지 상태에서 '여신' 버튼 연속 미발견 횟수 (3회째 예비 좌표)
   # 전투 진행 중 연장 한도: 제한 시간이 다 됐어도 퀘스트 추적기에 클리어 목표가 남아
   # 있으면(= 판이 길어진 것뿐) 오류 대신 대기를 연장하되, 이 절대 한도까지만 허용합니다.
   $extendLimit = (Get-Date).AddSeconds([Math]::Max($TimeoutSeconds * 3, 1800))
@@ -2797,12 +2927,58 @@ function Wait-ForDungeonClearScreen {
       }
     }
 
-    # 행동불능(사망) 감지 시 자동 부활:
+    # 행동불능(사망)/파티 전멸 감지 시 자동 부활:
+    #  - 파티 전멸('전멸하였습니다')이면 '여신상에서 부활' 클릭 = 세이브 지점(캠프파이어)부터
+    #    재도전 (2026-07-28 실기 오류 + 사용자 확정 스펙. Dead 보다 먼저 판정)
     #  - 남은 부활 횟수가 있으면 R키로 '여기서 부활' (그 자리에서 바로 전투 재개)
     #  - 남은 횟수가 없으면 '여신상에서 부활' 클릭 (여신상에서 살아나 전투를 이어감)
     if ($reviveEnabled) {
       $death = Get-DeathScreenInfo -Game $Game
-      if ($death.Dead) {
+      if (-not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (Codex 조건)
+      if ($death.Wiped) {
+        if ($reviveCount -ge $reviveMaxPerCycle) {
+          # 전멸 재도전도 자동 복구 시도이므로 기존 부활 상한을 공유합니다 (무한 재도전 루프 방지)
+          if (-not $reviveBlockedLogged) {
+            Write-RunLog "[경고] 이번 회차 자동 부활이 ${reviveMaxPerCycle}회에 도달해 전멸 재도전을 더 시도하지 않습니다."
+            $reviveBlockedLogged = $true
+          }
+        } else {
+          # 이중 확인: 우하단에서 '여신' 버튼 글자를 실제로 찾은 뒤에만 클릭합니다
+          # (중앙 문구 오탐 방어 + 상태 기반 클릭 정책. 실측: '여신상에서' 중심 (986,670))
+          $wipeClicked = $false
+          $wipeStatuePoint = Find-GameTextPoint -Game $Game -ReferenceX $rgReviveButtons[0] -ReferenceY $rgReviveButtons[1] `
+            -RegionWidth $rgReviveButtons[2] -RegionHeight $rgReviveButtons[3] -SearchText '여신'
+          if ($wipeStatuePoint) {
+            $wipeButtonMisses = 0
+            Focus-Game -Game $Game
+            Click-ScreenPoint -X $wipeStatuePoint.X -Y $wipeStatuePoint.Y
+            $wipeClicked = $true
+          } else {
+            $wipeButtonMisses++
+            if ($wipeButtonMisses -ge 3) {
+              # 예비 좌표는 클릭 직전 전멸 상태를 한 번 더 확인한 뒤에만 사용합니다 (Codex 조건 -
+              # 그 사이 화면이 바뀌었으면 고정 좌표 클릭이 다른 버튼을 누를 수 있음)
+              $wipeButtonMisses = 0
+              $wipeRecheck = Get-DeathScreenInfo -Game $Game
+              if ($wipeRecheck.Wiped) {
+                Write-RunLog '[경고] 전멸 화면에서 여신상 부활 버튼 글자를 찾지 못해 예비 좌표를 클릭합니다'
+                Focus-Game -Game $Game
+                Click-GamePoint -Game $Game -ReferenceX $ptWipeStatueRevive[0] -ReferenceY $ptWipeStatueRevive[1]
+                $wipeClicked = $true
+              }
+            }
+          }
+          if ($wipeClicked) {
+            $reviveCount++
+            Write-RunLog "$($script:contentTag) 전멸 감지 - 여신상에서 부활 클릭 (세이브 지점부터 재도전)"
+            $reviveConfirmPending = $true
+            Start-Sleep -Seconds 3
+            # 재도전으로 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+            continue
+          }
+        }
+      } elseif ($death.Dead) {
         if ($reviveCount -ge $reviveMaxPerCycle) {
           if (-not $reviveBlockedLogged) {
             Write-RunLog "[경고] 이번 회차 자동 부활이 ${reviveMaxPerCycle}회에 도달해 더 시도하지 않습니다."
@@ -2963,26 +3139,46 @@ function Get-AutoHuntState {
   return 'unknown'
 }
 
-function Get-DeathScreenInfo {
-  param([System.Diagnostics.Process]$Game)
+function Get-DeathInfoFromText {
+  param([string]$Text)
 
-  # 화면 중앙의 사망 안내 영역을 읽어 행동불능 여부와 남은 부활 횟수를 확인합니다.
-  # 실측 결과 장식 폰트인 '행동불능' 글자는 OCR이 잘 못 읽지만, 그 아래
-  # '남은 부활 횟수 3/3' 줄은 안정적으로 읽히므로 이 줄을 감지 기준으로 삼습니다.
-  # 반환: @{ Dead = 사망 여부; Remaining = 남은 부활 횟수(파싱 실패 시 $null) }
-  $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgDeathStatus[0] -ReferenceY $rgDeathStatus[1] `
-    -RegionWidth $rgDeathStatus[2] -RegionHeight $rgDeathStatus[3] -Scale 3 -Engine $ocrKoreanEngine
-  $normalized = $ocrText -replace '\s', ''
+  # 사망/전멸 안내 판정의 순수부 (진리표 테스트 대상 - Get-DeathScreenInfo 가 OCR 후 위임).
+  # Dead(개인 행동불능): '행동불능' 장식 폰트는 OCR이 잘 못 읽어 그 아래 '남은 부활 횟수 3/3'
+  # 줄을 기준으로 삼습니다. Wiped(파티 전멸): '전멸하였습니다 / 마지막 캠프파이어에서부터
+  # 재도전하시겠습니까?' 화면 - 2026-07-28 실기 오류 캡처 실측 판독은
+  # '전별하였습LI다 … 재도전하시겠습니)가?' ('전멸'→'전별' 깨짐, '캠프파이어' 전파괴).
+  # 조각은 '전멸하/전별하/재도전하'만 인정 - '재도전' 단독은 클리어 점수표의 '재도전 보너스'
+  # 실측 판독('처치완벽한전주권장전투력재도전보너스…')과 겹쳐 오탐이라 제외 (Codex 합의.
+  # 전멸 화면 실측은 '재도전하시겠…'라 '재도전하'로 잡힘). 실제 클릭은 호출부가 우하단에서
+  # '여신' 버튼을 실제로 찾은 뒤에만 수행하는 이중 확인 구조입니다.
+  # 반환: @{ Dead; Remaining(파싱 실패 시 $null); Wiped }
+  $normalized = ([string]$Text) -replace '\s', ''
+  $wiped = (
+    $normalized.Contains('전멸하') -or
+    $normalized.Contains('전별하') -or
+    $normalized.Contains('재도전하')
+  )
   $dead = (
     $normalized.Contains('남은부활') -or
     $normalized.Contains('부활횟수') -or
     $normalized.Contains('행동불능')
   )
-  if (-not $dead) { return @{ Dead = $false; Remaining = $null } }
   $remaining = $null
-  $match = [regex]::Match($normalized, '(\d+)/(\d+)')
-  if ($match.Success) { $remaining = [int]$match.Groups[1].Value }
-  return @{ Dead = $true; Remaining = $remaining }
+  if ($dead) {
+    $match = [regex]::Match($normalized, '(\d+)/(\d+)')
+    if ($match.Success) { $remaining = [int]$match.Groups[1].Value }
+  }
+  return @{ Dead = $dead; Remaining = $remaining; Wiped = $wiped }
+}
+
+function Get-DeathScreenInfo {
+  param([System.Diagnostics.Process]$Game)
+
+  # 화면 중앙의 사망/전멸 안내 영역을 읽어 판정합니다 (판정 규칙은 Get-DeathInfoFromText 참고).
+  # 반환: @{ Dead = 개인 행동불능; Remaining = 남은 부활 횟수($null 가능); Wiped = 파티 전멸 }
+  $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgDeathStatus[0] -ReferenceY $rgDeathStatus[1] `
+    -RegionWidth $rgDeathStatus[2] -RegionHeight $rgDeathStatus[3] -Scale 3 -Engine $ocrKoreanEngine
+  return Get-DeathInfoFromText -Text $ocrText
 }
 
 function Test-DungeonClearPrompt {
@@ -3407,7 +3603,7 @@ function Get-DgCoinBalance {
 }
 
 function Get-DgTributeCost {
-  param([System.Diagnostics.Process]$Game)
+  param([System.Diagnostics.Process]$Game, [int[]]$ValidCosts = @(10, 20))
 
   # '입장하기' 버튼에 표시되는 공물(은동전) 소모량을 읽습니다. 소탕만이면 10,
   # 더블 루팅까지면 20입니다. 숫자만 좁게 자르면 고립 숫자라 OCR이 실패해서
@@ -3428,7 +3624,7 @@ function Get-DgTributeCost {
     if ($numberGroups.Count -eq 0) { continue }
     foreach ($grp in $numberGroups) {
       $n = [int]$grp.Value
-      if ($n -eq 10 -or $n -eq 20) { return $n }
+      if ($ValidCosts -contains $n) { return $n }   # 던전 10/20, 심층 1/2 (호출부 주입)
     }
     # 유효값(10/20)은 아니지만 숫자는 읽힌 경우: 첫 성공 읽기를 예비로 보관
     if ($null -eq $fallbackValue) { $fallbackValue = [int]$numberGroups[$numberGroups.Count - 1].Value }
@@ -3729,7 +3925,7 @@ function Set-DgOptionDifficulty {
   # (Select-DgDifficultyWord)이라 '어려움'이 '매우 어려움' 뒷단어에 걸리지 않습니다.
   $point = $null
   for ($findTry = 1; $findTry -le 3; $findTry++) {
-    $point = Find-DgDifficultyPoint -Game $Game -Region $rgDgOptDifficulty -Label $Label -HardX 724
+    $point = Find-DgDifficultyPoint -Game $Game -Region $rgDgOptDifficulty -Label $Label -HardX $dgOptHardX
     if ($point) { break }
     Write-RunLog "[던전] 옵션 화면에서 난이도 '$Label' 글자를 찾지 못했습니다 - 잠시 후 재탐색 (${findTry}/3)"
     Start-Sleep -Milliseconds 1200
@@ -3956,7 +4152,7 @@ function Invoke-NormalDungeonCycle {
   #   → 던전 내부(어비스와 동일: 자동출발 → 클리어 대기 → 터치 → 나가기)까지.
   # 클리어 후 결과 화면에서 '다시 하기'로 진입 옵션 화면까지 복귀하고 정상 종료(코드 0)하면,
   # GUI가 다음 회차 워커를 띄워 옵션 화면부터 이어가는 방식으로 반복됩니다.
-  $script:contentTag = '[던전]'
+  $script:contentTag = $(if ($deepMode) { '[심층]' } else { '[던전]' })
 
   if ($script:customSpecInvalid) {
     # 커스텀 항목 형식 오류: 조용히 normalDungeon 설정으로 돌면 오계상 사고라 명확히 실패시킵니다
@@ -3969,7 +4165,7 @@ function Invoke-NormalDungeonCycle {
     Coin       = $ndUseCoin
     Double     = $ndDoubleLoot
   }
-  Write-RunLog "[던전] 자동화 시작: $(Format-CustomItemLabel -Item $dungeonRunItem), 매칭 '$ndMatching'"
+  Write-RunLog "$($script:contentTag) 자동화 시작: $(Format-CustomItemLabel -Item $dungeonRunItem), 매칭 '$ndMatching'"
 
   if ($script:customMode) {
     $customPosLabel = $script:customPositionText
@@ -4013,6 +4209,54 @@ function Invoke-NormalDungeonCycle {
   # '매우 어려움' 요청인데 2단계(일반/어려움) 던전으로 판별되면 시작하지 않습니다
   if ($ndVeryHardTarget -and $script:dgDungeonId -and ($dgTwoTierDungeons -contains [string]$script:dgDungeonId)) {
     throw "던전 '$($script:dgDungeonId)'에는 '매우 어려움' 난이도가 없습니다 - 난이도 설정을 확인해 주세요."
+  }
+
+  # 던전|심층 탭 확인: 같은 선택 화면의 탭이라 제목(던전명)만으로는 구분되지 않습니다.
+  # 옵션 화면은 제목의 '심층' 조각으로, 선택 화면은 진입 버튼('심층 N층 M구역 진입')의
+  # '심층' 조각으로 확인하고, 요청 모드와 다르면 시작하지 않습니다 (fail-closed - Codex 합의).
+  # 선택/옵션 화면이 아닌 재시작(던전 안/결과 화면)은 게이트 대상이 아닙니다.
+  if ($onOptionsScreen -or (Test-DgSelectionTitle -TitleText $titleText)) {
+    $deepTabMark = $false
+    if ($onOptionsScreen) {
+      $deepTabMark = $titleText.Contains('심층')
+    } else {
+      $deepTabProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
+      $deepTabMark = $deepTabProbe.Contains('심층')
+    }
+    if ($deepMode -and -not $deepTabMark) {
+      Write-RunLog "[완료] 심층 던전 화면이 확인되지 않습니다 - 던전 선택 화면에서 '심층 던전' 탭을 연 뒤 다시 시작해 주세요 (제목: '$titleText')"
+      exit 4
+    }
+    if ((-not $deepMode) -and $deepTabMark) {
+      Write-RunLog "[완료] '심층 던전' 탭이 열려 있습니다 - 던전 자동화는 '던전' 탭 화면에서 시작해 주세요 (제목: '$titleText')"
+      exit 4
+    }
+  }
+
+  # 주간 매우 어려움 (심층 전용): 단일 구역이며 주마다 위치가 바뀌므로 구역 설정을 쓰지 않고
+  # 화면에 열려 있는 그 구역을 동적으로 채택합니다 (층·구역 전환/선택 클릭 전체 미사용 -
+  # 매우 어려움 카드는 색이 달라(빨강) 남색 카드 픽셀 검증 경로를 태울 수 없음. Codex 합의).
+  if ($deepMode -and $ndVeryHardTarget) {
+    $weeklySource = $titleText
+    if (-not $onOptionsScreen) {
+      $weeklySource = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
+    }
+    $weeklyShapes = [regex]::Matches(([string]$weeklySource), '(\d)\D{0,2}(\d)구역')
+    $weeklyStage = ''
+    if ($weeklyShapes.Count -gt 0) {
+      $weeklyStage = ('{0}-{1}' -f $weeklyShapes[$weeklyShapes.Count - 1].Groups[1].Value, `
+          $weeklyShapes[$weeklyShapes.Count - 1].Groups[2].Value)
+    }
+    if ($weeklyStage -and $dgSelStagePoints['A'].ContainsKey($weeklyStage)) {
+      $ndStage = $weeklyStage
+      $stageParts = $ndStage -split '-'
+      $stageFloor = $stageParts[0]
+      $stageArea = $stageParts[1]
+      Write-RunLog "[심층] 주간 매우 어려움 - 이번 주 구역 ${ndStage} 채택 (판독: '$weeklySource')"
+    } else {
+      Write-RunLog "[완료] 주간 매우 어려움 구역을 판독하지 못했습니다 (판독: '$weeklySource') - 심층 탭에서 '매우 어려움'을 선택해 단일 구역 화면을 열어 두고 다시 시작해 주세요"
+      exit 4
+    }
   }
 
   # 완료 마커 복구 전용 회차에서 옵션/선택 화면이 이미 보이면 이전 워커의 마무리 입력은
@@ -4126,11 +4370,14 @@ function Invoke-NormalDungeonCycle {
       # (2026-07-20 실측 - 역방향 포함). 구역 지도가 화면 오른쪽 중앙 '가로 배치'라
       # 선택 화면 좌표($ndStagePoints)와 다름 - 전용 탐색(Get-DgOptStageCardPoint:
       # 카드 숫자 라벨 글자 탐색 + 실측 예비 좌표)으로 클릭하고, 제목 재판독으로 전환을
-      # 확인합니다. 상태 기반 클릭(무조건 재클릭 금지): 다른 구역의 옵션 화면 제목이
-      # '명확히 보일 때만' 클릭(최대 3회)하고, 전환 중/판독 불명확이면 입력 없이 재확인.
-      # 끝내 확인 실패면 조건부 정지(코드 4) - 난이도 확정 격상과 같은 규칙입니다.
+      # 확인합니다. 상태 기반 클릭(무조건 재클릭 금지): 이 분기 도달 = '같은 층의 다른
+      # 구역'이 이미 확정된 상태(명확한 제목 또는 보조 판정 2표)라, 제목이 다시 불명확해져도
+      # 첫 클릭은 진행(-AssumeMismatchFirst - 같은 층 목표 카드 클릭은 멱등이라 무해).
+      # 전환 확인은 이후 제목/보조 판정으로 검증하고, 끝내 확인 실패면 조건부 정지(코드 4) -
+      # 난이도 확정 격상과 같은 규칙입니다. (2026-07-26 실사고: 제목 층 숫자 유실 지속 시
+      # 클릭 없이 8회 대기만 하다 정지 → 첫 클릭 허용으로 재발 방지)
       Write-RunLog "[커스텀] 진입 옵션 화면에서 시작 - 같은 층의 다른 구역이라 화면에서 구역 ${ndStage}를 선택합니다 (제목: '$titleText')"
-      $switchResult = Set-DgOptionStage -Game $Game -Stage $ndStage -ReadTitle $readDgTitle -LogTag '[커스텀]'
+      $switchResult = Set-DgOptionStage -Game $Game -Stage $ndStage -ReadTitle $readDgTitle -LogTag '[커스텀]' -AssumeMismatchFirst
       $titleText = [string]$switchResult.Title
       if (-not $switchResult.Ok) {
         Write-DgStageDiagnostics -Game $Game -Context "커스텀 시작 구역 ${ndStage} 전환 실패" -MapKind 'option'
@@ -4277,7 +4524,7 @@ function Invoke-NormalDungeonCycle {
   if ($script:customMode) {
     $diffOk = $false
     for ($diffTry = 1; $diffTry -le 3; $diffTry++) {
-      $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX 140
+      $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX $dgSelHardX
       if (-not $difficultyPoint) {
         Write-RunLog "[커스텀] 난이도 '$ndDifficulty' 글자를 찾지 못했습니다 - 잠시 후 재탐색 (${diffTry}/3)"
         Start-Sleep -Milliseconds 1200
@@ -4298,7 +4545,7 @@ function Invoke-NormalDungeonCycle {
       throw "난이도 '$ndDifficulty' 선택을 확인하지 못했습니다 - 화면 인식 실패로 중단합니다 (오난이도 판 방지)."
     }
   } else {
-  $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX 140
+  $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX $dgSelHardX
   if ($difficultyPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
@@ -4330,6 +4577,13 @@ function Invoke-NormalDungeonCycle {
     $triedCandidateTypes = @()
     $stagePlan = $null
     for ($stageTry = 1; $stageTry -le 4; $stageTry++) {
+      if ($deepMode -and $ndVeryHardTarget) {
+        # 주간 매우 어려움: 단일 카드가 이미 선택된 화면이라 구역 클릭 없이 진입 버튼
+        # 확인만 합니다 (구역은 위에서 화면 기준으로 동적 채택됨 - 클릭할 카드도 하나뿐)
+        $stagePlan = $null
+        $stageLabelSeen = $true
+        Start-Sleep -Milliseconds 300
+      } else {
       # 포커스/선택 상태가 클릭마다 바뀔 수 있어 매 시도마다 클릭 지점을 다시 계산합니다.
       # 오선택된 미등록 배치 후보는 제외 목록으로 넘겨 같은 후보를 반복 클릭하지 않습니다.
       $stagePlan = Get-NdStageClickPoint -Game $Game -Stage $ndStage -ExcludeTypes $triedCandidateTypes
@@ -4345,6 +4599,7 @@ function Invoke-NormalDungeonCycle {
       Click-GamePoint -Game $Game -ReferenceX $stagePlan.Point[0] -ReferenceY $stagePlan.Point[1]
       Write-RunLog "[던전] 구역 ${ndStage} 클릭 ($($stagePlan.Source))"
       Start-Sleep -Milliseconds 900
+      }
       $enterText = Get-DgStageEnterButtonText -Game $Game
       $selectionResult = Get-DgSelectionRecoveryAction -EnterText $enterText -TargetStage $ndStage
       if ($selectionResult.Action -eq 'selected') {
@@ -4478,7 +4733,8 @@ function Invoke-NormalDungeonCycle {
   if ($ndUseCoin) {
     $coinBalance = Get-DgCoinBalance -Game $Game
     $coinDecision = Get-CustomCoinDecision -UseCoin $ndUseCoin -DoubleLoot $ndDoubleLoot -Balance $coinBalance `
-      -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback
+      -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback `
+      -SweepCost $dgSweepCost -FullCost $dgFullCost -CurrencyName $dgCurrencyName -ExhaustLabel $dgExhaustLabel
     if ($coinDecision.Action -eq 'stop') {
       Write-RunLog "[완료] $($coinDecision.Reason)"
       exit 4
@@ -4487,29 +4743,35 @@ function Invoke-NormalDungeonCycle {
     $effectiveLoot = [bool]$coinDecision.Loot
     if ($coinDecision.Reason) { Write-RunLog "[던전] $($coinDecision.Reason)" }
   }
-  Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $effectiveCoin -Label '은동전(소탕)' | Out-Null
+  Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $effectiveCoin -Label "$dgCurrencyName(소탕)" | Out-Null
   # 더블 루팅은 소탕(은동전) 전제 기능이라, 소탕을 해제하면 카드 자체가 화면에서 사라집니다.
   # 소탕을 사용할 때만 더블 루팅 상태를 맞추고, 미사용이면 확인을 생략합니다.
+  # 심층던전에는 더블 루팅 카드가 없어(소탕 단독) 토글을 건너뜁니다 - 매우 어려움 화면의
+  # 2번째 카드(능숙한 던전 소탕 - 무료 도전과제)를 오클릭하지 않기 위한 가드이기도 합니다.
   if ($effectiveCoin) {
-    Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $effectiveLoot -Label '더블 루팅' | Out-Null
+    if (-not $deepMode) {
+      Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $effectiveLoot -Label '더블 루팅' | Out-Null
+    }
 
     # 5-1. '입장하기' 버튼의 공물(은동전) 소모량으로 더블 루팅 설정을 교차 검증합니다.
     #      소탕만 = 10, 더블 루팅까지 = 20. 카드 버튼 글자('선택됨'/'도전')보다 크고
     #      또렷해 더 확실합니다. 예상과 다르고 값이 유효(10/20)하면 더블 루팅 버튼을
     #      한 번 눌러 정정하고, 그래도 안 맞거나 값이 이상하면 경고만 남기고 진행합니다.
     Start-Sleep -Milliseconds 500
-    $expectedCost = if ($effectiveLoot) { 20 } else { 10 }
-    $actualCost = Get-DgTributeCost -Game $Game
+    $expectedCost = if ($effectiveLoot) { $dgFullCost } else { $dgSweepCost }
+    $actualCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
     if ($null -eq $actualCost) {
       Write-RunLog "[던전] 공물 소모량을 읽지 못해 교차 검증을 건너뜁니다 (예상 ${expectedCost}개)"
     } elseif ($actualCost -eq $expectedCost) {
       Write-RunLog "[던전] 공물 소모량 ${actualCost}개 확인"
-    } elseif ($actualCost -eq 10 -or $actualCost -eq 20) {
+    } elseif ((-not $deepMode) -and ($dgValidCosts -contains $actualCost)) {
+      # 심층은 더블 루팅이 없어 유효값 불일치(1↔2)를 버튼 클릭으로 정정할 수 없습니다 -
+      # 아래 예상 밖 값 분기(커스텀 재확인 후 정지 / 비커스텀 경고 진행)로 흘려보냅니다.
       Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 더블 루팅 버튼을 눌러 정정합니다"
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgLootButton[0] -ReferenceY $ptDgLootButton[1]
       Start-Sleep -Milliseconds 1100
-      $recheck = Get-DgTributeCost -Game $Game
+      $recheck = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       if ($null -ne $recheck -and $recheck -eq $expectedCost) {
         Write-RunLog "[던전] 공물 소모량 ${recheck}개로 정정 확인"
       } elseif ($script:customMode) {
@@ -4526,7 +4788,7 @@ function Invoke-NormalDungeonCycle {
       # 재판독으로 '계속 불일치'를 확인한 뒤에만 정지합니다 (null = 판독 실패는 검증 생략 유지.
       # 상태 불명 재클릭은 하지 않음 - 무조건 재클릭 금지 원칙).
       Start-Sleep -Milliseconds 800
-      $oddRecheck = Get-DgTributeCost -Game $Game
+      $oddRecheck = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       if ($null -ne $oddRecheck -and $oddRecheck -eq $expectedCost) {
         Write-RunLog "[던전] 공물 소모량 ${oddRecheck}개 재확인 (첫 판독 ${actualCost}는 OCR 잡음으로 판단)"
       } elseif ($null -eq $oddRecheck) {
@@ -4545,9 +4807,9 @@ function Invoke-NormalDungeonCycle {
     # 입장하기가 거부돼 45초 헛대기. 버튼 숫자 '10 입장하기'는 멀쩡히 읽혔음).
     # 버튼 숫자가 카드 글자보다 크고 또렷해 이걸로 역방향 검증합니다.
     Start-Sleep -Milliseconds 500
-    $offCost = Get-DgTributeCost -Game $Game
-    if ($null -ne $offCost -and ($offCost -eq 10 -or $offCost -eq 20)) {
-      Write-RunLog "[경고] 은동전 미사용인데 입장 버튼에 소모량 ${offCost}개가 보입니다 - 소탕 카드를 눌러 해제합니다"
+    $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+    if ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
+      Write-RunLog "[경고] ${dgCurrencyName} 미사용인데 입장 버튼에 소모량 ${offCost}개가 보입니다 - 소탕 카드를 눌러 해제합니다"
       # 상태 기반 해제: 10/20이 '그대로 보일 때만' 클릭(최대 2회)합니다.
       #  - null = 숫자 사라짐(해제 성공). 단 캡처 실패 중의 null은 증거가 아니므로 기다렸다 재확인
       #  - 10/20이 아닌 잡음 숫자 = 순방향 검증과 같은 기준으로 OCR 오류 가능성 - 클릭하지 않고 경고 후 진행
@@ -4558,7 +4820,7 @@ function Invoke-NormalDungeonCycle {
         if ($null -eq $offCost) {
           if (-not $script:screenCaptureFailing) { $offCleared = $true; break }
           Start-Sleep -Milliseconds 1500   # 캡처 실패 중 - 입력 없이 재확인
-        } elseif ($offCost -eq 10 -or $offCost -eq 20) {
+        } elseif ($dgValidCosts -contains $offCost) {
           if ($offClicks -ge 2) { break }
           $offClicks++
           Focus-Game -Game $Game
@@ -4567,18 +4829,18 @@ function Invoke-NormalDungeonCycle {
         } else {
           break
         }
-        $offCost = Get-DgTributeCost -Game $Game
+        $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       }
       if ($offCleared) {
         Write-RunLog '[던전] 소모량 표시 사라짐 - 은동전 미사용 확인'
-      } elseif ($null -ne $offCost -and ($offCost -eq 10 -or $offCost -eq 20)) {
+      } elseif ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
         if ($script:customMode) {
           # 커스텀 격상: 오류(코드 1) 대신 조건부 정지(코드 4) - 오류 자동 재시도 2회를
           # 소모하지 않습니다 (미사용 항목의 소모량 초과 표시도 '불일치 → 입장 불허' 계약에 포함)
-          Write-RunLog "[완료] 은동전 미사용 항목인데 소탕 해제가 안 됩니다 (소모량 ${offCost}개) - 입장하지 않고 정지합니다"
+          Write-RunLog "[완료] ${dgCurrencyName} 미사용 항목인데 소탕 해제가 안 됩니다 (소모량 ${offCost}개) - 입장하지 않고 정지합니다"
           exit 4
         }
-        throw "은동전 미사용 설정인데 소탕을 해제하지 못했습니다 (입장 버튼 소모량: ${offCost}개). 게임에서 소탕 카드를 직접 '도전'으로 바꾼 뒤 다시 시작해 주세요."
+        throw "${dgCurrencyName} 미사용 설정인데 소탕을 해제하지 못했습니다 (입장 버튼 소모량: ${offCost}개). 게임에서 소탕 카드를 직접 '도전'으로 바꾼 뒤 다시 시작해 주세요."
       } elseif ($script:customMode) {
         # 이 분기는 블록 서두에서 소모량 10/20(불일치)이 '확인'된 뒤 해제 확인만 불명확해진
         # 경우입니다. 이대로 입장하면 은동전 미사용 항목이 소모 판으로 돌 수 있어(이중 소모
@@ -4652,7 +4914,8 @@ function Invoke-NormalDungeonCycle {
       if ($enterTry -ge 2 -and $ndUseCoin -and -not $script:screenCaptureFailing) {
         $retryBalance = Get-DgCoinBalance -Game $Game
         $retryDecision = Get-CustomCoinDecision -UseCoin $ndUseCoin -DoubleLoot $ndDoubleLoot -Balance $retryBalance `
-          -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback
+          -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback `
+      -SweepCost $dgSweepCost -FullCost $dgFullCost -CurrencyName $dgCurrencyName -ExhaustLabel $dgExhaustLabel
         if ($null -ne $retryBalance -and $retryDecision.Action -eq 'stop') {
           Write-RunLog "[완료] $($retryDecision.Reason)"
           exit 4
@@ -4669,7 +4932,7 @@ function Invoke-NormalDungeonCycle {
             $effectiveLoot = $false
           }
           Write-RunLog "[던전] $($retryDecision.Reason)"
-          Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label '은동전(소탕)' | Out-Null
+          Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)" | Out-Null
           $effectiveCoin = $false
           $coinFallbackDone = $true
         } elseif ($null -eq $retryBalance -and $effectiveLoot -and $ndLootFallback -and -not $lootFallbackDone) {
@@ -4679,7 +4942,7 @@ function Invoke-NormalDungeonCycle {
           $lootFallbackDone = $true
         } elseif ($null -eq $retryBalance -and -not $effectiveLoot -and $ndCoinFallback -and -not $coinFallbackDone) {
           Write-RunLog '[던전] 입장 안 됨(은동전 부족 추정) - 소탕 해제 후 미사용으로 계속'
-          Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label '은동전(소탕)' | Out-Null
+          Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)" | Out-Null
           $effectiveCoin = $false
           $coinFallbackDone = $true
         }
@@ -4689,7 +4952,8 @@ function Invoke-NormalDungeonCycle {
       # 은동전 소진 대응이 '멈춤'이면 오류가 아니라 조건부 정상 정지(code 4)로 마칩니다.
       $finalBalance = Get-DgCoinBalance -Game $Game
       $finalDecision = Get-CustomCoinDecision -UseCoin $ndUseCoin -DoubleLoot $ndDoubleLoot -Balance $finalBalance `
-        -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback
+        -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback `
+      -SweepCost $dgSweepCost -FullCost $dgFullCost -CurrencyName $dgCurrencyName -ExhaustLabel $dgExhaustLabel
       if ($null -ne $finalBalance -and $finalDecision.Action -eq 'stop') {
         Write-RunLog "[완료] $($finalDecision.Reason)"
         exit 4
@@ -4877,7 +5141,8 @@ function Invoke-NormalDungeonCycle {
   if (-not $script:customMode -and $ndUseCoin) {
     $resultBalance = Get-DgCoinBalance -Game $Game
     $resultDecision = Get-CustomCoinDecision -UseCoin $ndUseCoin -DoubleLoot $ndDoubleLoot -Balance $resultBalance `
-      -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback
+      -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback `
+      -SweepCost $dgSweepCost -FullCost $dgFullCost -CurrencyName $dgCurrencyName -ExhaustLabel $dgExhaustLabel
     if ($null -ne $resultBalance -and $resultDecision.Action -eq 'stop') {
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
@@ -5116,18 +5381,20 @@ function Invoke-HuntingGroundCycle {
     # 입장 버튼의 공물 소모량(소탕 10 / 더블 루팅 20)으로 교차 검증합니다 (던전과 동일 영역).
     # 사냥터 화면에 소모량 표기가 없으면 읽기 실패로 건너뛰므로 무해합니다.
     Start-Sleep -Milliseconds 500
-    $expectedCost = if ($effectiveLoot) { 20 } else { 10 }
-    $actualCost = Get-DgTributeCost -Game $Game
+    $expectedCost = if ($effectiveLoot) { $dgFullCost } else { $dgSweepCost }
+    $actualCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
     if ($null -eq $actualCost) {
       Write-RunLog "[사냥터] 공물 소모량을 읽지 못해 교차 검증을 건너뜁니다 (예상 ${expectedCost}개)"
     } elseif ($actualCost -eq $expectedCost) {
       Write-RunLog "[사냥터] 공물 소모량 ${actualCost}개 확인 (더블 루팅 $(if ($effectiveLoot) { '켬' } else { '끔' })과 일치)"
-    } elseif ($actualCost -eq 10 -or $actualCost -eq 20) {
+    } elseif ((-not $deepMode) -and ($dgValidCosts -contains $actualCost)) {
+      # 심층은 더블 루팅이 없어 유효값 불일치(1↔2)를 버튼 클릭으로 정정할 수 없습니다 -
+      # 아래 예상 밖 값 분기(커스텀 재확인 후 정지 / 비커스텀 경고 진행)로 흘려보냅니다.
       Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 더블 루팅 버튼을 눌러 정정합니다"
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptHtLootButton[0] -ReferenceY $ptHtLootButton[1]
       Start-Sleep -Milliseconds 1100
-      $recheck = Get-DgTributeCost -Game $Game
+      $recheck = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       if ($null -ne $recheck -and $recheck -eq $expectedCost) {
         Write-RunLog "[사냥터] 공물 소모량 ${recheck}개로 정정 확인"
       } else {
@@ -5141,8 +5408,8 @@ function Invoke-HuntingGroundCycle {
     # (던전 2026-07-19 00:21 실측 사고와 동일 구조 - 카드 글자 깨짐 대비).
     # 사냥터 화면에 소모량 표기가 없으면 읽기 실패($null)로 건너뛰므로 무해합니다.
     Start-Sleep -Milliseconds 500
-    $offCost = Get-DgTributeCost -Game $Game
-    if ($null -ne $offCost -and ($offCost -eq 10 -or $offCost -eq 20)) {
+    $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+    if ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
       Write-RunLog "[경고] 은동전 미사용인데 시작 버튼에 소모량 ${offCost}개가 보입니다 - 은동전(사냥 임무) 카드를 눌러 해제합니다"
       # 상태 기반 해제 (던전 역방향 검증과 동일한 규칙 - 그쪽 주석 참고)
       $offCleared = $false
@@ -5151,7 +5418,7 @@ function Invoke-HuntingGroundCycle {
         if ($null -eq $offCost) {
           if (-not $script:screenCaptureFailing) { $offCleared = $true; break }
           Start-Sleep -Milliseconds 1500   # 캡처 실패 중 - 입력 없이 재확인
-        } elseif ($offCost -eq 10 -or $offCost -eq 20) {
+        } elseif ($dgValidCosts -contains $offCost) {
           if ($offClicks -ge 2) { break }
           $offClicks++
           Focus-Game -Game $Game
@@ -5160,11 +5427,11 @@ function Invoke-HuntingGroundCycle {
         } else {
           break
         }
-        $offCost = Get-DgTributeCost -Game $Game
+        $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       }
       if ($offCleared) {
         Write-RunLog '[사냥터] 소모량 표시 사라짐 - 은동전 미사용 확인'
-      } elseif ($null -ne $offCost -and ($offCost -eq 10 -or $offCost -eq 20)) {
+      } elseif ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
         throw "은동전 미사용 설정인데 은동전(사냥 임무)을 해제하지 못했습니다 (시작 버튼 소모량: ${offCost}개). 게임에서 카드를 직접 '도전'으로 바꾼 뒤 다시 시작해 주세요."
       } else {
         Write-RunLog "[경고] 카드 해제 확인이 불명확합니다 (소모량 판독: '$offCost') - 현재 상태로 진행합니다"
@@ -5762,14 +6029,15 @@ try {
 
   # 파티(파티원) 매칭은 흐름이 완전히 다릅니다: 메뉴 이동 없이 필드에서 '준비 완료'만
   # 담당하고, 클리어 후에도 선택 화면으로 복귀하지 않습니다 (전용 사이클 내부에서 종료).
-  if ($contentCategory -ne 'dungeon' -and $contentCategory -ne 'hunting' -and
+  if ($contentCategory -ne 'dungeon' -and $contentCategory -ne 'hunting' -and (-not $deepMode) -and
       $dungeonMode -eq 'party' -and $abyssMatching -eq '파티(파티원)') {
     Invoke-AbyssPartyMemberCycle -Game $game
   }
 
-  # 콘텐츠 선택이 '던전'/'사냥터'면 각 전용 흐름으로 진행합니다 (아래 어비스 흐름과 분리).
-  # 이 화면들은 어비스의 '알 수 없는 화면' 처리에 걸리면 안 되므로 이 분기가 먼저 옵니다.
-  if ($contentCategory -eq 'dungeon') {
+  # 콘텐츠 선택이 '던전'/'심층던전'/'사냥터'면 각 전용 흐름으로 진행합니다 (아래 어비스 흐름과
+  # 분리). 이 화면들은 어비스의 '알 수 없는 화면' 처리에 걸리면 안 되므로 이 분기가 먼저 옵니다.
+  # 심층던전은 던전 사이클을 공유합니다 ($deepMode 가 재화·라벨·난이도 데이터를 치환).
+  if ($contentCategory -eq 'dungeon' -or $deepMode) {
     Invoke-NormalDungeonCycle -Game $game
   }
   if ($contentCategory -eq 'hunting') {
@@ -6234,7 +6502,7 @@ try {
           }
         }
 
-        if ($contentCategory -eq 'dungeon') {
+        if ($contentCategory -eq 'dungeon' -or $deepMode) {
           # 던전 구역 선택/진입 오류는 실제 클릭 게이트와 같은 넓은 영역을 기록해야 합니다.
           # 어비스용 좁은 입장 영역을 남기면 버튼이 보여도 무관한 글자만 찍혀 원인 분석을 흐립니다.
           $diagDetail = Get-DgStageEnterButtonText -Game $game

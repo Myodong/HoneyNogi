@@ -77,8 +77,9 @@ try {
     (-not [string]::IsNullOrWhiteSpace($script:configMigrationError)) $true
 
   # 5) 좌표 버전이 같아도 구조 버전이 낮으면 마이그레이션하고 ui 값을 보존
+  # (schema 3 = 2026-07-28 심층던전 섹션 추가 - deepDungeon/deepCustomRepeat 이전 검증 포함)
   $defaultConfig = [pscustomobject]@{
-    configSchemaVersion = 2
+    configSchemaVersion = 3
     coordsVersion = 6
     ui = [pscustomobject]@{ logFontSize = 9 }
     diagnostics = [pscustomobject]@{ keepScreenshots = 10 }
@@ -86,6 +87,8 @@ try {
     afterEntry = [pscustomobject]@{ keys = @([pscustomobject]@{ key = 32; enabled = $false }) }
     customRepeat = [pscustomobject]@{ progress = $null }
     abyssCustomRepeat = [pscustomobject]@{ items = @(); listRepeat = 'infinite'; listRepeatCount = 1; progress = $null }
+    deepDungeon = [pscustomobject]@{ difficulty = '어려움'; stage = '1-1'; useTribute = $false; continueWithoutTribute = $false; matching = '우연한 만남' }
+    deepCustomRepeat = [pscustomobject]@{ items = @(); listRepeat = 'infinite'; listRepeatCount = 1; progress = $null }
   }
   $userConfig = [pscustomobject]@{
     coordsVersion = 6
@@ -100,8 +103,10 @@ try {
   $migrated = Update-ConfigToLatest
   $migrationResult = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   Assert-Case '구조이전: schemaVersion만 낮아도 실행' $migrated $true
-  Assert-Case '구조이전: 최신 schemaVersion 적용' $migrationResult.configSchemaVersion 2
+  Assert-Case '구조이전: 최신 schemaVersion 적용' $migrationResult.configSchemaVersion 3
   Assert-Case '구조이전: 어비스 커스텀 기본 섹션 추가' ($null -ne $migrationResult.abyssCustomRepeat) $true
+  Assert-Case '구조이전: 심층던전 기본 섹션 추가' ($null -ne $migrationResult.deepDungeon) $true
+  Assert-Case '구조이전: 심층 커스텀 기본 섹션 추가' ($null -ne $migrationResult.deepCustomRepeat) $true
   Assert-Case '구조이전: ui.logFontSize 보존' $migrationResult.ui.logFontSize 17
   Assert-Case '구조이전: 다른 사용자 설정 보존' $migrationResult.diagnostics.keepScreenshots 7
   Assert-Case '구조이전: 문자열 revive 불리언은 최신 기본값 유지' $migrationResult.revive.enabled $false

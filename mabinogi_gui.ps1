@@ -29,26 +29,11 @@ public static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(Unma
   [Win32.TaskbarAppId]::SetCurrentProcessExplicitAppUserModelID('HoneyNogi.ControlPanel') | Out-Null
 } catch { }
 
-# ----- 중복 실행 방지 (워커와 동일한 방식의 전역 뮤텍스) -----
-# 컨트롤 패널이 여러 개 뜨면 [시작] 시 서로의 워커를 '기존 프로세스'로 종료시키고
-# 설정 저장도 서로 덮어쓰므로, 두 번째 인스턴스는 안내 후 스스로 종료합니다.
-$script:guiMutex = New-Object System.Threading.Mutex($false, 'Global\HoneyNogiGui')
-$guiMutexAcquired = $false
-try {
-  $guiMutexAcquired = $script:guiMutex.WaitOne(0)
-} catch [System.Threading.AbandonedMutexException] {
-  # 이전 GUI가 강제 종료되어 뮤텍스가 버려진 경우: 이 인스턴스가 소유권을 이어받음
-  $guiMutexAcquired = $true
-}
-if (-not $guiMutexAcquired) {
-  [System.Windows.Forms.MessageBox]::Show(
-    '컨트롤 패널이 이미 실행 중입니다. 기존 창을 사용해 주세요.' + [Environment]::NewLine +
-    '(기존 창이 안 보이면 작업 관리자에서 powershell.exe 를 확인하세요)',
-    '꿀비노기', [System.Windows.Forms.MessageBoxButtons]::OK,
-    [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-  try { $script:guiMutex.Dispose() } catch { }
-  exit
-}
+# ----- 중복 실행 방지 뮤텍스는 '구버전 정리' 다음으로 이동 (2026-07-27) -----
+# 구버전 GUI가 뮤텍스를 쥔 채 실행 중이면 새 버전이 '이미 실행 중'으로 종료되므로,
+# 신규 버전 최초 실행 1회의 구버전 정리(구버전 프로세스 종료 포함)를 뮤텍스 검사보다
+# 먼저 수행해야 합니다. 실제 뮤텍스 획득은 아래 '구버전 정리 실행 + 중복 실행 방지'
+# 섹션에 있습니다 (이 지점과 그 사이에는 함수 정의뿐이라 부작용 없음).
 
 # 화면 꺼짐 방지용 API (자동화 실행 중에만 화면 유지 신호를 켭니다)
 Add-Type -Namespace Win32 -Name PowerState -MemberDefinition @'
@@ -145,7 +130,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '1.1.2'
+$appVersion = '1.2.0'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -159,6 +144,7 @@ $safeStopFlag = Join-Path $scriptRoot 'Log\safe_stop.flag'
 # 항목의 소유자 정보(리스트 지문/lap/index/항목 토큰)를 기록하고 코드 0에서 한 번만 전진합니다.
 $customDungeonMarkerFile = Join-Path $scriptRoot 'Log\custom_done.marker' # 기존 던전 마커 경로 호환
 $customAbyssMarkerFile = Join-Path $scriptRoot 'Log\abyss_custom_done.marker'
+$customDeepMarkerFile = Join-Path $scriptRoot 'Log\deep_custom_done.marker'
 $customMarkerFile = $customDungeonMarkerFile
 $redirectScript = Join-Path $scriptRoot 'rdp_redirect_console.ps1'
 
@@ -268,7 +254,7 @@ function Update-ConfigToLatest {
     }
     # 2) 값 섹션들: '_' 주석 키를 제외하고, 최신 구조에 존재하는 키만 사용자 값으로 덮어씀
     #    (최신 구조에서 사라진 키는 버리고, 새로 생긴 키는 최신 기본값 유지)
-    foreach ($sect in @('normalDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat')) {
+    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat')) {
       if ($usr.PSObject.Properties[$sect] -and $def.PSObject.Properties[$sect]) {
         foreach ($prop in $usr.$sect.PSObject.Properties) {
           if ($prop.Name -like '_*') { continue }
@@ -303,6 +289,18 @@ function Update-ConfigToLatest {
       else { $def.abyssCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = ($script:customProgressReset -or $hadAbyssCustomProgress)
     }
+    if ($def.PSObject.Properties['deepCustomRepeat']) {
+      $hadDeepCustomProgress = $false
+      try {
+        if ($usr.PSObject.Properties['deepCustomRepeat'] -and $usr.deepCustomRepeat -and
+            $usr.deepCustomRepeat.PSObject.Properties['progress'] -and $usr.deepCustomRepeat.progress) {
+          $hadDeepCustomProgress = $true
+        }
+      } catch { }
+      if ($def.deepCustomRepeat.PSObject.Properties['progress']) { $def.deepCustomRepeat.progress = $null }
+      else { $def.deepCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
+      $script:customProgressReset = ($script:customProgressReset -or $hadDeepCustomProgress)
+    }
     # 3) 자동부활 on/off (키 코드/횟수 상한은 최신 기본값 유지)
     if ($usr.PSObject.Properties['revive'] -and $def.PSObject.Properties['revive'] -and
         $usr.revive.PSObject.Properties['enabled']) {
@@ -315,6 +313,15 @@ function Update-ConfigToLatest {
         if ($matchKey -and $matchKey.PSObject.Properties['enabled']) {
           $defKey.enabled = ConvertTo-StrictBoolean $matchKey.enabled $defKey.enabled
         }
+      }
+    }
+    # 5) 사용 승인 캐시/구버전 정리 마커: 최상위 키를 그대로 이전합니다.
+    #    기본 config 에는 이 키들이 없어서, 여기서 놓치면 업데이트 때마다 승인 유예가
+    #    초기화되고(오프라인 무인 PC 가 차단됨) 정리 안내 팝업이 다시 뜹니다 (Codex 합의).
+    foreach ($keepKey in @('approval', 'oldExeCleanup')) {
+      if ($usr.PSObject.Properties[$keepKey]) {
+        if ($def.PSObject.Properties[$keepKey]) { $def.$keepKey = $usr.$keepKey }
+        else { $def | Add-Member -NotePropertyName $keepKey -NotePropertyValue $usr.$keepKey }
       }
     }
 
@@ -462,6 +469,741 @@ function Convert-WorkerLogLineForGui {
   return $Line
 }
 
+# ============================================================
+#  사용 승인(화이트리스트) + 구버전 정리 (2026-07-27, Codex 설계 합의)
+#  - 승인: 비공개 구글 시트 명단(Apps Script /exec)이 활성 기기 코드만 텍스트로 응답.
+#    검사는 GUI 시작·새 자동화 시작 시만, 실행 중 자동화는 어떤 전이에도 중단하지 않음.
+#    조회 실패(전송/형식)는 캐시 유예 7일, 유효 명단에서 명시적 부재만 즉시 차단.
+#  - 정리: 신규 버전 최초 실행 1회, SHA-256이 공식 '이전 릴리스' 해시와 정확히 일치하는
+#    파일만 완전 삭제. 이 승인제는 평문 스크립트 구조상 보안 경계가 아니라
+#    '지인 관리용 소프트 게이트'입니다 (결심한 사용자는 우회 가능 - 이슈 문서 참고).
+# ============================================================
+$whitelistUrl = 'https://script.google.com/macros/s/AKfycbwHLZtR0EPApTIkU-IQUc2Jc7mMPCySPWs1caqKqLPm1tN9Q6IhC_JmAeb_OygNNZZkkQ/exec'
+$approvalGraceDays = 7
+$script:cleanupLogLines = @()        # 폼 생성 전 정리 결과를 모아 두었다가 시작 로그로 출력
+
+function Get-DeviceCode {
+  param([string]$MachineGuid)
+  # PC 식별 코드: 앱 전용 프리픽스 + 정규화된 MachineGuid 의 SHA-256 (소문자 hex 64자).
+  # 원본 MachineGuid 는 화면·로그·네트워크에 노출하지 않고, 빈 값은 해시하지 않습니다
+  # (빈 문자열 해시가 '유효한 코드'가 되어 차단을 우회하는 것을 방지 - 실패 폐쇄).
+  $normalized = ([string]$MachineGuid).Trim().Trim('{', '}').ToLowerInvariant()
+  if ($normalized -eq '') { return '' }
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes('HoneyNogi:device:v1:' + $normalized))
+    return (($hashBytes | ForEach-Object { $_.ToString('x2') }) -join '')
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Get-LocalDeviceCode {
+  # 이 PC(윈도우 설치)의 식별 코드. 레지스트리 읽기 실패는 빈 코드 = 차단측으로 처리합니다.
+  $machineGuid = ''
+  try {
+    $machineGuid = [string](Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name 'MachineGuid' -ErrorAction Stop).MachineGuid
+  } catch { }
+  return (Get-DeviceCode -MachineGuid $machineGuid)
+}
+
+function Test-WhitelistResponse {
+  param([string]$Text)
+  # 명단 응답 엄격 검증: 형식이 조금이라도 어긋나면 전체를 '조회 실패'로 취급합니다
+  # (구글 점검/로그인 페이지가 200으로 와도 철회로 오인하지 않음 - 유예 로직과 맞물림).
+  # 허용: 선두 BOM, CRLF/LF, 끝의 빈 줄. 불허: 중간 빈 줄, COUNT 불일치, 중복, 형식 오류.
+  $invalid = @{ Valid = $false; Codes = @() }
+  $raw = [string]$Text
+  if ($raw.Length -eq 0 -or $raw.Length -gt 65536) { return $invalid }
+  $raw = $raw.TrimStart([char]0xFEFF)
+  $lines = New-Object System.Collections.Generic.List[string]
+  foreach ($line in ($raw -split "`n")) { $lines.Add($line.TrimEnd("`r").Trim()) }
+  while ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') { $lines.RemoveAt($lines.Count - 1) }
+  if ($lines.Count -lt 2 -or $lines.Count -gt 1002) { return $invalid }
+  if ($lines[0] -ne 'HONEYNOGI-WL-V1') { return $invalid }
+  if ($lines[1] -notmatch '^COUNT=([0-9]{1,4})$') { return $invalid }   # \d 는 유니코드 숫자까지 허용해 [int] 변환 예외 가능 (Codex #7)
+  $expectedCount = [int]$Matches[1]
+  $codeLines = @($lines | Select-Object -Skip 2)
+  if ($codeLines.Count -ne $expectedCount) { return $invalid }
+  $seenCodes = @{}
+  foreach ($code in $codeLines) {
+    # -cnotmatch: PS 기본 -notmatch 는 대소문자 무시라 대문자 응답이 통과함 (진리표로 검출)
+    if ($code -cnotmatch '^[0-9a-f]{64}$') { return $invalid }
+    if ($seenCodes.ContainsKey($code)) { return $invalid }
+    $seenCodes[$code] = $true
+  }
+  return @{ Valid = $true; Codes = @($codeLines) }
+}
+
+function Get-ApprovalDecision {
+  param(
+    [bool]$FetchOk,          # 전송 성공 + 응답 전체 검증 성공일 때만 $true
+    $Codes,
+    [string]$DeviceCode,
+    [string]$CacheApprovedAtUtc,
+    [string]$CacheDeviceCode,
+    [datetime]$NowUtc,
+    [int]$GraceDays = 7
+  )
+  # 승인 판정 (순수부 - 진리표 테스트 대상):
+  #   approved-live  = 유효 명단에 내 코드 있음 (캐시 갱신 신호)
+  #   denied         = 유효 명단에 내 코드 없음 = 철회/미승인 확정 (캐시 삭제 신호, 유예 없음)
+  #   approved-grace = 조회 실패 + 7일 내 승인 캐시 (무인 운용 보호)
+  #   no-cache       = 조회 실패 + 캐시 없음/만료/기기 불일치/미래 시각 (차단측)
+  if ([string]$DeviceCode -eq '') { return 'no-cache' }   # 기기 코드 산출 불가 = 차단측
+  if ($FetchOk) {
+    if (@($Codes) -contains $DeviceCode) { return 'approved-live' }
+    return 'denied'
+  }
+  if ([string]$CacheDeviceCode -ne $DeviceCode) { return 'no-cache' }
+  $approvedAt = [datetime]::MinValue
+  $parsedOk = [datetime]::TryParseExact([string]$CacheApprovedAtUtc, "yyyy-MM-dd'T'HH:mm:ss'Z'",
+    [System.Globalization.CultureInfo]::InvariantCulture,
+    ([System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal),
+    [ref]$approvedAt)
+  if (-not $parsedOk) { return 'no-cache' }
+  $elapsed = $NowUtc - $approvedAt
+  if ($elapsed.TotalSeconds -lt 0) { return 'no-cache' }          # 미래 시각 캐시 무효
+  if ($elapsed.TotalDays -gt $GraceDays) { return 'no-cache' }    # 유예 만료
+  return 'approved-grace'
+}
+
+function Get-CleanupPlan {
+  param([string]$DoneVersion, [bool]$Pending, [string]$CurrentVersion)
+  # 구버전 정리 단계 판정 (순수부): full = 신규 버전 최초 실행(팝업+프로세스+파일),
+  # files-only = 같은 버전에서 남은 파일만 무팝업 재시도, skip = 아무것도 안 함.
+  # doneVersion 이 현재보다 높으면(다운그레이드 실행) 과잉 정리를 막기 위해 skip 입니다.
+  $doneVersionParsed = $null
+  if (-not [System.Version]::TryParse([string]$DoneVersion, [ref]$doneVersionParsed)) { return 'full' }
+  if ($doneVersionParsed -lt [System.Version]$CurrentVersion) { return 'full' }
+  if ($doneVersionParsed -gt [System.Version]$CurrentVersion) { return 'skip' }   # 다운그레이드 실행 - 아무것도 안 함
+  if ($Pending) { return 'files-only' }
+  return 'skip'
+}
+
+function Test-OldGuiTitle {
+  param([string]$Title, [string]$CurrentVersion)
+  # 실행 중 구버전 GUI 판정 1축: 창 제목 엄격 일치 + 버전 파싱 성공 + 현재보다 낮음.
+  # 정규식만으로는 '1..2' 같은 값이 통과할 수 있어 [System.Version] 파싱을 이중으로 요구합니다.
+  if ([string]$Title -notmatch '^꿀비노기 컨트롤 패널 v(\d+(?:\.\d+){1,3})$') { return $false }
+  $titleVersion = $null
+  if (-not [System.Version]::TryParse($Matches[1], [ref]$titleVersion)) { return $false }
+  return ($titleVersion -lt [System.Version]$CurrentVersion)
+}
+
+function Select-OldGuiProcesses {
+  param($Snapshots, [string]$CurrentVersion, [string]$GuiScriptPath)
+  # 종료 대상 구버전 GUI 선정 (순수부). 제목과 명령줄 이중 확인 - 명령줄은 '우리 사용자의
+  # 추출 경로 전체'와 대조합니다 (다른 윈도우 사용자 세션의 HoneyNogi 는 프로필 경로가 달라
+  # 제외됨 - Codex 리뷰 #1). 제목이 비어 있거나(식별 불가) 명령줄이 다르면 '보존'합니다
+  # (과잉 종료 방향으로는 실패하지 않음).
+  $selected = @()
+  foreach ($snapshot in @($Snapshots)) {
+    if (-not $snapshot) { continue }
+    if ([int]$snapshot.Id -eq $PID) { continue }
+    if (-not (Test-OldGuiTitle -Title ([string]$snapshot.Title) -CurrentVersion $CurrentVersion)) { continue }
+    if ([string]$GuiScriptPath -eq '') { continue }
+    if (([string]$snapshot.CommandLine).IndexOf([string]$GuiScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+    $selected += , $snapshot
+  }
+  return $selected
+}
+
+function Test-ReleaseManifest {
+  param($Manifest)
+  # 공식 릴리스 해시 대장 사전 검증 (순수부): 항목 없음/버전 파싱 실패/해시 형식 오류/
+  # 버전·해시 중복이 하나라도 있으면 전체 무효 = 그 실행에서는 한 건도 삭제하지 않습니다.
+  if (-not $Manifest) { return $false }
+  if (-not $Manifest.PSObject.Properties['releases']) { return $false }
+  $entries = @($Manifest.releases)
+  if ($entries.Count -eq 0) { return $false }
+  $seenVersions = @{}
+  $seenHashes = @{}
+  foreach ($entry in $entries) {
+    if (-not $entry) { return $false }
+    $entryVersion = $null
+    if (-not $entry.PSObject.Properties['version']) { return $false }
+    if (-not [System.Version]::TryParse([string]$entry.version, [ref]$entryVersion)) { return $false }
+    $entryHash = ''
+    if ($entry.PSObject.Properties['sha256']) { $entryHash = ([string]$entry.sha256).Trim().ToLowerInvariant() }
+    if ($entryHash -notmatch '^[0-9a-f]{64}$') { return $false }
+    if ($seenVersions.ContainsKey($entryVersion.ToString())) { return $false }
+    if ($seenHashes.ContainsKey($entryHash)) { return $false }
+    $seenVersions[$entryVersion.ToString()] = $true
+    $seenHashes[$entryHash] = $true
+  }
+  return $true
+}
+
+function Select-OldZipTargets {
+  param($ZipInfos, $Manifest, [string]$CurrentVersion)
+  # 구버전 zip 삭제 대상 선정 (순수부). zip 자체 해시는 압축 시점마다 달라 쓸 수 없으므로
+  # '내용물'로 판정합니다: 모든 엔트리가 HoneyNogi*.exe 이름이고 그 해시가 전부 대장의
+  # '이전 릴리스'와 일치할 때만 (사용자 파일이 섞인 zip, 빈 zip, 미지 해시는 보존).
+  # ZipInfo = @{ Path; Entries = @(@{ Name(잎 이름); Hash }) }
+  if (-not (Test-ReleaseManifest -Manifest $Manifest)) { return @() }
+  $currentVersionParsed = [System.Version]$CurrentVersion
+  $hashToVersion = @{}
+  foreach ($entry in @($Manifest.releases)) {
+    $hashToVersion[([string]$entry.sha256).Trim().ToLowerInvariant()] = [System.Version][string]$entry.version
+  }
+  $targets = @()
+  foreach ($zipInfo in @($ZipInfos)) {
+    if (-not $zipInfo) { continue }
+    $zipEntries = @($zipInfo.Entries)
+    if ($zipEntries.Count -eq 0) { continue }
+    $allOldOfficial = $true
+    foreach ($zipEntry in $zipEntries) {
+      if (([string]$zipEntry.Name) -notlike 'HoneyNogi*.exe') { $allOldOfficial = $false; break }
+      $entryHash = ([string]$zipEntry.Hash).Trim().ToLowerInvariant()
+      if (-not $hashToVersion.ContainsKey($entryHash)) { $allOldOfficial = $false; break }
+      if ($hashToVersion[$entryHash] -ge $currentVersionParsed) { $allOldOfficial = $false; break }
+    }
+    if ($allOldOfficial) { $targets += , $zipInfo }
+  }
+  return $targets
+}
+
+function Select-OldExeTargets {
+  param($Candidates, $Manifest, [string]$CurrentVersion)
+  # 삭제 대상 선정 (순수부): SHA-256 이 대장의 '이전 릴리스' 해시와 정확히 일치할 때만.
+  # 대장에 없는 해시(자작/새 버전 사본/미보관 구버전)와 현재 이상 버전은 무조건 보존합니다.
+  if (-not (Test-ReleaseManifest -Manifest $Manifest)) { return @() }
+  $currentVersionParsed = [System.Version]$CurrentVersion
+  $hashToVersion = @{}
+  foreach ($entry in @($Manifest.releases)) {
+    $hashToVersion[([string]$entry.sha256).Trim().ToLowerInvariant()] = [System.Version][string]$entry.version
+  }
+  $targets = @()
+  foreach ($candidate in @($Candidates)) {
+    if (-not $candidate) { continue }
+    $candidateHash = ([string]$candidate.Hash).Trim().ToLowerInvariant()
+    if (-not $hashToVersion.ContainsKey($candidateHash)) { continue }
+    if ($hashToVersion[$candidateHash] -ge $currentVersionParsed) { continue }
+    $targets += , $candidate
+  }
+  return $targets
+}
+
+# ----- 승인 상태 캐시 (config.approval) -----
+function Get-ConfigApprovalCache {
+  $cache = @{ At = ''; Code = '' }
+  try {
+    $cacheConfig = Read-Config
+    if ($cacheConfig -and $cacheConfig.PSObject.Properties['approval'] -and $cacheConfig.approval) {
+      if ($cacheConfig.approval.PSObject.Properties['lastApprovedAtUtc']) { $cache.At = [string]$cacheConfig.approval.lastApprovedAtUtc }
+      if ($cacheConfig.approval.PSObject.Properties['deviceCode']) { $cache.Code = [string]$cacheConfig.approval.deviceCode }
+    }
+  } catch { }
+  return $cache
+}
+
+function Set-ApprovalCache {
+  # 승인 확인 성공 시각 기록 (유예 7일의 기준). fresh read 후 해당 키만 병합해 저장합니다.
+  try {
+    $cacheConfig = Read-Config
+    if (-not $cacheConfig) { return }
+    $cacheNode = [pscustomobject]@{
+      lastApprovedAtUtc = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+      deviceCode        = $script:deviceCode
+    }
+    if ($cacheConfig.PSObject.Properties['approval']) { $cacheConfig.approval = $cacheNode }
+    else { $cacheConfig | Add-Member -NotePropertyName 'approval' -NotePropertyValue $cacheNode }
+    Save-Config $cacheConfig
+  } catch { }
+}
+
+function Clear-ApprovalCache {
+  # 유효 명단에서 명시적 부재(철회) 확인 시 호출 - 이후 조회 실패가 유예로 살아나는 구멍을 막습니다.
+  # 저장 실패는 경고로 남깁니다 (재시작+오프라인 조합에서 과거 캐시가 유예로 통과할 수 있는
+  # 잔여 위험 - config 원자 저장이라 극히 드묾, 이슈 문서에 한계 명시. Codex #4)
+  try {
+    $cacheConfig = Read-Config
+    if (-not $cacheConfig -or -not $cacheConfig.PSObject.Properties['approval']) { return }
+    $cacheConfig.approval = $null
+    Save-Config $cacheConfig
+  } catch {
+    try { Add-GuiLog ('[경고] 승인 캐시 삭제 실패: {0}' -f $_.Exception.Message) } catch { }
+  }
+}
+
+function Test-ApprovalAllowsStart {
+  return ([string]$script:approvalState -like 'approved*')
+}
+
+# ----- 구버전 정리: 탐색/삭제 -----
+function Read-ReleaseManifest {
+  # 런처가 추출한 공식 릴리스 해시 대장. 없거나 손상이면 null = 파일 삭제 0건 (안전측).
+  $manifestPath = Join-Path $scriptRoot 'release_hashes.json'
+  if (-not (Test-Path -LiteralPath $manifestPath)) { return $null }
+  try { return (Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { return $null }
+}
+
+function Get-OwnExePath {
+  # 런처가 기록한 자기 exe 경로 (관리자 승격을 거쳐도 파일이라 유실되지 않음).
+  try {
+    $recordPath = Join-Path $scriptRoot 'exe_path.txt'
+    if (Test-Path -LiteralPath $recordPath) {
+      $recorded = (Get-Content -LiteralPath $recordPath -Raw -Encoding UTF8 -ErrorAction Stop).Trim()
+      if ($recorded -and (Test-Path -LiteralPath $recorded)) { return $recorded }
+    }
+  } catch { }
+  return ''
+}
+
+function Get-DownloadsFolderPath {
+  # Downloads 는 환경변수 조합이 아니라 셸 등록 경로로 구합니다 (사용자 이동/리디렉션 반영).
+  try {
+    $shellFolders = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction Stop
+    $downloadsRaw = [string]$shellFolders.'{374DE290-123F-4565-9164-39C4925E467B}'
+    if ($downloadsRaw) { return [Environment]::ExpandEnvironmentVariables($downloadsRaw) }
+  } catch { }
+  return (Join-Path $env:USERPROFILE 'Downloads')
+}
+
+function Get-OldExeSearchRoots {
+  # 탐색 범위 (사용자 확정): 자기 exe 폴더(직속만) + Downloads + 바탕화면 + 문서(하위 포함).
+  # exe 폴더는 깊이 0 - 구버전은 새 exe '옆'에 놓이는 게 일반적이고, 하위까지 훑으면
+  # 개발 PC 의 버전 보관 폴더(version\v1.0.7 등)처럼 '일부러 보관한' 하위 사본을 지우는
+  # 사고가 남 (2026-07-27 실제 발견). 반환: @(@{ Path; MaxDepth })
+  $rawRoots = New-Object System.Collections.Generic.List[object]
+  $ownExe = Get-OwnExePath
+  if ($ownExe) { $rawRoots.Add(@{ Path = (Split-Path -Parent $ownExe); MaxDepth = 0 }) }
+  $rawRoots.Add(@{ Path = (Get-DownloadsFolderPath); MaxDepth = 5 })
+  foreach ($specialFolder in @([System.Environment+SpecialFolder]::Desktop, [System.Environment+SpecialFolder]::MyDocuments)) {
+    try { $rawRoots.Add(@{ Path = [Environment]::GetFolderPath($specialFolder); MaxDepth = 5 }) } catch { }
+  }
+  $depthByKey = @{}
+  $pathByKey = @{}
+  foreach ($rawRoot in $rawRoots) {
+    if (-not $rawRoot -or -not $rawRoot.Path) { continue }
+    $fullRoot = ''
+    try { $fullRoot = [System.IO.Path]::GetFullPath([string]$rawRoot.Path).TrimEnd('\') } catch { continue }
+    if ($fullRoot -eq '') { continue }
+    if (-not [System.IO.Directory]::Exists($fullRoot)) { continue }
+    $rootKey = $fullRoot.ToLowerInvariant()
+    # 같은 경로가 두 규칙으로 들어오면(예: exe 가 Downloads 에 있음) 더 깊은 쪽을 채택
+    if ($depthByKey.ContainsKey($rootKey) -and [int]$depthByKey[$rootKey] -ge [int]$rawRoot.MaxDepth) { continue }
+    $depthByKey[$rootKey] = [int]$rawRoot.MaxDepth
+    $pathByKey[$rootKey] = $fullRoot
+  }
+  $roots = @()
+  foreach ($rootKey in $pathByKey.Keys) {
+    $roots += , @{ Path = $pathByKey[$rootKey]; MaxDepth = [int]$depthByKey[$rootKey] }
+  }
+  return $roots
+}
+
+function Find-OldExeCandidates {
+  # 2단계 평가의 1단계: 후보 파일(exe·zip) '전체 수집'만 하고 아무것도 삭제하지 않습니다.
+  # 가드: 루트별 깊이(exe 폴더 0, 나머지 5), 방문 폴더 5000개, 전체 20초, reparse 폴더 제외,
+  #       OFFLINE/REPARSE/RECALL_* 속성 파일 제외(OneDrive 자리표시자 강제 다운로드 방지), 10MB 초과 제외.
+  $skipAttrMask = [int]0x1000 -bor [int]0x400 -bor [int]0x40000 -bor [int]0x400000
+  $candidateByKey = @{}
+  $zipByKey = @{}
+  $skippedCount = 0
+  $visitedDirs = 0
+  $aborted = $false
+  $abortReason = ''
+  $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  foreach ($root in @(Get-OldExeSearchRoots)) {
+    if ($aborted) { break }
+    $rootMaxDepth = [int]$root.MaxDepth
+    $stack = New-Object System.Collections.Generic.Stack[object]
+    $stack.Push(@{ Path = [string]$root.Path; Depth = 0 })
+    while ($stack.Count -gt 0) {
+      if ($stopwatch.Elapsed.TotalSeconds -gt 20) { $aborted = $true; $abortReason = '시간 상한(20초)'; break }
+      $visitedDirs++
+      if ($visitedDirs -gt 5000) { $aborted = $true; $abortReason = '폴더 수 상한(5000개)'; break }
+      $entry = $stack.Pop()
+      foreach ($pattern in @('HoneyNogi*.exe', 'HoneyNogi*.zip')) {
+        try {
+          foreach ($filePath in [System.IO.Directory]::GetFiles([string]$entry.Path, $pattern)) {
+            try {
+              $fileInfo = New-Object System.IO.FileInfo($filePath)
+              if (([int]$fileInfo.Attributes -band $skipAttrMask) -ne 0) { $skippedCount++; continue }
+              if ($fileInfo.Length -gt 10MB) { $skippedCount++; continue }
+              if ($pattern -eq 'HoneyNogi*.zip') { $zipByKey[$filePath.ToLowerInvariant()] = $filePath }
+              else { $candidateByKey[$filePath.ToLowerInvariant()] = $filePath }
+            } catch { $skippedCount++ }
+          }
+        } catch { }   # 접근 거부 등은 폴더 단위로 격리
+      }
+      if ([int]$entry.Depth -ge $rootMaxDepth) { continue }
+      try {
+        foreach ($subDir in [System.IO.Directory]::GetDirectories([string]$entry.Path)) {
+          try {
+            if (([System.IO.File]::GetAttributes($subDir) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+          } catch { continue }
+          $stack.Push(@{ Path = $subDir; Depth = ([int]$entry.Depth + 1) })
+        }
+      } catch { }
+    }
+  }
+  return @{ Files = @($candidateByKey.Values); ZipFiles = @($zipByKey.Values); Skipped = $skippedCount; Aborted = $aborted; AbortReason = $abortReason }
+}
+
+function Get-ZipEntryInfos {
+  param([string]$ZipPath)
+  # zip 내용물 판독: 폴더 엔트리를 제외한 각 파일의 잎 이름과 SHA-256 (디스크 추출 없이
+  # 스트림으로 해시). 손상 zip/엔트리 과다(>5)/대형 엔트리는 Ok=$false = 보존 (실패 폐쇄).
+  $entryInfos = @()
+  $archive = $null
+  try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    foreach ($archiveEntry in $archive.Entries) {
+      $entryFullName = [string]$archiveEntry.FullName
+      if ($entryFullName.EndsWith('/') -or $entryFullName.EndsWith('\')) { continue }   # 폴더 엔트리
+      if ([long]$archiveEntry.Length -gt 10MB) { return @{ Ok = $false; Entries = @() } }
+      if (@($entryInfos).Count -ge 5) { return @{ Ok = $false; Entries = @() } }        # 공식 zip 은 엔트리 1개
+      $sha = [System.Security.Cryptography.SHA256]::Create()
+      $entryStream = $archiveEntry.Open()
+      try {
+        # 헤더의 Length 는 위조 가능하므로 '실제 읽은 누적량'으로 상한을 검사합니다
+        # (압축폭탄 방어 - Codex 지적). 초과 시 즉시 중단하고 zip 전체를 보존합니다.
+        $buffer = New-Object byte[] 81920
+        $totalRead = [long]0
+        while ($true) {
+          $readCount = $entryStream.Read($buffer, 0, $buffer.Length)
+          if ($readCount -le 0) { break }
+          $totalRead += $readCount
+          if ($totalRead -gt 10MB) { return @{ Ok = $false; Entries = @() } }
+          [void]$sha.TransformBlock($buffer, 0, $readCount, $null, 0)
+        }
+        [void]$sha.TransformFinalBlock($buffer, 0, 0)
+        $entryHash = (($sha.Hash | ForEach-Object { $_.ToString('x2') }) -join '')
+      } finally {
+        $entryStream.Dispose()
+        $sha.Dispose()
+      }
+      $entryInfos += , @{ Name = [System.IO.Path]::GetFileName($entryFullName); Hash = $entryHash }
+    }
+    return @{ Ok = $true; Entries = $entryInfos }
+  } catch {
+    return @{ Ok = $false; Entries = @() }
+  } finally {
+    if ($archive) { try { $archive.Dispose() } catch { } }
+  }
+}
+
+function Invoke-OldExeFileSweep {
+  param($Manifest)
+  # 2단계 평가의 2단계: 상한·매니페스트 검증 통과 후, 해시가 '이전 릴리스'와 일치하는
+  # 파일만 완전 삭제합니다 (휴지통 미사용 - 사용자 확정. 원본은 개발자가 보유).
+  # 반환: @{ Deleted; Unverified; Failed; Pending }
+  $result = @{ Deleted = 0; Unverified = 0; Failed = 0; Pending = $false }
+  # 대장이 없거나 손상이면 이번 실행은 정리 불가 - '완료'가 아니라 '재시도 대기'로 남깁니다
+  # (일시적 추출 실패가 이 버전의 정리를 영구히 건너뛰게 하지 않음 - Codex #6)
+  if (-not (Test-ReleaseManifest -Manifest $Manifest)) {
+    $script:cleanupLogLines += '[경고] 공식 릴리스 해시 목록을 읽지 못해 이번에는 구버전 파일을 정리하지 않습니다 (다음 실행 때 재시도)'
+    $result.Pending = $true
+    return $result
+  }
+  $found = Find-OldExeCandidates
+  if ($found.Aborted) {
+    $script:cleanupLogLines += ('[경고] 구버전 탐색을 중단했습니다({0}) - 다음 실행 때 다시 시도합니다' -f $found.AbortReason)
+    $result.Pending = $true
+    return $result
+  }
+  $candidateFiles = @($found.Files)
+  $zipFiles = @($found.ZipFiles)
+  if (($candidateFiles.Count + $zipFiles.Count) -eq 0) { return $result }
+  if (($candidateFiles.Count + $zipFiles.Count) -gt 20) {
+    # 비정상적으로 많은 후보 = 오판 가능성 → 한 건도 삭제하지 않고 중단 (Codex 합의)
+    $script:cleanupLogLines += ('[경고] HoneyNogi exe/zip 후보가 {0}개로 비정상적으로 많아 정리를 건너뜁니다' -f ($candidateFiles.Count + $zipFiles.Count))
+    $result.Pending = $true
+    return $result
+  }
+  # 자기 자신/현재 버전 사본 식별용: 자기 exe 의 경로와 해시 (내장 대장에는 자기 해시가 없음 -
+  # 빌드 순환 방지 설계라, 방금 받은 새 버전 사본은 여기서 걸러 '확인 불가'로 세지 않습니다)
+  $ownExePath = (Get-OwnExePath).ToLowerInvariant()
+  $ownExeHash = ''
+  if ($ownExePath) {
+    try { $ownExeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $ownExePath -ErrorAction Stop).Hash.ToLowerInvariant() } catch { }
+  }
+  $candidates = @()
+  foreach ($candidateFile in $candidateFiles) {
+    if ($ownExePath -and ($candidateFile.ToLowerInvariant() -eq $ownExePath)) { continue }   # 자기 자신 제외
+    $candidateHash = ''
+    try {
+      $candidateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidateFile -ErrorAction Stop).Hash.ToLowerInvariant()
+    } catch { $result.Failed++; continue }
+    if ($ownExeHash -and ($candidateHash -eq $ownExeHash)) { continue }                      # 현재 버전 사본 보존
+    $candidates += , @{ Path = $candidateFile; Hash = $candidateHash }
+  }
+  $targets = @(Select-OldExeTargets -Candidates $candidates -Manifest $Manifest -CurrentVersion $appVersion)
+  $result.Unverified = @($candidates).Count - $targets.Count
+  foreach ($target in $targets) {
+    try {
+      [System.IO.File]::Delete([string]$target.Path)
+      $result.Deleted++
+      $script:cleanupLogLines += ('[안내] 구버전 삭제: {0}' -f $target.Path)
+    } catch {
+      $result.Failed++
+      $script:cleanupLogLines += ('[경고] 구버전 삭제 실패(다음 실행 때 재시도): {0} - {1}' -f $target.Path, $_.Exception.Message)
+    }
+  }
+  # zip 후보: 내용물이 '전부 공식 이전 릴리스 exe'일 때만 삭제 (2026-07-27 사용자 요청 -
+  # HoneyNogi.zip 배포본 정리). 새 버전 zip(내용 = 자기 해시)과 판독 불가/혼합 zip 은 보존.
+  $zipInfos = @()
+  foreach ($zipFile in $zipFiles) {
+    $zipRead = Get-ZipEntryInfos -ZipPath $zipFile
+    if (-not [bool]$zipRead.Ok) { $result.Unverified++; continue }
+    $zipEntries = @($zipRead.Entries)
+    $isOwnCopy = $false
+    if ($ownExeHash) {
+      foreach ($zipEntry in $zipEntries) {
+        if (([string]$zipEntry.Hash) -eq $ownExeHash) { $isOwnCopy = $true; break }
+      }
+    }
+    if ($isOwnCopy) { continue }   # 현재 버전 zip 사본(방금 받은 배포물) 보존
+    $zipInfos += , @{ Path = $zipFile; Entries = $zipEntries }
+  }
+  $zipTargets = @(Select-OldZipTargets -ZipInfos $zipInfos -Manifest $Manifest -CurrentVersion $appVersion)
+  $result.Unverified += @($zipInfos).Count - @($zipTargets).Count
+  foreach ($zipTarget in $zipTargets) {
+    try {
+      [System.IO.File]::Delete([string]$zipTarget.Path)
+      $result.Deleted++
+      $script:cleanupLogLines += ('[안내] 구버전 압축본 삭제: {0}' -f $zipTarget.Path)
+    } catch {
+      $result.Failed++
+      $script:cleanupLogLines += ('[경고] 구버전 압축본 삭제 실패(다음 실행 때 재시도): {0} - {1}' -f $zipTarget.Path, $_.Exception.Message)
+    }
+  }
+  if ($result.Unverified -gt 0) {
+    $script:cleanupLogLines += ('[안내] 공식 릴리스 해시와 일치하지 않는 HoneyNogi 파일/압축본 {0}개는 보존했습니다' -f $result.Unverified)
+  }
+  $result.Pending = ($result.Failed -gt 0)
+  return $result
+}
+
+function Set-CleanupMarker {
+  param([string]$DoneVersion, [bool]$Pending)
+  # '이 버전은 정리 완료(팝업 1회 소진)' 마커. fresh read 후 해당 키만 병합해 저장합니다.
+  try {
+    $markerConfig = Read-Config
+    if (-not $markerConfig) { return }
+    $markerNode = [pscustomobject]@{ doneVersion = $DoneVersion; pending = $Pending }
+    if ($markerConfig.PSObject.Properties['oldExeCleanup']) { $markerConfig.oldExeCleanup = $markerNode }
+    else { $markerConfig | Add-Member -NotePropertyName 'oldExeCleanup' -NotePropertyValue $markerNode }
+    Save-Config $markerConfig
+  } catch {
+    $script:cleanupLogLines += ('[경고] 구버전 정리 마커 저장 실패: {0}' -f $_.Exception.Message)
+  }
+}
+
+# ----- 구버전 정리: 실행 중 구버전 프로세스 종료 -----
+function Invoke-OldProcessShutdown {
+  # 실행 중 구버전 = 구버전이 띄운 powershell(GUI/워커). exe 파일은 잠기지 않지만(런처는
+  # 즉시 종료) 구 GUI 가 전역 뮤텍스를 쥐고 있으면 새 버전이 못 뜨고, 구 워커는 계속
+  # 게임을 조작하므로 반드시 정리합니다. 워커 스냅샷을 GUI 종료 '전'에 수집합니다.
+  # 명령줄 대조는 '우리 사용자의 추출 경로 전체'로 - 다른 윈도우 사용자 세션 제외 (Codex #1).
+  $shutdown = @{ GuiKilled = 0; WorkerKilled = 0 }
+  $guiScriptPath = Join-Path $scriptRoot 'mabinogi_gui.ps1'
+  $cimRows = @()
+  try { $cimRows = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction Stop) } catch { }
+  $commandLineByPid = @{}
+  foreach ($cimRow in $cimRows) { $commandLineByPid[[int]$cimRow.ProcessId] = [string]$cimRow.CommandLine }
+  # 워커 스냅샷: 우리 추출 경로의 run_once 만. .Handle 접근으로 핸들을 지금 바인딩해
+  # PID 재사용에도 '그 프로세스'만 가리키게 합니다 (Kill 은 캐시된 핸들 사용 - Codex #3)
+  $workerProcs = @()
+  foreach ($cimRow in $cimRows) {
+    if (([string]$cimRow.CommandLine).IndexOf($workerScript, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+    if ([int]$cimRow.ProcessId -eq $PID) { continue }
+    try {
+      $workerProc = Get-Process -Id ([int]$cimRow.ProcessId) -ErrorAction Stop
+      [void]$workerProc.Handle
+      $workerProcs += , $workerProc
+    } catch { }
+  }
+  # 구버전 GUI 선정 (제목+명령줄 이중 확인, 순수부)
+  $processByPid = @{}
+  $snapshots = @()
+  $currentGuiElsewhere = $false
+  foreach ($psProc in @(Get-Process -Name 'powershell' -ErrorAction SilentlyContinue)) {
+    try { [void]$psProc.Handle } catch { }   # 스냅샷 시점 핸들 바인딩 - 이후 Kill 이 PID 재사용본을 잡지 않음 (Codex #3)
+    $processByPid[[int]$psProc.Id] = $psProc
+    $procTitle = [string]$psProc.MainWindowTitle
+    $procCmd = [string]$commandLineByPid[[int]$psProc.Id]
+    $snapshots += , @{ Id = $psProc.Id; Title = $procTitle; CommandLine = $procCmd }
+    # 현재 버전 GUI 가 이미 떠 있는지 (동시 기동 레이스에서 그쪽 워커를 죽이지 않기 위함 - Codex #1/#2)
+    if ([int]$psProc.Id -ne $PID -and $procTitle -eq ('꿀비노기 컨트롤 패널 v' + $appVersion) -and
+        $procCmd.IndexOf($guiScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+      $currentGuiElsewhere = $true
+    }
+  }
+  $oldGuis = @(Select-OldGuiProcesses -Snapshots $snapshots -CurrentVersion $appVersion -GuiScriptPath $guiScriptPath)
+  $hasWorkers = (@($workerProcs).Count -gt 0)
+  foreach ($oldGui in $oldGuis) {
+    $guiProc = $processByPid[[int]$oldGui.Id]
+    if (-not $guiProc) { continue }
+    try {
+      if ($hasWorkers) {
+        # 자동화 실행 중인 구 GUI 는 정상 닫기가 종료 확인창(YesNo)에 걸리므로 바로 강제 종료
+        if (-not $guiProc.HasExited) { $guiProc.Kill() }
+      } else {
+        [void]$guiProc.CloseMainWindow()
+        if (-not $guiProc.WaitForExit(3000)) {
+          if (-not $guiProc.HasExited) { $guiProc.Kill() }
+        }
+      }
+      [void]$guiProc.WaitForExit(3000)
+      $shutdown.GuiKilled++
+    } catch { }
+  }
+  # 워커 종료. 단 '현재 버전 GUI 가 다른 프로세스로 이미 떠 있으면' 워커가 그쪽의 정상
+  # 워커일 수 있으므로 일절 건드리지 않습니다 (동시 기동 레이스 - 어차피 이쪽 인스턴스는
+  # 곧 GUI 뮤텍스에서 중복 실행으로 종료되고, 방금 죽인 구 GUI 의 워커가 남더라도 회차
+  # 하나를 끝내면 스스로 종료됨). 그 외 시점의 run_once 워커는 전부 구버전/고아입니다.
+  if ($currentGuiElsewhere) {
+    return $shutdown
+  }
+  foreach ($workerProc in $workerProcs) {
+    try {
+      if (-not $workerProc.HasExited) {
+        $workerProc.Kill()
+        [void]$workerProc.WaitForExit(3000)
+        $shutdown.WorkerKilled++
+      }
+    } catch { }
+  }
+  if ($shutdown.GuiKilled -gt 0 -or $shutdown.WorkerKilled -gt 0) {
+    $script:cleanupLogLines += ('[안내] 실행 중이던 구버전을 종료했습니다 (GUI {0}개, 워커 {1}개)' -f $shutdown.GuiKilled, $shutdown.WorkerKilled)
+  }
+  return $shutdown
+}
+
+# ----- 구버전 정리: 안내 팝업 (자동 닫힘 - 클릭 대기 없음, 무인 재시작 보호) -----
+function Show-CleanupPopup {
+  param([string]$Text)
+  $popupForm = New-Object System.Windows.Forms.Form
+  $popupForm.FormBorderStyle = 'None'
+  $popupForm.TopMost = $true
+  $popupForm.ShowInTaskbar = $false
+  $popupForm.StartPosition = 'CenterScreen'
+  $popupForm.Size = New-Object System.Drawing.Size(440, 100)
+  $popupForm.BackColor = [System.Drawing.Color]::FromArgb(255, 250, 235)
+  $popupLabel = New-Object System.Windows.Forms.Label
+  $popupLabel.Dock = 'Fill'
+  $popupLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+  $popupLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
+  $popupLabel.ForeColor = [System.Drawing.Color]::FromArgb(120, 84, 20)
+  $popupLabel.Text = $Text
+  $popupForm.Controls.Add($popupLabel)
+  $popupForm.Show()
+  $popupForm.Refresh()
+  [System.Windows.Forms.Application]::DoEvents()
+  return @{ Form = $popupForm; Label = $popupLabel }
+}
+
+function Invoke-OldExeCleanup {
+  # 구버전 정리 전체 오케스트레이션. 동시 최초 실행 레이스는 전용 뮤텍스로 직렬화하고,
+  # 획득 후 config 를 다시 읽어 판정합니다 (Codex 합의). 프로세스 종료는 최초 1회(full)만,
+  # pending 재시도는 파일만 건드립니다.
+  if ($script:cleanupInProgress) { return }
+  $script:cleanupInProgress = $true
+  $script:cleanupProcessPhaseDone = $false
+  $cleanupMutex = $null
+  $cleanupMutexHeld = $false
+  $popup = $null
+  try {
+    $cleanupMutex = New-Object System.Threading.Mutex($false, 'Global\HoneyNogiCleanup')
+    try {
+      # 대기 40초 = 정리 최대 소요(탐색 20초 + 프로세스 정리 + 해싱)보다 길게 - 동시 기동 시
+      # 두 번째 인스턴스가 첫 인스턴스의 정리 완료를 실제로 기다리게 합니다 (Codex #2)
+      $cleanupMutexHeld = $cleanupMutex.WaitOne(40000)
+    } catch [System.Threading.AbandonedMutexException] {
+      $cleanupMutexHeld = $true
+    }
+    if (-not $cleanupMutexHeld) {
+      # 다른 인스턴스가 40초 넘게 정리 중 = 그쪽이 GUI 가 됩니다. 이 인스턴스가 정리 없이
+      # 계속 진행하면 그쪽 정리와 레이스가 생기므로 조용히 종료합니다 (Codex #2)
+      $script:cleanupMutexTimedOut = $true
+      return
+    }
+    $markerConfig = Read-Config
+    $doneVersion = ''
+    $pending = $false
+    if ($markerConfig -and $markerConfig.PSObject.Properties['oldExeCleanup'] -and $markerConfig.oldExeCleanup) {
+      if ($markerConfig.oldExeCleanup.PSObject.Properties['doneVersion']) { $doneVersion = [string]$markerConfig.oldExeCleanup.doneVersion }
+      if ($markerConfig.oldExeCleanup.PSObject.Properties['pending']) { $pending = ConvertTo-StrictBoolean $markerConfig.oldExeCleanup.pending $false }
+    }
+    $plan = Get-CleanupPlan -DoneVersion $doneVersion -Pending $pending -CurrentVersion $appVersion
+    if ($plan -eq 'skip') { return }
+    $manifest = Read-ReleaseManifest
+    if ($plan -eq 'files-only') {
+      # 안내 창은 버전당 1회 약속 - 재시도는 조용히 (로그만)
+      $sweep = Invoke-OldExeFileSweep -Manifest $manifest
+      Set-CleanupMarker -DoneVersion $appVersion -Pending ([bool]$sweep.Pending)
+      return
+    }
+    # full: 신규 버전 최초 실행 1회
+    $popup = Show-CleanupPopup -Text ('구버전 확인 및 삭제를 진행합니다.' + [Environment]::NewLine + '잠시만 기다려주세요…')
+    $shutdown = Invoke-OldProcessShutdown
+    $script:cleanupProcessPhaseDone = $true   # 여기 도달 = 프로세스 정리 완료 (Codex #5)
+    if ($shutdown.WorkerKilled -gt 0) { Release-StuckInput }   # 워커 강제 종료 시 키/마우스 눌림 해제
+    $sweep = Invoke-OldExeFileSweep -Manifest $manifest
+    Set-CleanupMarker -DoneVersion $appVersion -Pending ([bool]$sweep.Pending)
+    $resultText = if ([int]$sweep.Deleted -gt 0) { ('구버전 {0}개 삭제 완료' -f $sweep.Deleted) }
+      elseif ([bool]$sweep.Pending) { '일부를 확인하지 못했습니다 (다음 실행 때 재시도)' }
+      else { '구버전이 없습니다' }
+    $popup.Label.Text = $resultText
+    $popup.Form.Refresh()
+    [System.Windows.Forms.Application]::DoEvents()
+    $closeAt = [DateTime]::UtcNow.AddMilliseconds(2500)
+    while ([DateTime]::UtcNow -lt $closeAt) {
+      Start-Sleep -Milliseconds 100
+      [System.Windows.Forms.Application]::DoEvents()
+    }
+  } catch {
+    # 어떤 오류도 프로그램 시작을 막지 않습니다 (예외 경로 MessageBox 금지 - 무인 운용 보호).
+    # 마커는 '프로세스 정리까지 끝난 경우'에만 남깁니다 - 그 전에 실패했으면 다음 실행이
+    # full 정리(구버전 종료 포함)를 다시 시도해야 하기 때문입니다 (Codex #5)
+    $script:cleanupLogLines += ('[경고] 구버전 정리 중 오류: {0}' -f $_.Exception.Message)
+    if ($script:cleanupProcessPhaseDone) {
+      try { Set-CleanupMarker -DoneVersion $appVersion -Pending $true } catch { }
+    }
+  } finally {
+    if ($popup -and $popup.Form) {
+      try { $popup.Form.Close() } catch { }
+      try { $popup.Form.Dispose() } catch { }
+    }
+    if ($cleanupMutexHeld) { try { $cleanupMutex.ReleaseMutex() } catch { } }
+    if ($cleanupMutex) { try { $cleanupMutex.Dispose() } catch { } }
+    $script:cleanupInProgress = $false
+  }
+}
+
+# ============================================================
+#  구버전 정리 실행 + 중복 실행 방지 (순서 중요 - 위 이동 안내 주석 참고)
+# ============================================================
+$script:cleanupInProgress = $false
+$script:cleanupMutexTimedOut = $false
+try { Invoke-OldExeCleanup } catch { $script:cleanupLogLines += ('[경고] 구버전 정리 실행 실패: {0}' -f $_.Exception.Message) }
+if ($script:cleanupMutexTimedOut) { exit }   # 다른 인스턴스가 정리 중 - 그쪽에 양보하고 종료
+
+# 컨트롤 패널이 여러 개 뜨면 [시작] 시 서로의 워커를 '기존 프로세스'로 종료시키고
+# 설정 저장도 서로 덮어쓰므로, 두 번째 인스턴스는 안내 후 스스로 종료합니다.
+$script:guiMutex = New-Object System.Threading.Mutex($false, 'Global\HoneyNogiGui')
+$guiMutexAcquired = $false
+try {
+  $guiMutexAcquired = $script:guiMutex.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+  # 이전 GUI가 강제 종료되어 뮤텍스가 버려진 경우: 이 인스턴스가 소유권을 이어받음
+  $guiMutexAcquired = $true
+}
+if (-not $guiMutexAcquired) {
+  [System.Windows.Forms.MessageBox]::Show(
+    '컨트롤 패널이 이미 실행 중입니다. 기존 창을 사용해 주세요.' + [Environment]::NewLine +
+    '(기존 창이 안 보이면 작업 관리자에서 powershell.exe 를 확인하세요)',
+    '꿀비노기', [System.Windows.Forms.MessageBoxButtons]::OK,
+    [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+  try { $script:guiMutex.Dispose() } catch { }
+  exit
+}
+
 # ----- 상태 변수 -----
 $script:worker = $null
 $script:running = $false
@@ -489,6 +1231,102 @@ $script:configMigrationError = $null # 설정 자동 이전 실패 원인 (실�
 $script:acrLockUpdating = $false     # 어비스 커스텀 방식·매칭 잠금 적용 중 재진입 가드 (라디오 Checked 변경 → 패널 갱신 → 재호출 방지)
 $script:acrLockOn = $false           # 어비스 방식·매칭이 리스트 값으로 잠겨 있는지 (비활성 라디오 툴팁 판정용)
 $script:acrTipShownFor = $null       # 현재 툴팁을 띄워 둔 잠긴 라디오 (같은 컨트롤에서 반복 호출 → 깜박임 방지)
+# --- 사용 승인(화이트리스트) 상태 ---
+$script:deviceCode = Get-LocalDeviceCode   # 이 PC 의 식별 코드 (빈 값 = 산출 불가 → 차단측)
+$script:approvalState = 'no-cache'   # 'approved-live'|'approved-grace'|'denied'|'no-cache' (시작 시 캐시로 잠정 판정)
+$script:approvalPendingStart = $false # 시작 버튼이 눌려 '조회 완료 후 시작'이 예약된 상태 (새 자동화 시작 시 검사 스펙)
+$script:approvalDeniedSeen = $false  # 이 세션에서 '유효 명단에 부재(철회)'를 확인한 적 있음 - 캐시 삭제가
+                                     # 실패해도 세션 내에서는 이후 조회 실패가 유예로 되살아나지 않게 함 (Codex #4)
+$script:approvalPs = $null           # 진행 중 명단 조회 러닝스페이스 (null = 조회 없음, single-flight 가드)
+$script:approvalAsync = $null
+
+function Start-ApprovalCheck {
+  # 명단 비동기 조회 시작. 진행 중이면 새로 만들지 않고 합류합니다 (single-flight -
+  # 조회는 한 번에 하나뿐이라 늦게 온 과거 응답이 최신 판정을 덮는 역전이 생기지 않음).
+  param([switch]$ForStart)
+  if ($ForStart) { $script:approvalPendingStart = $true }
+  if ($script:approvalPs) { return }
+  try {
+    $script:approvalPs = [System.Management.Automation.PowerShell]::Create()
+    [void]$script:approvalPs.AddScript({
+        param($fetchUrl)
+        try {
+          # PS 5.1 기본 설정에는 TLS 1.2가 빠져 있을 수 있어 추가합니다 (3072 = Tls12).
+          # -UseBasicParsing: IE 초기 설정 의존 제거 (무인 환경). /exec 는 302 리다이렉트를
+          # 거치므로 기본 리다이렉트 추종을 그대로 둡니다. ?t= 는 캐시 무효화용입니다.
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          $response = Invoke-WebRequest -Uri ($fetchUrl + '?t=' + [DateTime]::UtcNow.Ticks) -UseBasicParsing -TimeoutSec 10
+          if ([int]$response.StatusCode -ne 200) { return '' }
+          return [string]$response.Content
+        } catch { return '' }
+      }).AddArgument($whitelistUrl)
+    $script:approvalAsync = $script:approvalPs.BeginInvoke()
+    if ($script:approvalTimer) { $script:approvalTimer.Start() }
+  } catch {
+    # 조회 기동 자체가 실패하면(러닝스페이스 생성 불가 등) '조회 실패'로 즉시 판정합니다 -
+    # 방치하면 single-flight 가드와 예약된 시작이 영구 고착됨 (Codex #9)
+    try { if ($script:approvalPs) { $script:approvalPs.Dispose() } } catch { }
+    $script:approvalPs = $null
+    $script:approvalAsync = $null
+    Complete-ApprovalCheck -ResponseText ''
+  }
+}
+
+function Complete-ApprovalCheck {
+  param([string]$ResponseText)
+  # 조회 결과 반영: 검증 → 판정 → 캐시 갱신/삭제 → UI/로그 → 예약된 시작 처리.
+  # 실행 중인 자동화는 어떤 판정에도 건드리지 않습니다 (다음 새 시작부터 적용).
+  $parsed = Test-WhitelistResponse -Text $ResponseText
+  $cache = Get-ConfigApprovalCache
+  $decision = Get-ApprovalDecision -FetchOk ([bool]$parsed.Valid) -Codes $parsed.Codes -DeviceCode $script:deviceCode `
+    -CacheApprovedAtUtc $cache.At -CacheDeviceCode $cache.Code -NowUtc ([DateTime]::UtcNow) -GraceDays $approvalGraceDays
+  # 세션 내 철회 tombstone: 이 세션에서 denied 를 확인했다면, 캐시 삭제 성패와 무관하게
+  # 이후 조회 실패가 grace 로 되살아나지 못하게 합니다 (Codex #4)
+  if ($decision -eq 'approved-grace' -and $script:approvalDeniedSeen) { $decision = 'no-cache' }
+  $script:approvalState = $decision
+  switch ($decision) {
+    'approved-live' { $script:approvalDeniedSeen = $false; Set-ApprovalCache }
+    'denied' { $script:approvalDeniedSeen = $true; Clear-ApprovalCache }   # 명시적 부재 = 철회 확정, 유예 근거 제거
+  }
+  # 확인 결과는 '매번' 로그로 남깁니다 - 상태가 이전과 같다고 침묵하면 [승인 다시 확인]이
+  # 동작하지 않는 것처럼 보임 (2026-07-27 타 PC 실기 제보). denied 문구는 사용자용으로
+  # 간결하게 하되 기기 코드 끝자리는 유지합니다 - 제보 스크린샷 한 장으로 관리자가 명단과
+  # 대조(미등록/오타/체크 꺼짐 구분)할 수 있는 진단 정보 (2026-07-28 사용자 확정 문구).
+  $codeTail = $(if ($script:deviceCode.Length -ge 6) { $script:deviceCode.Substring($script:deviceCode.Length - 6) } else { '' })
+  switch ($decision) {
+    'approved-live' { Add-GuiLog '[안내] 사용 승인 확인 완료' }
+    'approved-grace' { Add-GuiLog '[안내] 승인 서버에 연결하지 못했지만 최근 승인 기록(7일 이내)으로 계속 사용합니다' }
+    'denied' { Add-GuiLog ('[경고] 사용 승인이 확인되지 않았습니다 - 개발자에게 문의해 주세요 (기기 코드 끝자리 {0})' -f $codeTail) }
+    default { Add-GuiLog '[경고] 사용 승인을 확인하지 못했습니다 (인터넷 연결 확인) - 승인 기록이 없어 시작할 수 없습니다' }
+  }
+  Update-ApprovalUi
+  if ($script:approvalPendingStart) {
+    $script:approvalPendingStart = $false
+    $lblStatus.Text = '대기 중'
+    if (Test-ApprovalAllowsStart) {
+      Invoke-StartAutomation
+    } else {
+      Add-GuiLog '[안내] 사용 승인이 확인되지 않아 시작하지 않았습니다'
+    }
+  }
+}
+
+function Update-ApprovalUi {
+  # 미승인이면 '사용 승인' 그룹을 보여주고 시작 버튼을 잠급니다. 팝업 없음(메인 폼 내 표시).
+  # Stop/즉시 중지 등 실행 중 제어는 승인 상태와 무관하게 그대로 둡니다.
+  $approved = Test-ApprovalAllowsStart
+  $grpApproval.Visible = -not $approved
+  if (-not $approved) {
+    $grpApproval.BringToFront()
+    $txtApprovalCode.Text = $(if ($script:deviceCode) { $script:deviceCode } else { '기기 코드를 계산할 수 없습니다 - 개발자에게 문의해 주세요' })
+    $lblApprovalMsg.Text = $(if ($script:approvalState -eq 'denied') {
+        '이 PC는 사용 승인 목록에 없습니다. 아래 기기 코드를 복사해 개발자에게 보내 승인을 요청해 주세요.'
+      } else {
+        '승인 확인에 실패했습니다 (인터넷 연결 확인). 아직 승인 전이라면 아래 기기 코드를 개발자에게 보내 주세요.'
+      })
+  }
+  if (-not $script:running) { $btnStart.Enabled = $approved }
+}
 
 # ============================================================
 #  UI 구성
@@ -516,6 +1354,50 @@ $lblStatus.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing
 $lblStatus.Text = '대기 중'
 $lblStatus.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($lblStatus)
+
+# --- 사용 승인 안내 (미승인일 때만 표시 - 설정 영역 위에 겹쳐 나타남, 팝업 아님) ---
+$grpApproval = New-Object System.Windows.Forms.GroupBox
+$grpApproval.Text = '사용 승인 필요'
+$grpApproval.Location = New-Object System.Drawing.Point(15, 42)
+$grpApproval.Size = New-Object System.Drawing.Size(554, 118)
+$grpApproval.Visible = $false
+$form.Controls.Add($grpApproval)
+
+$lblApprovalMsg = New-Object System.Windows.Forms.Label
+$lblApprovalMsg.Location = New-Object System.Drawing.Point(12, 20)
+$lblApprovalMsg.Size = New-Object System.Drawing.Size(530, 34)
+$lblApprovalMsg.Text = ''
+$grpApproval.Controls.Add($lblApprovalMsg)
+
+$txtApprovalCode = New-Object System.Windows.Forms.TextBox
+$txtApprovalCode.Location = New-Object System.Drawing.Point(12, 58)
+$txtApprovalCode.Size = New-Object System.Drawing.Size(530, 24)
+$txtApprovalCode.ReadOnly = $true
+$txtApprovalCode.Font = New-Object System.Drawing.Font('Consolas', 8)
+$grpApproval.Controls.Add($txtApprovalCode)
+
+$btnApprovalCopy = New-Object System.Windows.Forms.Button
+$btnApprovalCopy.Text = '기기 코드 복사'
+$btnApprovalCopy.Location = New-Object System.Drawing.Point(12, 86)
+$btnApprovalCopy.Size = New-Object System.Drawing.Size(120, 26)
+$grpApproval.Controls.Add($btnApprovalCopy)
+
+$btnApprovalRecheck = New-Object System.Windows.Forms.Button
+$btnApprovalRecheck.Text = '승인 다시 확인'
+$btnApprovalRecheck.Location = New-Object System.Drawing.Point(140, 86)
+$btnApprovalRecheck.Size = New-Object System.Drawing.Size(120, 26)
+$grpApproval.Controls.Add($btnApprovalRecheck)
+
+$btnApprovalCopy.Add_Click({
+    # 클립보드 실패(원격 세션 등)에도 코드가 전달되도록 로그에도 함께 남깁니다
+    try { [System.Windows.Forms.Clipboard]::SetText([string]$txtApprovalCode.Text) } catch { }
+    Add-GuiLog ('[안내] 기기 코드: {0}' -f [string]$txtApprovalCode.Text)
+    Add-GuiLog '[안내] 기기 코드를 복사했습니다 - 개발자에게 보내 주세요'
+  })
+$btnApprovalRecheck.Add_Click({
+    Add-GuiLog '[안내] 사용 승인을 다시 확인합니다…'
+    Start-ApprovalCheck
+  })
 
 # --- 반복 설정 (가로 한 줄로 압축) ---
 $grpRepeat = New-Object System.Windows.Forms.GroupBox
@@ -654,6 +1536,23 @@ $btnManual.Add_Click({
       " - 은동전 항목은 실제로 은동전이 소모되니 잔량을 확인해 주세요."
       [System.Windows.Forms.MessageBox]::Show($manualText, '던전 설명서',
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+    } elseif ($rbCatDeep.Checked) {
+      $manualText = $manualCommon +
+      "[심층던전 자동화 사용법]`n" +
+      " 1) 게임을 창 모드로 변경합니다.`n" +
+      " 2) 원하는 심층던전의 석상을 클릭하여 구역 선택 화면을 열어둡니다.`n" +
+      " 3) [시작] 버튼을 클릭 후 마우스를 잠시 움직이지 마세요.`n`n" +
+      "[던전과 다른 점]`n" +
+      " - 입장 재화가 마족공물입니다 (소탕: 어려움 1개 / 매우 어려움 2개, 더블 루팅 없음).`n" +
+      " - 난이도는 어려움만 있고, 주마다 심층던전 1곳에만 '매우 어려움'이 열립니다.`n" +
+      " - '매우 어려움'을 고르면 이번 주 매우 어려움 던전의 화면을 열어 두세요.`n" +
+      "   그 구역을 자동 채택해 반복합니다 (구역 설정 무시).`n`n" +
+      "[커스텀 반복]`n" +
+      " - 리스트에 추가한 항목(구역+마족공물)을 위에서부터 순서대로 1판씩 실행합니다.`n" +
+      " - 시작 시 열어 둔 심층던전 하나에서만 동작하며 난이도는 어려움 고정입니다.`n" +
+      " - 마족공물 항목은 실제로 공물이 소모되니 잔량을 확인해 주세요."
+      [System.Windows.Forms.MessageBox]::Show($manualText, '심층던전 설명서',
+        [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
     } else {
       $manualText = $manualCommon +
       "[어비스 사용법]`n" +
@@ -705,18 +1604,17 @@ $rbCatDungeon.Location = New-Object System.Drawing.Point(100, 2)
 $rbCatDungeon.Size = New-Object System.Drawing.Size(70, 22)
 $pnlCategory.Controls.Add($rbCatDungeon)
 
+$rbCatDeep = New-Object System.Windows.Forms.RadioButton
+$rbCatDeep.Text = '심층던전'
+$rbCatDeep.Location = New-Object System.Drawing.Point(180, 2)
+$rbCatDeep.Size = New-Object System.Drawing.Size(100, 22)
+$pnlCategory.Controls.Add($rbCatDeep)
+
 $rbCatHunting = New-Object System.Windows.Forms.RadioButton
 $rbCatHunting.Text = '사냥터'
-$rbCatHunting.Location = New-Object System.Drawing.Point(180, 2)
+$rbCatHunting.Location = New-Object System.Drawing.Point(290, 2)
 $rbCatHunting.Size = New-Object System.Drawing.Size(130, 22)
 $pnlCategory.Controls.Add($rbCatHunting)
-
-$rbCatDeep = New-Object System.Windows.Forms.RadioButton
-$rbCatDeep.Text = '심층던전 (개발 예정)'
-$rbCatDeep.Location = New-Object System.Drawing.Point(320, 2)
-$rbCatDeep.Size = New-Object System.Drawing.Size(160, 22)
-$rbCatDeep.Enabled = $false
-$pnlCategory.Controls.Add($rbCatDeep)
 
 # 상세 설정 1줄: 입장 방식 (혼자하기 / 함께하기)
 $pnlMode = New-Object System.Windows.Forms.Panel
@@ -999,6 +1897,131 @@ $chkNdCoin.Add_CheckedChanged({
       $rbNdNoDoubleStop.Checked = $true
     }
     if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels }
+  })
+
+# ============================================================
+#  '심층던전' 카테고리 전용 상세 설정 (던전과 동일 구조 - 재화만 마족공물 1/2개,
+#  난이도는 어려움 고정 + 주간 매우 어려움(이번 주 단일 구역) 선택형. 2026-07-27 실측 스펙)
+# ============================================================
+# 1줄: 난이도 (어려움 / 주간 매우 어려움)
+$pnlDdDifficulty = New-Object System.Windows.Forms.Panel
+$pnlDdDifficulty.Location = New-Object System.Drawing.Point(15, 20)
+$pnlDdDifficulty.Size = New-Object System.Drawing.Size(524, 26)
+$pnlDdDifficulty.Visible = $false
+$grpContentDetail.Controls.Add($pnlDdDifficulty)
+
+$lblDdDifficulty = New-Object System.Windows.Forms.Label
+$lblDdDifficulty.Text = '난이도:'
+$lblDdDifficulty.Location = New-Object System.Drawing.Point(0, 5)
+$lblDdDifficulty.Size = New-Object System.Drawing.Size(52, 20)
+$pnlDdDifficulty.Controls.Add($lblDdDifficulty)
+
+$rbDdHard = New-Object System.Windows.Forms.RadioButton
+$rbDdHard.Text = '어려움'
+$rbDdHard.Location = New-Object System.Drawing.Point(58, 2)
+$rbDdHard.Size = New-Object System.Drawing.Size(75, 22)
+$rbDdHard.Checked = $true
+$pnlDdDifficulty.Controls.Add($rbDdHard)
+
+# 주간 매우 어려움: 주마다 심층던전 1곳에만 열리는 단일 구역 - 이번 주 던전의 '매우 어려움'
+# 화면을 열어 두면 그 구역을 자동 채택해 반복합니다 (구역 설정 무시)
+$rbDdWeeklyVeryHard = New-Object System.Windows.Forms.RadioButton
+$rbDdWeeklyVeryHard.Text = '매우 어려움'
+$rbDdWeeklyVeryHard.Location = New-Object System.Drawing.Point(143, 2)
+$rbDdWeeklyVeryHard.Size = New-Object System.Drawing.Size(110, 22)
+$pnlDdDifficulty.Controls.Add($rbDdWeeklyVeryHard)
+
+# 2줄: 구역 (표시는 D1-1 형식, 저장은 내부 표현 1-1)
+$pnlDdStage = New-Object System.Windows.Forms.Panel
+$pnlDdStage.Location = New-Object System.Drawing.Point(15, 52)
+$pnlDdStage.Size = New-Object System.Drawing.Size(524, 26)
+$pnlDdStage.Visible = $false
+$grpContentDetail.Controls.Add($pnlDdStage)
+
+$lblDdStage = New-Object System.Windows.Forms.Label
+$lblDdStage.Text = '구역:'
+$lblDdStage.Location = New-Object System.Drawing.Point(0, 5)
+$lblDdStage.Size = New-Object System.Drawing.Size(52, 20)
+$pnlDdStage.Controls.Add($lblDdStage)
+
+$cboDdStage = New-Object System.Windows.Forms.ComboBox
+$cboDdStage.Location = New-Object System.Drawing.Point(68, 1)
+$cboDdStage.Size = New-Object System.Drawing.Size(100, 24)
+$cboDdStage.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+foreach ($ddChapter in 1..2) {
+  foreach ($ddStep in 1..3) { [void]$cboDdStage.Items.Add("D$ddChapter-$ddStep") }
+}
+$cboDdStage.SelectedIndex = 0
+$pnlDdStage.Controls.Add($cboDdStage)
+
+# 3줄: 마족공물 사용 (소탕 카드 - 어려움 1개/매우 어려움 2개 소모. 해제 시 무료 입장)
+$pnlDdTribute = New-Object System.Windows.Forms.Panel
+$pnlDdTribute.Location = New-Object System.Drawing.Point(15, 84)
+$pnlDdTribute.Size = New-Object System.Drawing.Size(524, 26)
+$pnlDdTribute.Visible = $false
+$grpContentDetail.Controls.Add($pnlDdTribute)
+
+$chkDdTribute = New-Object System.Windows.Forms.CheckBox
+$chkDdTribute.Text = '마족공물 사용 (소탕)'
+$chkDdTribute.Location = New-Object System.Drawing.Point(0, 2)
+$chkDdTribute.Size = New-Object System.Drawing.Size(160, 22)
+$pnlDdTribute.Controls.Add($chkDdTribute)
+
+# 4줄: 공물 소진 대응 (던전의 은동전 소진 대응과 동일 의미)
+$pnlDdExhaust = New-Object System.Windows.Forms.Panel
+$pnlDdExhaust.Location = New-Object System.Drawing.Point(15, 116)
+$pnlDdExhaust.Size = New-Object System.Drawing.Size(524, 26)
+$pnlDdExhaust.Visible = $false
+$grpContentDetail.Controls.Add($pnlDdExhaust)
+
+$lblDdExhaust = New-Object System.Windows.Forms.Label
+$lblDdExhaust.Text = '공물 소진 시:'
+$lblDdExhaust.Location = New-Object System.Drawing.Point(0, 5)
+$lblDdExhaust.Size = New-Object System.Drawing.Size(100, 20)
+$pnlDdExhaust.Controls.Add($lblDdExhaust)
+
+$rbDdExhaustStop = New-Object System.Windows.Forms.RadioButton
+$rbDdExhaustStop.Text = '멈춤'
+$rbDdExhaustStop.Location = New-Object System.Drawing.Point(105, 2)
+$rbDdExhaustStop.Size = New-Object System.Drawing.Size(60, 22)
+$rbDdExhaustStop.Checked = $true
+$pnlDdExhaust.Controls.Add($rbDdExhaustStop)
+
+$rbDdExhaustGo = New-Object System.Windows.Forms.RadioButton
+$rbDdExhaustGo.Text = '미사용으로 진행'
+$rbDdExhaustGo.Location = New-Object System.Drawing.Point(170, 2)
+$rbDdExhaustGo.Size = New-Object System.Drawing.Size(135, 22)
+$pnlDdExhaust.Controls.Add($rbDdExhaustGo)
+
+# 5줄: 매칭 (우연한 만남 / 파티 찾기 - 던전과 동일)
+$pnlDdMatching = New-Object System.Windows.Forms.Panel
+$pnlDdMatching.Location = New-Object System.Drawing.Point(15, 148)
+$pnlDdMatching.Size = New-Object System.Drawing.Size(524, 26)
+$pnlDdMatching.Visible = $false
+$grpContentDetail.Controls.Add($pnlDdMatching)
+
+$lblDdMatching = New-Object System.Windows.Forms.Label
+$lblDdMatching.Text = '매칭:'
+$lblDdMatching.Location = New-Object System.Drawing.Point(0, 5)
+$lblDdMatching.Size = New-Object System.Drawing.Size(52, 20)
+$pnlDdMatching.Controls.Add($lblDdMatching)
+
+$rbDdChance = New-Object System.Windows.Forms.RadioButton
+$rbDdChance.Text = '우연한 만남'
+$rbDdChance.Location = New-Object System.Drawing.Point(58, 2)
+$rbDdChance.Size = New-Object System.Drawing.Size(105, 22)
+$rbDdChance.Checked = $true
+$pnlDdMatching.Controls.Add($rbDdChance)
+
+$rbDdFindParty = New-Object System.Windows.Forms.RadioButton
+$rbDdFindParty.Text = '파티 찾기'
+$rbDdFindParty.Location = New-Object System.Drawing.Point(173, 2)
+$rbDdFindParty.Size = New-Object System.Drawing.Size(95, 22)
+$pnlDdMatching.Controls.Add($rbDdFindParty)
+
+# 주간 매우 어려움 선택 시 구역 콤보는 의미가 없어 비활성화합니다 (화면 기준 자동 채택)
+$rbDdWeeklyVeryHard.Add_CheckedChanged({
+    $cboDdStage.Enabled = -not $rbDdWeeklyVeryHard.Checked
   })
 
 # ============================================================
@@ -1634,6 +2657,10 @@ $cellEditMouseUp = {
     $cellItems = @(Get-CustomItemsFromList)
     if ($cellRow -ge $cellItems.Count) { return }
     $cellPlan = Get-CrCellEditPlan -ColumnIndex $cellColumn -Item $cellItems[$cellRow]
+  } elseif ($clickSender -eq $lvDcrList) {
+    $cellItems = @(Get-DeepCustomItemsFromList)
+    if ($cellRow -ge $cellItems.Count) { return }
+    $cellPlan = Get-DcrCellEditPlan -ColumnIndex $cellColumn -Item $cellItems[$cellRow]
   } else {
     $cellItems = @(Get-AbyssCustomItemsFromList)
     if ($cellRow -ge $cellItems.Count) { return }
@@ -1802,6 +2829,271 @@ $rbAcrSolo.Add_CheckedChanged({
 $rbAcrParty.Add_CheckedChanged({
     & $updateAcrDifficultyItems
     if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels }
+  })
+
+# ============================================================
+#  '심층던전 + 커스텀 반복' 목록/설정 화면 (2026-07-28)
+#  던전 커스텀과 같은 항목 계약(6조각 토큰)을 쓰되 컨트롤·저장 섹션(deepCustomRepeat)·
+#  완료 마커를 완전히 분리합니다 (Codex A-lite 합의 - 기존 던전 커스텀 코드 무접촉).
+#  난이도는 어려움 고정/더블 루팅 없음이라 입력은 구역 + 마족공물 + 소진 대응만 받습니다.
+# ============================================================
+$pnlDcrInput = New-Object System.Windows.Forms.Panel
+$pnlDcrInput.Location = New-Object System.Drawing.Point(15, 20)
+$pnlDcrInput.Size = New-Object System.Drawing.Size(524, 26)
+$pnlDcrInput.Visible = $false
+$grpContentDetail.Controls.Add($pnlDcrInput)
+
+# 난이도 고정 안내 라벨: 심층 커스텀은 어려움 고정이라 난이도 입력이 없는데, 던전 커스텀
+# 입력 줄(난이도 콤보 시작)과 비교하면 빠진 것처럼 보임 (2026-07-28 사용자 피드백 →
+# Codex 합의: 입력 줄에서 고정 제약을 설명하고 리스트에는 변동값만 표시)
+$lblDcrDifficulty = New-Object System.Windows.Forms.Label
+$lblDcrDifficulty.Text = '난이도: 어려움 (고정)'
+$lblDcrDifficulty.Location = New-Object System.Drawing.Point(0, 5)
+$lblDcrDifficulty.Size = New-Object System.Drawing.Size(140, 20)
+$pnlDcrInput.Controls.Add($lblDcrDifficulty)
+
+$cboDcrStage = New-Object System.Windows.Forms.ComboBox
+$cboDcrStage.Location = New-Object System.Drawing.Point(145, 1)
+$cboDcrStage.Size = New-Object System.Drawing.Size(84, 24)
+$cboDcrStage.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+foreach ($dcrChapter in 1..2) {
+  foreach ($dcrStep in 1..3) { [void]$cboDcrStage.Items.Add("D$dcrChapter-$dcrStep") }
+}
+$cboDcrStage.SelectedIndex = 0
+$pnlDcrInput.Controls.Add($cboDcrStage)
+
+$chkDcrTribute = New-Object System.Windows.Forms.CheckBox
+$chkDcrTribute.Text = '마족공물'
+$chkDcrTribute.Location = New-Object System.Drawing.Point(239, 2)
+$chkDcrTribute.Size = New-Object System.Drawing.Size(85, 22)
+$pnlDcrInput.Controls.Add($chkDcrTribute)
+
+# 입력 줄 아래 라디오 줄: '다음에 [추가]할 항목'의 공물 소진 대응 속성 (기본 멈춤,
+# 마족공물 체크 시에만 표시. 표시/배치는 updateCategoryPanels 가 제어)
+$pnlDcrExhaust = New-Object System.Windows.Forms.Panel
+$pnlDcrExhaust.Location = New-Object System.Drawing.Point(15, 50)
+$pnlDcrExhaust.Size = New-Object System.Drawing.Size(524, 26)
+$pnlDcrExhaust.Visible = $false
+$grpContentDetail.Controls.Add($pnlDcrExhaust)
+
+$lblDcrExhaust = New-Object System.Windows.Forms.Label
+$lblDcrExhaust.Text = '공물 소진 시(잔량 부족):'
+$lblDcrExhaust.Location = New-Object System.Drawing.Point(0, 5)
+$lblDcrExhaust.Size = New-Object System.Drawing.Size(195, 20)
+$pnlDcrExhaust.Controls.Add($lblDcrExhaust)
+
+$rbDcrExhaustStop = New-Object System.Windows.Forms.RadioButton
+$rbDcrExhaustStop.Text = '멈춤'
+$rbDcrExhaustStop.Location = New-Object System.Drawing.Point(200, 2)
+$rbDcrExhaustStop.Size = New-Object System.Drawing.Size(60, 22)
+$rbDcrExhaustStop.Checked = $true
+$pnlDcrExhaust.Controls.Add($rbDcrExhaustStop)
+
+$rbDcrExhaustGo = New-Object System.Windows.Forms.RadioButton
+$rbDcrExhaustGo.Text = '미사용으로 진행'
+$rbDcrExhaustGo.Location = New-Object System.Drawing.Point(265, 2)
+$rbDcrExhaustGo.Size = New-Object System.Drawing.Size(135, 22)
+$pnlDcrExhaust.Controls.Add($rbDcrExhaustGo)
+
+$chkDcrTribute.Add_CheckedChanged({
+    if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels }
+  })
+
+# 리스트 (표 형태): 체크 / # / 구역(D표기) / 마족공물(판당 소모량) / 소진 시
+$lvDcrList = New-Object System.Windows.Forms.ListView
+$lvDcrList.Location = New-Object System.Drawing.Point(15, 52)
+$lvDcrList.Size = New-Object System.Drawing.Size(420, 150)
+$lvDcrList.View = [System.Windows.Forms.View]::Details
+$lvDcrList.GridLines = $true
+$lvDcrList.CheckBoxes = $true
+$lvDcrList.FullRowSelect = $true
+$lvDcrList.MultiSelect = $false
+$lvDcrList.HideSelection = $false
+$lvDcrList.Visible = $false
+[void]$lvDcrList.Columns.Add('', 28)
+[void]$lvDcrList.Columns.Add('#', 32)
+[void]$lvDcrList.Columns.Add('구역', 68)
+[void]$lvDcrList.Columns.Add('마족공물', 74)
+[void]$lvDcrList.Columns.Add('소진 시', 78)
+$grpContentDetail.Controls.Add($lvDcrList)
+$lvDcrList.Add_MouseUp($cellEditMouseUp)   # 셀 편집 - 생성 직후 연결 (던전/어비스 리스트와 공용 핸들러)
+
+# 0번(체크) 열 머리글 클릭 = 전체 선택/해제 (던전 리스트와 동일 규칙)
+$lvDcrList.Add_ColumnClick({
+    param($dcrClickSender, $dcrClickArgs)
+    if ($dcrClickArgs.Column -ne 0 -or $lvDcrList.Items.Count -eq 0) { return }
+    $dcrAllChecked = $true
+    foreach ($dcrRow in $lvDcrList.Items) { if (-not $dcrRow.Checked) { $dcrAllChecked = $false; break } }
+    $dcrNewState = -not $dcrAllChecked
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try { foreach ($dcrRow in $lvDcrList.Items) { $dcrRow.Checked = $dcrNewState } }
+    finally { $script:crLoading = $prevLoading }
+  })
+
+$btnDcrAdd = New-Object System.Windows.Forms.Button
+$btnDcrAdd.Text = '추가'
+$btnDcrAdd.Location = New-Object System.Drawing.Point(445, 52)
+$btnDcrAdd.Size = New-Object System.Drawing.Size(94, 30)
+$btnDcrAdd.Visible = $false
+$grpContentDetail.Controls.Add($btnDcrAdd)
+
+$btnDcrDelete = New-Object System.Windows.Forms.Button
+$btnDcrDelete.Text = '삭제(체크)'
+$btnDcrDelete.Location = New-Object System.Drawing.Point(445, 88)
+$btnDcrDelete.Size = New-Object System.Drawing.Size(94, 30)
+$btnDcrDelete.Visible = $false
+$grpContentDetail.Controls.Add($btnDcrDelete)
+
+$btnDcrUp = New-Object System.Windows.Forms.Button
+$btnDcrUp.Text = '↑ 위로'
+$btnDcrUp.Location = New-Object System.Drawing.Point(445, 124)
+$btnDcrUp.Size = New-Object System.Drawing.Size(94, 30)
+$btnDcrUp.Visible = $false
+$grpContentDetail.Controls.Add($btnDcrUp)
+
+$btnDcrDown = New-Object System.Windows.Forms.Button
+$btnDcrDown.Text = '↓ 아래로'
+$btnDcrDown.Location = New-Object System.Drawing.Point(445, 160)
+$btnDcrDown.Size = New-Object System.Drawing.Size(94, 30)
+$btnDcrDown.Visible = $false
+$grpContentDetail.Controls.Add($btnDcrDown)
+
+$btnDcrAdd.Add_Click({
+    $dcrStageValue = Get-DeepStageInternal -Display ([string]$cboDcrStage.SelectedItem)
+    if (-not $dcrStageValue) { return }
+    # 정규화: 공물 미사용이면 소진 대응도 false (던전 [추가] 정규화와 같은 원칙 -
+    # 리스트 '—' 표기 ↔ 역해석 false 일치. 어긋나면 재저장 때 지문이 바뀌어 진행 기록이 날아감)
+    $dcrCoinValue = [bool]$chkDcrTribute.Checked
+    $dcrExhaustValue = [bool]($dcrCoinValue -and $rbDcrExhaustGo.Checked)
+    # 추가 차단: 마지막 항목 → 새 항목 전환이 게임에서 불가능한 조합이면 팝업 안내
+    # (던전 커스텀과 동일 규칙 - 심층도 같은 1층/2층 구역 지도 구조. 사용자 버튼 즉답
+    # 팝업이라 무인 운용과 무관 - GUI 팝업 금지 규칙의 명시적 예외)
+    $dcrExistingItems = @(Get-DeepCustomItemsFromList)
+    if ($dcrExistingItems.Count -gt 0) {
+      $dcrLastItem = $dcrExistingItems[$dcrExistingItems.Count - 1]
+      $dcrNewItem = [pscustomobject]@{
+        difficulty = '어려움'; stage = $dcrStageValue
+        coin = $dcrCoinValue; doubleLoot = $false
+        exhaustContinue = $dcrExhaustValue; noDoubleSweep = $false
+      }
+      $dcrPairIssues = @(Get-CustomTransitionIssues -Items @($dcrLastItem, $dcrNewItem) `
+          -ListRepeat 'count' -ListRepeatCount 1)
+      if ($dcrPairIssues.Count -gt 0) {
+        $dcrBlockText = ("이 순서로는 추가할 수 없습니다.`n`n" +
+          "마지막 항목 '{0}' 다음에 '{1}' 항목은 올 수 없습니다.`n{2}" -f `
+            (Get-DeepCustomItemLabel -Item $dcrLastItem), (Get-DeepCustomItemLabel -Item $dcrNewItem), `
+            [string]$dcrPairIssues[0].Reason)
+        Add-GuiLog ('[안내] 심층 추가 차단: {0} → {1} - {2}' -f `
+            (Get-DeepCustomItemLabel -Item $dcrLastItem), (Get-DeepCustomItemLabel -Item $dcrNewItem), `
+            [string]$dcrPairIssues[0].Reason)
+        [System.Windows.Forms.MessageBox]::Show($dcrBlockText, '심층 커스텀 반복 - 추가 불가',
+          [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+        return
+      }
+    }
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try {
+      Add-DeepCustomListRow -Stage $dcrStageValue -Coin $dcrCoinValue -ExhaustContinue $dcrExhaustValue
+      Update-DeepCustomListNumbers
+    } finally { $script:crLoading = $prevLoading }
+    if ($script:uiReady) { Save-DeepCustomRepeatToConfig }
+    # 전환 규칙 사전 경고 (최종 차단은 시작 게이트 - 던전 커스텀과 동일)
+    $dcrAddRepeat = $(if ($rbDcrCount.Checked) { 'count' } else { 'infinite' })
+    $dcrAddIssues = @(Get-CustomTransitionIssues -Items @(Get-DeepCustomItemsFromList) `
+        -ListRepeat $dcrAddRepeat -ListRepeatCount ([int]$numDcrLaps.Value))
+    foreach ($dcrAddIssue in $dcrAddIssues) {
+      $dcrAddWrapTag = $(if ([bool]$dcrAddIssue.Wrap) { ' [바퀴 순환: 마지막 → 첫 항목]' } else { '' })
+      Add-GuiLog ('[경고] {0} → {1}{2}: {3} - 이대로는 시작할 수 없습니다 (순서 조정 또는 뒤에 항목을 더 추가해 해소해 주세요).' -f `
+          $dcrAddIssue.From, $dcrAddIssue.To, $dcrAddWrapTag, $dcrAddIssue.Reason)
+    }
+  })
+
+$btnDcrDelete.Add_Click({
+    $dcrCheckedRows = @()
+    foreach ($dcrRow in $lvDcrList.Items) { if ($dcrRow.Checked) { $dcrCheckedRows += $dcrRow } }
+    if ($dcrCheckedRows.Count -eq 0) {
+      Add-GuiLog '[안내] 삭제할 항목의 앞 체크박스를 켠 뒤 [삭제(체크)]를 눌러 주세요. (첫 열 머리글 클릭 = 전체 선택/해제)'
+      return
+    }
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try {
+      foreach ($dcrRow in $dcrCheckedRows) { $lvDcrList.Items.Remove($dcrRow) }
+      Update-DeepCustomListNumbers
+    } finally { $script:crLoading = $prevLoading }
+    if ($script:uiReady) { Save-DeepCustomRepeatToConfig }
+  })
+
+$btnDcrUp.Add_Click({ Move-DeepCustomListRow -Delta (-1) })
+$btnDcrDown.Add_Click({ Move-DeepCustomListRow -Delta 1 })
+
+# 하단 줄: 리스트 반복 (무한 / 횟수 N바퀴) + 공물 합계 + 진행 초기화
+$pnlDcrRepeat = New-Object System.Windows.Forms.Panel
+$pnlDcrRepeat.Location = New-Object System.Drawing.Point(15, 238)
+$pnlDcrRepeat.Size = New-Object System.Drawing.Size(524, 28)
+$pnlDcrRepeat.Visible = $false
+$grpContentDetail.Controls.Add($pnlDcrRepeat)
+
+$lblDcrRepeat = New-Object System.Windows.Forms.Label
+$lblDcrRepeat.Text = '리스트 반복:'
+$lblDcrRepeat.Location = New-Object System.Drawing.Point(0, 5)
+$lblDcrRepeat.Size = New-Object System.Drawing.Size(80, 20)
+$pnlDcrRepeat.Controls.Add($lblDcrRepeat)
+
+$rbDcrInfinite = New-Object System.Windows.Forms.RadioButton
+$rbDcrInfinite.Text = '무한'
+$rbDcrInfinite.Location = New-Object System.Drawing.Point(85, 2)
+$rbDcrInfinite.Size = New-Object System.Drawing.Size(55, 22)
+$rbDcrInfinite.Checked = $true
+$pnlDcrRepeat.Controls.Add($rbDcrInfinite)
+
+$rbDcrCount = New-Object System.Windows.Forms.RadioButton
+$rbDcrCount.Text = '횟수:'
+$rbDcrCount.Location = New-Object System.Drawing.Point(145, 2)
+$rbDcrCount.Size = New-Object System.Drawing.Size(60, 22)
+$pnlDcrRepeat.Controls.Add($rbDcrCount)
+
+$numDcrLaps = New-Object System.Windows.Forms.NumericUpDown
+$numDcrLaps.Location = New-Object System.Drawing.Point(205, 0)
+$numDcrLaps.Size = New-Object System.Drawing.Size(50, 24)
+$numDcrLaps.Minimum = 1
+$numDcrLaps.Maximum = 999
+$numDcrLaps.Value = 1
+$numDcrLaps.Enabled = $false   # '횟수' 라디오를 골랐을 때만 활성
+$pnlDcrRepeat.Controls.Add($numDcrLaps)
+
+$lblDcrLaps = New-Object System.Windows.Forms.Label
+$lblDcrLaps.Text = '바퀴'
+$lblDcrLaps.Location = New-Object System.Drawing.Point(258, 5)
+$lblDcrLaps.Size = New-Object System.Drawing.Size(35, 20)
+$pnlDcrRepeat.Controls.Add($lblDcrLaps)
+
+# 리스트에 필요한 마족공물 합계 표시 (심층 소탕 = 어려움 1개 - 커스텀은 어려움 고정)
+$lblDcrTributeTotal = New-Object System.Windows.Forms.Label
+$lblDcrTributeTotal.Text = '바퀴당 마족공물 0개'
+$lblDcrTributeTotal.Location = New-Object System.Drawing.Point(293, 5)
+$lblDcrTributeTotal.Size = New-Object System.Drawing.Size(122, 20)
+$lblDcrTributeTotal.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$lblDcrTributeTotal.ForeColor = [System.Drawing.Color]::SteelBlue
+$pnlDcrRepeat.Controls.Add($lblDcrTributeTotal)
+
+$btnDcrReset = New-Object System.Windows.Forms.Button
+$btnDcrReset.Text = '진행 초기화'
+$btnDcrReset.Location = New-Object System.Drawing.Point(430, 0)
+$btnDcrReset.Size = New-Object System.Drawing.Size(94, 26)
+$pnlDcrRepeat.Controls.Add($btnDcrReset)
+
+# 커스텀 설정 변경 = 즉시 저장 (던전 커스텀과 동일 패턴 - 로딩 중 가드)
+$rbDcrCount.Add_CheckedChanged({
+    $numDcrLaps.Enabled = $rbDcrCount.Checked
+    if ($script:uiReady -and -not $script:crLoading) { Save-DeepCustomRepeatToConfig }
+  })
+$numDcrLaps.Add_ValueChanged({ if ($script:uiReady -and -not $script:crLoading) { Save-DeepCustomRepeatToConfig } })
+$btnDcrReset.Add_Click({
+    Reset-CustomProgress -SectionName 'deepCustomRepeat' `
+      -LogMessage '[안내] 심층 커스텀 반복 진행 기록을 초기화했습니다 - 다음 시작은 리스트 처음(1바퀴째 1번)부터입니다.'
   })
 
 # --- 설정 (on/off) ---
@@ -2377,6 +3669,8 @@ function Invoke-CellEditApply {
   if ($applyContext.RowIndex -lt 0 -or $applyContext.RowIndex -ge $applyList.Items.Count) { return }
   if ($applyList -eq $lvCrList) {
     Invoke-CrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
+  } elseif ($applyList -eq $lvDcrList) {
+    Invoke-DcrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
   } else {
     Invoke-AcrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
   }
@@ -2784,6 +4078,268 @@ function Get-AbyssCustomItemsFromList {
   return $items
 }
 
+# ============================================================
+#  심층던전 커스텀 반복 - 헬퍼 (2026-07-28, Codex A-lite 합의로 던전 커스텀과 분리)
+#  항목 계약은 던전과 동일한 6필드(difficulty/stage/coin/doubleLoot/exhaustContinue/
+#  noDoubleSweep)를 쓰되 difficulty='어려움'/doubleLoot=false/noDoubleSweep=false 고정 -
+#  토큰·지문·마커·워커 env 계약(Format-CustomItemToken)을 그대로 재사용하기 위함입니다.
+# ============================================================
+function Get-DeepStageInternal {
+  # 표시용 'D1-1' → 내부 표기 '1-1'. 형식 밖 값은 '' (호출부가 추가/저장을 건너뜀)
+  param([string]$Display)
+  if ([string]$Display -match '^D([12]-[123])$') { return $Matches[1] }
+  return ''
+}
+
+function Get-DeepStageDisplay {
+  # 내부 표기 '1-1' → 표시용 'D1-1'. 형식 밖 값은 그대로 반환 (방어적 표시)
+  param([string]$Stage)
+  if ([string]$Stage -match '^[12]-[123]$') { return ('D' + $Stage) }
+  return [string]$Stage
+}
+
+function Get-DeepCustomItemLabel {
+  # 심층 항목 로그 표기: 'D1-1 (마족공물)' / 'D1-1'
+  param($Item)
+  $label = Get-DeepStageDisplay -Stage ([string]$Item.stage)
+  if ([bool]$Item.coin) { $label += ' (마족공물)' }
+  return $label
+}
+
+function Get-DeepTributeTotalPerLap {
+  # 리스트 1바퀴에 필요한 마족공물 합계 (심층 커스텀은 어려움 고정 - 소탕 1개/미사용 0개)
+  param($Items)
+  $total = 0
+  foreach ($totalItem in @($Items)) {
+    if ($null -eq $totalItem) { continue }
+    if ([bool]$totalItem.coin) { $total += 1 }
+  }
+  return $total
+}
+
+function Get-DeepCustomListCompact {
+  # 심층 리스트 압축 표기 (워커 [설정] 스냅샷 한 줄 기록용).
+  # 항목당 'D1-1(1,멈)' 형식: 괄호 안은 판당 공물 소모량(1/0)과 소진 대응(진/멈).
+  param($Items)
+  $parts = @()
+  $seq = 0
+  foreach ($compactItem in @($Items)) {
+    if ($null -eq $compactItem) { continue }
+    $seq++
+    $suffix = if (-not [bool]$compactItem.coin) { '(0)' }
+    elseif ([bool]$compactItem.exhaustContinue) { '(1,진)' } else { '(1,멈)' }
+    $parts += ('{0}.{1}{2}' -f $seq, (Get-DeepStageDisplay -Stage ([string]$compactItem.stage)), $suffix)
+  }
+  return ($parts -join ' ')
+}
+
+function Set-DeepListRowTexts {
+  # 심층 리스트 1행의 표시 텍스트 갱신 - 표시 규칙의 단일 소스
+  # ([추가]와 셀 편집 공용. Get-DeepCustomItemsFromList 가 역해석하므로 표기 변경 시 함께 수정):
+  # 구역 열 = 'D1-1' 표기. 마족공물 열 = 사용 '1개' / 미사용 '0개'.
+  # 소진 시 열 = 공물 미사용 '—' / 그 외 진행·멈춤.
+  param($Row, $Item)
+  $rowCoin = [bool]$Item.coin
+  $Row.SubItems[2].Text = Get-DeepStageDisplay -Stage ([string]$Item.stage)
+  $Row.SubItems[3].Text = $(if ($rowCoin) { '1개' } else { '0개' })
+  $Row.SubItems[4].Text = $(if (-not $rowCoin) { '—' }
+    elseif ([bool]$Item.exhaustContinue) { '진행' } else { '멈춤' })
+}
+
+function Add-DeepCustomListRow {
+  # 심층 리스트뷰에 항목 1행 추가 (열: 체크빈칸 / # / 구역 / 마족공물 / 소진 시)
+  param([string]$Stage, [bool]$Coin, [bool]$ExhaustContinue)
+  $row = New-Object System.Windows.Forms.ListViewItem('')
+  [void]$row.SubItems.Add([string]($lvDcrList.Items.Count + 1))
+  for ($fillIndex = 2; $fillIndex -le 4; $fillIndex++) { [void]$row.SubItems.Add('') }
+  Set-DeepListRowTexts -Row $row -Item ([pscustomobject]@{
+      difficulty = '어려움'; stage = $Stage; coin = $Coin; doubleLoot = $false
+      exhaustContinue = $ExhaustContinue; noDoubleSweep = $false
+    })
+  [void]$lvDcrList.Items.Add($row)
+}
+
+function Update-DeepCustomListNumbers {
+  # 각 행의 # 열을 1부터 다시 매깁니다 (추가/삭제/이동 직후 호출. crLoading 가드로 이벤트 재발화 억제)
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try {
+    for ($rowIndex = 0; $rowIndex -lt $lvDcrList.Items.Count; $rowIndex++) {
+      $lvDcrList.Items[$rowIndex].SubItems[1].Text = [string]($rowIndex + 1)
+    }
+  } finally { $script:crLoading = $prevLoading }
+}
+
+function Move-DeepCustomListRow {
+  # 선택한 1줄을 위(-1)/아래(+1)로 이동합니다
+  param([int]$Delta)
+  if ($lvDcrList.SelectedItems.Count -eq 0) { return }
+  $row = $lvDcrList.SelectedItems[0]
+  $fromIndex = $row.Index
+  $toIndex = $fromIndex + $Delta
+  if ($toIndex -lt 0 -or $toIndex -ge $lvDcrList.Items.Count) { return }
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try {
+    $lvDcrList.Items.RemoveAt($fromIndex)
+    [void]$lvDcrList.Items.Insert($toIndex, $row)
+    Update-DeepCustomListNumbers
+    $row.Selected = $true
+    $lvDcrList.EnsureVisible($toIndex)
+  } finally { $script:crLoading = $prevLoading }
+  if ($script:uiReady) { Save-DeepCustomRepeatToConfig }
+}
+
+function Get-DeepCustomItemsFromList {
+  # 심층 리스트뷰 → 계약 형태 항목 배열 (던전과 동일 6필드 - 고정값 포함).
+  # PS 5.1 배열 풀림 주의: 열거용이므로 return $items 그대로 두고 호출부에서 @()로 감쌉니다.
+  $items = @()
+  foreach ($listRow in $lvDcrList.Items) {
+    $items += [pscustomobject]@{
+      difficulty      = '어려움'
+      stage           = (Get-DeepStageInternal -Display ([string]$listRow.SubItems[2].Text))
+      coin            = ($listRow.SubItems[3].Text -ne '0개')
+      doubleLoot      = $false
+      exhaustContinue = ($listRow.SubItems[4].Text -eq '진행')
+      noDoubleSweep   = $false
+    }
+  }
+  return $items
+}
+
+function Get-DcrCellEditPlan {
+  # 심층 리스트 셀 편집 계획: 편집 가능하면 @{ Options; Current }, 아니면 $null (순수 - 진리표 대상).
+  # 소진 시 열은 마족공물 사용 항목에서만 편집할 수 있습니다 ('—' 표기 상태는 편집 무의미).
+  param([int]$ColumnIndex, $Item)
+  switch ($ColumnIndex) {
+    2 {
+      return @{ Options = @('D1-1', 'D1-2', 'D1-3', 'D2-1', 'D2-2', 'D2-3')
+                Current = (Get-DeepStageDisplay -Stage ([string]$Item.stage)) }
+    }
+    3 {
+      $planCurrent = $(if ([bool]$Item.coin) { '1개' } else { '0개' })
+      return @{ Options = @('0개', '1개'); Current = $planCurrent }
+    }
+    4 {
+      if (-not [bool]$Item.coin) { return $null }
+      $planCurrent = $(if ([bool]$Item.exhaustContinue) { '진행' } else { '멈춤' })
+      return @{ Options = @('진행', '멈춤'); Current = $planCurrent }
+    }
+  }
+  return $null
+}
+
+function Set-DcrItemCellValue {
+  # 선택값을 심층 항목에 적용하고 [추가]와 동일한 정규화를 수행합니다 (coin=false → exhaust=false).
+  # 고정 필드(difficulty/doubleLoot/noDoubleSweep)는 항상 고정값으로 되돌립니다 (순수 - 진리표 대상).
+  param($Item, [int]$ColumnIndex, [string]$Value)
+  $newStage = [string]$Item.stage
+  $newCoin = [bool]$Item.coin
+  $newExhaust = [bool]$Item.exhaustContinue
+  switch ($ColumnIndex) {
+    2 {
+      $parsedStage = Get-DeepStageInternal -Display $Value
+      if ($parsedStage) { $newStage = $parsedStage }
+    }
+    3 { $newCoin = ($Value -ne '0개') }
+    4 { $newExhaust = ($Value -eq '진행') }
+  }
+  $newExhaust = ($newCoin -and $newExhaust)
+  return [pscustomobject]@{
+    difficulty = '어려움'; stage = $newStage; coin = $newCoin; doubleLoot = $false
+    exhaustContinue = $newExhaust; noDoubleSweep = $false
+  }
+}
+
+function Invoke-DcrCellEdit {
+  # 심층 리스트 행 단위 셀 편집 적용: 정규화 → 행 텍스트 갱신 → 저장(실패 시 원복) →
+  # 전환 규칙 경고 (던전 Invoke-CrCellEdit 와 동일 구조 - 심층 전용 저장/라벨만 다름)
+  param([int]$RowIndex, [int]$ColumnIndex, [string]$Value)
+  $editItems = @(Get-DeepCustomItemsFromList)
+  if ($RowIndex -ge $editItems.Count) { return }
+  $beforeItem = $editItems[$RowIndex]
+  $afterItem = Set-DcrItemCellValue -Item $beforeItem -ColumnIndex $ColumnIndex -Value $Value
+  if (([string]$beforeItem.stage -eq [string]$afterItem.stage) -and
+      ([bool]$beforeItem.coin -eq [bool]$afterItem.coin) -and
+      ([bool]$beforeItem.exhaustContinue -eq [bool]$afterItem.exhaustContinue)) { return }
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try { Set-DeepListRowTexts -Row $lvDcrList.Items[$RowIndex] -Item $afterItem } finally { $script:crLoading = $prevLoading }
+  $script:lastCustomSaveOk = $true
+  if ($script:uiReady) { Save-DeepCustomRepeatToConfig }
+  if (-not $script:lastCustomSaveOk) {
+    # 저장 실패: 화면과 config 이 어긋나지 않게 행을 원복하고 공물 합계도 되돌립니다
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try { Set-DeepListRowTexts -Row $lvDcrList.Items[$RowIndex] -Item $beforeItem } finally { $script:crLoading = $prevLoading }
+    Update-DeepTributeTotalLabel
+    Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
+    return
+  }
+  Add-GuiLog ('[안내] 심층 항목 {0} 수정: {1} → {2}' -f ($RowIndex + 1),
+    (Get-DeepCustomItemLabel -Item $beforeItem), (Get-DeepCustomItemLabel -Item $afterItem))
+  $editRepeat = $(if ($rbDcrCount.Checked) { 'count' } else { 'infinite' })
+  $editIssues = @(Get-CustomTransitionIssues -Items @(Get-DeepCustomItemsFromList) `
+      -ListRepeat $editRepeat -ListRepeatCount ([int]$numDcrLaps.Value))
+  foreach ($editIssue in $editIssues) {
+    $editWrapTag = $(if ([bool]$editIssue.Wrap) { ' [바퀴 순환: 마지막 → 첫 항목]' } else { '' })
+    Add-GuiLog ('[경고] {0} → {1}{2}: {3} - 이대로는 시작할 수 없습니다 (순서 조정 또는 항목 수정으로 해소해 주세요).' -f `
+        $editIssue.From, $editIssue.To, $editWrapTag, $editIssue.Reason)
+  }
+}
+
+function Update-DeepTributeTotalLabel {
+  # 심층 하단 줄의 마족공물 예산 라벨 갱신 (리스트 편집·리스트 반복 설정 변경·복원 시 호출)
+  $totalItems = @(Get-DeepCustomItemsFromList)
+  $perLap = Get-DeepTributeTotalPerLap -Items $totalItems
+  if ($rbDcrCount.Checked) {
+    $lblDcrTributeTotal.Text = ('바퀴당 {0:N0} · 총 {1:N0}개' -f $perLap, ($perLap * [int]$numDcrLaps.Value))
+  } else {
+    $lblDcrTributeTotal.Text = ('바퀴당 마족공물 {0:N0}개' -f $perLap)
+  }
+}
+
+function Set-DeepCustomRepeatOnConfig {
+  # deepCustomRepeat 섹션을 현재 UI 상태로 갱신합니다 (Save-Config 는 호출부 몫).
+  # progress 는 절대 건드리지 않고 그대로 옮겨 담습니다 (진행 기록 비파괴 원칙).
+  param($Config)
+  $prevProgress = $null
+  if ($Config.PSObject.Properties['deepCustomRepeat'] -and $Config.deepCustomRepeat -and
+      $Config.deepCustomRepeat.PSObject.Properties['progress']) {
+    $prevProgress = $Config.deepCustomRepeat.progress
+  }
+  $node = [pscustomobject]@{
+    '_설명'         = "'심층던전 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. progress 는 이어가기용 진행 기록이므로 직접 수정하지 마세요."
+    '_items'        = "각 항목: difficulty(항상 '어려움')/stage/coin(마족공물 사용)/doubleLoot(항상 false) + exhaustContinue(공물 소진 시 true=미사용으로 진행, false=멈춤) / noDoubleSweep(항상 false). 던전 커스텀과 같은 항목 계약을 사용합니다"
+    items           = [array]@(Get-DeepCustomItemsFromList)
+    listRepeat      = $(if ($rbDcrCount.Checked) { 'count' } else { 'infinite' })
+    listRepeatCount = [int]$numDcrLaps.Value
+    progress        = $prevProgress
+  }
+  if ($Config.PSObject.Properties['deepCustomRepeat']) { $Config.deepCustomRepeat = $node }
+  else { $Config | Add-Member -NotePropertyName 'deepCustomRepeat' -NotePropertyValue $node }
+}
+
+function Save-DeepCustomRepeatToConfig {
+  # 심층 커스텀 즉시 저장 경로 (던전/어비스 공용 Save-CustomRepeatToConfig 와 분리 -
+  # Codex A-lite 합의: 기존 저장 경로 무접촉. 실패 신호는 같은 부채널을 사용합니다)
+  $script:lastCustomSaveOk = $false
+  $cfg = Read-Config
+  if (-not $cfg) {
+    Add-GuiLog '[경고] config.json 을 읽지 못해 심층 커스텀 반복 설정을 저장하지 못했습니다.'
+    return
+  }
+  Set-DeepCustomRepeatOnConfig -Config $cfg
+  try {
+    Save-Config $cfg
+    $script:lastCustomSaveOk = $true
+  }
+  catch {
+    Add-GuiLog "[경고] 심층 커스텀 반복 설정 저장 실패: $($_.Exception.Message)"
+  }
+  Update-DeepTributeTotalLabel
+}
+
 function Get-AbyssListLock {
   # 어비스 커스텀 리스트의 '방식·매칭 고정값'을 첫 항목에서 뽑습니다 (2026-07-22 사용자 확정:
   # 리스트 전체가 같은 방식+매칭이어야 함 - 항목마다 다르면 파티 상태가 항목 간에 꼬임).
@@ -3133,12 +4689,13 @@ function Load-SettingsToUi {
       default { $rbAbyssChance.Checked = $true }
     }
   } catch { $rbAbyssChance.Checked = $true }
-  # 저장된 콘텐츠 카테고리 복원 (abyss = 어비스 / dungeon = 던전 / hunting = 사냥터)
+  # 저장된 콘텐츠 카테고리 복원 (abyss = 어비스 / dungeon = 던전 / deepdungeon = 심층던전 / hunting = 사냥터)
   try {
     switch ([string]$cfg.contentCategory) {
-      'dungeon' { $rbCatDungeon.Checked = $true }
-      'hunting' { $rbCatHunting.Checked = $true }
-      default   { $rbCatAbyss.Checked = $true }
+      'dungeon'     { $rbCatDungeon.Checked = $true }
+      'deepdungeon' { $rbCatDeep.Checked = $true }
+      'hunting'     { $rbCatHunting.Checked = $true }
+      default       { $rbCatAbyss.Checked = $true }
     }
   } catch { $rbCatAbyss.Checked = $true }
   # 저장된 사냥터 설정 복원
@@ -3177,6 +4734,19 @@ function Load-SettingsToUi {
       # 두 번째 단계는 더블 루팅이 켜져 있을 때만 유효합니다.
       try { $rbNdNoDoubleSweep.Checked = ((ConvertTo-StrictBoolean $nd.continueSweepOnly $false) -and $chkNdDoubleLoot.Checked) } catch { $rbNdNoDoubleStop.Checked = $true }
       if ([string]$nd.matching -eq '우연한 만남') { $rbNdChance.Checked = $true } else { $rbNdFindParty.Checked = $true }
+    }
+  } catch { }
+  # 저장된 심층던전 설정 복원 (difficulty '매우 어려움' = 주간 단일 구역 반복.
+  # stage 는 내부 표기('1-1')로 저장되고 콤보는 'D1-1' 표시라 변환해 선택합니다)
+  try {
+    $dd = $cfg.deepDungeon
+    if ($dd) {
+      if ([string]$dd.difficulty -eq '매우 어려움') { $rbDdWeeklyVeryHard.Checked = $true } else { $rbDdHard.Checked = $true }
+      $ddStageDisplay = Get-DeepStageDisplay -Stage ([string]$dd.stage)
+      if ($ddStageDisplay -and $cboDdStage.Items.Contains($ddStageDisplay)) { $cboDdStage.SelectedItem = $ddStageDisplay }
+      $chkDdTribute.Checked = ConvertTo-StrictBoolean $dd.useTribute $false
+      try { $rbDdExhaustGo.Checked = ConvertTo-StrictBoolean $dd.continueWithoutTribute $false } catch { $rbDdExhaustStop.Checked = $true }
+      if ([string]$dd.matching -eq '파티찾기') { $rbDdFindParty.Checked = $true } else { $rbDdChance.Checked = $true }
     }
   } catch { }
   # 저장된 커스텀 반복 설정 복원 (리스트/반복 방식/소진 대응. progress 는 UI에 표시하지 않고
@@ -3232,6 +4802,33 @@ function Load-SettingsToUi {
       } finally { $script:crLoading = $false }
       # 복원된 리스트 기준으로 방식·매칭 입력 잠금을 맞춥니다 (통일 규칙)
       Update-AbyssInputLock
+    }
+  } catch { $script:crLoading = $false }
+  # 저장된 심층 커스텀 반복 목록/반복 방식 복원. 진행 기록은 시작 시 지문과 함께 판정합니다.
+  try {
+    if ($cfg.PSObject.Properties['deepCustomRepeat'] -and $cfg.deepCustomRepeat) {
+      $dcr = $cfg.deepCustomRepeat
+      $script:crLoading = $true
+      try {
+        $lvDcrList.Items.Clear()
+        if ($dcr.PSObject.Properties['items']) {
+          foreach ($dcrSavedItem in @($dcr.items)) {
+            if ($null -eq $dcrSavedItem) { continue }
+            # 계약 밖 stage 값(직접 편집 등)은 행으로 넣지 않습니다 - 내부 형식('1-1'~'2-3')만 인정
+            # (Codex 지적: D 접두 검사만으로는 'D3-1' 같은 범위 밖 값이 통과해 워커 파싱에서 실패)
+            $dcrSavedStage = [string]$dcrSavedItem.stage
+            if ($dcrSavedStage -notmatch '^[12]-[123]$') { continue }
+            $dcrSavedCoin = ConvertTo-StrictBoolean $dcrSavedItem.coin $false
+            Add-DeepCustomListRow -Stage $dcrSavedStage -Coin $dcrSavedCoin `
+              -ExhaustContinue ($dcrSavedCoin -and (ConvertTo-StrictBoolean $dcrSavedItem.exhaustContinue $false))
+          }
+        }
+        Update-DeepCustomListNumbers
+        if ([string]$dcr.listRepeat -eq 'count') { $rbDcrCount.Checked = $true } else { $rbDcrInfinite.Checked = $true }
+        try { $numDcrLaps.Value = [Math]::Min(999, [Math]::Max(1, [int]$dcr.listRepeatCount)) } catch { $numDcrLaps.Value = 1 }
+        $numDcrLaps.Enabled = $rbDcrCount.Checked
+        Update-DeepTributeTotalLabel
+      } finally { $script:crLoading = $false }
     }
   } catch { $script:crLoading = $false }
   # 저장된 난이도 복원 (없거나 빈 값이면 '게임 그대로'. 목록에 없는 이름이 저장돼
@@ -3319,9 +4916,10 @@ function Save-SettingsFromUi {
   if ($cboDifficulty.SelectedIndex -gt 0 -and $cboDifficulty.SelectedItem) {
     $difficultyValue = [string]$cboDifficulty.SelectedItem
   }
-  # 콘텐츠 카테고리 저장 (abyss = 어비스 / dungeon = 던전 / hunting = 사냥터)
+  # 콘텐츠 카테고리 저장 (abyss = 어비스 / dungeon = 던전 / deepdungeon = 심층던전 / hunting = 사냥터)
   $categoryValue = 'abyss'
   if ($rbCatDungeon.Checked) { $categoryValue = 'dungeon' }
+  elseif ($rbCatDeep.Checked) { $categoryValue = 'deepdungeon' }
   elseif ($rbCatHunting.Checked) { $categoryValue = 'hunting' }
   if ($cfg.PSObject.Properties['contentCategory']) { $cfg.contentCategory = $categoryValue }
   else { $cfg | Add-Member -NotePropertyName 'contentCategory' -NotePropertyValue $categoryValue }
@@ -3340,6 +4938,18 @@ function Save-SettingsFromUi {
   }
   if ($cfg.PSObject.Properties['normalDungeon']) { $cfg.normalDungeon = $ndSettings }
   else { $cfg | Add-Member -NotePropertyName 'normalDungeon' -NotePropertyValue $ndSettings }
+  # 심층던전 설정 저장 (던전과 동일 흐름 - 재화만 마족공물. '매우 어려움' = 주간 단일 구역 반복)
+  $ddSettings = [pscustomobject]@{
+    '_설명'      = "'심층던전' 카테고리 전용 설정입니다 (던전과 동일 흐름 - 재화만 마족공물(어려움 1개/매우 어려움 2개), 더블 루팅 없음. difficulty '매우 어려움'은 주간 단일 구역 반복 - stage 는 무시하고 화면의 매우 어려움 구역을 자동 채택합니다)"
+    difficulty   = $(if ($rbDdWeeklyVeryHard.Checked) { '매우 어려움' } else { '어려움' })
+    stage        = (Get-DeepStageInternal -Display ([string]$cboDdStage.SelectedItem))
+    useTribute   = [bool]$chkDdTribute.Checked
+    '_continueWithoutTribute' = '공물 소진 시(잔량 부족): true=미사용으로 진행 / false=멈춤'
+    continueWithoutTribute = [bool]($chkDdTribute.Checked -and $rbDdExhaustGo.Checked)
+    matching     = $(if ($rbDdChance.Checked) { '우연한 만남' } else { '파티찾기' })
+  }
+  if ($cfg.PSObject.Properties['deepDungeon']) { $cfg.deepDungeon = $ddSettings }
+  else { $cfg | Add-Member -NotePropertyName 'deepDungeon' -NotePropertyValue $ddSettings }
   # 사냥터 설정 저장 (특정 사냥터에 매이지 않음 - 원하는 사냥터 첫 화면을 열어 두고 시작)
   $htSettings = [pscustomobject]@{
     '_설명'      = "'사냥터' 카테고리 설정입니다. 원하는 사냥터의 첫 화면을 열어 두고 시작하면 어느 사냥터든 동작합니다"
@@ -3397,6 +5007,7 @@ function Save-SettingsFromUi {
   # 별도 Read/Save 를 하면 아래 Save-Config 가 되돌려 덮어쓰므로 반드시 이 객체에 병합)
   Set-CustomRepeatOnConfig -Config $cfg
   Set-AbyssCustomRepeatOnConfig -Config $cfg
+  Set-DeepCustomRepeatOnConfig -Config $cfg
 
   try {
     Save-Config $cfg
@@ -3410,7 +5021,8 @@ function Save-SettingsFromUi {
 function Set-UiRunning {
   param([bool]$IsRunning)
   $script:running = $IsRunning
-  $btnStart.Enabled = -not $IsRunning
+  # 시작 버튼은 '미실행 + 사용 승인'의 합성 조건 (실행 종료 후에도 미승인이면 잠금 유지)
+  $btnStart.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnSafeStop.Enabled = $IsRunning
   $btnKill.Enabled = $IsRunning
   # 대기 중에는 시작만, 실행 중에는 중지 2개만 표시 (시작 자리에 중지가 나타남 - 오클릭 방지)
@@ -3502,7 +5114,9 @@ function Start-NextCycle {
     $env:HONEYNOGI_CUSTOM_RESTART = $(if ($script:customRestart) { '1' } else { '' })
     $env:HONEYNOGI_CUSTOM_RECOVERY = $(if ($script:customRecoveryPending) { '1' } else { '' })
     $env:HONEYNOGI_CUSTOM_POSITION = $customContext.Position
-    $env:HONEYNOGI_CUSTOM_LIST = Get-CustomListCompact -Items $customContext.Items
+    $env:HONEYNOGI_CUSTOM_LIST = $(if ($script:customConfigSection -eq 'deepCustomRepeat') {
+        Get-DeepCustomListCompact -Items $customContext.Items
+      } else { Get-CustomListCompact -Items $customContext.Items })
     $env:HONEYNOGI_CUSTOM_MARKER = $customMarkerFile
     $env:HONEYNOGI_CUSTOM_OWNER = New-CustomMarkerOwnerJson -Context $customContext
     $repeatModeText = $(if ($customContext.ListRepeat -eq 'count') { "$($customContext.ListRepeatCount)바퀴" } else { '무한' })
@@ -3784,7 +5398,8 @@ $timer.Add_Tick({
             return
           }
         }
-        Stop-AllRun '조건 충족으로 정지 - 은동전 소진 등 (자세한 내용은 로그 참고)'
+        Stop-AllRun $(if ($rbCatDeep.Checked) { '조건 충족으로 정지 - 마족공물 소진 등 (자세한 내용은 로그 참고)' }
+          else { '조건 충족으로 정지 - 은동전 소진 등 (자세한 내용은 로그 참고)' })
         $lblStatus.ForeColor = [System.Drawing.Color]::SteelBlue
       } else {
         if ($script:customActive -and $exitCode -eq 1) {
@@ -3830,10 +5445,15 @@ $timer.Add_Tick({
   })
 
 # --- 버튼 이벤트 ---
-$btnStart.Add_Click({
+function Invoke-StartAutomation {
+  # [시작]의 실제 본문. 승인 게이트(아래 btnStart 핸들러)를 통과한 뒤에만 호출됩니다.
+  # 함수로 분리한 이유: '새 자동화 시작 시 승인 검사' 스펙 - 클릭 시 비동기 조회를 먼저
+  # 돌리고, 조회 완료 콜백(Complete-ApprovalCheck)이 승인 확인 후 이 함수를 호출합니다.
     $isCustomStart = ($rbCustomRepeat.Checked -and -not $rbCatHunting.Checked)
-    $script:customConfigSection = $(if ($rbCatAbyss.Checked) { 'abyssCustomRepeat' } else { 'customRepeat' })
-    $script:customMarkerFile = $(if ($rbCatAbyss.Checked) { $customAbyssMarkerFile } else { $customDungeonMarkerFile })
+    $script:customConfigSection = $(if ($rbCatAbyss.Checked) { 'abyssCustomRepeat' }
+      elseif ($rbCatDeep.Checked) { 'deepCustomRepeat' } else { 'customRepeat' })
+    $script:customMarkerFile = $(if ($rbCatAbyss.Checked) { $customAbyssMarkerFile }
+      elseif ($rbCatDeep.Checked) { $customDeepMarkerFile } else { $customDungeonMarkerFile })
     if ($rbCatDungeon.Checked) {
       if ($isCustomStart) {
         # 커스텀 반복 시작 안내 (한 번만 표시: 열어 둔 던전 하나 / 우연한 만남 강제)
@@ -3846,6 +5466,17 @@ $btnStart.Add_Click({
     }
     if ($rbCatAbyss.Checked -and $isCustomStart) {
       Add-GuiLog '[안내] 어비스 커스텀 반복: 리스트 순서대로 항목을 한 판씩 실행합니다.'
+    }
+    if ($rbCatDeep.Checked) {
+      if ($isCustomStart) {
+        Add-GuiLog '[안내] 심층 커스텀 반복: 시작 시 열어 둔 심층던전 하나에서 리스트 순서대로 동작합니다 (난이도는 어려움 고정).'
+        Add-GuiLog "[안내] '커스텀 반복'은 설정과 무관하게 '우연한 만남'으로 진행합니다."
+      } else {
+        Add-GuiLog '[안내] 심층던전 자동화: 원하는 심층던전의 구역 선택 화면(또는 진입 옵션 화면)을 열어 두고 시작하세요. 마족공물 옵션을 켰다면 실제로 공물이 소모됩니다.'
+        if ($rbDdWeeklyVeryHard.Checked) {
+          Add-GuiLog "[안내] '매우 어려움'은 주간 던전입니다 - 이번 주 매우 어려움 심층던전의 화면을 열어 두면 그 구역을 자동 채택해 반복합니다 (구역 설정 무시)."
+        }
+      }
     }
     if (-not (Test-Path -LiteralPath $workerScript)) {
       [System.Windows.Forms.MessageBox]::Show('mabinogi_run_once.ps1 을 찾지 못했습니다.', '오류') | Out-Null
@@ -3873,7 +5504,8 @@ $btnStart.Add_Click({
       try { if ($crNode.PSObject.Properties['listRepeat']) { $crGateRepeat = [string]$crNode.listRepeat } } catch { }
       try { if ($crNode.PSObject.Properties['listRepeatCount']) { $crGateLaps = [int]$crNode.listRepeatCount } } catch { }
       $crGateIssues = @()
-      if ($script:customConfigSection -eq 'customRepeat') {
+      if ($script:customConfigSection -eq 'customRepeat' -or $script:customConfigSection -eq 'deepCustomRepeat') {
+        # 심층도 같은 1층/2층 구역 지도 구조라 던전과 동일한 층 전환 규칙을 적용합니다
         $crGateIssues = @(Get-CustomTransitionIssues -Items $crItems -ListRepeat $crGateRepeat -ListRepeatCount $crGateLaps)
       }
       # 어비스 방식·매칭 통일 게이트: GUI 에서는 라디오 잠금으로 섞일 수 없지만 config 를 직접
@@ -4025,6 +5657,20 @@ $btnStart.Add_Click({
     [Win32.PowerState]::SetThreadExecutionState($script:esKeepAwake) | Out-Null
     Set-UiRunning $true
     Start-NextCycle
+}
+
+$btnStart.Add_Click({
+    # 사용 승인 게이트 (새 자동화 시작 시 검사 - 스펙): 미승인 상태는 즉시 거부하고,
+    # 승인 상태여도 명단을 한 번 더 비동기 조회한 뒤(최대 10초) 시작합니다.
+    # 조회 실패 시에는 7일 유예 캐시가 판정을 대신합니다 (무인 운용 보호).
+    if (-not (Test-ApprovalAllowsStart)) {
+      Add-GuiLog '[안내] 사용 승인이 확인되지 않아 시작할 수 없습니다 - 화면의 기기 코드를 개발자에게 보내 승인을 받아 주세요.'
+      Update-ApprovalUi
+      return
+    }
+    $btnStart.Enabled = $false
+    $lblStatus.Text = '사용 승인 확인 중…'
+    Start-ApprovalCheck -ForStart
   })
 
 $btnSafeStop.Add_Click({
@@ -4128,10 +5774,12 @@ $form.Add_FormClosing({
 # ----- 카테고리 전환: 상세 설정 패널 교체 + 그룹 높이/아래 요소 위치 재계산 -----
 $updateCategoryPanels = {
   $isDungeon = $rbCatDungeon.Checked
+  $isDeep = $rbCatDeep.Checked
   $isHunting = $rbCatHunting.Checked
-  $isAbyss = (-not $isDungeon -and -not $isHunting)
+  $isAbyss = (-not $isDungeon -and -not $isDeep -and -not $isHunting)
   # 설명서 버튼 글자를 선택한 콘텐츠에 맞게 전환
-  $btnManual.Text = $(if ($isDungeon) { '던전 설명서' } elseif ($isHunting) { '사냥터 설명서' } else { '어비스 설명서' })
+  $btnManual.Text = $(if ($isDungeon) { '던전 설명서' } elseif ($isDeep) { '심층 설명서' }
+    elseif ($isHunting) { '사냥터 설명서' } else { '어비스 설명서' })
   # 커스텀 반복 라디오는 던전/어비스에서 활성화합니다. 사냥터로는 전환할 수 없고
   # 선택 의도는 config 에 보존합니다.
   # crSwitching 가드: 이 프로그램적 전환이 라디오 CheckedChanged 의 enabled 저장을 오염시키지 않게 함
@@ -4149,6 +5797,7 @@ $updateCategoryPanels = {
   $isCustom = $supportsCustom -and $rbCustomRepeat.Checked
   $isDungeonCustom = $isDungeon -and $isCustom
   $isAbyssCustom = $isAbyss -and $isCustom
+  $isDeepCustom = $isDeep -and $isCustom
   $grpContentDetail.Text = '콘텐츠 상세 설정'
   # 커스텀 반복 중에는 사냥터 카테고리로 전환하지 못하게 합니다.
   # 커스텀 반복을 해제하거나 다른 카테고리로 폴백하면 문구와 활성 상태가 즉시 원래대로 돌아옵니다.
@@ -4177,6 +5826,15 @@ $updateCategoryPanels = {
   $pnlNdExhaust.Visible = $coinRowOn
   $pnlNdNoDouble.Visible = $ndNoDoubleRowOn
   $pnlNdParty.Visible = $ndSingleOn
+  # 심층던전용 패널 (던전과 같은 줄 구성 - 더블 루팅 없음. 공물 소진 대응은 마족공물 체크 시에만.
+  # 커스텀 반복 선택 시 단일 모드 줄들은 전부 숨기고 심층 리스트 빌더로 전환합니다)
+  $ddSingleOn = $isDeep -and -not $isDeepCustom
+  $ddExhaustRowOn = $ddSingleOn -and $chkDdTribute.Checked
+  $pnlDdDifficulty.Visible = $ddSingleOn
+  $pnlDdStage.Visible = $ddSingleOn
+  $pnlDdTribute.Visible = $ddSingleOn
+  $pnlDdExhaust.Visible = $ddExhaustRowOn
+  $pnlDdMatching.Visible = $ddSingleOn
   # 커스텀 반복 리스트 빌더 패널 (던전 + 커스텀 반복 선택 시에만 표시.
   # 소진/더블 불가 라디오 줄은 입력 줄의 은동전/더블 루팅 체크 상태를 따라갑니다)
   $crExhaustRowOn = $isDungeonCustom -and $chkCrCoin.Checked
@@ -4200,6 +5858,17 @@ $updateCategoryPanels = {
   $btnAcrUp.Visible = $isAbyssCustom
   $btnAcrDown.Visible = $isAbyssCustom
   $pnlAcrRepeat.Visible = $isAbyssCustom
+  # 심층 커스텀 리스트 빌더 (심층던전 + 커스텀 반복 선택 시에만 표시.
+  # 소진 라디오 줄은 입력 줄의 마족공물 체크 상태를 따라갑니다)
+  $dcrExhaustRowOn = $isDeepCustom -and $chkDcrTribute.Checked
+  $pnlDcrInput.Visible = $isDeepCustom
+  $pnlDcrExhaust.Visible = $dcrExhaustRowOn
+  $lvDcrList.Visible = $isDeepCustom
+  $btnDcrAdd.Visible = $isDeepCustom
+  $btnDcrDelete.Visible = $isDeepCustom
+  $btnDcrUp.Visible = $isDeepCustom
+  $btnDcrDown.Visible = $isDeepCustom
+  $pnlDcrRepeat.Visible = $isDeepCustom
   # 사냥터용 패널 (소진 대응 옵션 없음 - 은동전이 부족하면 나가고 자동화 종료)
   $pnlHtDifficulty.Visible = $isHunting
   $pnlHtCoin.Visible = $isHunting
@@ -4232,6 +5901,25 @@ $updateCategoryPanels = {
       $pnlNdParty.Top = 116
       $grpContentDetail.Height = 150
     }
+  } elseif ($isDeep) {
+    # 심층: 단일 모드는 난이도/구역/공물 3줄 + (공물 체크 시) 소진 대응 + 매칭.
+    # 커스텀은 던전 커스텀과 같은 배치 규칙 (입력 줄 + 소진 라디오 0~1줄 + 리스트 + 하단 줄)
+    if ($isDeepCustom) {
+      $dcrListTop = $(if ($dcrExhaustRowOn) { 78 } else { 52 })
+      $lvDcrList.Top = $dcrListTop
+      $btnDcrAdd.Top = $dcrListTop
+      $btnDcrDelete.Top = $dcrListTop + 36
+      $btnDcrUp.Top = $dcrListTop + 72
+      $btnDcrDown.Top = $dcrListTop + 108
+      $pnlDcrRepeat.Top = $dcrListTop + 156
+      $grpContentDetail.Height = $pnlDcrRepeat.Top + 36
+    } elseif ($ddExhaustRowOn) {
+      $pnlDdMatching.Top = 148
+      $grpContentDetail.Height = 182
+    } else {
+      $pnlDdMatching.Top = 116
+      $grpContentDetail.Height = 150
+    }
   } elseif ($isAbyssCustom) {
     $acrListTop = $(if ($acrPartyOn) { 78 } else { 52 })
     $lvAcrList.Top = $acrListTop
@@ -4258,7 +5946,10 @@ $updateCategoryPanels = {
 }
 $rbCatAbyss.Add_CheckedChanged($updateCategoryPanels)
 $rbCatDungeon.Add_CheckedChanged($updateCategoryPanels)
+$rbCatDeep.Add_CheckedChanged($updateCategoryPanels)
 $rbCatHunting.Add_CheckedChanged($updateCategoryPanels)
+# 심층 마족공물 체크 = 소진 대응 줄 표시/숨김 (던전 chkNdCoin 과 동일한 재배치 트리거)
+$chkDdTribute.Add_CheckedChanged({ if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels } })
 # 파티(파티원) 선택/해제 시 난이도·던전 줄 표시가 바뀝니다 (라디오 전환은 상대 버튼의
 # CheckedChanged 도 함께 발생하므로 파티원 버튼 하나에만 걸어도 모든 전환을 잡습니다)
 $rbAbyssPartyMember.Add_CheckedChanged($updateCategoryPanels)
@@ -4301,6 +5992,33 @@ $hotkeyTimer.Add_Tick({
 
 $script:uiReady = $true
 Add-GuiLog '컨트롤 패널이 준비됐습니다. [시작]을 누르면 반복을 시작합니다.'
+# 폼 생성 전(구버전 정리)에 모아 둔 안내를 로그로 출력합니다
+foreach ($cleanupLine in @($script:cleanupLogLines)) { Add-GuiLog $cleanupLine }
+$script:cleanupLogLines = @()
+
+# --- 사용 승인 확인 (시작 시 1회) ---
+# 캐시로 잠정 판정해 승인된 지인의 오프라인 시작을 막지 않고(유예 7일), 곧바로 명단을
+# 비동기 조회해 실제 판정으로 갱신합니다. 폴링 타이머는 업데이트 확인과 같은 패턴입니다.
+$script:approvalTimer = New-Object System.Windows.Forms.Timer
+$script:approvalTimer.Interval = 500
+$script:approvalTimer.Add_Tick({
+    if (-not $script:approvalAsync -or -not $script:approvalAsync.IsCompleted) { return }
+    $script:approvalTimer.Stop()
+    $responseText = ''
+    try {
+      $fetchResult = $script:approvalPs.EndInvoke($script:approvalAsync)
+      if ($fetchResult -and $fetchResult.Count -gt 0) { $responseText = [string]$fetchResult[0] }
+    } catch { }
+    try { $script:approvalPs.Dispose() } catch { }
+    $script:approvalPs = $null
+    $script:approvalAsync = $null
+    Complete-ApprovalCheck -ResponseText $responseText
+  })
+$initialCache = Get-ConfigApprovalCache
+$script:approvalState = Get-ApprovalDecision -FetchOk:$false -Codes @() -DeviceCode $script:deviceCode `
+  -CacheApprovedAtUtc $initialCache.At -CacheDeviceCode $initialCache.Code -NowUtc ([DateTime]::UtcNow) -GraceDays $approvalGraceDays
+Update-ApprovalUi
+Start-ApprovalCheck
 if ($script:configMigrated) {
   Add-GuiLog '[안내] 업데이트 감지: 설정을 새 버전 형식으로 이전했습니다 (사용자 설정은 유지, 화면 좌표는 최신으로 갱신)'
   if ($script:customProgressReset) {
@@ -4423,7 +6141,7 @@ try {
 } finally {
   # 창을 닫을 때 폴링 타이머·업데이트 러닝스페이스·전역 뮤텍스를 명시적으로 정리합니다.
   # 프로세스 종료에만 맡기면 업데이트 확인 중 닫은 직후 재실행 시 뮤텍스가 잠깐 남을 수 있습니다.
-  foreach ($uiTimer in @($hotkeyTimer, $timer, $script:updateTimer)) {
+  foreach ($uiTimer in @($hotkeyTimer, $timer, $script:updateTimer, $script:approvalTimer)) {
     if ($uiTimer) {
       try { $uiTimer.Stop() } catch { }
       try { $uiTimer.Dispose() } catch { }
@@ -4436,6 +6154,15 @@ try {
       }
     } catch { }
     try { $script:updateCheckPs.Dispose() } catch { }
+  }
+  if ($script:approvalPs) {
+    # 승인 명단 조회 러닝스페이스도 명시적으로 정리 (업데이트 확인과 동일 규약)
+    try {
+      if ($script:approvalAsync -and -not $script:approvalAsync.IsCompleted) {
+        $script:approvalPs.Stop()
+      }
+    } catch { }
+    try { $script:approvalPs.Dispose() } catch { }
   }
   try { $form.Dispose() } catch { }
   if ($guiMutexAcquired) {
