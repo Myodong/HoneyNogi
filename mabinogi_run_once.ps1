@@ -807,12 +807,12 @@ $ddLayoutTable = @{
 # 북쪽/남쪽 첫 단어로 구분되어 조각에 불필요). 바리 광구 숫자 가드는 공용 함수에 내장.
 $ddNamePatterns = @(
   @{ Id = '페카고분';  Any = @('페카', '패가', '메카') }
-  @{ Id = '북쪽폐허';  Any = @('북쪽') }
+  @{ Id = '북쪽폐허';  Any = @('북쪽', '록쪽') }   # '록쪽' = '북'→'록' 오독 (2026-07-28 23:04 실기, 비권장 창 크기)
   @{ Id = '남쪽폐허';  Any = @('남쪽') }
   @{ Id = '알비던전';  Any = @('알비') }
   @{ Id = '키아던전';  Any = @('키아', '기아') }
   @{ Id = '라비던전';  Any = @('라비', '라바') }
-  @{ Id = '마스던전';  Any = @('마스', '마싀') }
+  @{ Id = '마스던전';  Any = @('마스', '마싀', '파스') }   # '파스' = '마'→'파' 오독 (2026-07-29 21:52 실기)
 )
 # 알약 '어려움' 표준 x (Select-DgDifficultyWord 의 HardX): 심층은 '어려움'이 첫 알약
 # 자리라 던전(선택 140/옵션 724)과 다름 (실측: 선택 (78,186), 옵션 (660,120)).
@@ -828,6 +828,8 @@ $dgFullCost = 20
 $dgCurrencyName = '은동전'
 $dgExhaustLabel = '동전 소진 시'
 $dgValidCosts = @(10, 20)
+$dgBalanceMax = 150   # 은동전 보유 상한 (2026-07-28 사용자 제보) - 잔량 판독이 이를 넘으면 오독 확정
+
 if ($deepMode) {
   # 모드 테이블 치환: 이후 모든 소비 함수(던전 판별/선택 화면 판정/좌표 산출)가 심층 기준으로 동작.
   # 2단계 가드($dgTwoTierDungeons)는 심층에서 미사용(어려움 고정)이라 비웁니다.
@@ -840,11 +842,23 @@ if ($deepMode) {
   $dgCurrencyName = '마족공물'
   $dgExhaustLabel = '공물 소진 시'
   $dgValidCosts = @(1, 2)
+  $dgBalanceMax = 15   # 마족공물 보유 상한 (2026-07-28 사용자 제보)
   $dgSelHardX = 78
   $dgOptHardX = 660
-  # 공물 잔량 표시 영역 (옵션 화면 우상단, 2026-07-27 실측: 아이콘+숫자 중심 (1088,67) -
-  # 은동전과 재화줄 구성이 달라 영역을 교체. Get-DgCoinBalance 가 마지막 숫자 그룹을 읽음)
+  # 공물 잔량 표시 영역 (옵션 화면 우상단). 재화줄은 골드(950)·은동전(1039)·마족공물(1087)·
+  # 하트토큰(1146) 순서 고정 (2026-07-28 사용자 제보 + 캡처 2장 단어 좌표 실측 - 07-27 실측
+  # (1088,67)과 일치). 이 영역(1056~1120)은 공물만 잡고 은동전/하트토큰은 밖이라 오독 없음.
+  # Get-DgCoinBalance 가 마지막 숫자 그룹을 읽음.
   $rgDgCoinBalance = @(1056, 45, 64, 44)
+  # 입장 버튼 소모량 판독 영역: 공물 뿔 아이콘을 제외하고 숫자+'입장하기'만 읽습니다
+  # (2026-07-28 22:40 실기: 아이콘이 'V'/'7' 등으로 오독돼 소모량 1이 7로 읽혀 안전 정지 -
+  # 'VI입장하기'/'Space72입장하기' 실측. 아이콘 x953~977, 숫자 x980~ 픽셀 실측으로 경계 확정.
+  # 아이콘 제외 영역은 소탕선택 캡처 21장 중 IME 팝업 오염 2장 제외 전수가 첫 시도에
+  # '1입장하기'/'2입장하기'로 즉시 정확 판독. config 키 값 불변 - coordsVersion 유지)
+  $rgDgTributeCost = @(978, 636, 152, 44)
+  # 제목 판독은 Read-DgTitleText 의 '좁은 우선 + 심층 조건부 확장' 이중 판독을 사용합니다
+  # (폭 420 전역 확장은 밝은 배경 선택 화면에서 판독 전멸 - 2026-07-28 20:53 실기로 철회.
+  # 근거 실측은 Read-DgTitleText 주석 참고).
 }
 
 function Get-DgMapLabelText {
@@ -902,6 +916,33 @@ function Test-DgSelectionTitle {
   if ($normalized.Contains('던전') -or $normalized.Contains('오드') -or
       $normalized.Contains('고분') -or $normalized.Contains('광구')) { return $true }
   if (Get-DgDungeonIdFromTitle -TitleText $normalized) { return $true }
+  # 심층 전용 던전(북쪽/남쪽 폐허)은 던전 모드의 이름 테이블($dgNamePatterns)에 없어 위
+  # ID 매칭이 실패 → 선택 화면 미인식 → 탭 자동 전환 게이트에 도달하지 못합니다
+  # (2026-07-28 21:58 실기: 던전 모드 + 심층 탭 '북쪽폐하'가 '던전 화면이 아닙니다'로 정지).
+  # 모드와 무관하게 심층 이름 조각도 선택 화면 제목으로 인정합니다 (옵션 화면은 위의
+  # 구역/층 선제외가 그대로 걸러줌).
+  foreach ($ddEntry in $ddNamePatterns) {
+    foreach ($ddFragment in $ddEntry.Any) {
+      if ($normalized.Contains([string]$ddFragment)) { return $true }
+    }
+  }
+  return $false
+}
+
+function Test-ImeOverlayText {
+  param([string]$Text)
+
+  # Windows IME 알림 팝업("한국어 Microsoft 입력기 / 입력 방법을 전환하려면 Windows 키 +
+  # 스페이스를 누르세요") 판별식. 팝업이 게임 창 우하단(진입/입장 버튼 자리)을 덮으면
+  # 버튼 OCR이 이 문구로 대체돼 클릭 게이트가 막히고, 클릭도 팝업에 먹힙니다
+  # (2026-07-29 00:20 실기 + 보관 캡처 2장 재발 실증). 단일 조각은 오탐 위험이 있어
+  # 두 조각 복합 조건으로만 판정합니다 (Codex 계약). 실측 OCR 원문:
+  # 'SpaceMicrosoft입력기심층1층입력방법을전환하러면Windows기+스페이스' ('하려면/키' 깨짐 포함)
+  $normalized = ([string]$Text) -replace '\s', ''
+  if ($normalized.Length -eq 0) { return $false }
+  if ($normalized.Contains('Microsoft') -and $normalized.Contains('입력')) { return $true }
+  if ($normalized.Contains('입력방법') -and $normalized.Contains('전환')) { return $true }
+  if ($normalized.Contains('Windows') -and $normalized.Contains('스페이스')) { return $true }
   return $false
 }
 
@@ -981,7 +1022,13 @@ function Select-DgDifficultyWord {
     return $null
   }
   foreach ($word in $Words) {
-    if ([string]$word.Text -ne $Key) { continue }
+    # '어려움'의 실측 깨짐 이형 허용 (2026-07-29 키아/페카 심층 실기 - 금색 선택 강조가 걸린
+    # 알약의 깨짐이 스케일마다 다름: '이려움'(s3, 키아 옵션) / '이컪움'(s4, 페카·키아·알비
+    # 선택) / '이컪울'(s5, 같은 화면). 전부 오류 캡처 오프라인 재현 실측. 이형도 아래 짝
+    # 제외·앵커/HardX 검증을 똑같이 통과해야 채택되므로 오채택 불가 - Codex 승인)
+    $textMatches = ([string]$word.Text -eq $Key) -or
+                   ($Key -eq '어려움' -and (@('이려움', '이컪움', '이컪울') -contains [string]$word.Text))
+    if (-not $textMatches) { continue }
     if ($Key -eq '어려움') {
       # ① '매우'의 짝(오른쪽 70px 이내 같은 줄)이면 '매우 어려움'의 뒷단어 - 제외
       $partOfVeryHard = $false
@@ -1021,19 +1068,71 @@ function Select-DgDifficultyWord {
   return $null
 }
 
+function Select-DgTabWord {
+  param($Words, [bool]$DeepTab)
+
+  # 선택 화면 상단 '던전|심층 던전' 탭에서 클릭할 단어를 고릅니다 (순수 - 진리표 대상).
+  # 실측 (2026-07-28, 1272x717): 던전(66,128) / 심층(135,128) 던전(172,128).
+  # 심층 던전 탭 = '심층' 단어('심충' 오독 관용 - 퀘스트 트래커 실측 사례).
+  # 던전 탭 = 왼쪽 70px 안 같은 줄에 심층 단어가 없는 '던전' 단어
+  # (난이도 알약의 '매우 어려움' 뒷단어 제외와 같은 패턴 - 심층 던전 탭의 '던전' 오클릭 방지).
+  # 반환: @{ X; Y } (기준 좌표) 또는 $null (호출부가 실측 예비 좌표 사용)
+  if ($DeepTab) {
+    foreach ($word in $Words) {
+      if ([string]$word.Text -match '^심[층충]$') { return @{ X = [int]$word.X; Y = [int]$word.Y } }
+    }
+    return $null
+  }
+  foreach ($word in $Words) {
+    if ([string]$word.Text -ne '던전') { continue }
+    $deepPaired = $false
+    foreach ($other in $Words) {
+      if ([string]$other.Text -match '^심[층충]$') {
+        $dx = [int]$word.X - [int]$other.X
+        if ($dx -gt 0 -and $dx -le 70 -and [Math]::Abs([int]$word.Y - [int]$other.Y) -le 14) {
+          $deepPaired = $true
+          break
+        }
+      }
+    }
+    if (-not $deepPaired) { return @{ X = [int]$word.X; Y = [int]$word.Y } }
+  }
+  return $null
+}
+
+function Test-DgTabProbeMatchesMode {
+  param([string]$ProbeText, [bool]$DeepTab)
+
+  # 탭 전환 확인 (순수 - 진리표 대상): 선택 화면 진입 버튼 문구가 목표 탭과 일치하는지.
+  # 빈/불완전 판독이 '심층 없음 = 던전 탭 성공'으로 오인되지 않게 '진입' 존재를 함께
+  # 요구합니다 (Codex 지적). '심층' 오독 '심충' 관용 포함.
+  $normalized = ([string]$ProbeText) -replace '\s', ''
+  if (-not $normalized.Contains('진입')) { return $false }
+  $deepSeen = [bool]($normalized -match '심[층충]')
+  return ($deepSeen -eq $DeepTab)
+}
+
 function Find-DgDifficultyPoint {
   param([System.Diagnostics.Process]$Game, [int[]]$Region, [string]$Label, [int]$HardX = -1)
 
   # 던전 난이도 알약의 클릭 지점(화면 픽셀)을 찾습니다. 단어 목록 기반 판정으로
   # '매우 어려움' 지원과 '어려움'↔'매우 어려움' 오채택 방지를 함께 처리합니다.
   # HardX = 이 영역에서 '어려움' 알약의 표준 x (Select-DgDifficultyWord 주석 참고).
+  # 다중 스케일 재시도 (2026-07-29 실측): 금색 선택 강조가 걸린 알약은 스케일에 따라
+  # 깨짐이 달라(선택 화면은 s3 정상/s4·s5 깨짐, 키아 옵션은 s4 빈 판독/s5 정상) 단일
+  # 스케일로는 전멸할 수 있음. 실측 전 케이스에서 최소 한 스케일은 정상 판독 - 첫 성공
+  # 채택, 성공 시 조기 종료라 기존 성공 경로 비용 불변 (Get-DgTributeCost 전례, Codex 승인).
   $key = ([string]$Label) -replace '\s', ''
-  $words = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
-      -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 4 -Engine $ocrKoreanEngine)
-  $refPoint = Select-DgDifficultyWord -Words $words -Key $key -HardX $HardX
-  if (-not $refPoint) { return $null }
-  $screenPoint = Get-ScaledScreenPoint -Game $Game -ReferenceX ([int]$refPoint.X) -ReferenceY ([int]$refPoint.Y)
-  return [System.Drawing.Point]::new([int]$screenPoint.X, [int]$screenPoint.Y)
+  foreach ($pillScale in @(4, 3, 5)) {
+    $words = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
+        -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale $pillScale -Engine $ocrKoreanEngine)
+    $refPoint = Select-DgDifficultyWord -Words $words -Key $key -HardX $HardX
+    if ($refPoint) {
+      $screenPoint = Get-ScaledScreenPoint -Game $Game -ReferenceX ([int]$refPoint.X) -ReferenceY ([int]$refPoint.Y)
+      return [System.Drawing.Point]::new([int]$screenPoint.X, [int]$screenPoint.Y)
+    }
+  }
+  return $null
 }
 # ===== '사냥터' 카테고리 설정 - 특정 사냥터에 매이지 않는 범용 방식 =====
 # 사용자가 원하는 사냥터의 첫 화면(하단에 파티 찾기/입장하기)을 열어 두면 동작합니다.
@@ -1067,6 +1166,16 @@ $ptHtClose      = @(1228, 67)      # 첫 화면 우상단 닫기(X) - 은동전 
 
 # 진입 옵션 화면의 클릭 좌표 (기준 1272x717 실측)
 $ptDgStageEnter   = @(918, 655)    # 선택 화면의 'N층 M구역 진입' 버튼
+# IME 팝업 예비: 시스템 입력기 팝업(우하단 x≈908~, 2026-07-29 00:20 실측)이 기본 클릭
+# 지점을 덮을 때 쓰는 진입 버튼 왼쪽 지점. 선택 화면 보관 캡처 43장 전수 픽셀 실측으로
+# 전부 버튼 위(심층 분홍 206,64,96 / 일반 보라 129,99,255) 확인. 단 옵션 화면에서는 같은
+# 자리가 '파티 찾기' 초록 버튼이므로 반드시 '선택 화면 제목 확인' 게이트와 함께만 사용.
+$ptDgStageEnterLeft = @(770, 655)
+# IME 팝업 전용 판독 영역 (팝업 실측 x≈908~1265, y≈612~700 - 여유 포함). OS 팝업은 게임
+# 창 크기와 무관한 고정 픽셀 크기라 큰 창(1908x1076)에서는 비율 환산 영역과 어긋날 수
+# 있지만, 우하단 앵커는 같아서 대부분 겹쳐 판독됩니다 (판별식이 조각 복합 조건이라 부분
+# 판독으로도 동작).
+$rgImePopup = @(905, 610, 360, 95)
 $ptDgBackArrow    = @(43, 67)      # 진입 옵션 화면 좌상단 '<' (선택 화면으로 한 단계 뒤로) - 2026-07-18 실측
                                    # 주의: ESC는 한 단계 뒤로가 아니라 던전 UI 전체를 닫고 필드로 나감 (18:44 실측)
 $rgDgOptDifficulty = @(600, 95, 320, 50) # 진입 옵션 화면 상단 난이도 알약 - 2026-07-24 확장: '매우 어려움'('매우' 단어 x≈796)까지 커버 (기존 190 폭은 x790에서 잘림)
@@ -1363,6 +1472,11 @@ $rgReviveButtons   = @(Get-ConfigValue $config @('ocrRegions', 'reviveButtons') 
 # 우하단 자동사냥 버튼의 아이콘 중심 좌표(클릭용 아님, 상태 판별용).
 # 꺼짐 = 나침반 아이콘(중심에 검은 점) / 켜짐 = 흰 사각형(정지 아이콘) → 픽셀로 구분합니다.
 $ptAutoHuntIcon    = @(Get-ConfigValue $config @('clickPoints', 'autoHuntIcon') @(1192, 637))
+# ASSIST(어시스트 모드) 자동 켜기 (2026-07-28 사용자 요청·실측): 전투 HUD 우측 ASSIST
+# 토글이 꺼져 있으면 H키로 켭니다. 좌표는 토글 필의 기준점(클릭용 아님, 상태 판별용).
+$assistAutoOn      = Get-ConfigBoolean $config @('assist', 'autoEnable') $true
+$assistKey         = Get-ConfigInteger $config @('assist', 'key') 72 1 255   # 72 = H (ASSIST 토글)
+$ptAssistToggle    = @(Get-ConfigValue $config @('clickPoints', 'assistToggle') @(1216, 513))
 
 $refocusEverySeconds = Get-ConfigInteger $config @('focus', 'refocusEverySeconds') 8 0 3600
 $refocusIdleSeconds  = Get-ConfigInteger $config @('focus', 'onlyWhenUserIdleSeconds') 15 0 3600
@@ -2756,6 +2870,16 @@ function Test-DgStageEnterButtonVisible {
   return (Test-DgStageEnterTextMatches -EnterText (Get-DgStageEnterButtonText -Game $Game) -Stage $Stage)
 }
 
+function Test-DgImePopupVisible {
+  param([System.Diagnostics.Process]$Game)
+
+  # 게임 창 우하단에 시스템 입력기(IME) 팝업이 떠 있는지 전용 영역 OCR로 확인합니다.
+  # 이 팝업은 진입/입장 버튼을 덮어 버튼 OCR과 클릭을 동시에 무력화합니다 (2026-07-29 실측).
+  $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgImePopup[0] -ReferenceY $rgImePopup[1] `
+    -RegionWidth $rgImePopup[2] -RegionHeight $rgImePopup[3] -Scale 3 -Engine $ocrKoreanEngine
+  return (Test-ImeOverlayText -Text $ocrText)
+}
+
 function Test-DetailScreen {
   param([System.Diagnostics.Process]$Game)
 
@@ -2858,8 +2982,10 @@ function Wait-ForDungeonClearScreen {
   $lastFocus = Get-Date
   $reviveCount = 0              # 이번 회차에 자동 부활한 횟수
   $reviveConfirmPending = $false # R키 입력 후 부활 완료 확인 대기 중
+  $revivePendingKind = ''        # 진행 중인 부활 종류 (가루 부활/여신상 부활/전멸 재도전 - 완료 로그에 표기)
   $reviveBlockedLogged = $false  # 부활 불가 경고를 이미 남겼는지(반복 출력 방지)
   $autoHuntPresses = 0           # 자동사냥 꺼짐 감시가 자동출발 키를 누른 횟수(로그 정리용)
+  $assistPresses = 0             # ASSIST 꺼짐 감시가 H키를 누른 횟수(로그 정리용)
   $pollCounter = 0               # 팝업(2회)/컷신(3회) 확인 주기 조절용
   $useStatueRevive = $false      # 부활 재료 부족이 확인되면 이후 부활을 여신상으로 전환
   $wipeButtonMisses = 0          # 전멸 감지 상태에서 '여신' 버튼 연속 미발견 횟수 (3회째 예비 좌표)
@@ -2971,6 +3097,7 @@ function Wait-ForDungeonClearScreen {
           if ($wipeClicked) {
             $reviveCount++
             Write-RunLog "$($script:contentTag) 전멸 감지 - 여신상에서 부활 클릭 (세이브 지점부터 재도전)"
+            $revivePendingKind = '전멸 재도전'
             $reviveConfirmPending = $true
             Start-Sleep -Seconds 3
             # 재도전으로 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
@@ -2988,6 +3115,7 @@ function Wait-ForDungeonClearScreen {
           $reviveCount++
           $statueReason = if ($useStatueRevive) { '부활 재료 부족' } else { '남은 부활 횟수 없음' }
           Write-RunLog "$($script:contentTag) 행동불능($statueReason) - 여신상에서 부활 클릭"
+          $revivePendingKind = '여신상 부활'
           Focus-Game -Game $Game
           # 부활 버튼 배치는 남은 횟수 유무에 따라 달라지므로(0회면 버튼들이 한 줄로 재배치됨),
           # 고정 좌표 대신 '여신상' 글자를 OCR로 찾아 실제 버튼 위치를 클릭합니다.
@@ -3007,7 +3135,8 @@ function Wait-ForDungeonClearScreen {
         } else {
           $reviveCount++
           $remainText = if ($null -ne $death.Remaining) { "남은 부활 횟수 $($death.Remaining)회" } else { '남은 횟수 인식 불가' }
-          Write-RunLog "$($script:contentTag) 행동불능($remainText) - R키로 여기서 부활"
+          Write-RunLog "$($script:contentTag) 행동불능($remainText) - 여기서 부활 (R키, 불사의 가루 소모)"
+          $revivePendingKind = '가루 부활'
           Focus-Game -Game $Game
           Press-KeyOnce -VirtualKey ([byte]$reviveKey)
           $reviveConfirmPending = $true
@@ -3019,7 +3148,10 @@ function Wait-ForDungeonClearScreen {
       } elseif ($reviveConfirmPending) {
         $reviveConfirmPending = $false
         $reviveBlockedLogged = $false
-        Write-RunLog "$($script:contentTag) 부활 완료 - 전투 계속"
+        # 어떤 부활이었는지 종류를 함께 표기 (사용자가 로그만 보고 사망/부활 경위를 알 수 있게)
+        $reviveDoneKind = $(if ($revivePendingKind) { "($revivePendingKind)" } else { '' })
+        Write-RunLog "$($script:contentTag) 부활 완료$reviveDoneKind - 전투 계속"
+        $revivePendingKind = ''
       }
 
       # 자동사냥 꺼짐 상시 감시: 입장 키가 씹혔거나(그 순간 사용자가 마우스/키보드를 쓴 경우 등),
@@ -3042,6 +3174,28 @@ function Wait-ForDungeonClearScreen {
           Write-RunLog "$($script:contentTag) 자동사냥 켜짐 확인 (Space ${autoHuntPresses}회 입력)"
           $autoHuntPresses = 0
         }
+      }
+    }
+
+    # ASSIST 자동 켜기 상시 감시 (2026-07-28 사용자 요청): 전투 HUD 우측 ASSIST 토글이
+    # 꺼져 있으면 H키로 켭니다 (분홍=클래스 특화/초록=일반 모두 '켜짐'으로 인정).
+    # 픽셀 3점이 꺼짐 패턴과 정확히 일치할 때만 입력 - 다른 화면/전투 버튼은 unknown 으로
+    # 아무것도 누르지 않습니다 (자동사냥 꺼짐 감시와 동일 패턴, 입력 후 2초 대기).
+    if ($assistAutoOn -and -not $script:screenCaptureFailing) {
+      $assistState = Get-AssistState -Game $Game
+      if ($assistState -eq 'off') {
+        $assistPresses++
+        if ($assistPresses -eq 1) {
+          Write-RunLog "$($script:contentTag) ASSIST 꺼짐 감지 - H키로 켬"
+        } elseif (($assistPresses % 15) -eq 0) {
+          Write-RunLog "[경고] ASSIST 켜기 입력 ${assistPresses}회째에도 켜지지 않습니다 - 계속 시도합니다"
+        }
+        Focus-Game -Game $Game
+        Press-KeyOnce -VirtualKey ([byte]$assistKey)
+        Start-Sleep -Seconds 2
+      } elseif ($assistState -eq 'on' -and $assistPresses -gt 0) {
+        Write-RunLog "$($script:contentTag) ASSIST 켜짐 확인 (H ${assistPresses}회 입력)"
+        $assistPresses = 0
       }
     }
 
@@ -3137,6 +3291,44 @@ function Get-AutoHuntState {
   if ($centerBright -eq $centerOffsets.Count -and $ringBright -eq $ringOffsets.Count) { return 'on' }
   if ($centerDark -eq $centerOffsets.Count -and $ringBright -eq $ringOffsets.Count) { return 'off' }
   return 'unknown'
+}
+
+function Get-AssistStateFromColors {
+  param($Left, $Mid, $Right)
+
+  # ASSIST 토글 상태 분류의 순수부 (진리표 테스트 대상 - Get-AssistState 가 픽셀 프로브 후 위임).
+  # 2026-07-28 실측 (1272x717, 토글 필 y=513 의 L=-7/M=0/R=+12 오프셋 3점):
+  #  - 꺼짐: 흰 점이 왼쪽 = L(255,255,255) + 필 회색 = M/R(78~100)
+  #  - 켜짐(분홍=클래스 특화 어시): L/M (206,64,96) - R채널 우세
+  #  - 켜짐(초록=일반 어시): L/M (13,179,118) - G채널 우세
+  #    (켜지면 흰 점이 오른쪽으로 이동 - R점은 점 위치 가변이라 켜짐 판정에서 제외)
+  # 꺼짐은 3점 전부 일치(보수적 - H 입력 조건), 켜짐은 L/M 이 '같은 색 계열'일 때만
+  # (혼합색 오탐 방지 - Codex 합의). 그 외 unknown = 다른 화면/전투 버튼 - 아무것도 안 누름.
+  $leftWhite = ($Left.R -gt 200 -and $Left.G -gt 200 -and $Left.B -gt 200)
+  $midGrey = ($Mid.R -ge 50 -and $Mid.R -le 140 -and $Mid.G -ge 50 -and $Mid.G -le 140 -and $Mid.B -ge 50 -and $Mid.B -le 140)
+  $rightGrey = ($Right.R -ge 50 -and $Right.R -le 140 -and $Right.G -ge 50 -and $Right.G -le 140 -and $Right.B -ge 50 -and $Right.B -le 140)
+  if ($leftWhite -and $midGrey -and $rightGrey) { return 'off' }
+  $leftPink = ($Left.R -gt 160 -and $Left.G -lt 110 -and $Left.B -lt 140)
+  $midPink = ($Mid.R -gt 160 -and $Mid.G -lt 110 -and $Mid.B -lt 140)
+  $leftGreen = ($Left.G -gt 140 -and $Left.R -lt 80 -and $Left.B -ge 60 -and $Left.B -le 160)
+  $midGreen = ($Mid.G -gt 140 -and $Mid.R -lt 80 -and $Mid.B -ge 60 -and $Mid.B -le 160)
+  if (($leftPink -and $midPink) -or ($leftGreen -and $midGreen)) { return 'on' }
+  return 'unknown'
+}
+
+function Get-AssistState {
+  param([System.Diagnostics.Process]$Game)
+
+  # ASSIST 토글 3점 픽셀 프로브 (분류 규칙은 Get-AssistStateFromColors 참고).
+  # 캡처/픽셀 읽기 실패는 unknown = 아무것도 하지 않음 (오입력 방지).
+  try {
+    $assistLeft  = Get-GamePixel -Game $Game -ReferenceX ($ptAssistToggle[0] - 7)  -ReferenceY $ptAssistToggle[1]
+    $assistMid   = Get-GamePixel -Game $Game -ReferenceX $ptAssistToggle[0]        -ReferenceY $ptAssistToggle[1]
+    $assistRight = Get-GamePixel -Game $Game -ReferenceX ($ptAssistToggle[0] + 12) -ReferenceY $ptAssistToggle[1]
+  } catch {
+    return 'unknown'
+  }
+  return Get-AssistStateFromColors -Left $assistLeft -Mid $assistMid -Right $assistRight
 }
 
 function Get-DeathInfoFromText {
@@ -3311,12 +3503,17 @@ function Invoke-ClickUntil {
     [scriptblock]$SourceCondition,
     [string]$Description,
     [int]$TimeoutSeconds = 20,
-    [int]$ReclickEverySeconds = 5
+    [int]$ReclickEverySeconds = 5,
+    [int[]]$FallbackPoint,
+    [scriptblock]$FallbackCondition
   )
 
   # 클릭 후 목표 화면이 나타나는지 확인하고, 정해진 시간 동안 안 나오면 다시 클릭합니다.
   # SourceCondition을 준 호출부는 원래 버튼/화면이 여전히 확인될 때만 재클릭합니다.
   # 화면은 이미 바뀌었지만 목표 OCR이 늦게 잡히는 사이 같은 좌표의 다른 버튼을 누르는 사고를 막습니다.
+  # FallbackPoint/FallbackCondition: 원래 버튼 확인(SourceCondition)이 시스템 팝업 등에 가려
+  # 실패했지만 별도 신호(예: IME 팝업 감지 + 좌상단 제목)가 '원래 화면 그대로'를 보증할 때,
+  # 팝업에 안 덮이는 예비 지점을 대신 클릭합니다 (사이클당 1클릭 유지 - 2026-07-29 실기).
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     # 조건이 참이어도 캡처 실패 중이면 믿지 않습니다: 실패 중 OCR은 빈 문자열을 돌려주므로
@@ -3334,6 +3531,11 @@ function Invoke-ClickUntil {
     if ($sourceStillVisible) {
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $Point[0] -ReferenceY $Point[1]
+    } elseif ($null -ne $FallbackPoint -and $null -ne $FallbackCondition -and
+              (& $FallbackCondition) -and -not $script:screenCaptureFailing) {
+      Write-RunLog "[안내] $Description - 원래 버튼이 팝업에 가려져 예비 지점을 클릭합니다"
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $FallbackPoint[0] -ReferenceY $FallbackPoint[1]
     }
     $nextClick = (Get-Date).AddSeconds($ReclickEverySeconds)
     while ((Get-Date) -lt $nextClick -and (Get-Date) -lt $deadline) {
@@ -3363,6 +3565,28 @@ function Test-InDungeonQuest {
   return $false
 }
 
+function Read-DgTitleText {
+  param([System.Diagnostics.Process]$Game)
+
+  # 좌상단 던전 제목 판독 - 좁은 기본 영역(config 폭 250) 우선, 심층에서만 조건부 확장.
+  # 실측 근거 (2026-07-28, 같은 날 상반된 두 사고):
+  #  - 심층 옵션 제목('던전명+심층+N층 M구역')은 길어서 폭 250이면 끝 '구역'이 잘림
+  #    (20:20 오류: '〈북쪽폐61심층2층3국'. 폭 420은 심층 옵션 캡처 21장 전수 '구역' 포함)
+  #  - 반대로 밝은 배경(노을 항구)의 선택 화면에서는 폭 420 판독이 통째로 빈 값
+  #    (20:53 오류: 같은 캡처가 폭 250='북쪽폐하', 폭 420=''. 밝은 영역이 넓게 들어오면
+  #    OCR 텍스트 검출 자체가 전멸. 옵션 화면은 배경이 항상 어두운 오버레이라 확장이 안정)
+  # → 좁게 읽어 '구역'이 있으면 그대로, 없으면 심층에서만 폭 420 재판독해 '구역'이 보일
+  #   때만 채택. 일반 던전은 기존과 동일한 좁은 판독 1회 (무접촉).
+  $narrowText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
+    -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not $deepMode) { return $narrowText }
+  if ($narrowText.Contains('구역')) { return $narrowText }
+  $wideText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
+    -RegionWidth 420 -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ($wideText.Contains('구역')) { return $wideText }
+  return $narrowText
+}
+
 function Test-KnownScreen {
   param([System.Diagnostics.Process]$Game)
 
@@ -3378,9 +3602,16 @@ function Test-KnownScreen {
     if ($title.Contains($titleKeyword)) { return $true }
   }
   # 던전 선택('~던전')/진입 옵션('N층 M구역') 화면 - 던전 카테고리도 이벤트 넘기기를 거치므로 필요
-  $dgTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-    -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  $dgTitle = Read-DgTitleText -Game $Game
   if ($dgTitle.Contains('구역') -or (Test-DgSelectionTitle -TitleText $dgTitle)) { return $true }
+  # 던전 선택 화면 2차 신호: 하단 'N층 M구역 진입' 버튼의 '진입' 조각 (2026-07-28 실기:
+  # 제목 OCR이 일시적으로 빈 값이라 심층 선택 화면을 못 알아보고, 알 수 없는 화면 폴백의
+  # X 후보(1229,67)가 던전 우상단 X(1228,67)와 같은 자리라 던전 UI를 닫고 필드로 이탈.
+  # 제목(좌상단)과 독립된 우하단 영역이라 이중 신호가 됨. '진입'은 선택 화면 전용 문구 -
+  # 옵션/어비스 상세는 '입장하기', 결과 화면은 '다시 하기'라 오탐 없음)
+  $dgEnterProbe = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgEnterBtn[0] -ReferenceY $rgDgEnterBtn[1] `
+    -RegionWidth $rgDgEnterBtn[2] -RegionHeight $rgDgEnterBtn[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ($dgEnterProbe.Contains('진입')) { return $true }
   # 사냥터 첫 화면 (하단 '입장하기'/'임무 시작' 버튼)
   if (Find-HtEntryButtonPoint -Game $Game) { return $true }
   # 사냥터 결과 화면 (나가기/머무르기/새 임무 선택) - 이걸 모르는 화면으로 보고 중앙을
@@ -3598,7 +3829,9 @@ function Get-DgCoinBalance {
   # 6자리 초과면 은동전이 아니라 금화가 병합된 것(은동전 숫자가 안 읽힘)이므로 실패 처리
   if ($lastGroup.Length -gt 6) { return $null }
   $value = [int]$lastGroup
-  if ($value -gt 99999) { return $null }
+  # 게임 보유 상한(은동전 150 / 마족공물 15 - 2026-07-28 사용자 제보)을 넘는 판독은 오독
+  # 확정(하트토큰/골드 조각 오인 등)이므로 실패 처리합니다 - null = 검사 생략 진행(안전측)
+  if ($value -gt $dgBalanceMax) { return $null }
   return $value
 }
 
@@ -3610,6 +3843,18 @@ function Get-DgTributeCost {
   # 아이콘+'입장하기' 텍스트까지 함께 읽고 숫자 그룹만 뽑습니다. 10/20 중 하나가
   # 잡히면 우선 그 값을, 아니면 마지막 숫자 그룹을 돌려줍니다. 실패 시 $null.
   # 숫자가 한 번에 안 잡히는 경우가 있어 스케일/엔진을 바꿔가며 재시도합니다.
+  # (01:45 실기로 커서 호버 이론이 반증되어 판독 전 커서 파킹은 제거 - Codex 지시.
+  #  카드를 끈 직후의 '1' 지속은 게임 자체의 표시 지연이며, 호출부가 '방금 전환 확인' 시
+  #  검증을 생략하는 것으로 대응)
+  # IME 팝업이 입장 버튼(소모량 표시 자리)을 덮으면 팝업 글자의 오독 숫자('전환하己1면'의
+  # '1' 등)가 소모량으로 잡히는 실사고가 있어(2026-07-29 00:48 - 10초 내내 '1' 판독 → 오정지),
+  # 팝업 중에는 판독 불가($null)로 처리하고 $script:dgCostImeBlocked 로 사유를 남깁니다.
+  # 판독 영역이 팝업 안쪽 조각이라 조각 복합 판별이 안 통해, 전용 ROI 판별을 사용합니다.
+  $script:dgCostImeBlocked = $false
+  if (Test-DgImePopupVisible -Game $Game) {
+    $script:dgCostImeBlocked = $true
+    return $null
+  }
   $attempts = @(
     @{ Scale = 3; Engine = $ocrKoreanEngine },
     @{ Scale = 5; Engine = $ocrKoreanEngine },
@@ -3625,6 +3870,9 @@ function Get-DgTributeCost {
     foreach ($grp in $numberGroups) {
       $n = [int]$grp.Value
       if ($ValidCosts -contains $n) { return $n }   # 던전 10/20, 심층 1/2 (호출부 주입)
+      # 공물 뿔 아이콘이 '7'로 읽혀 숫자 앞에 붙는 이형 (2026-07-28 23:40 실기 '71' - 아이콘
+      # 제외 영역에서도 렌더링 순간에 드물게 발생): 앞의 7을 떼서 유효값이면 그 값을 채택
+      if ($grp.Value -match '^7(\d+)$' -and $ValidCosts -contains [int]$Matches[1]) { return [int]$Matches[1] }
     }
     # 유효값(10/20)은 아니지만 숫자는 읽힌 경우: 첫 성공 읽기를 예비로 보관
     if ($null -eq $fallbackValue) { $fallbackValue = [int]$numberGroups[$numberGroups.Count - 1].Value }
@@ -3717,12 +3965,80 @@ function Find-HtEntryButtonPoint {
 
 # ===== 어비스/던전/사냥터 공통 블록 (2026-07-18 기술 부채 정리: 복사 코드 → 헬퍼 통일) =====
 
+function Invoke-PurchasePopupSweep {
+  param([System.Diagnostics.Process]$Game)
+
+  # 구매 제안 팝업(회복 물약 부족 등)이 떠 있으면 '닫기'를 눌러 닫습니다. 닫았으면 $true.
+  # 입장/매칭 대기 루프용 (2026-07-28 실기 20:45: 심층 입장 직후 물약 팝업이 화면을 덮어
+  # HUD/퀘스트 기반 입장 완료 감지가 45초 내내 가려짐 - 클리어 대기 루프와 입장 직후 키
+  # 입력에는 같은 처리가 있었지만 입장 대기 루프들에는 없었음). 캡처 실패 중에는 무동작.
+  # 주의: Wait-ForScreen 의 Condition 안에서 쓸 때는 반환값이 파이프라인에 새어 나가
+  # 대기 성공으로 오판되지 않게 `if (Invoke-PurchasePopupSweep ...) { return $false }`
+  # 계약으로 소비해야 합니다 (Codex 지적 - PS 5.1 스크립트블록 출력 오염).
+  if ($script:screenCaptureFailing) { return $false }
+  $sweepPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
+    -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
+  if ($sweepPoint) {
+    Focus-Game -Game $Game
+    Click-ScreenPoint -X $sweepPoint.X -Y $sweepPoint.Y
+    Write-RunLog '[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)'
+    Start-Sleep -Seconds 1
+    return $true
+  }
+  # 퀘스트 클리어 보상 전체 화면 (2026-07-28 23:12 실기: 입장 로딩 중 '법황청의 특별 의뢰'
+  # 완료 화면이 덮여 입장 감지가 45초 내내 가려짐). 하단 안내 문구('아이템을 누르면 상세
+  # 정보...')가 이 화면 전용이라 그 문구가 보일 때만 '확인' 버튼 글자를 찾아 클릭합니다.
+  # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키 입력은 쓰지 않음 (상태 기반 클릭).
+  $bottomText = (Get-GameOcrText -Game $Game) -replace '\s', ''
+  if ($bottomText.Contains('아이템을누르') -or $bottomText.Contains('상세정보')) {
+    $confirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
+      -RegionWidth 470 -RegionHeight 55 -SearchText '확인'
+    if ($confirmPoint) {
+      Focus-Game -Game $Game
+      Click-ScreenPoint -X $confirmPoint.X -Y $confirmPoint.Y
+      Write-RunLog '[안내] 퀘스트 클리어 보상 화면 감지 - 확인 클릭 (입장 대기 중)'
+      Start-Sleep -Seconds 1
+      return $true
+    }
+  }
+  return $false
+}
+
 function Invoke-AfterEntryKeys {
   param([System.Diagnostics.Process]$Game, [string]$LogPrefix)
 
   # 입장 직후 키 입력: config.json 의 afterEntry.keys 중 enabled 인 키만 순서대로 한 번씩
   # 입력합니다 (예: 음식 자동 먹기(B)를 끄려면 해당 항목의 enabled 를 false 로).
   # 어비스 본류/파티원/던전/사냥터 네 흐름이 같은 동작을 씁니다.
+  #
+  # 키 입력 전 구매 제안 팝업 사전 처리 (2026-07-28 실기: 물약 부족 상태로 입장하면 구매
+  # 팝업이 이미 떠 있어 B(음식) 키가 팝업에 먹혀 음식을 못 먹음 - 02:56 로그 실측. 클리어
+  # 대기 루프의 팝업 감시는 키 입력 '이후'라 못 막았음). 확인 최대 4회 = 닫기 최대 3회 +
+  # 마지막 재확인 - 무팝업이면 OCR 1회만 추가 (Codex 합의 계약). 캡처 실패 중이면 사전
+  # 처리를 건너뛰고 바로 키 입력 (실패를 '팝업 잔존'으로 오인 금지 - Codex 지적).
+  # 키 입력 후 재입력은 하지 않음 - 팝업이 키보다 늦게 떴다면 키는 이미 전달된 것이고,
+  # B 재입력은 음식 중복 소모 위험 (상태 확인 없는 재입력 금지 정책).
+  if (-not $script:screenCaptureFailing) {
+    $entryPopupClicks = 0
+    $entryPopupRemains = $false
+    for ($popupTry = 1; $popupTry -le 4; $popupTry++) {
+      $entryPopupPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
+        -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
+      if (-not $entryPopupPoint) { break }
+      if ($popupTry -ge 4) { $entryPopupRemains = $true; break }   # 3회 닫고도 남아 있음
+      Focus-Game -Game $Game
+      Click-ScreenPoint -X $entryPopupPoint.X -Y $entryPopupPoint.Y
+      $entryPopupClicks++
+      Start-Sleep -Seconds 1
+    }
+    if ($entryPopupClicks -gt 0) {
+      if ($entryPopupRemains) {
+        Write-RunLog "[경고] 구매 팝업이 닫히지 않습니다 - 키 입력을 진행하고 클리어 대기 중 다시 닫기를 시도합니다"
+      } else {
+        Write-RunLog "$LogPrefix 구매 팝업 감지 - 닫은 뒤 키 입력 진행"
+      }
+    }
+  }
   Focus-Game -Game $Game
   for ($keyIndex = 0; $keyIndex -lt $afterEntryActions.Count; $keyIndex++) {
     if ($keyIndex -gt 0) { Start-Sleep -Milliseconds $afterEntryDelayMs }
@@ -3867,16 +4183,32 @@ function Test-DifficultySelectedAt {
   $refX = [int][Math]::Round(($ScreenPoint.X - $rect.Left) * $referenceWidth / $width)
   $refY = [int][Math]::Round(($ScreenPoint.Y - $rect.Top) * $referenceHeight / $height)
   $hits = 0
-  foreach ($dy in @(-18, -16, -14, 14, 16, 18)) {
+  $probeRows = @()
+  # dy 그물 확대 (2026-07-29 21:28 계측으로 원인 확정 - Codex 승인): OCR 단어 박스의 Y 중심이
+  # 판독(스케일/깨짐)마다 최대 ~11px 출렁여, 기존 ±14~18 좁은 창이 금 테두리를 통째로 비껴가는
+  # 간헐 실패가 5회 재발 (기준(660,114) 2/18 실측 - 알약 중심 103 대비 11px 아래로 잡힘).
+  # 선택 알약은 글자도 금색이라 dy 0 근처도 유효 신호 - 촘촘한 그물로 Y 출렁임을 흡수한다.
+  # 비선택 알약은 어두운 배경(밝기<150)+흰 글자(채도≈0)라 추가 표본이 색 조건에 전부 걸러져
+  # 오탐 없음 (보관+오류 캡처 오프라인 스윕으로 검증 후 배포).
+  foreach ($dy in @(-18, -14, -10, -6, 0, 6, 10, 14, 18)) {
+    $rowMaxBright = 0
+    $rowMaxSat = 0
     foreach ($dx in @(-12, 0, 12)) {
       try {
         $c = Get-GamePixel -Game $Game -ReferenceX ($refX + $dx) -ReferenceY ($refY + $dy)
       } catch { continue }
       $chMax = [Math]::Max([int]$c.R, [Math]::Max([int]$c.G, [int]$c.B))
       $chMin = [Math]::Min([int]$c.R, [Math]::Min([int]$c.G, [int]$c.B))
+      if ($chMax -gt $rowMaxBright) { $rowMaxBright = $chMax }
+      if (($chMax - $chMin) -gt $rowMaxSat) { $rowMaxSat = $chMax - $chMin }
       if ($chMax -gt 150 -and ($chMax - $chMin) -gt 60) { $hits++ }
     }
+    $probeRows += ('{0}:{1}/{2}' -f $dy, $rowMaxBright, $rowMaxSat)
   }
+  # 판정 실패의 실측 계측 (2026-07-29 - 5회 재발한 '캡처는 정상인데 런타임만 실패' 원인
+  # 추적용): 실패 순간 실제로 읽힌 픽셀 요약을 남겨 다음 재발 때 원인을 확정한다 (Codex 승인).
+  # 형식: 히트수/18 + dy행별 '최대밝기/최대채도' (기준점 포함)
+  $script:lastPillProbe = ('기준({0},{1}) {2}/18 [{3}]' -f $refX, $refY, $hits, ($probeRows -join ' '))
   return ($hits -ge 3)
 }
 
@@ -3892,22 +4224,26 @@ function Confirm-DifficultySelected {
   # 재클릭은 반드시 '첫 클릭과 같은 좌표'로만 합니다. OCR로 난이도를 다시 찾으면
   # '어려움'을 찾을 때 '매우 어려움'의 '어려움' 조각을 잡아 엉뚱한 난이도를 누르는
   # 사고가 나기 때문입니다 (실측 2026-07-17: 어려움 재클릭이 매우 어려움으로 감).
-  # 선택 강조가 확인 안 되면 같은 자리를 1회 다시 누르고, 그래도 안 되면 경고만 남깁니다.
-  for ($tryNo = 1; $tryNo -le 2; $tryNo++) {
+  # 선택 강조가 확인 안 되면 같은 자리를 다시 누르고(재클릭 = 같은 난이도 재선택이라 멱등),
+  # 그래도 안 되면 경고만 남깁니다. 시도 3회·대기 1200ms (2026-07-28 실기 20:59: 심층
+  # 매우 어려움은 알약 전환과 함께 옵션 패널이 주간 단일 구역으로 재구성돼 강조 렌더링이
+  # 확인 시점보다 늦을 수 있음 - 오류 캡처에는 정상 선택돼 있었고 판정식·좌표는 오프라인
+  # 재현 통과. 기존 2회·800ms 에서 확인 여유만 늘림)
+  for ($tryNo = 1; $tryNo -le 3; $tryNo++) {
     if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $ClickPoint) {
       if ($tryNo -gt 1) { Write-RunLog "$($script:contentTag) 난이도 '$Label' 재클릭으로 선택 확인" }
       return $true
     }
-    if ($tryNo -lt 2) {
+    if ($tryNo -lt 3) {
       Focus-Game -Game $Game
       Click-ScreenPoint -X $ClickPoint.X -Y $ClickPoint.Y
-      Start-Sleep -Milliseconds 800
+      Start-Sleep -Milliseconds 1200
     }
   }
   if ($Strict) {
-    Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리)"
+    Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리, 표본: $($script:lastPillProbe))"
   } else {
-    Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 - 현재 상태로 진행합니다"
+    Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 - 현재 상태로 진행합니다 (표본: $($script:lastPillProbe))"
   }
   return $false
 }
@@ -3938,11 +4274,50 @@ function Set-DgOptionDifficulty {
     }
     return $false
   }
+  # 클릭 전 선확인 (2026-07-28 실기 20:59/21:06): 이미 선택된 알약을 다시 누르면 전환/눌림
+  # 연출로 강조가 잠깐 꺼지고, 확인 재시도가 매번 그 연출 중에 샘플링돼 실패하는 자기 방해
+  # 루프가 됩니다 (오류 시점 캡처는 판정 6/18 완벽 통과 - 화면·판정식 정상 실측).
+  # 심층 매우 어려움 진입 경로는 옵션 도달 시 항상 이미 선택 상태라 클릭 자체가 불필요.
+  # '검증 후 조작' 클릭 정책 그대로 - 이미 선택돼 있으면 클릭을 생략합니다.
+  # 선확인 최대 5회·1초 간격 (2026-07-28 22:14/23:56 실기: 진입 직후 옵션 도달 경로에서는
+  # 초기 페이드인으로 알약 강조가 수 초 늦게 그려져(글자는 먼저 그려져 Find 는 성공) 짧은
+  # 선확인이 미선택으로 오판 → 클릭 → 자기 방해 재발. 5회 모두 미선택일 때만 진짜 미선택)
+  for ($preTry = 1; $preTry -le 5; $preTry++) {
+    if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) {
+      Write-RunLog "[던전] 난이도 '$Label' 이미 선택 확인 - 클릭 생략 (옵션 화면)"
+      return $true
+    }
+    if ($preTry -lt 5) { Start-Sleep -Milliseconds 1000 }
+  }
+  # 클릭 1회 → 재클릭 없이 2초 간격 수동 확인 (Codex 계약 - 확인 실패마다 재클릭하면
+  # 눌림/전환 연출이 다시 시작돼 확인이 영원히 연출 구간에 걸리는 자기 방해 루프.
+  # 23:56 실기: 오류 3초 뒤 캡처는 판정 완벽 통과 = 기다리기만 하면 되는 상태였음)
   Focus-Game -Game $Game
   Click-ScreenPoint -X $point.X -Y $point.Y
   Write-RunLog "[던전] 난이도 '$Label' 확정 클릭 (옵션 화면)"
   Start-Sleep -Milliseconds 900
-  return (Confirm-DifficultySelected -Game $Game -ClickPoint $point -Label $Label -Strict:$Strict)
+  for ($passiveTry = 1; $passiveTry -le 3; $passiveTry++) {
+    if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) { return $true }
+    Start-Sleep -Milliseconds 2000
+  }
+  # 전부 실패했을 때만 같은 좌표를 최종 1회 재클릭하고 다시 수동 확인 (그래도 실패면
+  # 기존 계약대로 경고 후 $false - Strict 처리는 호출부 몫)
+  Focus-Game -Game $Game
+  Click-ScreenPoint -X $point.X -Y $point.Y
+  Start-Sleep -Milliseconds 900
+  for ($finalTry = 1; $finalTry -le 3; $finalTry++) {
+    if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) {
+      Write-RunLog "[던전] 난이도 '$Label' 재클릭으로 선택 확인 (옵션 화면)"
+      return $true
+    }
+    Start-Sleep -Milliseconds 2000
+  }
+  if ($Strict) {
+    Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리, 표본: $($script:lastPillProbe))"
+  } else {
+    Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 - 현재 상태로 진행합니다 (표본: $($script:lastPillProbe))"
+  }
+  return $false
 }
 
 function Test-TabSelectedAt {
@@ -4013,6 +4388,9 @@ function Set-DgToggleCard {
   # 두 상태를 다 읽지 못합니다. 주 영역에서 판별이 안 되면 보조 영역(AltRegion)을 읽습니다.
   $lastText = ''
   $clicked = $false
+  # 이번 호출에서 실제 클릭이 있었는지를 호출부에 알립니다 (매 호출 초기화 - Codex 계약).
+  # '방금 우리가 클릭해서 전환을 확인한' 경우 소모량 교차 검증을 생략하는 판단에 쓰입니다.
+  $script:dgToggleClicked = $false
   for ($setTry = 1; $setTry -le 6; $setTry++) {
     $lastText = (Get-GameRegionOcrText -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
       -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 5 -Engine $ocrKoreanEngine) -replace '\s', ''
@@ -4070,6 +4448,7 @@ function Set-DgToggleCard {
     Click-GamePoint -Game $Game -ReferenceX $ClickPoint[0] -ReferenceY $ClickPoint[1]
     Write-RunLog "$($script:contentTag) $Label 버튼 클릭 → $(if ($WantSelected) { '사용' } else { '미사용' })으로 변경"
     $clicked = $true
+    $script:dgToggleClicked = $true
     Start-Sleep -Milliseconds 1100
   }
   # 여기 도달: 클릭했는데도 계속 반대 상태로 읽히거나(설정이 안 먹힘), 클릭 전부터 계속 판별 불가
@@ -4191,8 +4570,7 @@ function Invoke-NormalDungeonCycle {
   #    선택/옵션 화면 둘 다 아니면, 던전 안에서 재시작한 경우인지 확인합니다
   #    (게임플레이 HUD + 퀘스트 추적기의 'N구역 클리어' 목표로 판별).
   $readDgTitle = {
-    (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-      -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    Read-DgTitleText -Game $Game   # 좁은 우선 + 심층 조건부 확장 이중 판독 (함수 주석 참고)
   }
   $titleText = & $readDgTitle
   $onOptionsScreen = $titleText.Contains('구역')
@@ -4206,30 +4584,83 @@ function Invoke-NormalDungeonCycle {
   } else {
     Write-RunLog "[던전] 던전 이름을 확정하지 못했습니다 (제목: '$titleText') - 라벨·기하 확인 좌표로만 진행합니다"
   }
+
+  # 선택 화면 2차 인식 (2026-07-28 22:48 실기: 제목 OCR이 일시적으로 빈 값이면 선택 화면을
+  # 몰라 탭 게이트도 스킵되고 '던전 화면이 아닙니다'로 정지 - 비권장 창 크기(1279x721)에서
+  # 제목만 판독 실패·진입 버튼은 정상 판독 실측). 하단 'N층 M구역 진입' 버튼은 선택 화면
+  # 전용 문구라 2차 신호로 인정합니다 (Test-KnownScreen 의 이중 신호와 동일 원리).
+  # 탭 게이트/시작 분기 두 곳이 이 변수로 통일됩니다.
+  $onSelectionScreen = (Test-DgSelectionTitle -TitleText $titleText)
+  if (-not $onOptionsScreen -and -not $onSelectionScreen) {
+    $selProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
+    if ($selProbe.Contains('진입')) {
+      $onSelectionScreen = $true
+      Write-RunLog "[던전] 선택 화면 인식 (제목 판독 실패 - 진입 버튼 '$selProbe' 기준)"
+    }
+  }
   # '매우 어려움' 요청인데 2단계(일반/어려움) 던전으로 판별되면 시작하지 않습니다
   if ($ndVeryHardTarget -and $script:dgDungeonId -and ($dgTwoTierDungeons -contains [string]$script:dgDungeonId)) {
     throw "던전 '$($script:dgDungeonId)'에는 '매우 어려움' 난이도가 없습니다 - 난이도 설정을 확인해 주세요."
   }
 
-  # 던전|심층 탭 확인: 같은 선택 화면의 탭이라 제목(던전명)만으로는 구분되지 않습니다.
-  # 옵션 화면은 제목의 '심층' 조각으로, 선택 화면은 진입 버튼('심층 N층 M구역 진입')의
-  # '심층' 조각으로 확인하고, 요청 모드와 다르면 시작하지 않습니다 (fail-closed - Codex 합의).
+  # 던전|심층 탭 확인·자동 전환: 같은 선택 화면의 탭이라 제목(던전명)만으로는 구분되지
+  # 않습니다. 옵션 화면은 제목의 '심층' 조각으로, 선택 화면은 진입 버튼('심층 N층 M구역
+  # 진입')의 '심층' 조각으로 확인합니다 ('심충' 오독 관용). 요청 모드와 다르면 상단
+  # '던전|심층 던전' 탭을 눌러 자동 전환하고(2026-07-28 사용자 요청 - 기존 코드 4 정지에서
+  # 변경), 전환 확인 실패 시에만 기존 안내로 정지합니다 (fail-closed 유지).
   # 선택/옵션 화면이 아닌 재시작(던전 안/결과 화면)은 게이트 대상이 아닙니다.
-  if ($onOptionsScreen -or (Test-DgSelectionTitle -TitleText $titleText)) {
+  if ($onOptionsScreen -or $onSelectionScreen) {
     $deepTabMark = $false
     if ($onOptionsScreen) {
-      $deepTabMark = $titleText.Contains('심층')
+      $deepTabMark = [bool]($titleText -match '심[층충]')
     } else {
       $deepTabProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
-      $deepTabMark = $deepTabProbe.Contains('심층')
+      $deepTabMark = [bool]($deepTabProbe -match '심[층충]')
     }
-    if ($deepMode -and -not $deepTabMark) {
-      Write-RunLog "[완료] 심층 던전 화면이 확인되지 않습니다 - 던전 선택 화면에서 '심층 던전' 탭을 연 뒤 다시 시작해 주세요 (제목: '$titleText')"
-      exit 4
-    }
-    if ((-not $deepMode) -and $deepTabMark) {
-      Write-RunLog "[완료] '심층 던전' 탭이 열려 있습니다 - 던전 자동화는 '던전' 탭 화면에서 시작해 주세요 (제목: '$titleText')"
-      exit 4
+    if ($deepMode -ne $deepTabMark) {
+      $tabTargetLabel = $(if ($deepMode) { '심층 던전' } else { '던전' })
+      Write-RunLog "$($script:contentTag) 화면 탭이 요청 모드와 다릅니다 - '$tabTargetLabel' 탭으로 자동 전환합니다"
+      if ($onOptionsScreen) {
+        # 옵션 화면에는 탭이 없어 좌상단 '<'로 선택 화면에 먼저 복귀합니다
+        # ('다시 하기'로 돌아온 옵션 화면에는 '<'가 없음 - 복귀 실패 시 기존 안내로 정지)
+        $tabBack = Invoke-DgBackToSelection -Game $Game -ReadTitle $readDgTitle
+        $titleText = [string]$tabBack.Title
+        if (-not $tabBack.Ok) {
+          Write-RunLog "[완료] 탭 전환을 위해 선택 화면으로 돌아가지 못했습니다 - 던전 선택 화면에서 '$tabTargetLabel' 탭을 연 뒤 다시 시작해 주세요 (제목: '$titleText')"
+          exit 4
+        }
+        $onOptionsScreen = $false
+      }
+      $tabSwitched = $false
+      for ($tabTry = 1; $tabTry -le 3 -and -not $tabSwitched; $tabTry++) {
+        # 탭 단어 탐색 후 클릭 (실측 예비 좌표: 심층 던전 탭 중앙 150,128 / 던전 탭 66,128)
+        $tabWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX 20 -ReferenceY 100 `
+            -RegionWidth 280 -RegionHeight 50 -Scale 3 -Engine $ocrKoreanEngine)
+        $tabPoint = Select-DgTabWord -Words $tabWords -DeepTab $deepMode
+        if (-not $tabPoint) {
+          $tabPoint = $(if ($deepMode) { @{ X = 150; Y = 128 } } else { @{ X = 66; Y = 128 } })
+        }
+        Focus-Game -Game $Game
+        Click-GamePoint -Game $Game -ReferenceX ([int]$tabPoint.X) -ReferenceY ([int]$tabPoint.Y)
+        Start-Sleep -Milliseconds 1200
+        # 전환 확인: 빈 판독이 '심층 없음 = 던전 탭'으로 오인되지 않게 '진입' 존재까지 요구 (Codex)
+        if (Test-DgTabProbeMatchesMode -ProbeText ([string](Get-DgStageEnterButtonText -Game $Game)) -DeepTab $deepMode) {
+          $tabSwitched = $true
+        }
+      }
+      if (-not $tabSwitched) {
+        Write-RunLog "[완료] '$tabTargetLabel' 탭 자동 전환을 확인하지 못했습니다 - 던전 선택 화면에서 '$tabTargetLabel' 탭을 연 뒤 다시 시작해 주세요 (제목: '$titleText')"
+        exit 4
+      }
+      # 전환 후 제목 재판독 → 던전 ID 재산출 + 매우 어려움 2단계 던전 가드 재평가 (Codex 조건 -
+      # 전환 전 판별이 이후 좌표·배치 판정을 오염시키지 않게)
+      $titleText = & $readDgTitle
+      $script:dgDungeonId = Get-DgDungeonIdFromTitle -TitleText $titleText
+      $tabRedetectTag = $(if ($script:dgDungeonId) { " (던전 재판별: $($script:dgDungeonId))" } else { '' })
+      Write-RunLog "$($script:contentTag) '$tabTargetLabel' 탭 전환 확인$tabRedetectTag"
+      if ($ndVeryHardTarget -and $script:dgDungeonId -and ($dgTwoTierDungeons -contains [string]$script:dgDungeonId)) {
+        throw "던전 '$($script:dgDungeonId)'에는 '매우 어려움' 난이도가 없습니다 - 난이도 설정을 확인해 주세요."
+      }
     }
   }
 
@@ -4237,15 +4668,20 @@ function Invoke-NormalDungeonCycle {
   # 화면에 열려 있는 그 구역을 동적으로 채택합니다 (층·구역 전환/선택 클릭 전체 미사용 -
   # 매우 어려움 카드는 색이 달라(빨강) 남색 카드 픽셀 검증 경로를 태울 수 없음. Codex 합의).
   if ($deepMode -and $ndVeryHardTarget) {
-    $weeklySource = $titleText
-    if (-not $onOptionsScreen) {
-      $weeklySource = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
-    }
-    $weeklyShapes = [regex]::Matches(([string]$weeklySource), '(\d)\D{0,2}(\d)구역')
+    # 판독 최대 3회 재시도 (2026-07-28 실기: 시작 직후 첫 OCR이 일시적으로 빈 값이면 1회
+    # 판독만으로 코드 4 정지 - 매회 재판독으로 일시 공백을 흡수. 옵션 경로는 제목, 선택
+    # 경로는 진입 버튼을 다시 읽음)
     $weeklyStage = ''
-    if ($weeklyShapes.Count -gt 0) {
-      $weeklyStage = ('{0}-{1}' -f $weeklyShapes[$weeklyShapes.Count - 1].Groups[1].Value, `
-          $weeklyShapes[$weeklyShapes.Count - 1].Groups[2].Value)
+    $weeklySource = ''
+    for ($weeklyTry = 1; $weeklyTry -le 3 -and -not $weeklyStage; $weeklyTry++) {
+      if ($weeklyTry -gt 1) { Start-Sleep -Milliseconds 1200 }
+      $weeklySource = $(if ($onOptionsScreen) { [string](& $readDgTitle) }
+        else { ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', '' })
+      $weeklyShapes = [regex]::Matches(([string]$weeklySource), '(\d)\D{0,2}(\d)구역')
+      if ($weeklyShapes.Count -gt 0) {
+        $weeklyStage = ('{0}-{1}' -f $weeklyShapes[$weeklyShapes.Count - 1].Groups[1].Value, `
+            $weeklyShapes[$weeklyShapes.Count - 1].Groups[2].Value)
+      }
     }
     if ($weeklyStage -and $dgSelStagePoints['A'].ContainsKey($weeklyStage)) {
       $ndStage = $weeklyStage
@@ -4467,7 +4903,7 @@ function Invoke-NormalDungeonCycle {
   }
   $insideAlready = $false
   $onResultScreen = $false
-  if (-not $onOptionsScreen -and -not (Test-DgSelectionTitle -TitleText $titleText)) {
+  if (-not $onOptionsScreen -and -not $onSelectionScreen) {
     # 던전 안에서만 퀘스트 추적기에 'N층 M구역 클리어' 목표가 표시됩니다.
     # ('던전' 키워드는 필드의 주간 퀘스트("심층 던전 클리어" 등)와 겹쳐 오인하므로 '구역'만 사용)
     $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
@@ -4588,7 +5024,17 @@ function Invoke-NormalDungeonCycle {
       # 오선택된 미등록 배치 후보는 제외 목록으로 넘겨 같은 후보를 반복 클릭하지 않습니다.
       $stagePlan = Get-NdStageClickPoint -Game $Game -Stage $ndStage -ExcludeTypes $triedCandidateTypes
       if (-not $stagePlan) {
-        # 확정 좌표 없음(후보 소진 포함): 틀린 좌표로 클릭하지 않고 안전 정지로 넘어갑니다.
+        # 확정 좌표 없음(후보 소진 포함): 정지 전에 '이미 목표 구역이 선택돼 있는지'를 진입
+        # 버튼으로 확인합니다 (2026-07-28 23:04 실기: 탭 전환 직후 심층 기본 선택이 이미
+        # 목표 1-1이었는데 카드 좌표를 못 만들어 그대로 정지 - 클릭 없이 상태 확인만 추가).
+        $enterText = Get-DgStageEnterButtonText -Game $Game
+        $selectionResult = Get-DgSelectionRecoveryAction -EnterText $enterText -TargetStage $ndStage
+        if ($selectionResult.Action -eq 'selected') {
+          Write-RunLog "[던전] 구역 ${ndStage} 이미 선택 확인 - 카드 클릭 불필요 (진입 버튼 기준)"
+          $stageSelected = $true
+          break
+        }
+        # 이미 선택도 아님: 틀린 좌표로 클릭하지 않고 안전 정지로 넘어갑니다.
         # 이전 시도의 오선택 판정이 남아 옵션 복구로 새지 않도록 판정도 초기화합니다 (Codex 리뷰).
         $stagePlanMissing = $true
         $selectionResult = [pscustomobject]@{ Action = 'unclear'; CurrentFloor = ''; CurrentArea = ''; CurrentStage = '' }
@@ -4601,6 +5047,27 @@ function Invoke-NormalDungeonCycle {
       Start-Sleep -Milliseconds 900
       }
       $enterText = Get-DgStageEnterButtonText -Game $Game
+      if ($deepMode -and $ndVeryHardTarget) {
+        # 주간 구역 재채택(선택 화면): 시작 시 채택은 난이도 전환 '전' 버튼을 읽어 어려움
+        # 상태의 구역을 오채택할 수 있습니다 (2026-07-28 실기: 어려움 1-3 오채택 → 실제
+        # 매우 어려움 2-3과 불일치 → 단일 카드 지도에서 1-3 탐색 실패로 안전 정지).
+        # '매우 어려움' 클릭이 끝난 이 시점의 진입 버튼이 진짜 주간 구역이므로 여기서 최종
+        # 확정합니다. 같은 텍스트로 목표를 만들어 아래 판정이 즉시 selected 가 되고,
+        # 4회 재시도 루프가 매 시도 갱신하므로 일시 오독도 다음 시도에서 자기 교정됩니다.
+        $weeklyNow = ([string]$enterText) -replace '\s', ''
+        $weeklyNowShapes = [regex]::Matches($weeklyNow, '(\d)\D{0,2}(\d)구역')
+        if ($weeklyNowShapes.Count -gt 0) {
+          $weeklyNowStage = ('{0}-{1}' -f $weeklyNowShapes[$weeklyNowShapes.Count - 1].Groups[1].Value, `
+              $weeklyNowShapes[$weeklyNowShapes.Count - 1].Groups[2].Value)
+          if ($weeklyNowStage -ne $ndStage -and $dgSelStagePoints['A'].ContainsKey($weeklyNowStage)) {
+            Write-RunLog "[심층] 주간 구역 재채택: ${ndStage} → ${weeklyNowStage} (매우 어려움 전환 후 진입 버튼 기준)"
+            $ndStage = $weeklyNowStage
+            $stageParts = $ndStage -split '-'
+            $stageFloor = $stageParts[0]
+            $stageArea = $stageParts[1]
+          }
+        }
+      }
       $selectionResult = Get-DgSelectionRecoveryAction -EnterText $enterText -TargetStage $ndStage
       if ($selectionResult.Action -eq 'selected') {
         $stageSelected = $true
@@ -4627,10 +5094,14 @@ function Invoke-NormalDungeonCycle {
     if ($stageSelected) {
       Write-RunLog "[던전] 구역 $ndStage 선택 확인 (진입 버튼: ${stageFloor}층 ${stageArea}구역 진입)"
       Invoke-ClickUntil -Game $Game -Point $ptDgStageEnter -Description '던전 진입 옵션 화면' -TimeoutSeconds 20 -Condition {
-        ((Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-            -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', '').Contains('구역')
+        (Read-DgTitleText -Game $Game).Contains('구역')
       } -SourceCondition {
         Test-DgStageEnterButtonVisible -Game $Game -Stage $ndStage
+      } -FallbackPoint $ptDgStageEnterLeft -FallbackCondition {
+        # IME 팝업이 진입 버튼을 덮으면 버튼 OCR·클릭이 모두 막힘 - 좌상단 제목(팝업 무관
+        # 영역)이 아직 선택 화면임을 보증할 때만 버튼 왼쪽 지점을 클릭 (옵션 화면의 같은
+        # 자리는 '파티 찾기'라 제목 게이트 필수 - 2026-07-29 00:20 실기)
+        (Test-DgImePopupVisible -Game $Game) -and (Test-DgSelectionTitle -TitleText (Read-DgTitleText -Game $Game))
       }
       $titleText = & $readDgTitle
       $onOptionsScreen = $true
@@ -4644,6 +5115,9 @@ function Invoke-NormalDungeonCycle {
         ((& $readDgTitle) -replace '\s', '').Contains('구역')
       } -SourceCondition {
         Test-DgStageEnterButtonVisible -Game $Game -Stage $selectionResult.CurrentStage
+      } -FallbackPoint $ptDgStageEnterLeft -FallbackCondition {
+        # IME 팝업 가림 예비 - 위 기본 진입과 동일 게이트 (선택 화면 제목 확인 필수)
+        (Test-DgImePopupVisible -Game $Game) -and (Test-DgSelectionTitle -TitleText (Read-DgTitleText -Game $Game))
       }
       $titleText = & $readDgTitle
       $switchResult = Set-DgOptionStage -Game $Game -Stage $ndStage -ReadTitle $readDgTitle -LogTag '[던전]'
@@ -4669,6 +5143,9 @@ function Invoke-NormalDungeonCycle {
         ((& $readDgTitle) -replace '\s', '').Contains('구역')
       } -SourceCondition {
         Test-DgStageEnterButtonVisible -Game $Game -Stage $selectionResult.CurrentStage
+      } -FallbackPoint $ptDgStageEnterLeft -FallbackCondition {
+        # IME 팝업 가림 예비 - 위 기본 진입과 동일 게이트 (선택 화면 제목 확인 필수)
+        (Test-DgImePopupVisible -Game $Game) -and (Test-DgSelectionTitle -TitleText (Read-DgTitleText -Game $Game))
       }
       $titleText = & $readDgTitle
       $backResult = Invoke-DgBackToSelection -Game $Game -ReadTitle $readDgTitle
@@ -4723,6 +5200,26 @@ function Invoke-NormalDungeonCycle {
       }
     }
   }
+  if ($deepMode -and $ndVeryHardTarget) {
+    # 주간 구역 최종 확인(옵션 화면 수렴점): 어려움 옵션 화면을 열어 두고 시작하면 위의
+    # '매우 어려움' 확정과 함께 구역도 주간 단일 구역으로 바뀝니다. 확정 후 제목이 가리키는
+    # 구역으로 재채택해 이후 제목 대조가 어긋나지 않게 합니다 (선택 경로는 진입 버튼에서
+    # 이미 재채택 - 2026-07-28 실기 오채택 사고의 옵션 경로 방어).
+    Start-Sleep -Milliseconds 400
+    $weeklyTitleNow = (([string](& $readDgTitle)) -replace '\s', '')
+    $weeklyTitleShapes = [regex]::Matches($weeklyTitleNow, '(\d)\D{0,2}(\d)구역')
+    if ($weeklyTitleShapes.Count -gt 0) {
+      $weeklyTitleStage = ('{0}-{1}' -f $weeklyTitleShapes[$weeklyTitleShapes.Count - 1].Groups[1].Value, `
+          $weeklyTitleShapes[$weeklyTitleShapes.Count - 1].Groups[2].Value)
+      if ($weeklyTitleStage -ne $ndStage -and $dgSelStagePoints['A'].ContainsKey($weeklyTitleStage)) {
+        Write-RunLog "[심층] 주간 구역 최종 확인: ${ndStage} → ${weeklyTitleStage} (매우 어려움 확정 후 제목 기준)"
+        $ndStage = $weeklyTitleStage
+        $stageParts = $ndStage -split '-'
+        $stageFloor = $stageParts[0]
+        $stageArea = $stageParts[1]
+      }
+    }
+  }
   Write-RunLog '[던전] 진입 옵션 화면 확인'
 
   # 5. 은동전(소탕)/더블 루팅을 설정값에 맞춥니다 (선택됨 = 사용 / 도전 = 미사용).
@@ -4743,7 +5240,8 @@ function Invoke-NormalDungeonCycle {
     $effectiveLoot = [bool]$coinDecision.Loot
     if ($coinDecision.Reason) { Write-RunLog "[던전] $($coinDecision.Reason)" }
   }
-  Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $effectiveCoin -Label "$dgCurrencyName(소탕)" | Out-Null
+  $coinToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $effectiveCoin -Label "$dgCurrencyName(소탕)")
+  $coinToggleClicked = $script:dgToggleClicked
   # 더블 루팅은 소탕(은동전) 전제 기능이라, 소탕을 해제하면 카드 자체가 화면에서 사라집니다.
   # 소탕을 사용할 때만 더블 루팅 상태를 맞추고, 미사용이면 확인을 생략합니다.
   # 심층던전에는 더블 루팅 카드가 없어(소탕 단독) 토글을 건너뜁니다 - 매우 어려움 화면의
@@ -4806,33 +5304,57 @@ function Invoke-NormalDungeonCycle {
     # 실측: 카드 글자가 '선태되'로 깨져 판별 불가 → 해제 클릭을 못 한 채 잔량 6개로
     # 입장하기가 거부돼 45초 헛대기. 버튼 숫자 '10 입장하기'는 멀쩡히 읽혔음).
     # 버튼 숫자가 카드 글자보다 크고 또렷해 이걸로 역방향 검증합니다.
+    # 단, 방금 우리가 카드를 클릭해 '도전' 전환을 카드 글자로 확인한 경우는 검증을 생략합니다
+    # (2026-07-29 01:45 확정 실측: 게임이 카드를 끈 뒤에도 소모량 표시를 13초+ 남겨두는
+    # 표시 지연이 정상이라 교차 검증의 정보가치가 없고, 경고 소음+헛대기만 남음. 전환 확인은
+    # 카드 자체의 글자 재판독으로 이미 완료 - 클릭 대상 오인 불가. Codex 승인).
+    if ($coinToggleClicked -and $coinToggleOk) {
+      Write-RunLog "[던전] 방금 $dgCurrencyName(소탕) 카드를 도전(미사용)으로 전환 확인 - 소모량 표시 검증 생략 (전환 직후 표시 지연 정상)"
+    } else {
     Start-Sleep -Milliseconds 500
     $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+    if ($script:dgCostImeBlocked) {
+      Write-RunLog '[안내] 입력기 팝업이 입장 버튼을 가려 소모량 역방향 확인을 건너뜁니다 (카드 상태 기준 진행)'
+    }
     if ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
       Write-RunLog "[경고] ${dgCurrencyName} 미사용인데 입장 버튼에 소모량 ${offCost}개가 보입니다 - 소탕 카드를 눌러 해제합니다"
-      # 상태 기반 해제: 10/20이 '그대로 보일 때만' 클릭(최대 2회)합니다.
-      #  - null = 숫자 사라짐(해제 성공). 단 캡처 실패 중의 null은 증거가 아니므로 기다렸다 재확인
-      #  - 10/20이 아닌 잡음 숫자 = 순방향 검증과 같은 기준으로 OCR 오류 가능성 - 클릭하지 않고 경고 후 진행
-      #    (해제된 카드를 확인 없이 재클릭해 도로 켜는 사고 방지 - 무조건 재클릭 금지 원칙)
+      # 상태 기반 해제 (2026-07-29 00:07 실기로 교체): 카드는 이미 '도전(미사용)'인데 입장
+      # 버튼의 소모량 표시 갱신이 몇 초 늦는 경우, 기존의 offCost 기반 raw 클릭(최대 2회)이
+      # 해제된 카드를 도로 켜는 토글 자기 방해가 됨. Set-DgToggleCard 를 **1회만** 호출해
+      # 카드가 실제 '선택됨'일 때만 클릭하게 하고(이미 도전이면 무클릭), 그 후에는 클릭 없이
+      # 2초 간격 수동 재판독으로 버튼 갱신을 기다립니다 (Codex 계약 - 헬퍼 내부에 자체 재클릭
+      # 로직이 있어 루프 반복 호출 금지).
       $offCleared = $false
-      $offClicks = 0
+      $imeOffWaitTotal = 0
+      $offCardConfirmed = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)")
       for ($offTry = 1; $offTry -le 5; $offTry++) {
+        Start-Sleep -Milliseconds 2000
+        $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+        if ($script:dgCostImeBlocked) {
+          # 팝업이 떠 있는 동안의 판독(null)은 해제 증거가 아님 - 이 바퀴는 세지 않고
+          # 소멸을 기다립니다 (총 40초 한도, 초과 시 기존 불명확 분기 - 카드 증거 기준 처리)
+          if ($imeOffWaitTotal -eq 0) { Write-RunLog '[안내] 입력기 팝업이 소모량 표시를 가리고 있습니다 - 사라질 때까지 대기' }
+          if ($imeOffWaitTotal -ge 40) { break }
+          $imeOffWaitTotal += 2
+          $offTry--
+          continue
+        }
         if ($null -eq $offCost) {
           if (-not $script:screenCaptureFailing) { $offCleared = $true; break }
-          Start-Sleep -Milliseconds 1500   # 캡처 실패 중 - 입력 없이 재확인
-        } elseif ($dgValidCosts -contains $offCost) {
-          if ($offClicks -ge 2) { break }
-          $offClicks++
-          Focus-Game -Game $Game
-          Click-GamePoint -Game $Game -ReferenceX $ptDgCoinButton[0] -ReferenceY $ptDgCoinButton[1]
-          Start-Sleep -Milliseconds 1100
-        } else {
-          break
+          # 캡처 실패 중의 null 은 해제 증거가 아니므로 다음 바퀴에서 재확인
+        } elseif (-not ($dgValidCosts -contains $offCost)) {
+          break   # 잡음 숫자 - 기존 계약대로 불명확 분기로
         }
-        $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       }
       if ($offCleared) {
         Write-RunLog '[던전] 소모량 표시 사라짐 - 은동전 미사용 확인'
+      } elseif ($offCardConfirmed) {
+        # 카드 '도전' 확정 판독 = 1차 증거 (2026-07-29 00:58 실측: 카드를 끈 직후 입장 버튼의
+        # 소모량 표시가 갱신되지 않고 남는 잔상 - 수동 10초 대기로도 안 사라지고, 정지 직후
+        # 캡처는 버튼 깨끗+카드 도전. 카드 클릭이 없던 항목은 무사 통과 = 잔상과 정합).
+        # 카드 확인이 이기고 소모량 표시는 경고만 남기고 진행합니다 (Codex 승인 -
+        # 카드 미확인 시에만 아래 정지가 유지되어 07-19 원사고(카드 판별 불가+표시 10)도 커버).
+        Write-RunLog "[경고] 소탕 카드는 '도전(미사용)'으로 확인됐지만 소모량 표시가 남아 있습니다 (판독: '$offCost') - 표시 잔상으로 판단하고 미사용으로 진행합니다"
       } elseif ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
         if ($script:customMode) {
           # 커스텀 격상: 오류(코드 1) 대신 조건부 정지(코드 4) - 오류 자동 재시도 2회를
@@ -4850,6 +5372,7 @@ function Invoke-NormalDungeonCycle {
       } else {
         Write-RunLog "[경고] 소탕 해제 확인이 불명확합니다 (소모량 판독: '$offCost') - 현재 상태로 진행합니다"
       }
+    }
     }
   }
 
@@ -4878,6 +5401,7 @@ function Invoke-NormalDungeonCycle {
     $entered = $false
     $coinFallbackDone = $false
     $lootFallbackDone = $false
+    $imePopupWaitTotal = 0
     for ($enterTry = 1; $enterTry -le 5; $enterTry++) {
       # 캡처 실패 중에는 입장 여부를 확인할 수 없는 채 클릭/시도 횟수만 소모되므로,
       # 제목 OCR을 복구 탐침 삼아 캡처가 돌아올 때까지 기다렸다가 진행합니다.
@@ -4896,17 +5420,32 @@ function Invoke-NormalDungeonCycle {
 
       # 옵션 화면(제목 'N구역')을 벗어났으면 입장(로딩)이 시작된 것입니다.
       # 로딩이 늦게 시작할 수 있어 2초 뒤 한 번 더 확인합니다.
-      $titleNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-        -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+      $titleNow = Read-DgTitleText -Game $Game
       if ($titleNow.Contains('구역')) {
         Start-Sleep -Seconds 2
-        $titleNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-          -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+        $titleNow = Read-DgTitleText -Game $Game
       }
       # 캡처 실패 중의 빈 OCR('')을 '옵션 화면을 벗어남'으로 오판하지 않도록 함께 확인합니다.
       if (-not $titleNow.Contains('구역') -and -not $script:screenCaptureFailing) {
         $entered = $true
         break
+      }
+
+      # 여전히 옵션 화면인데 IME 팝업이 입장하기 버튼을 덮고 있으면, 클릭이 게임에 닿지
+      # 않은 것이므로 이 시도를 세지 않고 팝업 소멸을 기다립니다. 팝업 중에는 아래 재화
+      # 부족 폴백도 평가하지 않습니다 - 팝업에 먹힌 클릭을 부족으로 오판해 소탕을 풀어버리는
+      # 사고 방지 (2026-07-29 00:20 실기 + Codex 계약: 명시적 부족 증거 없이는 해제 금지).
+      if (-not $script:screenCaptureFailing -and (Test-DgImePopupVisible -Game $Game)) {
+        if ($imePopupWaitTotal -eq 0) {
+          Write-RunLog '[안내] 입력기 팝업이 입장하기 버튼을 가리고 있습니다 - 사라질 때까지 대기'
+        }
+        if ($imePopupWaitTotal -ge 40) {
+          throw '입력기 팝업이 계속 게임 화면을 가려 입장을 확인할 수 없습니다. 게임 창을 한 번 클릭해 팝업을 닫은 뒤 다시 시작해 주세요.'
+        }
+        Start-Sleep -Seconds 2
+        $imePopupWaitTotal += 2
+        $enterTry--
+        continue
       }
 
       # 여전히 옵션 화면이면 잔량을 다시 읽어 같은 공용 판정으로 대응합니다. 잔량을 못 읽은
@@ -4935,17 +5474,12 @@ function Invoke-NormalDungeonCycle {
           Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)" | Out-Null
           $effectiveCoin = $false
           $coinFallbackDone = $true
-        } elseif ($null -eq $retryBalance -and $effectiveLoot -and $ndLootFallback -and -not $lootFallbackDone) {
-          Write-RunLog '[던전] 입장 안 됨 - 더블 루팅(합 20개 필요)부터 끄고 재시도'
-          Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅' | Out-Null
-          $effectiveLoot = $false
-          $lootFallbackDone = $true
-        } elseif ($null -eq $retryBalance -and -not $effectiveLoot -and $ndCoinFallback -and -not $coinFallbackDone) {
-          Write-RunLog '[던전] 입장 안 됨(은동전 부족 추정) - 소탕 해제 후 미사용으로 계속'
-          Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)" | Out-Null
-          $effectiveCoin = $false
-          $coinFallbackDone = $true
         }
+        # 잔량을 못 읽은 경우($null)의 '부족 추정' 해제 분기는 제거했습니다 (2026-07-29).
+        # 클릭이 팝업 등에 먹혀 화면이 안 넘어간 것을 재화 부족으로 오판해, 잔량이 충분한데
+        # 소탕/더블 루팅을 풀고 입장한 실사고(07-28 23:49, 공물 2개 보유)가 있었습니다.
+        # 해제는 잔량이 실제로 읽힌 명시적 부족 증거가 있을 때만 하고, 못 읽으면 재시도 후
+        # 아래의 안전 정지(오류)로 마칩니다 (Codex 계약).
       }
     }
     if (-not $entered) {
@@ -4958,7 +5492,7 @@ function Invoke-NormalDungeonCycle {
         Write-RunLog "[완료] $($finalDecision.Reason)"
         exit 4
       }
-      throw "입장하기가 진행되지 않습니다. 은동전 잔량과 '동전 소진 시/더블 루팅 불가 시' 설정을 확인해 주세요."
+      throw "입장하기가 진행되지 않습니다. ${dgCurrencyName} 잔량과 '소진 시/더블 루팅 불가 시' 설정을 확인해 주세요."
     }
   } else {
     # 파티찾기: '우연한 만남' 토글이 켜져 있으면 파티 찾기 버튼이 없고 그 자리가 넓은
@@ -4994,10 +5528,12 @@ function Invoke-NormalDungeonCycle {
   Start-Sleep -Seconds 1
   if ($ndMatching -eq '우연한 만남') {
     Wait-ForScreen -Game $Game -TimeoutSeconds $timeoutEntry -Description '던전 입장 완료 화면' -Condition {
+      if (Invoke-PurchasePopupSweep -Game $Game) { return $false }
       Test-DungeonEntered -Game $Game
     }
   } else {
     Wait-ForScreen -Game $Game -TimeoutSeconds $timeoutPartyMatch -Description '파티 매칭 완료 후 던전 입장' -Condition {
+      if (Invoke-PurchasePopupSweep -Game $Game) { return $false }
       ((Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
           -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', '').Contains('구역')
     }
@@ -5255,8 +5791,7 @@ function Invoke-NormalDungeonCycle {
       $optionsDeadline = (Get-Date).AddSeconds(40)
       continue
     }
-    if (((Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-        -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', '').Contains('구역')) {
+    if ((Read-DgTitleText -Game $Game).Contains('구역')) {
       $backToOptions = $true
       break
     }
@@ -5373,7 +5908,8 @@ function Invoke-HuntingGroundCycle {
       }
     }
   }
-  Set-DgToggleCard -Game $Game -Region $rgHtCardButton -AltRegion $rgHtCardButtonAlt -ClickPoint $ptHtCardButton -WantSelected $effectiveCoin -Label '은동전(사냥 임무)' | Out-Null
+  $coinToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgHtCardButton -AltRegion $rgHtCardButtonAlt -ClickPoint $ptHtCardButton -WantSelected $effectiveCoin -Label '은동전(사냥 임무)')
+  $coinToggleClicked = $script:dgToggleClicked
   # 더블 루팅은 소탕(은동전) 전제 기능이라 소탕을 사용할 때만 상태를 맞춥니다 (던전과 동일)
   if ($effectiveCoin) {
     Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $effectiveLoot -Label '더블 루팅' | Out-Null
@@ -5407,35 +5943,55 @@ function Invoke-HuntingGroundCycle {
     # 역방향 검증: 미사용인데도 시작 버튼에 소모량(10/20)이 보이면 카드가 켜진 채 남은 것
     # (던전 2026-07-19 00:21 실측 사고와 동일 구조 - 카드 글자 깨짐 대비).
     # 사냥터 화면에 소모량 표기가 없으면 읽기 실패($null)로 건너뛰므로 무해합니다.
+    # 방금 우리가 클릭해 '도전' 전환을 확인한 경우는 생략 (전환 직후 소모량 표시가 13초+
+    # 남는 게임 표시 지연이 정상 - 던전 역방향과 동일 계약, 2026-07-29 01:45 실측)
+    if ($coinToggleClicked -and $coinToggleOk) {
+      Write-RunLog '[사냥터] 방금 은동전(사냥 임무) 카드를 도전(미사용)으로 전환 확인 - 소모량 표시 검증 생략 (전환 직후 표시 지연 정상)'
+    } else {
     Start-Sleep -Milliseconds 500
     $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+    if ($script:dgCostImeBlocked) {
+      Write-RunLog '[안내] 입력기 팝업이 시작 버튼을 가려 소모량 역방향 확인을 건너뜁니다 (카드 상태 기준 진행)'
+    }
     if ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
       Write-RunLog "[경고] 은동전 미사용인데 시작 버튼에 소모량 ${offCost}개가 보입니다 - 은동전(사냥 임무) 카드를 눌러 해제합니다"
-      # 상태 기반 해제 (던전 역방향 검증과 동일한 규칙 - 그쪽 주석 참고)
+      # 상태 기반 해제 (던전 역방향 검증과 동일한 계약 - 2026-07-29 00:07 실측).
+      # 소모량 표시는 버튼 갱신 지연으로 카드보다 늦게 바뀔 수 있어, 소모량만 보고 raw 클릭을
+      # 반복하면 이미 해제된 카드를 도로 켜는 토글 자기 방해가 됨. Set-DgToggleCard 를 **1회만**
+      # 호출해 카드 상태 기준으로 해제하고, 이후에는 클릭 없이 소모량 사라짐만 재확인한다.
       $offCleared = $false
-      $offClicks = 0
+      $imeOffWaitTotal = 0
+      $offCardConfirmed = [bool](Set-DgToggleCard -Game $Game -Region $rgHtCardButton -AltRegion $rgHtCardButtonAlt -ClickPoint $ptHtCardButton -WantSelected $false -Label '은동전(사냥 임무)')
       for ($offTry = 1; $offTry -le 5; $offTry++) {
+        Start-Sleep -Milliseconds 2000
+        $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+        if ($script:dgCostImeBlocked) {
+          # 팝업 중 판독(null)은 해제 증거가 아님 - 세지 않고 대기 (던전 역방향과 동일 계약)
+          if ($imeOffWaitTotal -eq 0) { Write-RunLog '[안내] 입력기 팝업이 소모량 표시를 가리고 있습니다 - 사라질 때까지 대기' }
+          if ($imeOffWaitTotal -ge 40) { break }
+          $imeOffWaitTotal += 2
+          $offTry--
+          continue
+        }
         if ($null -eq $offCost) {
           if (-not $script:screenCaptureFailing) { $offCleared = $true; break }
-          Start-Sleep -Milliseconds 1500   # 캡처 실패 중 - 입력 없이 재확인
-        } elseif ($dgValidCosts -contains $offCost) {
-          if ($offClicks -ge 2) { break }
-          $offClicks++
-          Focus-Game -Game $Game
-          Click-GamePoint -Game $Game -ReferenceX $ptHtCardButton[0] -ReferenceY $ptHtCardButton[1]
-          Start-Sleep -Milliseconds 1100
-        } else {
-          break
+          # 캡처 실패 중 - 입력 없이 다음 바퀴에서 재확인
+        } elseif (-not ($dgValidCosts -contains $offCost)) {
+          break   # 소모량이 유효값이 아니면 불명확 처리(아래 분기)로 넘어감
         }
-        $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       }
       if ($offCleared) {
         Write-RunLog '[사냥터] 소모량 표시 사라짐 - 은동전 미사용 확인'
+      } elseif ($offCardConfirmed) {
+        # 카드 '도전' 확정 판독 = 1차 증거, 소모량 표시는 잔상 가능 (던전 역방향과 동일 계약 -
+        # 2026-07-29 00:58 실측 근거는 그쪽 주석 참고)
+        Write-RunLog "[경고] 카드는 '도전(미사용)'으로 확인됐지만 소모량 표시가 남아 있습니다 (판독: '$offCost') - 표시 잔상으로 판단하고 미사용으로 진행합니다"
       } elseif ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
         throw "은동전 미사용 설정인데 은동전(사냥 임무)을 해제하지 못했습니다 (시작 버튼 소모량: ${offCost}개). 게임에서 카드를 직접 '도전'으로 바꾼 뒤 다시 시작해 주세요."
       } else {
         Write-RunLog "[경고] 카드 해제 확인이 불명확합니다 (소모량 판독: '$offCost') - 현재 상태로 진행합니다"
       }
+    }
     }
   }
 
@@ -5451,7 +6007,7 @@ function Invoke-HuntingGroundCycle {
     # 은동전이 부족해 입장이 막히면 옵션에 따라 공물 임무를 해제하고 이어갑니다.
     Write-RunLog '[사냥터] 입장하기 클릭'
     $entered = $false
-    $lootFallbackDone = $false
+    $imePopupWaitTotal = 0
     for ($enterTry = 1; $enterTry -le 4; $enterTry++) {
       # 캡처 실패 중에는 입장 여부를 확인할 수 없는 채 클릭/시도 횟수만 소모되므로,
       # 입장 버튼 탐색을 복구 탐침 삼아 캡처가 돌아올 때까지 기다렸다가 진행합니다.
@@ -5471,18 +6027,26 @@ function Invoke-HuntingGroundCycle {
       }
       # 캡처 실패 중에는 버튼 탐색이 무조건 실패($null)하므로 '입장됨'으로 오판하지 않습니다.
       if (-not $stillEntry -and -not $script:screenCaptureFailing) {
+        # IME 팝업이 버튼 자리를 덮으면 '버튼이 안 보임'이 입장의 증거가 못 되고 클릭도
+        # 팝업에 먹혔을 수 있음 - 이 시도를 세지 않고 팝업 소멸을 기다립니다 (2026-07-29 실기).
+        if (Test-DgImePopupVisible -Game $Game) {
+          if ($imePopupWaitTotal -eq 0) {
+            Write-RunLog '[안내] 입력기 팝업이 입장하기 버튼 자리를 가리고 있습니다 - 사라질 때까지 대기'
+          }
+          if ($imePopupWaitTotal -ge 40) {
+            throw '입력기 팝업이 계속 게임 화면을 가려 입장을 확인할 수 없습니다. 게임 창을 한 번 클릭해 팝업을 닫은 뒤 다시 시작해 주세요.'
+          }
+          Start-Sleep -Seconds 2
+          $imePopupWaitTotal += 2
+          $enterTry--
+          continue
+        }
         $entered = $true
         break
       }
-      # 잔량 읽기가 실패해 사전 확인을 건너뛴 경우의 예비: 입장이 막히면 '소탕만 계속'
-      # 옵션에 따라 더블 루팅만 끄고 재시도합니다 (캡처 순단 중에는 발동하지 않음)
-      if ($enterTry -ge 2 -and -not $script:screenCaptureFailing -and
-          $effectiveLoot -and $htLootFallback -and -not $lootFallbackDone) {
-        Write-RunLog '[사냥터] 입장 안 됨(은동전 부족 추정) - 더블 루팅만 끄고 소탕(10개)으로 재시도'
-        Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $false -Label '더블 루팅' | Out-Null
-        $effectiveLoot = $false
-        $lootFallbackDone = $true
-      }
+      # 재시도 실패만으로 더블 루팅을 끄던 '부족 추정' 예비는 제거했습니다 (2026-07-29).
+      # 클릭이 팝업 등에 먹힌 것을 부족으로 오판하는 사고 방지 - 잔량이 실제로 읽힌 명시적
+      # 부족 증거가 있을 때만 아래(루프 뒤)에서 대응하고, 못 읽으면 안전 정지합니다 (Codex 계약).
     }
     if (-not $entered) {
       # 은동전 부족으로 입장이 막힌 것으로 확인되면 사냥터에서 나가고 마칩니다 (사용자 결정)
@@ -5501,6 +6065,7 @@ function Invoke-HuntingGroundCycle {
   Start-Sleep -Seconds 1
   $entryWaitSeconds = $(if ($htMatching -eq '파티찾기') { $timeoutPartyMatch } else { $timeoutEntry })
   Wait-ForScreen -Game $Game -TimeoutSeconds $entryWaitSeconds -Description '사냥터 입장 완료' -Condition {
+    if (Invoke-PurchasePopupSweep -Game $Game) { return $false }
     $questNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
         -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
     ($questNow.Contains('소탕') -or $questNow.Contains('정찰'))
@@ -5651,6 +6216,7 @@ function Invoke-AbyssPartyMemberCycle {
         if ((Get-Date) -ge $memberDeadline) {
           throw "파티장의 입장 시작을 기다리다 시간을 초과했습니다 (${memberWaitSeconds}초) - 파티 상태와 파티장 쪽 자동화를 확인해 주세요."
         }
+        [void](Invoke-PurchasePopupSweep -Game $Game)
         if (Test-InDungeonQuest -Game $Game) { break }
         # '준비 완료'를 누르기 전(순수 대기 중)에만 안전 중지 예약을 소비합니다 (필드 = 안전 지점)
         if (-not $readyClicked -and (Test-Path -LiteralPath $safeStopFlagPath)) {
@@ -6355,6 +6921,7 @@ try {
         Write-RunLog '[어비스] 파티 매칭 대기 중... (끝나면 자동 입장)'
       }
       Wait-ForScreen -Game $game -TimeoutSeconds $timeoutPartyMatch -Description '파티 매칭 완료 후 던전 입장' -Condition {
+        if (Invoke-PurchasePopupSweep -Game $game) { return $false }
         Test-InDungeonQuest -Game $game
       }
       Write-RunLog '[어비스] 던전 입장 완료 감지'
@@ -6422,6 +6989,7 @@ try {
     Write-RunLog '[어비스] 던전 로딩 중...'
     Start-Sleep -Seconds 1
     Wait-ForScreen -Game $game -TimeoutSeconds $timeoutEntry -Description '던전 입장 완료 화면' -Condition {
+      if (Invoke-PurchasePopupSweep -Game $game) { return $false }
       Test-DungeonEntered -Game $game
     }
     Write-RunLog '[어비스] 던전 입장 완료 감지'

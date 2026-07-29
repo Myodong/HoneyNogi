@@ -13,7 +13,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
 }
 # 본체의 데이터 표를 AST 로 추출 (변수 사본을 수작업으로 복제하지 않음 - 값 자체가 진리표)
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-foreach ($varName in @('dgFocusShiftY', 'dgLayoutTable', 'dgNamePatterns', 'dgSelStagePoints', 'dgOptStagePoints')) {
+foreach ($varName in @('dgFocusShiftY', 'dgLayoutTable', 'dgNamePatterns', 'dgSelStagePoints', 'dgOptStagePoints', 'ddNamePatterns')) {
   $assign = $sourceAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
@@ -63,6 +63,12 @@ $idCases = @(
 foreach ($case in $idCases) {
   Assert-Case "ID: $($case.N)" ([string](Get-DgDungeonIdFromTitle -TitleText $case.T)) $case.E
 }
+# 심층 모드 ID 판별 (본체의 deep 치환과 동일하게 테이블을 바꿔 판정)
+$savedNamePatterns = $dgNamePatterns
+$dgNamePatterns = $ddNamePatterns
+Assert-Case 'ID(심층): 마스 오독(파스, 실기 21:52)' ([string](Get-DgDungeonIdFromTitle -TitleText '파스던전')) '마스던전'
+Assert-Case 'ID(심층): 파스 + 층구역 제목' ([string](Get-DgDungeonIdFromTitle -TitleText '파스1층2구역')) '마스던전'
+$dgNamePatterns = $savedNamePatterns
 
 # ── 1b. 선택 화면 제목 판정 (2026-07-25 실기: '페카 고분' 제목에 '던전'이 없어
 #        시작 전 정리가 선택 화면을 알 수 없는 화면으로 오인 - 고분·광구·ID 매칭 추가) ──
@@ -80,6 +86,12 @@ $selTitleCases = @(
   @{ N = '광구 옵션 구역 깨짐도 제외'; T = '바리1광구2층3구멱'; E = $false }
   @{ N = '필드 오독';             T = '.크협크집';        E = $false }
   @{ N = '빈 제목';               T = '';                 E = $false }
+  # 2026-07-28 21:58 실기: 심층 전용 던전은 던전 모드 이름 테이블에 없어 미인식 →
+  # 탭 자동 전환 게이트 도달 불가 → 심층 이름 조각을 모드 무관 인정
+  @{ N = '심층 전용: 북쪽 폐허';   T = '북쪽폐허';         E = $true }
+  @{ N = '심층 전용: 북쪽 오독(폐하, 실기)'; T = '북쪽폐하'; E = $true }
+  @{ N = '심층 전용: 남쪽 폐허';   T = '남쪽폐허';         E = $true }
+  @{ N = '심층 옵션 제목은 여전히 선택 아님'; T = '북쪽폐하심층2층3구역'; E = $false }
 )
 foreach ($case in $selTitleCases) {
   Assert-Case "선택제목: $($case.N)" (Test-DgSelectionTitle -TitleText $case.T) $case.E
@@ -186,6 +198,27 @@ $w = Select-DgDifficultyWord -Words @(@{ Text = '어려움'; X = 140; Y = 186 })
 Assert-Case '알약: 선택 화면 표준 자리(140)도 동일 규칙' "$($w.X)" '140'
 Assert-Case '알약: HardX 있어도 매우 짝 제외가 우선' `
   ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '매우'; X = 700; Y = 120 }, @{ Text = '어려움'; X = 745; Y = 120 }) -Key '어려움' -HardX 724)) $true
+# 깨짐 이형 '이려움' (2026-07-29 20:02 키아 심층 실기: 매우 어려움 미해금이라 알약 1개+앵커
+# 없음 화면에서 스케일 3 OCR이 '이려움'으로 깨져 3회 전부 탈락 → 이형 허용, 가드는 동일 적용)
+$w = Select-DgDifficultyWord -Words @(@{ Text = '이려움'; X = 662; Y = 120 }) -Key '어려움' -HardX 660
+Assert-Case '알약: 이려움 깨짐도 표준 자리(심층 옵션 660)면 채택 (키아 실사고)' "$($w.X)" '662'
+Assert-Case '알약: 이려움이 매우 짝이면 여전히 제외' `
+  ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '매우'; X = 700; Y = 120 }, @{ Text = '이려움'; X = 745; Y = 120 }) -Key '어려움' -HardX 724)) $true
+Assert-Case '알약: 이려움도 표준 자리 밖이면 채택 금지' `
+  ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이려움'; X = 841; Y = 120 }) -Key '어려움' -HardX 660)) $true
+Assert-Case '알약: 이려움 이형은 어려움 Key 전용 (일반 Key 에는 불인정)' `
+  ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이려움'; X = 652; Y = 120 }) -Key '일반')) $true
+# 스케일별 추가 이형 (2026-07-29 20:17 페카 실기 - s4 '이컪움'/s5 '이컪울', 선택 화면 실측)
+$w = Select-DgDifficultyWord -Words @(@{ Text = '이컪움'; X = 77; Y = 186 }) -Key '어려움' -HardX 78
+Assert-Case '알약: 이컪움(s4) 깨짐도 표준 자리(심층 선택 78)면 채택 (페카 실사고)' "$($w.X)" '77'
+$w = Select-DgDifficultyWord -Words @(@{ Text = '이컪울'; X = 77; Y = 186 }) -Key '어려움' -HardX 78
+Assert-Case '알약: 이컪울(s5) 깨짐도 표준 자리면 채택' "$($w.X)" '77'
+Assert-Case '알약: 이컪움도 표준 자리 밖이면 채택 금지' `
+  ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이컪움'; X = 841; Y = 120 }) -Key '어려움' -HardX 660)) $true
+# 다중 스케일 배선: Find-DgDifficultyPoint 가 4→3→5 순서로 재시도해야 함 (단일 s4 전멸 방지)
+$workerSource = [IO.File]::ReadAllText($workerPath)
+Assert-Case '배선: 알약 탐색 다중 스케일(4,3,5) 재시도' `
+  ($workerSource -match 'foreach \(\$pillScale in @\(4, 3, 5\)\)') $true
 
 # ── 4c. 옵션 제목 보조 판정 (피오듸층3구역 실사고 재현) ──────────────────────
 Assert-Case '보조: 사고 원문 제목 + 1층 라벨 2개' `

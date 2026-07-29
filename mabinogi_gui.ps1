@@ -254,7 +254,7 @@ function Update-ConfigToLatest {
     }
     # 2) 값 섹션들: '_' 주석 키를 제외하고, 최신 구조에 존재하는 키만 사용자 값으로 덮어씀
     #    (최신 구조에서 사라진 키는 버리고, 새로 생긴 키는 최신 기본값 유지)
-    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat')) {
+    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'assist')) {
       if ($usr.PSObject.Properties[$sect] -and $def.PSObject.Properties[$sect]) {
         foreach ($prop in $usr.$sect.PSObject.Properties) {
           if ($prop.Name -like '_*') { continue }
@@ -3121,6 +3121,15 @@ $chkRevive.Location = New-Object System.Drawing.Point(15, 79)
 $chkRevive.Size = New-Object System.Drawing.Size(185, 22)
 $grpSettings.Controls.Add($chkRevive)
 
+# 어시스트 자동 켜기 (2026-07-28 사용자 요청): 전투 중 우측 ASSIST 토글이 꺼져 있으면 H키로 켬.
+# 배치는 2열 상단 - 1열 4번째 줄(y106)은 클리어 대기 줄(도움말?+라벨+숫자, y108~132)과 겹침
+# (Codex 리뷰 지적으로 이동. 2열 y82 의 저장 안내 라벨과도 안 겹치는 자리)
+$chkAssist = New-Object System.Windows.Forms.CheckBox
+$chkAssist.Text = '어시스트 자동 켜기 (H)'
+$chkAssist.Location = New-Object System.Drawing.Point(210, 25)
+$chkAssist.Size = New-Object System.Drawing.Size(185, 22)
+$grpSettings.Controls.Add($chkAssist)
+
 # 권장 창 모드 버튼: 클릭하면 게임 창을 OCR 인식 최적 크기(QHD 이상=1908x1076,
 # FHD 등=1272x717, 작업표시줄 안 겹치게)로 즉시 변경합니다. 한 번 맞춰두면
 # 매 회차 자동 보정이 그 크기를 그대로 유지하므로 별도 상시 설정이 필요 없습니다.
@@ -3147,6 +3156,7 @@ $btnAlwaysOn.Add_Click({
     if ($chkSpace.Checked) { $lines.Add(" - $($chkSpace.Text)") }
     if ($chkFood.Checked) { $lines.Add(" - $($chkFood.Text)") }
     if ($chkRevive.Checked) { $lines.Add(" - $($chkRevive.Text)") }
+    if ($chkAssist.Checked) { $lines.Add(" - $($chkAssist.Text)") }
     $lines.Add('')
     $lines.Add('[기본 설정 기능]')
     $lines.Add('<화면/창 관리>')
@@ -3202,6 +3212,7 @@ $btnClearHelp.Add_Click({
 $toolTip = New-Object System.Windows.Forms.ToolTip
 $toolTip.SetToolTip($btnClearHelp, '클릭하면 자세한 설명이 나옵니다')
 $toolTip.SetToolTip($chkRevive, "전투 중 행동불능이 되면 남은 부활 횟수를 확인해 R키(여기서 부활)로 자동 부활합니다.`r`n남은 횟수가 없으면 '여신상에서 부활'을 클릭해 이어갑니다.`r`n불사의 가루 등 부활 재화가 소모될 수 있으니 원치 않으면 꺼 두세요.")
+$toolTip.SetToolTip($chkAssist, "전투 중 화면 우측의 ASSIST(어시스트 모드) 토글이 꺼져 있으면 자동으로 H키를 눌러 켭니다.`r`n분홍(클래스 특화)/초록(일반) 어느 쪽이든 켜져 있으면 건드리지 않습니다.")
 
 $lblClearWait = New-Object System.Windows.Forms.Label
 $lblClearWait.Text = '클리어 대기(초):'
@@ -4662,6 +4673,12 @@ function Load-SettingsToUi {
   } else {
     $chkRevive.Checked = $true
   }
+  # 어시스트 자동 켜기 설정 복원 (assist 항목이 없던 예전 config 는 기본 켜짐)
+  if ($cfg.PSObject.Properties['assist'] -and $cfg.assist.PSObject.Properties['autoEnable']) {
+    $chkAssist.Checked = ConvertTo-StrictBoolean $cfg.assist.autoEnable $true
+  } else {
+    $chkAssist.Checked = $true
+  }
   # 저장된 선택 던전 복원 (해당 라디오가 활성화된 경우에만)
   try {
     $savedDungeon = [string]$cfg.dungeons.selected
@@ -4875,6 +4892,17 @@ function Save-SettingsFromUi {
       enabled  = [bool]$chkRevive.Checked
       key      = 82
       maxPerCycle = 10
+    })
+  }
+  # 어시스트 자동 켜기 설정 저장. assist 항목이 없던 예전 config 에는 새로 만들어 기록합니다.
+  if ($cfg.PSObject.Properties['assist']) {
+    if ($cfg.assist.PSObject.Properties['autoEnable']) { $cfg.assist.autoEnable = [bool]$chkAssist.Checked }
+    else { $cfg.assist | Add-Member -NotePropertyName 'autoEnable' -NotePropertyValue ([bool]$chkAssist.Checked) }
+  } else {
+    $cfg | Add-Member -NotePropertyName 'assist' -NotePropertyValue ([pscustomobject]@{
+      '_설명'    = '전투 중 우측 ASSIST(어시스트 모드) 토글이 꺼져 있으면 자동으로 켜는 기능입니다.'
+      autoEnable = [bool]$chkAssist.Checked
+      key        = 72
     })
   }
   # 창 자동 정렬과 가림 자동 복구는 안정 동작의 핵심이라 항상 켜둡니다.
