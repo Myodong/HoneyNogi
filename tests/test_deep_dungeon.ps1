@@ -8,7 +8,7 @@ $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
-    -Names @('Get-DgMapLabelText', 'Get-CustomCoinDecision')) {
+    -Names @('Get-DgMapLabelText', 'Get-CustomCoinDecision', 'Select-DgTabWord', 'Test-DgTabProbeMatchesMode')) {
   Invoke-Expression $definition
 }
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') `
@@ -146,6 +146,38 @@ $deepBadUp = @(
 Assert-Case '전환: 심층 1-1→2-2 상향은 1-3에서만 가능 → 위반' (@(Get-CustomTransitionIssues -Items $deepBadUp -ListRepeat 'count' -ListRepeatCount 1).Count) 1
 Assert-Case '전환: 심층 1-3→2-1 무한 반복은 바퀴 순환(2층→1-3) 위반' (@(Get-CustomTransitionIssues -Items $deepUp -ListRepeat 'infinite' -ListRepeatCount 1).Count) 1
 
+# ── 7.5 던전|심층 던전 탭 자동 전환 (2026-07-28 사용자 요청 - 실측 단어 기반) ──
+$tabWordsMeasured = @(
+  [pscustomobject]@{ Text = '던전'; X = 66; Y = 128 }
+  [pscustomobject]@{ Text = '심층'; X = 135; Y = 128 }
+  [pscustomobject]@{ Text = '던전'; X = 172; Y = 128 }
+)
+$tabPick = Select-DgTabWord -Words $tabWordsMeasured -DeepTab $true
+Assert-Case '탭: 심층 던전 탭 = 심층 단어(135,128)' "$($tabPick.X),$($tabPick.Y)" '135,128'
+$tabPick = Select-DgTabWord -Words $tabWordsMeasured -DeepTab $false
+Assert-Case '탭: 던전 탭 = 심층 짝 아닌 던전(66,128)' "$($tabPick.X),$($tabPick.Y)" '66,128'
+$tabWordsMisread = @(
+  [pscustomobject]@{ Text = '던전'; X = 66; Y = 128 }
+  [pscustomobject]@{ Text = '심충'; X = 135; Y = 128 }
+  [pscustomobject]@{ Text = '던전'; X = 172; Y = 128 }
+)
+$tabPick = Select-DgTabWord -Words $tabWordsMisread -DeepTab $true
+Assert-Case '탭: 심충 오독도 심층 탭으로 인정' "$($tabPick.X),$($tabPick.Y)" '135,128'
+$tabPick = Select-DgTabWord -Words $tabWordsMisread -DeepTab $false
+Assert-Case '탭: 오독 세트에서도 던전 탭은 66,128' "$($tabPick.X),$($tabPick.Y)" '66,128'
+$tabWordsNoDeep = @([pscustomobject]@{ Text = '던전'; X = 66; Y = 128 })
+Assert-Case '탭: 심층 단어 없으면 심층 탭 null(예비 좌표행)' ($null -eq (Select-DgTabWord -Words $tabWordsNoDeep -DeepTab $true)) $true
+Assert-Case '탭: 빈 목록 null' ($null -eq (Select-DgTabWord -Words @() -DeepTab $false)) $true
+
+Assert-Case '탭 확인: 심층 진입 버튼 + deep 목표 = 일치' (Test-DgTabProbeMatchesMode -ProbeText 'Space심층2층3구역진입' -DeepTab $true) $true
+Assert-Case '탭 확인: 심층 진입 버튼 + 던전 목표 = 불일치' (Test-DgTabProbeMatchesMode -ProbeText 'Space심층2층3구역진입' -DeepTab $false) $false
+Assert-Case '탭 확인: 심충 오독 + deep 목표 = 일치' (Test-DgTabProbeMatchesMode -ProbeText 'Space심충1층1구역진입' -DeepTab $true) $true
+Assert-Case '탭 확인: 일반 진입 버튼 + 던전 목표 = 일치' (Test-DgTabProbeMatchesMode -ProbeText '1층1구역진입' -DeepTab $false) $true
+Assert-Case '탭 확인: 일반 진입 버튼 + deep 목표 = 불일치' (Test-DgTabProbeMatchesMode -ProbeText '1층1구역진입' -DeepTab $true) $false
+Assert-Case '탭 확인: 빈 판독은 어느 쪽도 성공 아님' `
+  ((Test-DgTabProbeMatchesMode -ProbeText '' -DeepTab $false) -or (Test-DgTabProbeMatchesMode -ProbeText '' -DeepTab $true)) $false
+Assert-Case '탭 확인: 진입 소실 판독은 성공 아님' (Test-DgTabProbeMatchesMode -ProbeText 'Space심층2층3구역' -DeepTab $true) $false
+
 # ── 8. 배선 가드 (소스 텍스트 검사 - GUI 심층 분기가 유지되는지) ─────────────
 $guiSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_gui.ps1') -Raw -Encoding UTF8
 Assert-Case '배선: 심층 카테고리 저장값 deepdungeon' ($guiSource -match "rbCatDeep\.Checked\)\s*\{\s*\`$categoryValue = 'deepdungeon'") $true
@@ -154,10 +186,80 @@ Assert-Case '배선: 심층 전용 마커 파일 분기' ($guiSource -match 'rbC
 Assert-Case '배선: 셀 편집 디스패처에 심층 리스트 분기' ($guiSource -match 'elseif \(\$clickSender -eq \$lvDcrList\)') $true
 Assert-Case '배선: 셀 편집 적용에 심층 분기' ($guiSource -match 'elseif \(\$applyList -eq \$lvDcrList\)') $true
 Assert-Case '배선: 시작 게이트 층 전환 검사에 deepCustomRepeat 포함' ($guiSource -match "-eq 'customRepeat' -or \`$script:customConfigSection -eq 'deepCustomRepeat'") $true
+# 목록 끝 고정 검사는 뒤에 섹션이 추가될 때마다 깨지므로 포함 여부만 확인 (2026-07-28 assist 추가로 수정)
 Assert-Case '배선: 마이그레이션 섹션 목록에 deepDungeon/deepCustomRepeat' `
-  (($guiSource -match "'deepDungeon',") -and ($guiSource -match "'deepCustomRepeat'\)\)")) $true
+  (($guiSource -match "'deepDungeon', 'huntingGround'") -and ($guiSource -match "'deepCustomRepeat', ")) $true
 $workerSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Raw -Encoding UTF8
 Assert-Case '배선(워커): 심층 커스텀 강제 규칙(어려움 고정)' ($workerSource -match "if \(\`$deepMode\) \{[\s\S]{0,400}\`$ndDifficulty = '어려움'") $true
 Assert-Case '배선(워커): 심층 재화 테이블 치환(1/2개)' ($workerSource -match '\$dgValidCosts = @\(1, 2\)') $true
+# 2026-07-28 실기 2건(상반): 심층 옵션 제목은 폭 250에서 '구역' 잘림(20:20) / 밝은 배경
+# 선택 화면은 폭 420 판독 전멸(20:53) → Read-DgTitleText 이중 판독(좁은 우선 + 심층 조건부 확장)
+Assert-Case '배선(워커): 제목 이중 판독 함수 존재(심층 조건부 확장)' `
+  ($workerSource -match 'function Read-DgTitleText[\s\S]{0,2200}-RegionWidth 420') $true
+Assert-Case '배선(워커): 이중 판독은 심층 외 무접촉(좁은 1회)' `
+  ($workerSource -match 'if \(-not \$deepMode\) \{ return \$narrowText \}') $true
+Assert-Case '배선(워커): 폭 420 전역 오버라이드 철회됨' `
+  ($workerSource -notmatch '\$rgDgTitle = @\(\$rgDgTitle\[0\], \$rgDgTitle\[1\], 420') $true
+# 2026-07-28 실기 2차: 주간 구역 채택이 '매우 어려움' 클릭 전 버튼을 읽어 어려움 상태 구역을
+# 오채택 → 난이도 확정 '후' 재채택 2지점(선택=진입 버튼 / 옵션=제목)이 있어야 함
+Assert-Case '배선(워커): 주간 구역 재채택(선택 화면, 난이도 전환 후)' `
+  ($workerSource -match '주간 구역 재채택: \$\{ndStage\} → \$\{weeklyNowStage\}') $true
+Assert-Case '배선(워커): 주간 구역 최종 확인(옵션 화면 수렴점)' `
+  ($workerSource -match '주간 구역 최종 확인: \$\{ndStage\} → \$\{weeklyTitleStage\}') $true
+# 2026-07-28 실기 3차: 시작 정리가 심층 선택 화면을 못 알아보고 X 후보 클릭으로 던전 UI를
+# 닫은 사고 → Test-KnownScreen 진입 버튼 2차 신호 + 주간 판독 3회 재시도
+Assert-Case '배선(워커): Test-KnownScreen 진입 버튼 2차 신호' `
+  ($workerSource -match "\`$dgEnterProbe\.Contains\('진입'\)") $true
+Assert-Case '배선(워커): 주간 구역 판독 3회 재시도' `
+  ($workerSource -match '\$weeklyTry -le 3 -and -not \$weeklyStage') $true
+# 2026-07-28 실기 4차: 입장 직후 물약 팝업이 입장 완료 감지를 가림 → 입장/매칭 대기 6지점에
+# 팝업 스윕 추가 (Condition 안에서는 반환값을 소비해 대기 오판 방지 - PS 5.1 출력 오염)
+Assert-Case '배선(워커): 입장 대기 팝업 스윕 6지점(반환값 소비 계약)' `
+  ([regex]::Matches($workerSource, 'if \(Invoke-PurchasePopupSweep -Game \$[Gg]ame\) \{ return \$false \}').Count -eq 5 -and
+   [regex]::Matches($workerSource, '\[void\]\(Invoke-PurchasePopupSweep').Count -eq 1) $true
+# 2026-07-28 22:40 실기: 입장 버튼 뿔 아이콘이 'V'/'7'로 오독돼 소모량 1이 7로 판독 →
+# deep 은 아이콘 제외 영역(978,636,152,44)으로 오버라이드 (캡처 19/19 첫 시도 정확 판독)
+Assert-Case '배선(워커): 심층 소모량 판독 영역 아이콘 제외 오버라이드' `
+  ($workerSource -match '\$rgDgTributeCost = @\(978, 636, 152, 44\)') $true
+# 2026-07-28 22:48 실기: 제목 공백 시 선택 화면 미인식 → 진입 버튼 2차 신호 + 게이트/분기 변수 통일
+Assert-Case '배선(워커): 시작 검증 선택 화면 2차 신호(진입 버튼)' `
+  (($workerSource -match '선택 화면 인식 \(제목 판독 실패') -and
+   ($workerSource -match 'if \(\$onOptionsScreen -or \$onSelectionScreen\)') -and
+   ($workerSource -match 'if \(-not \$onOptionsScreen -and -not \$onSelectionScreen\)')) $true
+# 2026-07-28 23:12 실기: 입장 로딩 중 퀘스트 클리어 보상 전체 화면이 입장 감지를 가림 →
+# 스윕 헬퍼가 전용 문구 확인 후 '확인' 버튼 클릭 (Space 금지 정책 - 상태 기반 클릭만)
+Assert-Case '배선(워커): 입장 대기 스윕에 퀘스트 클리어 확인 처리' `
+  (($workerSource -match '퀘스트 클리어 보상 화면 감지 - 확인 클릭') -and
+   ($workerSource -match "아이템을누르")) $true
+Assert-Case '배선(워커): 구역 좌표 소진 시 이미 선택 확인' `
+  ($workerSource -match '이미 선택 확인 - 카드 클릭 불필요') $true
+# 2026-07-29 00:07 실기: 미사용 역방향 해제는 Set-DgToggleCard 1회(상태 기반) + 클릭 없는
+# 수동 재판독 5회x2초 (offCost 기반 raw 클릭이 해제된 카드를 도로 켜던 토글 자기 방해 교체)
+Assert-Case '배선(워커): 미사용 역방향 해제 = 상태 기반 1회 + 수동 재판독' `
+  (($workerSource -match '\$offTry -le 5[\s\S]{0,120}Start-Sleep -Milliseconds 2000') -and
+   ($workerSource -notmatch 'offClicks')) $true
+# 2026-07-29 00:58 실기: 카드를 끈 직후 소모량 표시가 갱신되지 않고 남는 잔상 실측(정지 직후
+# 캡처는 버튼 깨끗+카드 도전). 카드 '도전' 확정 판독($offCardConfirmed)이 1차 증거로 이기고
+# 표시 잔존은 경고 진행, 카드 미확인일 때만 정지 유지 (던전+사냥터 2곳, Codex 승인)
+Assert-Case '배선(워커): 역방향 카드 확인 우선 계약(잔상 허용) 2곳' `
+  (([regex]::Matches($workerSource, '\$offCardConfirmed = \[bool\]\(Set-DgToggleCard').Count -eq 2) -and
+   ([regex]::Matches($workerSource, 'elseif \(\$offCardConfirmed\)').Count -eq 2)) $true
+# 2026-07-28 23:56 실기: 옵션 확정은 선확인 5회 + 클릭 후 재클릭 없는 수동 확인(2초x3) +
+# 최종 재클릭 1회 계약 (재클릭마다 연출이 다시 시작되는 자기 방해 방지 - Codex 계약)
+Assert-Case '배선(워커): 옵션 확정 수동 확인 계약(선확인 5회/수동 3회/최종 재클릭 1회)' `
+  (($workerSource -match '\$preTry -le 5') -and ($workerSource -match '\$passiveTry -le 3') -and
+   ($workerSource -match '\$finalTry -le 3')) $true
+# 2026-07-28 23:40 실기 '71': 아이콘 '7' 결합 이형 → 앞 7 제거 후 유효값 채택 보정
+Assert-Case '배선(워커): 소모량 아이콘 결합 이형(7X) 보정' `
+  ($workerSource -match "\^7\(\\d\+\)\`$' -and \`$ValidCosts -contains") $true
+# 2026-07-28 사용자 제보: 은동전 상한 150 / 마족공물 상한 15 → 잔량 판독 상한 검증
+Assert-Case '배선(워커): 잔량 판독 모드별 상한(150/15)' `
+  (($workerSource -match '\$dgBalanceMax = 150') -and ($workerSource -match '\$dgBalanceMax = 15 ') -and
+   ($workerSource -match '\$value -gt \$dgBalanceMax')) $true
+# 2026-07-28: 탭 게이트 = 자동 전환 (전환 확인 실패 시에만 코드 4 fail-closed + 전환 후 던전 재판별)
+Assert-Case '배선(워커): 탭 자동 전환 + 실패 시 정지 + 재판별' `
+  (($workerSource -match "탭으로 자동 전환합니다") -and
+   ($workerSource -match "탭 자동 전환을 확인하지 못했습니다") -and
+   ($workerSource -match '탭 전환 확인\$tabRedetectTag')) $true
 
 exit $fails
