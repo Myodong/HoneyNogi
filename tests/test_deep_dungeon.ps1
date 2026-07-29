@@ -233,6 +233,16 @@ Assert-Case '배선(워커): 입장 대기 스윕에 퀘스트 클리어 확인 
    ($workerSource -match "아이템을누르")) $true
 Assert-Case '배선(워커): 구역 좌표 소진 시 이미 선택 확인' `
   ($workerSource -match '이미 선택 확인 - 카드 클릭 불필요') $true
+# 2026-07-30 00:36 1908 타 PC 실기: 제목 오독 → ID 불명 → 라벨은 정상인데 적갈색 카드라
+# 남색 픽셀 확인 전멸 → 정지. 심층은 화이트리스트 라벨 신뢰(픽셀 미확인 채택) + 클릭 후
+# 진입 버튼/제목 2차 검증에 위임 (색 판별식은 카드 R24~103 vs 배경 R16~45 겹침으로 기각)
+Assert-Case '배선(워커): 심층 선택 라벨 픽셀 미확인 채택 2곳(배율3/5)' `
+  (($workerSource -match "Source = '라벨\(픽셀 미확인\)'") -and
+   ($workerSource -match "라벨\(배율5·픽셀 미확인\)")) $true
+Assert-Case '배선(워커): 일반 던전은 라벨 픽셀 확인 유지(심층 완화는 실패 후 분기)' `
+  ($workerSource -match "Test-DgCardPixelAt[\s\S]{0,220}?Source = '라벨'[\s\S]{0,900}?라벨\(픽셀 미확인\)") $true
+Assert-Case '배선(워커): 심층 옵션 라벨도 픽셀 미확인 채택' `
+  ($workerSource -match 'if \(\$deepMode -and \$refPoint\)') $true
 # 2026-07-29 00:07 실기: 미사용 역방향 해제는 Set-DgToggleCard 1회(상태 기반) + 클릭 없는
 # 수동 재판독 5회x2초 (offCost 기반 raw 클릭이 해제된 카드를 도로 켜던 토글 자기 방해 교체)
 Assert-Case '배선(워커): 미사용 역방향 해제 = 상태 기반 1회 + 수동 재판독' `
