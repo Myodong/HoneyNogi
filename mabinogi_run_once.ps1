@@ -1268,6 +1268,12 @@ function Get-DgOptStageCardPoint {
         if ($refPoint -and (Test-DgCardPixelAt -Game $Game -ReferenceX $refPoint[0] -ReferenceY $refPoint[1])) {
           return @{ Screen = $cardPoint }
         }
+        if ($deepMode -and $refPoint) {
+          # 심층 카드 적갈색이라 픽셀 확인 항상 실패 - 정확 일치 라벨(D1-1/DI-1/01-1 한정
+          # 후보)은 신뢰하고, 카드 전환 후 제목 확인(호출부 2차 검증)에 맡긴다
+          # (선택 화면 라벨 경로와 동일 계약 - 2026-07-30 Codex 승인)
+          return @{ Screen = $cardPoint }
+        }
       }
     }
   }
@@ -2726,6 +2732,14 @@ function Get-NdStageClickPoint {
       if (Test-DgCardPixelAt -Game $Game -ReferenceX ([int]$mapWord.X) -ReferenceY ([int]$mapWord.Y)) {
         return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨' }
       }
+      if ($deepMode) {
+        # 심층 카드는 적갈색이라 남색 픽셀 판별이 항상 실패 (실측: 카드 몸통 R24~103 vs 패널
+        # 배경 R16~45 - 색 분리 불가로 심층 전용 색 판별식은 기각). 화이트리스트(D[12]-[123])
+        # 통과 라벨은 신뢰하고 클릭 후 진입 버튼 검증(2차 방어선)에 맡긴다
+        # (2026-07-30 00:36 1908 타 PC 실기: 제목 오독 → ID 불명 → 라벨은 정상인데 픽셀
+        # 확인 전멸로 안전 정지 - Codex 승인).
+        return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨(픽셀 미확인)' }
+      }
     }
   }
   $stageParts = ([string]$Stage) -split '-'
@@ -2768,6 +2782,10 @@ function Get-NdStageClickPoint {
     if ((Get-DgMapLabelText -Text $mapWord.Text) -eq [string]$Stage) {
       if (Test-DgCardPixelAt -Game $Game -ReferenceX ([int]$mapWord.X) -ReferenceY ([int]$mapWord.Y)) {
         return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨(배율5)' }
+      }
+      if ($deepMode) {
+        # 위 배율 3 라벨 경로와 동일한 심층 완화 (근거 주석은 그쪽 참고)
+        return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨(배율5·픽셀 미확인)' }
       }
     }
   }
@@ -5490,6 +5508,15 @@ function Invoke-NormalDungeonCycle {
       -SweepCost $dgSweepCost -FullCost $dgFullCost -CurrencyName $dgCurrencyName -ExhaustLabel $dgExhaustLabel
       if ($null -ne $finalBalance -and $finalDecision.Action -eq 'stop') {
         Write-RunLog "[완료] $($finalDecision.Reason)"
+        exit 4
+      }
+      if ($effectiveCoin -and $null -eq $finalBalance) {
+        # 소탕 사용 중 + 잔량 미판독 + 입장 거부 = 재화 부족이 유력한 조합 (잔량 '0' 한 자리
+        # 고립 숫자는 OCR이 자주 실패 - 2026-07-30 01:42 hyodong / 07-29 20:02 두 환경 실측).
+        # 임의 해제 없이(부족 추정 해제 금지 계약 유지) 오류 대신 조건부 정상 정지로 안내한다
+        # (이 지점은 클릭 5회 재시도+IME 팝업 대기+확인 팝업 처리를 지난 뒤라 일시 원인은
+        # 소진된 상태 - Codex 승인).
+        Write-RunLog "[완료] 입장이 진행되지 않습니다 - ${dgCurrencyName} 부족으로 보입니다 (잔량 판독 불가). 잔량을 확인해 충전하거나 소탕을 끄고 다시 시작해 주세요."
         exit 4
       }
       throw "입장하기가 진행되지 않습니다. ${dgCurrencyName} 잔량과 '소진 시/더블 루팅 불가 시' 설정을 확인해 주세요."

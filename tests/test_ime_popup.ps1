@@ -93,6 +93,11 @@ Assert-Case '배선: 잔량 미판독 추정 해제 분기 없음' `
   ($workerSource -notmatch '\$null -eq \$retryBalance -and') $true
 Assert-Case '배선: 입장 실패 문구에 부족 추정 없음' `
   ($workerSource -notmatch '입장 안 됨\(.{0,12}부족 추정\)') $true
+# 2026-07-30 01:42 실기: 소탕 사용 + 잔량 미판독 + 입장 거부 조합은 오류(throw) 대신
+# 코드 4 안내 정지 (임의 해제 없음 - 문구·종료 코드만. 잔량 읽힌 증거 분기·기타 원인
+# throw 는 유지)
+Assert-Case '배선: 소탕+잔량 미판독 입장 거부 = 코드 4 안내 정지' `
+  ($workerSource -match 'if \(\$effectiveCoin -and \$null -eq \$finalBalance\)[\s\S]{0,900}?부족으로 보입니다[\s\S]{0,200}?exit 4') $true
 
 if ($fails -gt 0) { "총 $fails 건 실패"; exit 1 }
 '전체 통과'

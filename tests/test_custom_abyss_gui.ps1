@@ -52,4 +52,13 @@ Check-Pattern '상세 설정 제목 통일' '\$grpContentDetail\.Text\s*=\s*''�
 Check-Pattern '커스텀 반복 중 사냥터 미지원 표기' `
   '\$rbCatHunting\.Text\s*=\s*\$\(if \(\$isCustom\) \{ ''사냥터\(미지원\)'' \} else \{ ''사냥터'' \}\)'
 
+# 혼합 리스트 자동 잠금 (2026-07-30): 바퀴 순환 불가(Wrap) 리스트면 반복을 '횟수 1바퀴'로
+# 강제하고 무한을 비활성 - 던전/심층 저장 서두 + 로드 직후 총 4곳에서 갱신
+Check-Pattern '혼합 잠금: Wrap 이슈만 필터해 판정' `
+  'function Update-CustomRepeatMixLock[\s\S]{0,1400}Where-Object \{ \[bool\]\$_\.Wrap \}'
+Check-Pattern '혼합 잠금: 무한 비활성 + 바퀴 수 1 고정' `
+  '\$RbInfinite\.Enabled = \$false\s*\r?\n\s*\$NumLaps\.Enabled = \$false'
+if (@([regex]::Matches($gui, 'Update-CustomRepeatMixLock -Items')).Count -eq 4) { 'OK   혼합 잠금: 호출 4곳(던전/심층 저장 + 로드)' }
+else { 'FAIL 혼합 잠금: 호출 4곳(던전/심층 저장 + 로드)'; $fails++ }
+
 exit $fails

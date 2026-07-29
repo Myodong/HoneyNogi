@@ -1224,6 +1224,7 @@ $script:customRestart = $false       # 다음 회차가 '오류 후 자동 재�
 $script:customRecoveryPending = $false # 완료 마커가 있는 코드 1 뒤, 같은 항목의 결과 화면 마무리만 복구 중인지
 $script:customMarkerIgnore = $false  # 실행 직전 이전 마커 삭제 실패 시 이번 회차는 마커 무시 (오계상 방지)
 $script:crLoading = $false           # 커스텀 리스트뷰를 프로그램적으로 조작 중일 때 저장 이벤트 억제 가드
+$script:crMixLockState = @{ cr = $false; dcr = $false }  # 혼합 리스트로 반복이 '횟수 1바퀴'로 잠겼는지 (던전/심층 섹션별)
 $script:crSwitching = $false         # 카테고리 전환에 의한 커스텀 라디오 폴백/복원 중 가드 (enabled 보존)
 $script:customEnabledWish = $false   # 커스텀 반복 '선택 의도' - 던전 외 카테고리에서 라디오가 풀려도 보존 (config enabled 와 동기)
 $script:customProgressReset = $false # 업데이트 이전(Update-ConfigToLatest)에서 진행 기록을 초기화했는지 (시작 로그 안내용)
@@ -3576,6 +3577,42 @@ function Get-CustomCoinTotalPerLap {
   return $total
 }
 
+function Update-CustomRepeatMixLock {
+  # 혼합 리스트 자동 잠금 (2026-07-30 사용자 요청, Codex 승인): 마지막→첫 항목의 바퀴 순환이
+  # 게임에서 불가능한 층 조합(Get-CustomTransitionIssues 의 Wrap 이슈)이면 리스트 반복을
+  # '횟수 1바퀴'로 강제하고 무한 라디오·바퀴 수 입력을 잠급니다. 혼합이 해소되면 자동 해제.
+  # 기존에는 시작 게이트가 거부하고 수동 변경을 안내했음 - 그 게이트는 config 직접 편집
+  # 방어선으로 유지. 호출: 던전/심층 저장 함수 서두(모든 리스트 변경이 저장을 경유) +
+  # config 로드 직후. 잠금 중 컨트롤 강제는 crLoading 가드로 저장 이벤트를 억제하고,
+  # 이 함수 자신은 저장을 부르지 않아 재귀가 없습니다.
+  param($Items, $RbInfinite, $RbCount, $NumLaps, [string]$StateKey)
+  $mixLockNeeded = $false
+  if (@($Items).Count -ge 2) {
+    $mixWrapIssues = @(@(Get-CustomTransitionIssues -Items $Items -ListRepeat 'infinite' -ListRepeatCount 1) |
+        Where-Object { [bool]$_.Wrap })
+    $mixLockNeeded = ($mixWrapIssues.Count -gt 0)
+  }
+  $mixWasLocked = [bool]$script:crMixLockState[$StateKey]
+  if ($mixLockNeeded -and -not $mixWasLocked) {
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try {
+      # '횟수' 강제 - CheckedChanged 핸들러가 NumLaps.Enabled 를 켜지만 아래에서 다시 잠급니다
+      if (-not $RbCount.Checked) { $RbCount.Checked = $true }
+      $NumLaps.Value = 1
+    } finally { $script:crLoading = $prevLoading }
+    $RbInfinite.Enabled = $false
+    $NumLaps.Enabled = $false
+    $script:crMixLockState[$StateKey] = $true
+    Add-GuiLog "[안내] 층이 섞인 혼합 리스트라 반복을 '횟수 1바퀴'로 고정합니다 (마지막→첫 항목 순환이 게임에서 불가능)."
+  } elseif ((-not $mixLockNeeded) -and $mixWasLocked) {
+    $RbInfinite.Enabled = $true
+    $NumLaps.Enabled = [bool]$RbCount.Checked   # 기존 규칙 복원: '횟수' 선택 시만 활성
+    $script:crMixLockState[$StateKey] = $false
+    Add-GuiLog '[안내] 혼합 리스트가 해소돼 반복 방식 잠금을 풀었습니다 - 무한/여러 바퀴를 다시 선택할 수 있습니다.'
+  }
+}
+
 function Get-CustomTransitionIssues {
   # 리스트 전환 규칙 검사 (2026-07-20 실기 실측 근거: '다시 하기'로 돌아온 화면은 같은 층
   # 구역만 선택 가능(역방향 포함), 1층→2층은 1-3 결과 화면의 '다음 층으로'로만 가능,
@@ -4334,6 +4371,9 @@ function Set-DeepCustomRepeatOnConfig {
 function Save-DeepCustomRepeatToConfig {
   # 심층 커스텀 즉시 저장 경로 (던전/어비스 공용 Save-CustomRepeatToConfig 와 분리 -
   # Codex A-lite 합의: 기존 저장 경로 무접촉. 실패 신호는 같은 부채널을 사용합니다)
+  # 혼합 리스트면 저장 전에 반복을 '횟수 1바퀴'로 강제해 그 값이 저장되게 합니다
+  Update-CustomRepeatMixLock -Items @(Get-DeepCustomItemsFromList) `
+    -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
   $script:lastCustomSaveOk = $false
   $cfg = Read-Config
   if (-not $cfg) {
@@ -4510,6 +4550,10 @@ function Save-CustomRepeatToConfig {
   # 던전/어비스 커스텀 설정 공용 즉시 저장 경로.
   # 성공 여부를 $script:lastCustomSaveOk 로 남깁니다 (반환값으로 바꾸면 기존 호출부 전체가
   # 파이프라인 오염 방어를 해야 해서 부채널 사용 - 셀 편집이 실패 시 원복에 사용).
+  # 혼합 리스트면 저장 전에 반복을 '횟수 1바퀴'로 강제해 그 값이 저장되게 합니다
+  # (어비스 저장 경유 호출에서도 던전 리스트 기준으로만 동작 - 무해)
+  Update-CustomRepeatMixLock -Items @(Get-CustomItemsFromList) `
+    -RbInfinite $rbCrInfinite -RbCount $rbCrCount -NumLaps $numCrLaps -StateKey 'cr'
   $script:lastCustomSaveOk = $false
   $cfg = Read-Config
   if (-not $cfg) {
@@ -4795,6 +4839,9 @@ function Load-SettingsToUi {
         if ($cr.PSObject.Properties['enabled'] -and (ConvertTo-StrictBoolean $cr.enabled $false)) { $script:customEnabledWish = $true }
         if ($script:customEnabledWish -and -not $rbCatHunting.Checked) { $rbCustomRepeat.Checked = $true }
       } finally { $script:crLoading = $false }
+      # 복원된 리스트가 혼합이면 반복을 '횟수 1바퀴'로 즉시 고정 (저장은 다음 변경 때 반영)
+      Update-CustomRepeatMixLock -Items @(Get-CustomItemsFromList) `
+        -RbInfinite $rbCrInfinite -RbCount $rbCrCount -NumLaps $numCrLaps -StateKey 'cr'
     }
   } catch { $script:crLoading = $false }
   # 저장된 어비스 커스텀 반복 목록/반복 방식 복원. 진행 기록은 시작 시 지문과 함께 판정합니다.
@@ -4846,6 +4893,9 @@ function Load-SettingsToUi {
         $numDcrLaps.Enabled = $rbDcrCount.Checked
         Update-DeepTributeTotalLabel
       } finally { $script:crLoading = $false }
+      # 복원된 리스트가 혼합이면 반복을 '횟수 1바퀴'로 즉시 고정 (저장은 다음 변경 때 반영)
+      Update-CustomRepeatMixLock -Items @(Get-DeepCustomItemsFromList) `
+        -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
     }
   } catch { $script:crLoading = $false }
   # 저장된 난이도 복원 (없거나 빈 값이면 '게임 그대로'. 목록에 없는 이름이 저장돼
