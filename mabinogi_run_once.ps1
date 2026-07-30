@@ -3835,6 +3835,25 @@ function Get-DgCoinBalance {
   # 우상단 재화 표시줄을 읽어 은동전 잔량을 얻습니다. 골드 뒤의 마지막 숫자 그룹이
   # 은동전입니다 (은동전 아이콘이 '0'으로 붙어 '026'처럼 읽혀도 정수 변환으로 정리됨).
   # 읽기 실패 시 $null 을 돌려주고, 호출한 쪽에서 '알 수 없음'으로 처리합니다.
+  if ($deepMode) {
+    # 심층 공물 잔량: 좁은 영역(숫자만)은 '0'/'1' 같은 한 자리 고립 숫자가 OCR 미검출
+    # (2026-07-30 01:42 / 07-29 20:02 두 환경 실측 - 사전 소진 감지가 생략됨).
+    # 재화줄을 넓게 읽으면 공물 아이콘이 '뗳'으로 오독되며 값과 한 단어로 붙어 나옴
+    # ('뗳0'/'뗳1'/'뗳3' - 캡처 6장 스윕 전수 일관). 단어 중심 x가 공물 자리(1080~1110)인
+    # 단어의 끝 숫자를 채택하면 정답률 100%, 이웃(은동전 x≈1038·하트토큰 잡음 x≈1122)은
+    # x 범위 밖이라 자연 배제 (Codex 승인). 전 스케일 실패 시 아래 기존 방식으로 폴백.
+    foreach ($balScale in @(4, 5, 3)) {
+      $balWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX 960 -ReferenceY 45 `
+          -RegionWidth 175 -RegionHeight 44 -Scale $balScale -Engine $ocrKoreanEngine)
+      foreach ($balWord in $balWords) {
+        $balText = ([string]$balWord.Text) -replace '[,\.]', ''
+        if ([int]$balWord.X -ge 1080 -and [int]$balWord.X -le 1110 -and $balText -match '(\d{1,3})$') {
+          $balValue = [int]$Matches[1]
+          if ($balValue -le $dgBalanceMax) { return $balValue }
+        }
+      }
+    }
+  }
   $text = Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgCoinBalance[0] -ReferenceY $rgDgCoinBalance[1] `
     -RegionWidth $rgDgCoinBalance[2] -RegionHeight $rgDgCoinBalance[3] -Scale 4 -Engine $ocrKoreanEngine
   # 금화 자릿수 구분(쉼표, OCR이 마침표로 읽기도 함)을 먼저 제거합니다.
@@ -4015,6 +4034,25 @@ function Invoke-PurchasePopupSweep {
       Focus-Game -Game $Game
       Click-ScreenPoint -X $confirmPoint.X -Y $confirmPoint.Y
       Write-RunLog '[안내] 퀘스트 클리어 보상 화면 감지 - 확인 클릭 (입장 대기 중)'
+      Start-Sleep -Seconds 1
+      return $true
+    }
+  }
+  # 협동 미션 완료 전체 화면 (2026-07-30 캡처 실측 - 던전이미지\어시스트\협동미션완료_확인버튼.png).
+  # 제목 '협동 미션 완료'는 OCR이 '협동1/四완로'로 심하게 깨져 쓸 수 없고, 부제
+  # '아이템은 대표 캐릭터가 위치한 서버 우편으로 전송됩니다.'는 단어별로 정확히 판독됩니다
+  # → 이 화면 전용 문구인 부제 조각으로 감지합니다 (오탐 위험 낮음).
+  # 확인 버튼은 퀘스트 보상 화면과 같은 자리(중심 636,654)라 같은 영역을 재사용합니다.
+  # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키는 쓰지 않습니다 (상태 기반 클릭).
+  $coopText = (Get-GameRegionOcrText -Game $Game -ReferenceX 360 -ReferenceY 285 `
+      -RegionWidth 560 -RegionHeight 35 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (($coopText.Contains('우편으로') -and $coopText.Contains('전송')) -or $coopText.Contains('캐릭터가위치한')) {
+    $coopConfirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
+      -RegionWidth 470 -RegionHeight 55 -SearchText '확인'
+    if ($coopConfirmPoint) {
+      Focus-Game -Game $Game
+      Click-ScreenPoint -X $coopConfirmPoint.X -Y $coopConfirmPoint.Y
+      Write-RunLog '[안내] 협동 미션 완료 화면 감지 - 확인 클릭'
       Start-Sleep -Seconds 1
       return $true
     }
