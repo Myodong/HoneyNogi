@@ -2,7 +2,7 @@
 # 본체: mabinogi_run_once.ps1 Test-NoticeBoardPopup ('쿠폰' 또는 '공지'+'이벤트' 조합)
 $fails = 0
 $cases = @(
-  @{ T = '공지사항이벤트쿠폰입력FAQ'; E = $true }   # 2026-07-19 hyodong 실측 판독
+  @{ T = '공지사항이벤트쿠폰입력FAQ'; E = $true }   # 2026-07-19 타 PC 실측 판독
   @{ T = '쿠폰입력'; E = $true }
   @{ T = '공지사항이벤트'; E = $true }
   @{ T = '공지사항'; E = $false }                    # 단독으로는 오탐 방지

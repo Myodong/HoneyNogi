@@ -36,7 +36,7 @@ Assert-Case '전멸: 공백 섞인 판독도 정규화 후 매칭' ([bool](Get-D
 
 # ── 2. Wiped 음성 케이스 (오탐 방어 - Codex 지적: 클리어 점수표의 '재도전 보너스') ──
 $info = Get-DeathInfoFromText -Text '처치완벽한전주권장전투력재도전보너스협동보너스11050201010'
-Assert-Case '음성: 클리어 점수표 실측(hyodong) - 재도전 보너스는 비대상' (Format-DeathInfo $info) 'False/null/False'
+Assert-Case '음성: 클리어 점수표 실측(타 PC) - 재도전 보너스는 비대상' (Format-DeathInfo $info) 'False/null/False'
 $info = Get-DeathInfoFromText -Text '처치완벽한전루재도전보너스협동보너스110501010'
 Assert-Case '음성: 클리어 점수표 실측(User) - 재도전 보너스는 비대상' (Format-DeathInfo $info) 'False/null/False'
 Assert-Case '음성: 재도전 단독(하 없음)은 비대상' ([bool](Get-DeathInfoFromText -Text '재도전').Wiped) $false
