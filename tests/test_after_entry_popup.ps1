@@ -1,5 +1,6 @@
 ﻿# 입장 직후 키 입력 전 구매 팝업 사전 처리 - 소스 계약 (2026-07-28 실기: 물약 부족 입장 시
 # 팝업이 먼저 떠 B(음식) 키가 먹히던 문제. 본체: mabinogi_run_once.ps1 Invoke-AfterEntryKeys)
+# (2026-07-30 추가) 협동 미션 완료 전체 화면 자동 닫기 배선 가드는 파일 끝에 있습니다.
 $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -30,5 +31,22 @@ Assert-Case '계약: 캡처 실패 가드' ($functionText -match 'if \(-not \$sc
 # 키 입력 루프는 1개 그대로 (재입력 금지 - B 이중 입력은 음식 중복 소모 위험)
 Assert-Case '계약: Press-KeyOnce 는 1곳뿐' ([regex]::Matches($functionText, 'Press-KeyOnce').Count) 1
 Assert-Case '계약: 잔존 시 경고 후 진행' ($functionText -match '\[경고\] 구매 팝업이 닫히지 않습니다') $true
+
+# ── 협동 미션 완료 전체 화면 자동 닫기 (2026-07-30 캡처 실측) ──────────────────
+# 제목('협동 미션 완료')은 OCR이 '협동1/四완로'로 깨져 사용 불가 → 이 화면 전용 부제 조각
+# ('우편으로'+'전송' / '캐릭터가위치한')으로 감지. 확인 버튼은 퀘스트 보상과 같은 자리 재사용.
+# 검증: 대상 캡처 감지 성공 + 보관 캡처 92장 오탐 0 (오프라인 스윕)
+$sweepSource = [string]@(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
+    -Names @('Invoke-PurchasePopupSweep'))[0]
+Assert-Case '협동: 스윕 함수 추출' ($sweepSource.Length -gt 0) $true
+Assert-Case '협동: 부제 영역(360,285,560,35) 판독' `
+  ($sweepSource -match '-ReferenceX 360 -ReferenceY 285[\s\S]{0,120}-RegionWidth 560 -RegionHeight 35') $true
+Assert-Case '협동: 부제 조각 조건(우편으로+전송 / 캐릭터가위치한)' `
+  ($sweepSource -match "우편으로'\)[\s\S]{0,60}전송'\)[\s\S]{0,80}캐릭터가위치한'\)") $true
+Assert-Case '협동: 확인 버튼 영역 재사용 + 클릭 후 true' `
+  ($sweepSource -match '협동 미션 완료 화면 감지[\s\S]{0,120}return \$true') $true
+# 제목 조각을 감지에 쓰지 않아야 함 (OCR 깨짐 실측 - '협동 미션 완료' 문자열 매칭 금지)
+Assert-Case '협동: 깨지는 제목 조각은 감지에 미사용' `
+  ($sweepSource -notmatch "Contains\('협동미션완료'\)") $true
 
 exit $fails
