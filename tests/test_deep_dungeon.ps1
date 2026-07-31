@@ -237,9 +237,17 @@ Assert-Case '배선(워커): 구역 좌표 소진 시 이미 선택 확인' `
 # 판별 실패 → 안전 정지. 같은 화면을 스케일 3으로 읽으면 정확 판독(오프라인 재현) → 다중
 # 스케일 재시도. 스케일 우선 순회(각 배율에서 주→보조)라 기존 s5 성공 경로는 1회째 그대로
 # (보관 캡처 21장 전수 1회째 성공 실측 - Codex 조건)
+# 다중 스케일은 첫 회전과 '클릭 직후 첫 재확인'에서만 - 그 외 회전은 s5 만 (2026-07-31 점검:
+# 판별 완전 실패 시 OCR 이 최대 36회로 불어남. 판독 구제 효과는 두 지점에서 그대로 유지 - Codex 조건)
 Assert-Case '배선(워커): 카드 버튼 판독 다중 스케일(5,3,4) 스케일 우선 순회' `
-  (($workerSource -match 'foreach \(\$cardScale in @\(5, 3, 4\)\)[\s\S]{0,200}?foreach \(\$cardRegion in \$cardRegions\)') -and
+  (($workerSource -match 'foreach \(\$cardScale in \$cardScales\)[\s\S]{0,200}?foreach \(\$cardRegion in \$cardRegions\)') -and
    ($workerSource -match '\$cardRegions \+= , \$Region')) $true
+Assert-Case '배선(워커): 다중 스케일은 1~2회전 + 클릭 후 첫 재확인만' `
+  (($workerSource -match '\$cardScales = @\(5\)') -and
+   ($workerSource -match 'if \(\$setTry -le 2\) \{ \$cardScales = @\(5, 3, 4\) \}') -and
+   ($workerSource -match 'elseif \(\$clicked -and -not \$clickedRecheckDone\)[\s\S]{0,120}\$clickedRecheckDone = \$true')) $true
+Assert-Case '배선(워커): 경고 로그가 빈 판독을 명시' `
+  ($workerSource -match "\(판독 없음\)") $true
 # 2026-07-30 스윕: 공물 잔량 '0'/'1' 고립 숫자 미검출 → 재화줄 넓은 판독에서 공물 자리
 # (단어 중심 x 1080~1110) 단어의 끝 숫자 채택 (캡처 6장 정답률 100%). 실패 시 기존 좁은
 # 영역 폴백 유지, 일반 던전 경로 무접촉 (deepMode 분기)

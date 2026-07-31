@@ -58,10 +58,13 @@ Assert-Case '배선: 팝업 전용 판독 영역 정의' ($workerSource -match '
 
 # 입장 재시도 루프(던전+사냥터)의 팝업 대기: 시도 미계상($enterTry--) + 40초 한도 안전 정지.
 # 팝업 중에는 재화 부족 폴백을 평가하지 않아야 함 (부족 오판 소탕 해제 방지 - Codex 계약)
-Assert-Case '배선: 입장 루프 팝업 시도 미계상 2곳(던전/사냥터)' `
-  ([regex]::Matches($workerSource, '\$enterTry--').Count -eq 2) $true
+# 2026-08-01 전수 점검: 클릭 '전' 사전 게이트 추가(가려진 좌표를 확인 없이 재클릭하지 않기
+# 위한 재클릭 정책 준수) - 던전/사냥터 각 사전+사후 4곳 + 사냥터 '소탕만 계속' 폴백 바퀴
+# 미계상 1곳(마지막 회전에서 발견돼도 재입장 보장 - Codex 리뷰) = 총 5곳
+Assert-Case '배선: 입장 루프 팝업/폴백 시도 미계상 5곳' `
+  ([regex]::Matches($workerSource, '\$enterTry--').Count -eq 5) $true
 Assert-Case '배선: 팝업 대기 40초 한도 안전 정지' `
-  ([regex]::Matches($workerSource, '\$imePopupWaitTotal -ge 40').Count -eq 2) $true
+  ([regex]::Matches($workerSource, '\$imePopupWaitTotal -ge 40').Count -eq 4) $true
 
 # 소모량 판독의 팝업 선차단 (00:48 실사고: 팝업 글자 오독 '전환하己1면'의 '1'이 소모량으로
 # 잡혀 10초 내내 '1' → 미사용 항목 오정지): Get-DgTributeCost는 팝업 중 판독 불가($null)

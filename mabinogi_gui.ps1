@@ -203,12 +203,11 @@ function Write-Utf8FileAtomic {
       [System.IO.File]::Move($tempPath, $fullPath)
     }
   } finally {
-    if ([System.IO.File]::Exists($tempPath)) {
-      [System.IO.File]::Delete($tempPath)
-    }
-    if ([System.IO.File]::Exists($backupPath)) {
-      [System.IO.File]::Delete($backupPath)
-    }
+    # 임시/백업 파일 청소 실패는 저장 실패가 아닙니다 (2026-08-01 전수 점검: 교체(Replace)가
+    # 이미 성공했는데 .bak 삭제 예외로 전체가 실패 처리되면, 호출부가 UI 를 롤백해 디스크(새
+    # 값)와 화면(옛 값)이 역방향으로 어긋남 - 청소 실패는 무시하고 다음 저장 때 재시도됨)
+    try { if ([System.IO.File]::Exists($tempPath)) { [System.IO.File]::Delete($tempPath) } } catch { }
+    try { if ([System.IO.File]::Exists($backupPath)) { [System.IO.File]::Delete($backupPath) } } catch { }
   }
 }
 
@@ -347,7 +346,11 @@ function Stop-ExistingAutomation {
       try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop; $killed++ } catch { $failed++ }
     }
     if ($existing.Count -gt 0) { Start-Sleep -Milliseconds 500 }
-  } catch { }
+  } catch {
+    # 열거 자체가 실패하면 '기존 프로세스 없음'과 구분되지 않던 문제 (2026-08-01 전수 점검):
+    # 실제 탐색을 못 했음을 실패 1건으로 보고합니다 (최종 방어는 워커 뮤텍스 코드 2)
+    $failed++
+  }
   return @{ Killed = $killed; Failed = $failed }
 }
 
@@ -1224,7 +1227,12 @@ $script:customRestart = $false       # 다음 회차가 '오류 후 자동 재�
 $script:customRecoveryPending = $false # 완료 마커가 있는 코드 1 뒤, 같은 항목의 결과 화면 마무리만 복구 중인지
 $script:customMarkerIgnore = $false  # 실행 직전 이전 마커 삭제 실패 시 이번 회차는 마커 무시 (오계상 방지)
 $script:crLoading = $false           # 커스텀 리스트뷰를 프로그램적으로 조작 중일 때 저장 이벤트 억제 가드
-$script:crMixLockState = @{ cr = $false; dcr = $false }  # 혼합 리스트로 반복이 '횟수 1바퀴'로 잠겼는지 (던전/심층 섹션별)
+# 혼합 리스트로 반복이 '횟수 1바퀴'로 잠겼는지 (던전/심층 섹션별).
+# PrevInfinite/PrevLaps = 잠금 직전의 반복 설정 (해제 시 복원 - 2026-08-01 3차 점검)
+$script:crMixLockState = @{
+  cr  = @{ Locked = $false; PrevInfinite = $false; PrevLaps = 1 }
+  dcr = @{ Locked = $false; PrevInfinite = $false; PrevLaps = 1 }
+}
 $script:crSwitching = $false         # 카테고리 전환에 의한 커스텀 라디오 폴백/복원 중 가드 (enabled 보존)
 $script:customEnabledWish = $false   # 커스텀 반복 '선택 의도' - 던전 외 카테고리에서 라디오가 풀려도 보존 (config enabled 와 동기)
 $script:customProgressReset = $false # 업데이트 이전(Update-ConfigToLatest)에서 진행 기록을 초기화했는지 (시작 로그 안내용)
@@ -3592,8 +3600,14 @@ function Update-CustomRepeatMixLock {
         Where-Object { [bool]$_.Wrap })
     $mixLockNeeded = ($mixWrapIssues.Count -gt 0)
   }
-  $mixWasLocked = [bool]$script:crMixLockState[$StateKey]
+  $mixState = $script:crMixLockState[$StateKey]
+  $mixWasLocked = [bool]$mixState.Locked
   if ($mixLockNeeded -and -not $mixWasLocked) {
+    # 잠금 진입 시에만 이전 반복 상태를 저장합니다 (2026-08-01 3차 점검: 해제 때 Enabled 만
+    # 복원하고 무한/바퀴 수는 잠금이 바꾼 '횟수 1바퀴'로 남아, 저장 실패 롤백 등으로 잠금이
+    # 풀리면 사용자의 원래 반복 설정이 유실됐음 - Codex 조건: 진입 시 저장/해제 시 복원)
+    $mixState.PrevInfinite = -not [bool]$RbCount.Checked
+    $mixState.PrevLaps = [int]$NumLaps.Value
     $prevLoading = $script:crLoading
     $script:crLoading = $true
     try {
@@ -3603,13 +3617,23 @@ function Update-CustomRepeatMixLock {
     } finally { $script:crLoading = $prevLoading }
     $RbInfinite.Enabled = $false
     $NumLaps.Enabled = $false
-    $script:crMixLockState[$StateKey] = $true
+    $mixState.Locked = $true
     Add-GuiLog "[안내] 층이 섞인 혼합 리스트라 반복을 '횟수 1바퀴'로 고정합니다 (마지막→첫 항목 순환이 게임에서 불가능)."
   } elseif ((-not $mixLockNeeded) -and $mixWasLocked) {
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try {
+      # 이전 반복 상태 복원 (범위 보정: NumericUpDown 한계 밖 값 방어 - Codex 조건)
+      if ([bool]$mixState.PrevInfinite) { $RbInfinite.Checked = $true }
+      $restoreLaps = [int]$mixState.PrevLaps
+      if ($restoreLaps -lt [int]$NumLaps.Minimum) { $restoreLaps = [int]$NumLaps.Minimum }
+      if ($restoreLaps -gt [int]$NumLaps.Maximum) { $restoreLaps = [int]$NumLaps.Maximum }
+      $NumLaps.Value = $restoreLaps
+    } finally { $script:crLoading = $prevLoading }
     $RbInfinite.Enabled = $true
     $NumLaps.Enabled = [bool]$RbCount.Checked   # 기존 규칙 복원: '횟수' 선택 시만 활성
-    $script:crMixLockState[$StateKey] = $false
-    Add-GuiLog '[안내] 혼합 리스트가 해소돼 반복 방식 잠금을 풀었습니다 - 무한/여러 바퀴를 다시 선택할 수 있습니다.'
+    $mixState.Locked = $false
+    Add-GuiLog '[안내] 혼합 리스트가 해소돼 반복 방식 잠금을 풀고 이전 반복 설정을 복원했습니다.'
   }
 }
 
@@ -3750,6 +3774,10 @@ function Invoke-CrCellEdit {
     $script:crLoading = $true
     try { Set-CustomListRowTexts -Row $lvCrList.Items[$RowIndex] -Item $beforeItem } finally { $script:crLoading = $prevLoading }
     Update-CustomCoinTotalLabel
+    # 롤백이 끝난 실제 리스트 기준으로 혼합 잠금을 다시 계산합니다 (2026-07-31 점검 - 저장
+    # 함수가 먼저 잠금을 바꿔 놓은 뒤 행만 되돌리면 잠금 상태가 리스트와 어긋남)
+    Update-CustomRepeatMixLock -Items @(Get-CustomItemsFromList) `
+      -RbInfinite $rbCrInfinite -RbCount $rbCrCount -NumLaps $numCrLaps -StateKey 'cr'
     Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
     return
   }
@@ -4321,6 +4349,9 @@ function Invoke-DcrCellEdit {
     $script:crLoading = $true
     try { Set-DeepListRowTexts -Row $lvDcrList.Items[$RowIndex] -Item $beforeItem } finally { $script:crLoading = $prevLoading }
     Update-DeepTributeTotalLabel
+    # 롤백이 끝난 실제 리스트 기준으로 혼합 잠금을 다시 계산합니다 (2026-07-31 점검)
+    Update-CustomRepeatMixLock -Items @(Get-DeepCustomItemsFromList) `
+      -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
     Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
     return
   }
@@ -4377,7 +4408,7 @@ function Save-DeepCustomRepeatToConfig {
   $script:lastCustomSaveOk = $false
   $cfg = Read-Config
   if (-not $cfg) {
-    Add-GuiLog '[경고] config.json 을 읽지 못해 심층 커스텀 반복 설정을 저장하지 못했습니다.'
+    Add-GuiLog '[경고] config.json 을 읽지 못해 심층 커스텀 반복 설정을 저장하지 못했습니다 - 화면 목록과 저장된 설정이 다를 수 있습니다. 목록을 한 번 더 변경하면 다시 저장을 시도합니다.'
     return
   }
   Set-DeepCustomRepeatOnConfig -Config $cfg
@@ -4386,7 +4417,9 @@ function Save-DeepCustomRepeatToConfig {
     $script:lastCustomSaveOk = $true
   }
   catch {
-    Add-GuiLog "[경고] 심층 커스텀 반복 설정 저장 실패: $($_.Exception.Message)"
+    # 셀 편집 외 경로(추가/삭제/이동 등)는 롤백이 없어 화면과 저장 파일이 어긋난 채 남을 수
+    # 있습니다 - 어긋남과 복구 방법을 문구로 명시 (2026-08-01 전수 점검. 다음 저장 성공 시 해소)
+    Add-GuiLog "[경고] 심층 커스텀 반복 설정 저장 실패: $($_.Exception.Message) - 화면 목록과 저장된 설정이 다를 수 있습니다. 목록을 한 번 더 변경하면 다시 저장을 시도합니다."
   }
   Update-DeepTributeTotalLabel
 }
@@ -4557,7 +4590,7 @@ function Save-CustomRepeatToConfig {
   $script:lastCustomSaveOk = $false
   $cfg = Read-Config
   if (-not $cfg) {
-    Add-GuiLog '[경고] config.json 을 읽지 못해 커스텀 반복 설정을 저장하지 못했습니다.'
+    Add-GuiLog '[경고] config.json 을 읽지 못해 커스텀 반복 설정을 저장하지 못했습니다 - 화면 목록과 저장된 설정이 다를 수 있습니다. 목록을 한 번 더 변경하면 다시 저장을 시도합니다.'
     return
   }
   Set-CustomRepeatOnConfig -Config $cfg
@@ -4567,7 +4600,9 @@ function Save-CustomRepeatToConfig {
     $script:lastCustomSaveOk = $true
   }
   catch {
-    Add-GuiLog "[경고] 커스텀 반복 설정 저장 실패: $($_.Exception.Message)"
+    # 셀 편집 외 경로(추가/삭제/이동 등)는 롤백이 없어 화면과 저장 파일이 어긋난 채 남을 수
+    # 있습니다 - 어긋남과 복구 방법을 문구로 명시 (2026-08-01 전수 점검. 다음 저장 성공 시 해소)
+    Add-GuiLog "[경고] 커스텀 반복 설정 저장 실패: $($_.Exception.Message) - 화면 목록과 저장된 설정이 다를 수 있습니다. 목록을 한 번 더 변경하면 다시 저장을 시도합니다."
   }
   Update-CustomCoinTotalLabel
 }
@@ -4821,6 +4856,10 @@ function Load-SettingsToUi {
         if ($cr.PSObject.Properties['items']) {
           foreach ($crSavedItem in @($cr.items)) {
             if ($null -eq $crSavedItem) { continue }
+            # 계약 밖 stage 값(직접 편집 등)은 행으로 넣지 않습니다 - 심층 로드(4890 부근)와
+            # 같은 규칙 (2026-08-01 전수 점검: 일반 던전만 미검증이라 범위 밖 구역이 시작
+            # 게이트(층 해석 불가 → 방어적 통과)를 지나 워커까지 전달될 수 있었음)
+            if (([string]$crSavedItem.stage) -notmatch '^[12]-[123]$') { continue }
             # 구버전(계약 v1) config 항목에는 exhaustContinue/noDoubleSweep 가 없음 - 기본 false(멈춤)
             Add-CustomListRow -Difficulty ([string]$crSavedItem.difficulty) -Stage ([string]$crSavedItem.stage) `
               -Coin (ConvertTo-StrictBoolean $crSavedItem.coin $false) `
@@ -5229,7 +5268,18 @@ function Start-NextCycle {
     $env:HONEYNOGI_LAST_RUN = $(if (($null -eq $script:targetTime) -and ($script:targetCycles -gt 0) -and
         ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
   }
-  $script:worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList $arguments -PassThru
+  # 프로세스 생성 실패 시 UI 잠금·절전 방지가 복원되지 않던 문제 방어 (2026-08-01 전수 점검:
+  # 종료 타이머 조건이 running && worker 라 worker 가 null 이면 자동 복구 경로가 없었음)
+  try {
+    $script:worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList $arguments -PassThru
+  } catch {
+    $script:worker = $null
+  }
+  if (-not $script:worker) {
+    Add-GuiLog '[경고] 자동화 프로세스를 시작하지 못했습니다 - 실행 상태를 되돌립니다. 잠시 후 다시 시작해 주세요.'
+    Stop-AllRun -Reason '워커 시작 실패'
+    return
+  }
   if ($customContext) {
     $lblStatus.Text = "커스텀: $($customContext.Position) 실행 중"
   } else {
@@ -5250,18 +5300,32 @@ function Stop-AllRun {
   $wasCustom = $script:customActive
   $workerToDispose = $script:worker
   if ($workerToDispose) {
+    # Kill 실패/미종료 시 재시도 + 잔존 경고 (2026-08-01 전수 점검 + 3차 리뷰: 첫 대기가
+    # 무기한 WaitForExit() 라 종료 신호가 안 오면 GUI 전체가 멈추고 재시도에도 못 갔음 -
+    # 타임아웃 대기로 바꾸고, 종료가 '확인된 경우에만' workerWasKilled 를 세움. Codex 조건)
     $workerWasKilled = $false
+    $killTryFailed = $false
     try {
       if (-not $workerToDispose.HasExited) {
         $workerToDispose.Kill()
-        $workerToDispose.WaitForExit()
-        $workerWasKilled = $true
+        if ($workerToDispose.WaitForExit(10000)) { $workerWasKilled = $true } else { $killTryFailed = $true }
       }
-    } catch { }
-    finally {
-      try { $workerToDispose.Dispose() } catch { }
-      $script:worker = $null
+    } catch { $killTryFailed = $true }
+    if ($killTryFailed) {
+      try {
+        if (-not $workerToDispose.HasExited) {
+          $workerToDispose.Kill()
+          if ($workerToDispose.WaitForExit(3000)) { $workerWasKilled = $true }
+        } else { $workerWasKilled = $true }
+      } catch { }
+      $workerStillAlive = $false
+      try { $workerStillAlive = (-not $workerToDispose.HasExited) } catch { }
+      if ($workerStillAlive) {
+        Add-GuiLog '[경고] 자동화 프로세스를 종료하지 못했습니다 - 게임 조작이 계속되면 작업 관리자에서 powershell 프로세스를 직접 종료해 주세요.'
+      }
     }
+    try { $workerToDispose.Dispose() } catch { }
+    $script:worker = $null
     if ($workerWasKilled) {
       # Kill 시점이 키/마우스 '누름-뗌' 사이였을 수 있으므로 입력 상태를 정리합니다
       Release-StuckInput
@@ -5351,8 +5415,10 @@ $timer.Add_Tick({
         try { $finishedWorker.Dispose() } catch { }
         $script:worker = $null
       }
+      # '연속 준비 실행' 카운터는 코드 10 이 아닌 모든 종료에서 초기화합니다 (2026-08-01 전수
+      # 점검: 기존에는 코드 0 에서만 초기화해 10→1(재시작)→10→1→10 교차도 '3회 연속'으로 오판)
+      if ($exitCode -ne 10) { $script:preparedStreak = 0 }
       if ($exitCode -eq 0) {
-        $script:preparedStreak = 0
         $script:completedCycles++
         $finishedContext = $null
         if ($script:customActive) {
@@ -5820,27 +5886,50 @@ $btnRecommendedWindow.Add_Click({
 $form.Add_FormClosing({
     param($formSender, $closeArgs)
     if ($script:running) {
-      $answer = [System.Windows.Forms.MessageBox]::Show(
-        '자동화가 실행 중입니다. 종료하면 현재 회차도 함께 중단됩니다. 종료할까요?',
-        '종료 확인', [System.Windows.Forms.MessageBoxButtons]::YesNo)
-      if ($answer -eq [System.Windows.Forms.DialogResult]::No) {
-        $closeArgs.Cancel = $true
-        return
+      # 종료 확인 팝업은 사용자가 직접 닫을 때만 (2026-08-01 전수 점검: Windows 종료/로그오프
+      # 등 비사용자 종료에도 팝업이 떠 시스템 종료를 막을 수 있었음 - 그 경우 확인 없이 정리)
+      if ($closeArgs.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) {
+        $answer = [System.Windows.Forms.MessageBox]::Show(
+          '자동화가 실행 중입니다. 종료하면 현재 회차도 함께 중단됩니다. 종료할까요?',
+          '종료 확인', [System.Windows.Forms.MessageBoxButtons]::YesNo)
+        if ($answer -eq [System.Windows.Forms.DialogResult]::No) {
+          $closeArgs.Cancel = $true
+          return
+        }
       }
       $closingWorker = $script:worker
       if ($closingWorker) {
+        # Stop-AllRun 과 같은 방어 (2026-08-01 3차 리뷰: 무기한 WaitForExit() 는 종료 신호가
+        # 안 오면 폼 종료 전체가 멈추고 재시도에도 못 감 - 타임아웃 대기 + 확인된 경우에만
+        # workerWasKilled. Codex 조건)
         $closingWorkerWasKilled = $false
+        $closingKillFailed = $false
         try {
           if (-not $closingWorker.HasExited) {
             $closingWorker.Kill()
-            $closingWorker.WaitForExit()
-            $closingWorkerWasKilled = $true
+            if ($closingWorker.WaitForExit(10000)) { $closingWorkerWasKilled = $true } else { $closingKillFailed = $true }
           }
-        } catch { }
-        finally {
-          try { $closingWorker.Dispose() } catch { }
-          $script:worker = $null
+        } catch { $closingKillFailed = $true }
+        if ($closingKillFailed) {
+          try {
+            if (-not $closingWorker.HasExited) {
+              $closingWorker.Kill()
+              if ($closingWorker.WaitForExit(3000)) { $closingWorkerWasKilled = $true }
+            } else { $closingWorkerWasKilled = $true }
+          } catch { }
+          $closingWorkerAlive = $false
+          try { $closingWorkerAlive = (-not $closingWorker.HasExited) } catch { }
+          if ($closingWorkerAlive -and $closeArgs.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) {
+            # 사용자가 직접 닫는 문맥의 즉답 안내 (무인 운용 아님 - 팝업 예외 범주.
+            # Windows 종료/로그오프 등 비사용자 종료에서는 모달로 시스템 종료를 막지 않음)
+            [System.Windows.Forms.MessageBox]::Show(
+              '자동화 프로세스를 종료하지 못했습니다. 게임 조작이 계속되면 작업 관리자에서 powershell 프로세스를 직접 종료해 주세요.',
+              '꿀비노기', [System.Windows.Forms.MessageBoxButtons]::OK,
+              [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+          }
         }
+        try { $closingWorker.Dispose() } catch { }
+        $script:worker = $null
         if ($closingWorkerWasKilled) { Release-StuckInput }
       }
       # 종료 전에 안전 중지 신호 파일을 정리합니다. 남겨 두면 컨트롤러 등 다른 실행 경로의
@@ -6201,7 +6290,10 @@ $script:updateTimer.Add_Tick({
     $lnkUpdate.Visible = $true
     # 구버전 실행 시 새 버전 안내 팝업 (확인 1번 = 안내만, 자동 동작 없음).
     # 자동화가 이미 실행 중이면 팝업으로 방해하지 않고 우하단 링크만 보여줍니다.
-    if (-not $script:running) {
+    # 시작 승인 조회 대기 중에도 생략 (2026-08-01 전수 점검: 조회 중에는 running 이 아직
+    # false 라 팝업이 뜰 수 있고, 모달이 열린 사이 승인 완료 → 워커가 팝업을 띄운 채 시작돼
+    # '실행 중 팝업 생략' 규칙이 우회됐음)
+    if (-not $script:running -and -not $script:approvalPendingStart) {
       [System.Windows.Forms.MessageBox]::Show(
         $form,
         ("새 버전 v$remoteVersion 이 나왔습니다!" + [Environment]::NewLine + [Environment]::NewLine +

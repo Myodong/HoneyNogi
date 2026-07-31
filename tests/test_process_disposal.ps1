@@ -16,7 +16,9 @@ $worker = Get-Content -LiteralPath (Join-Path $root 'mabinogi_run_once.ps1') -Ra
 Check-Pattern 'GUI 강제 정지 Process.Dispose' $gui '\$workerToDispose\.Dispose\(\)'
 Check-Pattern 'GUI 정상 종료 Process.Dispose' $gui '\$finishedWorker\.Dispose\(\)'
 Check-Pattern 'GUI 창 닫기 Process.Dispose' $gui '\$closingWorker\.Dispose\(\)'
-Check-Pattern 'GUI 강제 종료 WaitForExit' $gui '\$workerToDispose\.Kill\(\)[\s\S]{0,160}\$workerToDispose\.WaitForExit\(\)'
+# 2026-08-01 3차 점검: 무기한 WaitForExit() 는 종료 신호가 안 오면 GUI 전체가 멈춰
+# 타임아웃 대기(WaitForExit(10000))로 교체 - 가드도 새 형태를 요구
+Check-Pattern 'GUI 강제 종료 WaitForExit(타임아웃)' $gui '\$workerToDispose\.Kill\(\)[\s\S]{0,160}\$workerToDispose\.WaitForExit\(10000\)'
 Check-Pattern 'GUI 타이머 Dispose' $gui '\$uiTimer\.Dispose\(\)'
 Check-Pattern 'GUI 업데이트 확인 중단' $gui '\$script:updateCheckPs\.Stop\(\)'
 Check-Pattern 'GUI 업데이트 PowerShell Dispose' $gui '\$script:updateCheckPs\.Dispose\(\)'
