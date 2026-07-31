@@ -53,12 +53,19 @@ Check-Pattern '커스텀 반복 중 사냥터 미지원 표기' `
   '\$rbCatHunting\.Text\s*=\s*\$\(if \(\$isCustom\) \{ ''사냥터\(미지원\)'' \} else \{ ''사냥터'' \}\)'
 
 # 혼합 리스트 자동 잠금 (2026-07-30): 바퀴 순환 불가(Wrap) 리스트면 반복을 '횟수 1바퀴'로
-# 강제하고 무한을 비활성 - 던전/심층 저장 서두 + 로드 직후 총 4곳에서 갱신
+# 강제하고 무한을 비활성 - 던전/심층 저장 서두 + 로드 직후 4곳, 여기에 저장 실패 롤백 경로
+# 2곳을 더해 총 6곳에서 갱신 (2026-07-31 점검: 저장 함수가 먼저 잠금을 바꾼 뒤 행만 되돌리면
+# 잠금 상태가 실제 리스트와 어긋남 - Codex 지적)
 Check-Pattern '혼합 잠금: Wrap 이슈만 필터해 판정' `
   'function Update-CustomRepeatMixLock[\s\S]{0,1400}Where-Object \{ \[bool\]\$_\.Wrap \}'
 Check-Pattern '혼합 잠금: 무한 비활성 + 바퀴 수 1 고정' `
   '\$RbInfinite\.Enabled = \$false\s*\r?\n\s*\$NumLaps\.Enabled = \$false'
-if (@([regex]::Matches($gui, 'Update-CustomRepeatMixLock -Items')).Count -eq 4) { 'OK   혼합 잠금: 호출 4곳(던전/심층 저장 + 로드)' }
-else { 'FAIL 혼합 잠금: 호출 4곳(던전/심층 저장 + 로드)'; $fails++ }
+if (@([regex]::Matches($gui, 'Update-CustomRepeatMixLock -Items')).Count -eq 6) { 'OK   혼합 잠금: 호출 6곳(던전/심층 저장 + 로드 + 롤백)' }
+else { 'FAIL 혼합 잠금: 호출 6곳(던전/심층 저장 + 로드 + 롤백)'; $fails++ }
+# 롤백 경로: 행 원복 → 합계 갱신 → 잠금 재계산 순서여야 실제 리스트 기준으로 계산됨
+Check-Pattern '혼합 잠금: 던전 저장 실패 롤백 후 재계산' `
+  'Update-CustomCoinTotalLabel[\s\S]{0,220}Update-CustomRepeatMixLock -Items @\(Get-CustomItemsFromList\)'
+Check-Pattern '혼합 잠금: 심층 저장 실패 롤백 후 재계산' `
+  'Update-DeepTributeTotalLabel[\s\S]{0,220}Update-CustomRepeatMixLock -Items @\(Get-DeepCustomItemsFromList\)'
 
 exit $fails

@@ -36,17 +36,31 @@ Assert-Case '계약: 잔존 시 경고 후 진행' ($functionText -match '\[경�
 # 제목('협동 미션 완료')은 OCR이 '협동1/四완로'로 깨져 사용 불가 → 이 화면 전용 부제 조각
 # ('우편으로'+'전송' / '캐릭터가위치한')으로 감지. 확인 버튼은 퀘스트 보상과 같은 자리 재사용.
 # 검증: 대상 캡처 감지 성공 + 보관 캡처 92장 오탐 0 (오프라인 스윕)
-$sweepSource = [string]@(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
-    -Names @('Invoke-PurchasePopupSweep'))[0]
-Assert-Case '협동: 스윕 함수 추출' ($sweepSource.Length -gt 0) $true
+$coopSource = [string]@(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
+    -Names @('Close-CoopMissionScreen'))[0]
+Assert-Case '협동: 공용 소함수 존재' ($coopSource.Length -gt 0) $true
 Assert-Case '협동: 부제 영역(360,285,560,35) 판독' `
-  ($sweepSource -match '-ReferenceX 360 -ReferenceY 285[\s\S]{0,120}-RegionWidth 560 -RegionHeight 35') $true
+  ($coopSource -match '-ReferenceX 360 -ReferenceY 285[\s\S]{0,120}-RegionWidth 560 -RegionHeight 35') $true
 Assert-Case '협동: 부제 조각 조건(우편으로+전송 / 캐릭터가위치한)' `
-  ($sweepSource -match "우편으로'\)[\s\S]{0,60}전송'\)[\s\S]{0,80}캐릭터가위치한'\)") $true
+  ($coopSource -match "우편으로'\)[\s\S]{0,60}전송'\)[\s\S]{0,80}캐릭터가위치한'\)") $true
 Assert-Case '협동: 확인 버튼 영역 재사용 + 클릭 후 true' `
-  ($sweepSource -match '협동 미션 완료 화면 감지[\s\S]{0,120}return \$true') $true
+  ($coopSource -match '협동 미션 완료 화면 감지[\s\S]{0,120}return \$true') $true
 # 제목 조각을 감지에 쓰지 않아야 함 (OCR 깨짐 실측 - '협동 미션 완료' 문자열 매칭 금지)
 Assert-Case '협동: 깨지는 제목 조각은 감지에 미사용' `
-  ($sweepSource -notmatch "Contains\('협동미션완료'\)") $true
+  ($coopSource -notmatch "Contains\('협동미션완료'\)") $true
+
+# 2026-07-31 점검: 협동 미션은 몬스터 처치 누적으로 완료되므로 전투/클리어 대기 중에 뜰
+# 확률이 가장 높은데, 클리어 대기 루프는 입장용 팝업 스윕을 쓰지 않아 사각지대였음
+# → 입장 대기(스윕)와 클리어 대기 루프가 같은 소함수를 공용해야 함 (Codex 조건)
+$workerAll = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
+Assert-Case '협동: 스윕이 공용 소함수를 호출' `
+  ([bool]([regex]::Match($workerAll, 'function Invoke-PurchasePopupSweep[\s\S]*?\r?\n\}').Value -match
+    'if \(Close-CoopMissionScreen -Game \$Game\) \{ return \$true \}')) $true
+Assert-Case '협동: 클리어 대기 루프에도 배선(반환값 소비 + continue)' `
+  ([bool]([string]@(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
+        -Names @('Wait-ForDungeonClearScreen'))[0] -match
+    'if \(Close-CoopMissionScreen -Game \$Game\) \{ continue \}')) $true
+Assert-Case '협동: 호출 2곳(스윕 + 클리어 대기)' `
+  ([regex]::Matches($workerAll, 'Close-CoopMissionScreen -Game').Count) 2
 
 exit $fails

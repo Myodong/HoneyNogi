@@ -45,6 +45,9 @@ function Resolve-ConfigCoordinateArray {
       try { $number = [double]$entry } catch { $valid = $false; break }
       if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or
           $number -ne [Math]::Truncate($number)) { $valid = $false; break }
+      # int 범위 검사 ([int] 변환 전 - 2026-08-01 전수 점검: 2147483648 같은 값은 정수성
+      # 검사를 통과한 뒤 [int] 캐스트에서 예외가 터져 기본값 복구까지 못 갔음)
+      if ($number -lt [int]::MinValue -or $number -gt [int]::MaxValue) { $valid = $false; break }
       $numbers += [int]$number
     }
   }
@@ -449,6 +452,15 @@ if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
 
 $referenceWidth  = Get-ConfigInteger $config @('referenceResolution', 'width') 1272 640 7680
 $referenceHeight = Get-ConfigInteger $config @('referenceResolution', 'height') 717 360 4320
+# 기준 좌표계는 1272x717 고정입니다 (2026-08-01 전수 점검: 스크립트에 하드코딩된 좌표·영역
+# 전부가 이 기준이라, referenceResolution 만 바꾸면 config 좌표와 하드코딩 좌표의 환산이
+# 어긋나 전체 클릭이 빗나감 - 다른 값은 경고 후 기본값으로 강제. 이 키는 config 편집으로만
+# 바뀔 수 있고 GUI 는 노출하지 않음)
+if ($referenceWidth -ne 1272 -or $referenceHeight -ne 717) {
+  Add-ConfigValidationWarning "config 'referenceResolution' ${referenceWidth}x${referenceHeight} 은 지원하지 않아 기준 1272x717 을 사용합니다 (하드코딩 좌표와의 정합)"
+  $referenceWidth = 1272
+  $referenceHeight = 717
+}
 $script:configCoordinateWidth = $referenceWidth
 $script:configCoordinateHeight = $referenceHeight
 
@@ -2963,7 +2975,11 @@ function Wait-ForScreen {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $lastFocus = Get-Date
   do {
-    if (& $Condition) {
+    # Condition 은 실행하되 캡처 실패 중에는 성공으로 인정하지 않습니다 (2026-08-01 전수
+    # 점검: `-not (Test-...)` 형태 Condition 이 캡처 실패의 빈 판독을 성공으로 뒤집어 즉시
+    # 반환할 수 있었음. 실행 자체는 유지해야 캡처 성공 등록이 복구를 진행시킴 - Codex 조건.
+    # Invoke-ClickUntil 의 기존 게이트와 같은 계약)
+    if ((& $Condition) -and -not $script:screenCaptureFailing) {
       return
     }
     if ($script:screenCaptureFailing) {
@@ -3011,7 +3027,37 @@ function Wait-ForDungeonClearScreen {
   # 있으면(= 판이 길어진 것뿐) 오류 대신 대기를 연장하되, 이 절대 한도까지만 허용합니다.
   $extendLimit = (Get-Date).AddSeconds([Math]::Max($TimeoutSeconds * 3, 1800))
   $extendLogged = $false
-  do {
+  while ($true) {
+    # 마감/전투 연장 판정 (본문 최상단 - 2026-08-01 전수 점검: 기존 do-while 은 이 판정이
+    # 루프 바닥에 있어 팝업/부활/협동 처리의 continue 가 판정을 건너뛰었고, 마감 직전에
+    # 팝업을 닫으면 전투가 진행 중이어도 연장 없이 시간 초과로 죽을 수 있었음. 최상단으로
+    # 옮기면 continue 가 어디서 나와도 매 바퀴 반드시 거침 - Codex 승인).
+    if ((Get-Date) -ge $deadline) {
+      if ($script:screenCaptureFailing) {
+        # 캡처 실패 중에는 연장 판독이 불가 - throw 하지 않고 아래 캡처 실패 처리(시간 동결)에
+        # 맡깁니다 (Codex 조건: 실패 중 마감 도달을 오류로 확정하지 않음)
+      } elseif ((Get-Date) -lt $extendLimit -and (Test-InDungeonQuest -Game $Game)) {
+        if (-not $extendLogged) {
+          Write-RunLog "$($script:contentTag) 클리어 대기 한도(${TimeoutSeconds}초)를 넘겼지만 전투가 아직 진행 중 - 끝날 때까지 연장 대기합니다"
+          $extendLogged = $true
+        }
+        $deadline = (Get-Date).AddSeconds(60)
+      } elseif ($script:screenCaptureFailing) {
+        # 연장 판독(Test-InDungeonQuest) 도중 캡처 실패가 새로 시작된 경우 - 판독 불가를
+        # 오류로 확정하지 않고 아래 캡처 실패 처리(시간 동결)에 맡깁니다 (Codex 리뷰 지적)
+      } elseif ((Test-DungeonClearPrompt -Game $Game) -or
+          ($FindResultButton -and (& $FindResultButton) -and -not (Test-HomeEndEscHud -Game $Game)) -or
+          ((-not $DungeonMode) -and (Test-ExitButton -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game)) -or
+          ((-not $DungeonMode) -and (Test-AbyssSelectionScreen -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game))) {
+        # 마감 도달 순간 이미 성공 화면(클리어/결과/보상/선택)이면 오류가 아니라 이번 바퀴의
+        # 정상 판정에 맡깁니다 (3차 점검: 마감 직전 전환을 놓치고 throw 하던 회귀. 결과/보상
+        # 판정의 HUD 부재 조건은 본문과 동일 - Codex 조건. 탐침만 하고 처리·로그는 본문이 담당)
+      } elseif ($script:screenCaptureFailing) {
+        # 위 최종 탐침 도중 캡처 실패가 새로 시작된 경우도 동결 처리에 맡깁니다 (Codex 조건)
+      } else {
+        throw '던전 클리어 화면 감지 대기 시간이 초과됐습니다.'
+      }
+    }
     $pollCounter++
 
     # 클리어 감지가 목적이므로 가장 먼저, 매 바퀴 확인합니다 (지연 최소화)
@@ -3059,7 +3105,10 @@ function Wait-ForDungeonClearScreen {
       if ($popupClosePoint) {
         Focus-Game -Game $Game
         Click-ScreenPoint -X $popupClosePoint.X -Y $popupClosePoint.Y
-        if ($reviveConfirmPending) {
+        # '가루 부족' 해석은 R키 가루 부활 직후에만 (2026-08-01 전수 점검: 여신상/전멸 부활은
+        # 가루를 안 쓰므로 그 직후의 임의 구매 팝업(물약 부족 등)을 재료 부족으로 오인해
+        # 여신상 전환이 영구 고정되던 문제 - Codex 승인. 완료 로그용 pending 은 종류 무관 유지)
+        if ($reviveConfirmPending -and $revivePendingKind -eq '가루 부활') {
           $useStatueRevive = $true
           $reviveConfirmPending = $false
           Write-RunLog "$($script:contentTag) 부활 직후 구매 팝업(재료 부족 추정) - 닫고 이후 부활은 여신상으로 전환"
@@ -3069,6 +3118,12 @@ function Wait-ForDungeonClearScreen {
         Start-Sleep -Seconds 1
         continue
       }
+      # 협동 미션 완료 전체 화면 (2026-07-31 점검에서 발견한 사각지대 - 협동 미션은 몬스터
+      # 처치 누적으로 완료되므로 정작 전투/클리어 대기 중에 뜰 확률이 가장 높은데, 이 루프는
+      # 입장 대기용 팝업 스윕을 쓰지 않아 화면이 덮인 채 클리어 감지가 가려졌습니다).
+      # 구매 팝업 '닫기'를 못 찾았을 때만 확인하고, 실제로 닫았을 때만 폴링을 다시 돕니다.
+      # 부활 대기 상태($reviveConfirmPending)는 구매 팝업이 아니므로 건드리지 않습니다.
+      if (Close-CoopMissionScreen -Game $Game) { continue }
     }
 
     # 행동불능(사망)/파티 전멸 감지 시 자동 부활:
@@ -3258,22 +3313,7 @@ function Wait-ForDungeonClearScreen {
     # '화면을 터치' 감지가 늦다는 실사용 피드백(2026-07-19)으로 던전과 동일하게 통일.
     # 클리어 확인이 매 바퀴 첫 순서이므로 감지 지연 = 이 간격 + 나머지 검사 시간.
     Start-Sleep -Milliseconds 1000
-
-    # 제한 시간이 다 됐어도 던전 안(퀘스트 추적기에 클리어 목표)이 확인되면 전투가 아직
-    # 진행 중인 것이므로 오류로 끝내지 않고 60초씩 연장합니다 (다른 PC 실측 2026-07-17:
-    # 어려움 파티전이 240초 한도를 넘겨 보스 15.2% 시점에 오류 종료된 사고).
-    # 절대 한도($extendLimit)를 넘으면 전투가 아닌 다른 문제로 보고 기존처럼 오류 처리합니다.
-    if ((Get-Date) -ge $deadline -and (Get-Date) -lt $extendLimit -and
-        -not $script:screenCaptureFailing -and (Test-InDungeonQuest -Game $Game)) {
-      if (-not $extendLogged) {
-        Write-RunLog "$($script:contentTag) 클리어 대기 한도(${TimeoutSeconds}초)를 넘겼지만 전투가 아직 진행 중 - 끝날 때까지 연장 대기합니다"
-        $extendLogged = $true
-      }
-      $deadline = (Get-Date).AddSeconds(60)
-    }
-  } while ((Get-Date) -lt $deadline)
-
-  throw '던전 클리어 화면 감지 대기 시간이 초과됐습니다.'
+  }
 }
 
 function Get-AutoHuntState {
@@ -4002,6 +4042,36 @@ function Find-HtEntryButtonPoint {
 
 # ===== 어비스/던전/사냥터 공통 블록 (2026-07-18 기술 부채 정리: 복사 코드 → 헬퍼 통일) =====
 
+function Close-CoopMissionScreen {
+  param([System.Diagnostics.Process]$Game)
+
+  # 협동 미션 완료 전체 화면을 감지해 '확인'을 클릭합니다. 닫았으면 $true, 아니면 $false.
+  # (2026-07-30 캡처 실측 - 던전이미지\어시스트\협동미션완료_확인버튼.png)
+  # 제목 '협동 미션 완료'는 OCR이 '협동1/四완로'로 심하게 깨져 쓸 수 없고, 부제
+  # '아이템은 대표 캐릭터가 위치한 서버 우편으로 전송됩니다.'는 단어별로 정확히 판독됩니다
+  # → 이 화면 전용 문구인 부제 조각으로 감지합니다 (보관 캡처 92장 오탐 0 실측).
+  # 확인 버튼은 퀘스트 보상 화면과 같은 자리(중심 636,654)라 같은 영역을 재사용합니다.
+  # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키는 쓰지 않습니다 (상태 기반 클릭).
+  #
+  # 입장/매칭 대기(Invoke-PurchasePopupSweep)와 클리어 대기 루프가 공용합니다 - 협동 미션은
+  # 몬스터 처치 누적으로 완료되므로 정작 전투/클리어 대기 중에 뜰 확률이 가장 높은데, 클리어
+  # 대기 루프는 스윕이 아니라 자체 팝업 처리를 써서 이 화면이 안 닫혔습니다 (2026-07-31 점검).
+  # 주의: 반환값이 파이프라인에 새지 않도록 호출부에서 반드시 소비해야 합니다 (PS 5.1).
+  $coopText = (Get-GameRegionOcrText -Game $Game -ReferenceX 360 -ReferenceY 285 `
+      -RegionWidth 560 -RegionHeight 35 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not (($coopText.Contains('우편으로') -and $coopText.Contains('전송')) -or $coopText.Contains('캐릭터가위치한'))) {
+    return $false
+  }
+  $coopConfirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
+    -RegionWidth 470 -RegionHeight 55 -SearchText '확인'
+  if (-not $coopConfirmPoint) { return $false }
+  Focus-Game -Game $Game
+  Click-ScreenPoint -X $coopConfirmPoint.X -Y $coopConfirmPoint.Y
+  Write-RunLog "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 클릭"
+  Start-Sleep -Seconds 1
+  return $true
+}
+
 function Invoke-PurchasePopupSweep {
   param([System.Diagnostics.Process]$Game)
 
@@ -4038,25 +4108,8 @@ function Invoke-PurchasePopupSweep {
       return $true
     }
   }
-  # 협동 미션 완료 전체 화면 (2026-07-30 캡처 실측 - 던전이미지\어시스트\협동미션완료_확인버튼.png).
-  # 제목 '협동 미션 완료'는 OCR이 '협동1/四완로'로 심하게 깨져 쓸 수 없고, 부제
-  # '아이템은 대표 캐릭터가 위치한 서버 우편으로 전송됩니다.'는 단어별로 정확히 판독됩니다
-  # → 이 화면 전용 문구인 부제 조각으로 감지합니다 (오탐 위험 낮음).
-  # 확인 버튼은 퀘스트 보상 화면과 같은 자리(중심 636,654)라 같은 영역을 재사용합니다.
-  # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키는 쓰지 않습니다 (상태 기반 클릭).
-  $coopText = (Get-GameRegionOcrText -Game $Game -ReferenceX 360 -ReferenceY 285 `
-      -RegionWidth 560 -RegionHeight 35 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-  if (($coopText.Contains('우편으로') -and $coopText.Contains('전송')) -or $coopText.Contains('캐릭터가위치한')) {
-    $coopConfirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
-      -RegionWidth 470 -RegionHeight 55 -SearchText '확인'
-    if ($coopConfirmPoint) {
-      Focus-Game -Game $Game
-      Click-ScreenPoint -X $coopConfirmPoint.X -Y $coopConfirmPoint.Y
-      Write-RunLog '[안내] 협동 미션 완료 화면 감지 - 확인 클릭'
-      Start-Sleep -Seconds 1
-      return $true
-    }
-  }
+  # 협동 미션 완료 전체 화면 (공용 소함수 - 클리어 대기 루프도 같은 함수를 씁니다)
+  if (Close-CoopMissionScreen -Game $Game) { return $true }
   return $false
 }
 
@@ -4451,18 +4504,34 @@ function Set-DgToggleCard {
   $cardRegions = @()
   $cardRegions += , $Region
   if ($AltRegion) { $cardRegions += , $AltRegion }
+  $clickedRecheckDone = $false
   for ($setTry = 1; $setTry -le 6; $setTry++) {
     # 버튼 글자 판독: 다중 스케일 재시도 (2026-07-31 다른 PC 실기 - 창 1273x718 에서 스케일 5는
     # '서대되'로 깨져 판별 실패했는데 같은 화면을 스케일 3으로 읽으면 '선택됨' 정확 판독.
     # 07-29 난이도 알약과 같은 '단일 스케일 고정' 사고). 스케일 우선 순회(각 배율에서 주 →
-    # 보조)라 기존 스케일 5 성공 경로는 첫 배율에서 그대로 끝납니다 (Codex 조건).
+    # 보조)라 기존 스케일 5 성공 경로는 첫 배율에서 그대로 끝납니다.
+    #
+    # 다중 스케일은 **1~2회전과 클릭 직후 첫 재확인에서만** 씁니다 (Codex 조건 - 3차 점검에서
+    # 1회전 한정의 회귀 확인: 첫 회전이 화면 전환 중이라 3배율 전부 실패하면 이후 s5 만 남아
+    # s5 가 깨지는 창(어제 타 PC)에서 구제 불가. 2회전까지면 800ms 대기 후 안정 화면 재시도).
+    # 그래도 실패하면 글자 판독이 안 되는 상태(회색 비활성 등)라 픽셀 폴백·재확인 생략이 담당.
+    # 최악 비용: 1~2회전 3배율 12회 + 3~6회전 s5 8회 + 클릭 재확인이 s5 회전을 3배율로
+    # 대체하는 증가분 4회 = 24회 (전 회전 3배율이면 36회 - Codex 재산정).
+    $cardScales = @(5)
+    if ($setTry -le 2) { $cardScales = @(5, 3, 4) }
+    elseif ($clicked -and -not $clickedRecheckDone) {
+      $cardScales = @(5, 3, 4)
+      $clickedRecheckDone = $true
+    }
     $isSelected = $false
     $isChallenge = $false
-    foreach ($cardScale in @(5, 3, 4)) {
+    foreach ($cardScale in $cardScales) {
       foreach ($cardRegion in $cardRegions) {
         $cardText = (Get-GameRegionOcrText -Game $Game -ReferenceX $cardRegion[0] -ReferenceY $cardRegion[1] `
           -RegionWidth $cardRegion[2] -RegionHeight $cardRegion[3] -Scale $cardScale -Engine $ocrKoreanEngine) -replace '\s', ''
-        if ($cardText) { $lastText = $cardText }
+        # 진단 로그가 실제 마지막 판독을 가리키도록 빈 값도 그대로 반영합니다
+        # (기존에는 비어 있으면 갱신을 건너뛰어 이전 오독값이 경고에 남았음)
+        $lastText = $cardText
         # '선태되' = '선택됨' 깨짐 실측 (2026-07-19 00:21 - '됨'도 '선택'도 안 남아 판별 불가였음)
         $isSelected = ($cardText.Contains('됨') -or $cardText.Contains('선택') -or $cardText.Contains('선태'))
         $isChallenge = $cardText.Contains('도전')
@@ -4517,7 +4586,8 @@ function Set-DgToggleCard {
     Start-Sleep -Milliseconds 1100
   }
   # 여기 도달: 클릭했는데도 계속 반대 상태로 읽히거나(설정이 안 먹힘), 클릭 전부터 계속 판별 불가
-  Write-RunLog "[경고] $Label 상태를 설정값에 맞추지 못했습니다 (버튼 OCR: '$lastText') - 현재 상태로 진행합니다"
+  $lastTextLog = $(if ($lastText) { $lastText } else { '(판독 없음)' })
+  Write-RunLog "[경고] $Label 상태를 설정값에 맞추지 못했습니다 (버튼 OCR: '$lastTextLog') - 현재 상태로 진행합니다"
   return $false
 }
 
@@ -4695,6 +4765,10 @@ function Invoke-NormalDungeonCycle {
           exit 4
         }
         $onOptionsScreen = $false
+        # 복귀 성공 = 선택 화면 확정 (2026-08-01 전수 점검: 이 플래그를 안 세우면 아래 시작
+        # 분기가 '선택/옵션 화면 아님'으로 오판해 "던전 화면이 아닙니다" 헛 오류 - GUI 재시도가
+        # 가려주던 결함. 세 복귀 경로 공통)
+        $onSelectionScreen = $true
       }
       $tabSwitched = $false
       for ($tabTry = 1; $tabTry -le 3 -and -not $tabSwitched; $tabTry++) {
@@ -4764,7 +4838,10 @@ function Invoke-NormalDungeonCycle {
   # 성공했고 화면 전환 확인만 실패했던 경우입니다. 완료 항목을 다시 입장하지 않고 코드 0으로
   # GUI에 복구 완료를 알립니다. GUI는 그때 현재 항목을 딱 한 번 전진시킵니다.
   if ($script:customMode -and $script:customRecoveryOnly) {
-    $recoveryOnSelection = (Test-DgSelectionTitle -TitleText $titleText)
+    # 복귀/진입 버튼으로 이미 확정된 선택 화면 플래그를 신뢰합니다 (2026-08-01 3차 점검:
+    # 탭 전환 복귀 후 제목 재판독이 일시 공백이면 제목만 보는 판정이 선택 화면을 놓쳐,
+    # 완료 마커가 있는 항목을 다시 입장할 수 있었음 - Codex 승인)
+    $recoveryOnSelection = ($onSelectionScreen -or (Test-DgSelectionTitle -TitleText $titleText))
     # 마지막 판 복구: 마무리가 '나가기 → 필드'라서 옵션/선택 화면이 아니라 필드가 목표 화면입니다.
     # 필드 상태(HUD + 던전 목표 없음, 연속 2회)면 재입장 없이 복구 완료 처리하고, 나가기 팝업에서
     # 끊긴 경우는 나가기(Space)를 이어서 처리합니다 (Codex 리뷰 반영 - 기존 로직은 필드를
@@ -4915,6 +4992,7 @@ function Invoke-NormalDungeonCycle {
       }
       Write-RunLog '[던전] 선택 화면 복귀 확인 - 난이도/구역 선택부터 진행합니다'
       $onOptionsScreen = $false
+      $onSelectionScreen = $true   # 복귀 성공 = 선택 화면 확정 (2026-08-01 - 위 탭 전환 경로와 동일)
     }
   }
 
@@ -4959,6 +5037,7 @@ function Invoke-NormalDungeonCycle {
         }
         Write-RunLog '[던전] 선택 화면 복귀 확인 - 난이도/구역 선택부터 진행합니다'
         $onOptionsScreen = $false
+        $onSelectionScreen = $true   # 복귀 성공 = 선택 화면 확정 (2026-08-01 - 위 두 복귀 경로와 동일)
       }
     } elseif ($titleText.Length -gt 0) {
       # 재확인에서 설정과 일치했거나 숫자를 명확히 읽지 못한 경우: 새 판독 기준으로 진행
@@ -5312,8 +5391,11 @@ function Invoke-NormalDungeonCycle {
   # 심층던전에는 더블 루팅 카드가 없어(소탕 단독) 토글을 건너뜁니다 - 매우 어려움 화면의
   # 2번째 카드(능숙한 던전 소탕 - 무료 도전과제)를 오클릭하지 않기 위한 가드이기도 합니다.
   if ($effectiveCoin) {
+    $lootToggleOk = $true
+    $lootToggleClicked = $false
     if (-not $deepMode) {
-      Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $effectiveLoot -Label '더블 루팅' | Out-Null
+      $lootToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $effectiveLoot -Label '더블 루팅')
+      $lootToggleClicked = $script:dgToggleClicked
     }
 
     # 5-1. '입장하기' 버튼의 공물(은동전) 소모량으로 더블 루팅 설정을 교차 검증합니다.
@@ -5324,12 +5406,39 @@ function Invoke-NormalDungeonCycle {
     $expectedCost = if ($effectiveLoot) { $dgFullCost } else { $dgSweepCost }
     $actualCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
     if ($null -eq $actualCost) {
+      # 카드 설정도 미확인 + 소모량(2차 방어)도 판독 실패 = 설정 상태를 아무것도 보증할 수
+      # 없는 상태입니다. 커스텀(항목별 명시 설정)은 반대 설정 완료 오계상을 막기 위해 정지
+      # (2026-08-01 전수 점검 - Codex 조건: 소탕/더블 루팅 어느 카드든 실패 + 소모량 null).
+      # 일반 모드는 기존대로 경고 진행 (OCR 약한 환경 헛 정지 방지).
+      if ($script:customMode -and (-not $coinToggleOk -or -not $lootToggleOk)) {
+        Write-RunLog "[완료] 카드 설정을 확인하지 못했고 소모량 판독도 실패했습니다 (소탕 확인: $coinToggleOk, 더블 루팅 확인: $lootToggleOk) - 반대 설정 입장을 막기 위해 정지합니다"
+        exit 4
+      }
       Write-RunLog "[던전] 공물 소모량을 읽지 못해 교차 검증을 건너뜁니다 (예상 ${expectedCost}개)"
     } elseif ($actualCost -eq $expectedCost) {
       Write-RunLog "[던전] 공물 소모량 ${actualCost}개 확인"
     } elseif ((-not $deepMode) -and ($dgValidCosts -contains $actualCost)) {
       # 심층은 더블 루팅이 없어 유효값 불일치(1↔2)를 버튼 클릭으로 정정할 수 없습니다 -
       # 아래 예상 밖 값 분기(커스텀 재확인 후 정지 / 비커스텀 경고 진행)로 흘려보냅니다.
+      if (($coinToggleClicked -or $lootToggleClicked) -and $coinToggleOk -and $lootToggleOk) {
+        # 방금 카드를 클릭해 전환을 글자로 확인한 직후의 유효값 불일치 = 소모량 표시 지연
+        # 잔상 (2026-07-29 01:45 실측 13초+ 지연, 카드 확정 판독 > 소모량 잔상 증거 우선 계약.
+        # 소모량은 두 카드의 합산이라 어느 쪽 클릭이든 지연 영향 - Codex 조건. 3차 점검 반영)
+        Write-RunLog "[던전] 방금 카드 전환을 확인해 소모량 불일치(예상 ${expectedCost}, 실제 ${actualCost})는 표시 지연으로 판단 - 정정 클릭 생략"
+      } elseif ($coinToggleClicked -or $lootToggleClicked) {
+        # 방금 클릭했는데 카드 확인은 실패 - 정정 클릭은 이중 토글 위험이라 금지하고 무클릭
+        # 재판독으로만 판정합니다 (Codex 조건: clicked && !toggleOk 는 재판독 또는 정지)
+        Start-Sleep -Milliseconds 2500
+        $lagRecheck = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+        if ($null -ne $lagRecheck -and $lagRecheck -eq $expectedCost) {
+          Write-RunLog "[던전] 공물 소모량 ${lagRecheck}개 재확인 (첫 판독 ${actualCost}는 표시 지연으로 판단)"
+        } elseif ($script:customMode) {
+          Write-RunLog "[완료] 카드 클릭 후 상태 확인에 실패했고 소모량도 항목 설정과 다릅니다 (예상 ${expectedCost}, 실제 ${actualCost}→'$lagRecheck') - 입장하지 않고 정지합니다"
+          exit 4
+        } else {
+          Write-RunLog "[경고] 공물 소모량이 여전히 예상(${expectedCost})과 다릅니다 (실제 '$lagRecheck') - 현재 상태로 진행합니다"
+        }
+      } else {
       Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 더블 루팅 버튼을 눌러 정정합니다"
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgLootButton[0] -ReferenceY $ptDgLootButton[1]
@@ -5346,6 +5455,7 @@ function Invoke-NormalDungeonCycle {
       } else {
         Write-RunLog "[경고] 공물 소모량이 여전히 예상(${expectedCost})과 다릅니다 (실제 '$recheck') - 현재 상태로 진행합니다"
       }
+      }
     } elseif ($script:customMode) {
       # 예상 밖 값(10/20 이 아닌 숫자): 한 번의 잡음 판독으로 리스트 전체를 세우지 않도록
       # 재판독으로 '계속 불일치'를 확인한 뒤에만 정지합니다 (null = 판독 실패는 검증 생략 유지.
@@ -5355,6 +5465,12 @@ function Invoke-NormalDungeonCycle {
       if ($null -ne $oddRecheck -and $oddRecheck -eq $expectedCost) {
         Write-RunLog "[던전] 공물 소모량 ${oddRecheck}개 재확인 (첫 판독 ${actualCost}는 OCR 잡음으로 판단)"
       } elseif ($null -eq $oddRecheck) {
+        # 카드 미확인 + 첫 판독 잡음 + 재판독 실패 = 보증 없는 상태 - 커스텀은 정지
+        # (2026-08-01 3차 점검: 이 경로가 null 게이트를 우회해 검증 없이 입장했음 - Codex 승인)
+        if ($script:customMode -and (-not $coinToggleOk -or -not $lootToggleOk)) {
+          Write-RunLog "[완료] 카드 설정을 확인하지 못했고 소모량 재판독도 실패했습니다 (첫 판독 '${actualCost}') - 반대 설정 입장을 막기 위해 정지합니다"
+          exit 4
+        }
         Write-RunLog "[던전] 공물 소모량 재판독 실패 - 교차 검증을 건너뜁니다 (예상 ${expectedCost}개)"
       } else {
         Write-RunLog "[완료] 공물 소모량이 항목 설정과 계속 다릅니다 (예상 ${expectedCost}, 실제 ${actualCost}→${oddRecheck}) - 입장하지 않고 정지합니다"
@@ -5378,6 +5494,19 @@ function Invoke-NormalDungeonCycle {
     } else {
     Start-Sleep -Milliseconds 500
     $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
+    # 커스텀 미사용 항목 게이트: 카드 미확인($coinToggleOk=false) + 신뢰할 소모량 증거 없음
+    # (null 또는 유효 밖 잡음 값)이면 설정 상태를 아무것도 보증할 수 없어 정지합니다
+    # (2026-08-01 Codex 리뷰 - 사용 경로와 대칭. null 은 '소모량 없음(미사용 정상)'과 '일반
+    # OCR 실패'가 구분되지 않고, 유효 밖 숫자도 증거가 아님. 유효값(10/20)이 보이면 카드가
+    # 켜진 증거라 아래 해제 루프가 처리. IME 팝업 가림도 동일하게 이 게이트에 걸림)
+    if ($script:customMode -and -not $coinToggleOk -and
+        ($null -eq $offCost -or -not ($dgValidCosts -contains $offCost))) {
+      $offGateReason = $(if ($script:dgCostImeBlocked) { '입력기 팝업으로 소모량도 읽을 수 없습니다' }
+        elseif ($null -eq $offCost) { '소모량 표시로도 확인할 수 없습니다' }
+        else { "소모량 판독도 유효 밖 값('$offCost')입니다" })
+      Write-RunLog "[완료] 카드 설정을 확인하지 못했고 $offGateReason - 반대 설정 입장을 막기 위해 정지합니다"
+      exit 4
+    }
     if ($script:dgCostImeBlocked) {
       Write-RunLog '[안내] 입력기 팝업이 입장 버튼을 가려 소모량 역방향 확인을 건너뜁니다 (카드 상태 기준 진행)'
     }
@@ -5476,6 +5605,22 @@ function Invoke-NormalDungeonCycle {
         Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
           -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine | Out-Null
       }
+      # IME 팝업 '사전' 확인 (2026-08-01 전수 점검: 기존에는 팝업을 감지한 뒤에도 다음 반복이
+      # 확인 없이 다시 클릭해, 가려진 좌표를 최대 40초 동안 반복 클릭했음 - 클릭 전에 확인해
+      # 재클릭 정책(원래 버튼이 보일 때만 클릭)을 지킵니다. 대기 한도(40초)·시도 미계상은
+      # 아래 사후 확인과 공유 - Codex 승인)
+      if (-not $script:screenCaptureFailing -and (Test-DgImePopupVisible -Game $Game)) {
+        if ($imePopupWaitTotal -eq 0) {
+          Write-RunLog '[안내] 입력기 팝업이 입장하기 버튼을 가리고 있습니다 - 사라질 때까지 대기'
+        }
+        if ($imePopupWaitTotal -ge 40) {
+          throw '입력기 팝업이 계속 게임 화면을 가려 입장을 확인할 수 없습니다. 게임 창을 한 번 클릭해 팝업을 닫은 뒤 다시 시작해 주세요.'
+        }
+        Start-Sleep -Seconds 2
+        $imePopupWaitTotal += 2
+        $enterTry--
+        continue
+      }
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgEnterFinal[0] -ReferenceY $ptDgEnterFinal[1]
       Start-Sleep -Milliseconds 1200
@@ -5573,16 +5718,37 @@ function Invoke-NormalDungeonCycle {
     # 입장하기 버튼이라, 잘못 누르면 우연한 만남(혼자)으로 입장돼 버립니다.
     # 어비스와 동일하게 토글을 먼저 끄고 꺼짐을 확인한 뒤 파티 찾기를 클릭합니다.
     $toggleState = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+    # unknown 은 재판독으로 해소를 시도하고, 끝내 확인이 안 되면 정지합니다 (2026-08-01 전수
+    # 점검: 기존 '꺼짐으로 보고 진행'은 토글이 실제로 켜져 있으면 그 자리의 넓은 입장하기
+    # 버튼을 눌러 혼자 오입장 - 파티찾기는 정확한 꺼짐 확인이 안전 전제라 fail-closed. Codex 승인)
+    for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleState -eq 'unknown'; $toggleProbe++) {
+      Start-Sleep -Milliseconds 900
+      $toggleState = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+    }
+    if ($toggleState -eq 'unknown') {
+      Write-RunLog "[완료] '우연한 만남' 토글 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+      exit 4
+    }
     if ($toggleState -eq 'on') {
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgChanceToggle[0] -ReferenceY $ptDgChanceToggle[1]
       Start-Sleep -Milliseconds 900
-      if ((Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle) -eq 'on') {
+      # 끄기 확인도 'off' 확정을 요구합니다 (기존에는 'on'만 아니면 통과 → unknown 이 꺼짐으로 둔갑)
+      $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+      for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOff -ne 'off'; $toggleProbe++) {
+        Start-Sleep -Milliseconds 900
+        $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+      }
+      if ($toggleAfterOff -eq 'on') {
         throw "'우연한 만남' 토글을 끄지 못해 파티찾기를 진행할 수 없습니다 (토글이 켜진 상태에서는 파티 찾기 버튼이 없음)"
       }
+      if ($toggleAfterOff -ne 'off') {
+        # 클릭 후 재확인이 unknown = 판별 불가 - 최초 unknown 과 같은 조건부 정지(코드 4)로
+        # 통일합니다 (Codex 리뷰 지적: throw(코드 1)면 오류 재시도를 소모하는 비대칭)
+        Write-RunLog "[완료] '우연한 만남' 토글을 끈 뒤 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+        exit 4
+      }
       Write-RunLog "[던전] '우연한 만남' 토글 끔"
-    } elseif ($toggleState -eq 'unknown') {
-      Write-RunLog "[경고] '우연한 만남' 토글 상태를 판별하지 못했습니다(화면 확인 불가) - 꺼짐으로 보고 진행합니다"
     }
     # 클릭하면 자동으로 파티 매칭이 진행되고, 파티가 구성되면 게임이 알아서
     # 던전에 입장합니다. 여기서는 클릭 후 아래의 입장 감지에서 매칭 완료를 기다립니다.
@@ -6082,6 +6248,7 @@ function Invoke-HuntingGroundCycle {
     Write-RunLog '[사냥터] 입장하기 클릭'
     $entered = $false
     $imePopupWaitTotal = 0
+    $lootFallbackDone = $false
     for ($enterTry = 1; $enterTry -le 4; $enterTry++) {
       # 캡처 실패 중에는 입장 여부를 확인할 수 없는 채 클릭/시도 횟수만 소모되므로,
       # 입장 버튼 탐색을 복구 탐침 삼아 캡처가 돌아올 때까지 기다렸다가 진행합니다.
@@ -6089,6 +6256,20 @@ function Invoke-HuntingGroundCycle {
         Test-SafeStopDuringCaptureFail
         Start-Sleep -Seconds 2
         Find-HtEntryButtonPoint -Game $Game | Out-Null
+      }
+      # IME 팝업 '사전' 확인 - 던전 입장 재시도와 같은 계약 (2026-08-01: 가려진 좌표를 확인
+      # 없이 재클릭하지 않기 위한 클릭 전 게이트. 대기 한도·시도 미계상은 사후 확인과 공유)
+      if (-not $script:screenCaptureFailing -and (Test-DgImePopupVisible -Game $Game)) {
+        if ($imePopupWaitTotal -eq 0) {
+          Write-RunLog '[안내] 입력기 팝업이 입장하기 버튼 자리를 가리고 있습니다 - 사라질 때까지 대기'
+        }
+        if ($imePopupWaitTotal -ge 40) {
+          throw '입력기 팝업이 계속 게임 화면을 가려 입장을 확인할 수 없습니다. 게임 창을 한 번 클릭해 팝업을 닫은 뒤 다시 시작해 주세요.'
+        }
+        Start-Sleep -Seconds 2
+        $imePopupWaitTotal += 2
+        $enterTry--
+        continue
       }
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgEnterFinal[0] -ReferenceY $ptDgEnterFinal[1]
@@ -6120,7 +6301,25 @@ function Invoke-HuntingGroundCycle {
       }
       # 재시도 실패만으로 더블 루팅을 끄던 '부족 추정' 예비는 제거했습니다 (2026-07-29).
       # 클릭이 팝업 등에 먹힌 것을 부족으로 오판하는 사고 방지 - 잔량이 실제로 읽힌 명시적
-      # 부족 증거가 있을 때만 아래(루프 뒤)에서 대응하고, 못 읽으면 안전 정지합니다 (Codex 계약).
+      # 부족 증거가 있을 때만 대응하고, 못 읽으면 안전 정지합니다 (Codex 계약).
+      # '소탕만 계속'(continueSweepOnly) 존중 - 던전 재시도 경로와 동일 (2026-08-01 전수 점검:
+      # 최초 판독·결과 화면 경로만 이 옵션을 존중하고 여기는 20개 기준으로 정지했음. 잔량이
+      # 실제로 10~19개로 읽히면 더블 루팅만 끄고 다음 반복에서 재입장 - Codex 조건).
+      if ($enterTry -ge 2 -and $htUseCoin -and $effectiveCoin -and $effectiveLoot -and $htLootFallback -and
+          -not $lootFallbackDone -and -not $script:screenCaptureFailing) {
+        $retryBalance = Get-DgCoinBalance -Game $Game
+        if ($null -ne $retryBalance -and $retryBalance -ge 10 -and $retryBalance -lt 20) {
+          Write-RunLog "[사냥터] 은동전 잔량 ${retryBalance}개 - 더블 루팅을 끄고 소탕만 계속합니다 (소탕만 계속 설정)"
+          # 해제가 확인된 경우에만 내부 상태를 내립니다 (미확인이면 실제 카드가 켜진 채일 수
+          # 있어 이후 필요량 판정이 어긋남 - Codex 리뷰 지적). 폴백 처리 바퀴는 시도로 세지
+          # 않아 마지막 회전에서 발견돼도 재입장이 보장됩니다.
+          if ([bool](Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $false -Label '더블 루팅')) {
+            $effectiveLoot = $false
+          }
+          $lootFallbackDone = $true
+          $enterTry--
+        }
+      }
     }
     if (-not $entered) {
       # 은동전 부족으로 입장이 막힌 것으로 확인되면 사냥터에서 나가고 마칩니다 (사용자 결정)
@@ -6300,7 +6499,9 @@ function Invoke-AbyssPartyMemberCycle {
         }
         $memberBtnText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgPartyEnterBtn[0] -ReferenceY $rgPartyEnterBtn[1] `
           -RegionWidth $rgPartyEnterBtn[2] -RegionHeight $rgPartyEnterBtn[3] -Scale 4 -Engine $ocrKoreanEngine) -replace '\s', ''
-        if ($memberBtnText -match '완료' -and $memberBtnText -notmatch '취소') {
+        # '준비' 조각까지 요구합니다 (2026-08-01 전수 점검: '완료' 포함만으로는 같은 영역에
+        # 잡히는 다른 완료성 문구('협동 미션 완료' 등)에도 오클릭 - 버튼 문구는 '준비 완료')
+        if ($memberBtnText -match '준비' -and $memberBtnText -match '완료' -and $memberBtnText -notmatch '취소') {
           # '준비 완료' 활성 - 클릭. 누르면 '준비 취소'로 바뀐다고 보고 '취소'가 보이면 더
           # 누르지 않습니다 (파티장의 '입장 취소'와 같은 오클릭 방지 규칙). 파티장이 입장을
           # 취소했다가 다시 시작하면 버튼이 되살아나므로 그때는 이 분기가 다시 클릭합니다.
@@ -6346,7 +6547,13 @@ function Invoke-AbyssPartyMemberCycle {
 }
 
 function Return-ToAbyssSelection {
-  param([System.Diagnostics.Process]$Game)
+  param(
+    [System.Diagnostics.Process]$Game,
+    # 복귀 도중 안전 중지 예약을 소비할 때 쓸 종료 코드 (2026-08-01 전수 점검: 준비 실행
+    # (코드 10이어야 함)이 이 함수의 안전 중지 분기에서 무조건 exit 0 으로 끝나 던전을 돌지
+    # 않은 실행이 완료 회차로 계상됐음 - 호출부가 자기 문맥의 코드를 전달. Codex 승인)
+    [int]$SafeStopExitCode = 0
+  )
 
   # 던전 밖에서 어비스 선택 화면으로 돌아가는 과정을 '상태 기반'으로 반복합니다.
   # 매 반복마다 현재 화면을 다시 판단해 필요한 조작만 하므로, ESC 클릭이 빗나가거나
@@ -6370,6 +6577,18 @@ function Return-ToAbyssSelection {
 
     # 1) 이미 어비스 선택 화면이면 완료
     if (Test-AbyssSelectionScreen -Game $Game) {
+      # 선택 화면 도달 직전의 안전 중지 예약도 여기서 소비합니다 (2026-08-01 3차 점검:
+      # 이 return 이 아래 HUD 분기의 안전 중지 확인보다 먼저라, 도달 직전 예약이 소비되지
+      # 않은 채 다음 실행으로 새어 헛 조기 종료를 만들 수 있었음 - Codex 승인)
+      if (Test-Path -LiteralPath $safeStopFlagPath) {
+        Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
+        if ($SafeStopExitCode -eq 10) {
+          Write-RunLog '[완료] 안전 중지 예약 확인 - 선택 화면 복귀 완료, 준비/정리 실행이라 회차로 세지 않고 마칩니다'
+        } else {
+          Write-RunLog '[완료] 안전 중지 예약 확인 - 선택 화면 복귀 완료 시점에서 회차를 마칩니다'
+        }
+        exit $SafeStopExitCode
+      }
       Write-RunLog '[어비스] 선택 화면 복귀 확인'
       return
     }
@@ -6394,8 +6613,12 @@ function Return-ToAbyssSelection {
       if (Test-Path -LiteralPath $safeStopFlagPath) {
         # 신호 파일은 워커가 소비(삭제)합니다 (남은 파일로 인한 헛 조기 종료 방지)
         Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
-        Write-RunLog '[완료] 안전 중지 예약 확인 - 던전 밖(HUD) 확인 시점에서 회차를 마칩니다'
-        exit 0
+        if ($SafeStopExitCode -eq 10) {
+          Write-RunLog '[완료] 안전 중지 예약 확인 - 준비/정리 실행 중이라 회차로 세지 않고 마칩니다'
+        } else {
+          Write-RunLog '[완료] 안전 중지 예약 확인 - 던전 밖(HUD) 확인 시점에서 회차를 마칩니다'
+        }
+        exit $SafeStopExitCode
       }
       # 공지 게시판 팝업이 화면을 덮고 있으면(HUD는 가장자리로 계속 보임) ESC 클릭이
       # 팝업에 막혀 헛돌기만 합니다 - 먼저 팝업 우상단 X를 눌러 닫습니다
@@ -6688,7 +6911,7 @@ try {
   # 먼저 어비스 선택 화면으로 복귀부터 처리합니다.
   if (-not $startExitDetected -and (Test-AbyssMenu -Game $game)) {
     Write-RunLog '[어비스] 시작: ESC 메뉴 감지 - 선택 화면으로 복귀부터 진행'
-    Return-ToAbyssSelection -Game $game
+    Return-ToAbyssSelection -Game $game -SafeStopExitCode 10
     Write-RunLog '[완료] 어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)'
     # 던전을 돌지 않고 화면 복귀만 한 '준비 실행'은 코드 10으로 끝냅니다.
     # GUI가 이를 회차로 세지 않고 곧바로 본 회차를 시작하므로, 횟수 지정 모드에서
@@ -6702,7 +6925,7 @@ try {
     if ($script:customMode -and -not $script:customCleanupOnly) { Write-CustomClearMarker }
     Click-GamePoint -Game $game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
     Write-RunLog '[어비스] 나가기 클릭'
-    Return-ToAbyssSelection -Game $game
+    Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:customMode -and $script:customCleanupOnly) { 10 } else { 0 })
     Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
     if ($script:customMode -and $script:customCleanupOnly) { exit 10 }
     # 이전 회차의 클리어를 실제로 마무리한 실행이므로 정상 완료(코드 0)로 계상합니다
@@ -6722,7 +6945,7 @@ try {
     Focus-Game -Game $game
     Click-GamePoint -Game $game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
     Write-RunLog '[어비스] 나가기 클릭'
-    Return-ToAbyssSelection -Game $game
+    Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:customMode -and $script:customCleanupOnly) { 10 } else { 0 })
     Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
     if ($script:customMode -and $script:customCleanupOnly) { exit 10 }
     # 이전 회차의 클리어를 실제로 마무리한 실행이므로 정상 완료(코드 0)로 계상합니다
@@ -6734,7 +6957,9 @@ try {
   # 던전 안이면 이 분기를 건너뛰고 아래의 '던전 입장 상태' 재개 흐름을 그대로 탑니다.
   if ((Test-HomeEndEscHud -Game $game) -and -not (Test-InDungeonQuest -Game $game)) {
     Write-RunLog '[어비스] 시작: 필드 상태 감지 - ESC → 어비스로 선택 화면 이동'
-    Return-ToAbyssSelection -Game $game
+    # 복귀 도중 안전 중지는 복구 완료 이전이므로 recoveryOnly 여도 10 (Codex 리뷰 지적 -
+    # 0이면 선택 화면 복구 전에 완료 마커·진행 위치가 전진함. 복구 완료의 exit 0 은 아래 줄)
+    Return-ToAbyssSelection -Game $game -SafeStopExitCode 10
     Write-RunLog '[완료] 어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)'
     if ($script:customMode -and $script:customRecoveryOnly) { exit 0 }
     # 화면 복귀만 수행한 준비 실행: 회차로 세지 않도록 코드 10으로 종료 (위 ESC 메뉴 분기와 동일)
@@ -6815,8 +7040,18 @@ try {
           Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
           Write-RunLog "[어비스] 난이도 '$dungeonDifficulty' 클릭"
           Start-Sleep -Milliseconds 800
-          # 사후 검증: 클릭이 빗나가 다른 난이도로 바뀌지 않았는지 선택 강조로 확인 (첫 좌표 재사용)
-          Confirm-DifficultySelected -Game $game -ClickPoint $difficultyPoint -Label $dungeonDifficulty | Out-Null
+          # 사후 검증: 클릭이 빗나가 다른 난이도로 바뀌지 않았는지 선택 강조로 확인 (첫 좌표 재사용).
+          # 커스텀(항목별 명시 난이도)은 확인 실패 시 정지 - 던전 커스텀의 -Strict 계약과 통일
+          # (2026-08-01 전수 점검: 어비스만 경고 진행이라 오난이도 판이 항목 완료로 계상될 수 있었음)
+          $abyssDiffConfirmed = [bool](Confirm-DifficultySelected -Game $game -ClickPoint $difficultyPoint -Label $dungeonDifficulty)
+          if ($script:customMode -and -not $abyssDiffConfirmed) {
+            Write-RunLog "[완료] 난이도 '$dungeonDifficulty' 선택을 확정하지 못했습니다 - 오난이도 판 방지를 위해 정지합니다"
+            exit 4
+          }
+        } elseif ($script:customMode) {
+          # 커스텀 격상: 명시 난이도 글자를 못 찾으면 현재 난이도로 진행하지 않습니다
+          Write-RunLog "[완료] 상세 화면에서 난이도 '$dungeonDifficulty' 글자를 찾지 못했습니다 - 오난이도 판 방지를 위해 정지합니다"
+          exit 4
         } else {
           Write-RunLog "[경고] 상세 화면에서 난이도 '$dungeonDifficulty' 글자를 찾지 못했습니다 - 현재 선택된 난이도로 진행합니다"
         }
@@ -6891,10 +7126,13 @@ try {
           Focus-Game -Game $game
           Click-GamePoint -Game $game -ReferenceX $ptAbyssChanceToggle[0] -ReferenceY $ptAbyssChanceToggle[1]
           Start-Sleep -Milliseconds 900
-          if ((Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle) -eq 'on') {
-            Write-RunLog "[경고] '우연한 만남' 토글을 끄지 못했습니다 - 빈자리가 매칭으로 채워질 수 있습니다"
-          } else {
+          # 'off' 확인만 성공 로그 - unknown 을 '끔'으로 보고하지 않습니다 (2026-08-01 3차
+          # 점검 보류 조건: 파티장은 정지 없이 경고 유지하되 성공/미확인 로그는 구분)
+          $leaderToggleAfter = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
+          if ($leaderToggleAfter -eq 'off') {
             Write-RunLog "[어비스] '우연한 만남' 토글 끔 - 짠 파티 그대로 입장합니다"
+          } else {
+            Write-RunLog "[경고] '우연한 만남' 토글 끄기를 확인하지 못했습니다 (상태: $leaderToggleAfter) - 빈자리가 매칭으로 채워질 수 있습니다"
           }
         } elseif ($toggleState -eq 'off') {
           Write-RunLog "[어비스] '우연한 만남' 토글 꺼짐 확인 - 짠 파티 그대로 입장합니다"
@@ -6966,16 +7204,35 @@ try {
         # 파티찾기: 토글이 켜져 있으면 '파티 찾기' 버튼이 없고 그 자리가 넓은 입장하기라
         # 잘못 누르면 우연한 만남으로 입장돼 버립니다. 반드시 토글을 먼저 끕니다.
         $toggleState = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
+        # unknown 재판독 + 확인 불가 시 정지 - 던전 파티찾기와 같은 fail-closed 계약
+        # (2026-08-01 전수 점검: '꺼짐으로 보고 진행'은 토글이 켜져 있으면 혼자 오입장. Codex 승인)
+        for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleState -eq 'unknown'; $toggleProbe++) {
+          Start-Sleep -Milliseconds 900
+          $toggleState = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
+        }
+        if ($toggleState -eq 'unknown') {
+          Write-RunLog "[완료] '우연한 만남' 토글 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+          exit 4
+        }
         if ($toggleState -eq 'on') {
           Focus-Game -Game $game
           Click-GamePoint -Game $game -ReferenceX $ptAbyssChanceToggle[0] -ReferenceY $ptAbyssChanceToggle[1]
           Start-Sleep -Milliseconds 900
-          if ((Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle) -eq 'on') {
+          # 끄기 확인도 'off' 확정을 요구합니다 ('on'만 아니면 통과 → unknown 이 꺼짐으로 둔갑 방지)
+          $toggleAfterOff = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
+          for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOff -ne 'off'; $toggleProbe++) {
+            Start-Sleep -Milliseconds 900
+            $toggleAfterOff = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
+          }
+          if ($toggleAfterOff -eq 'on') {
             throw "'우연한 만남' 토글을 끄지 못해 파티찾기를 진행할 수 없습니다 (토글이 켜진 상태에서는 파티 찾기 버튼이 없음)"
           }
+          if ($toggleAfterOff -ne 'off') {
+            # 최초 unknown 과 같은 조건부 정지(코드 4)로 통일 (Codex 리뷰 지적 - 던전과 동일)
+            Write-RunLog "[완료] '우연한 만남' 토글을 끈 뒤 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+            exit 4
+          }
           Write-RunLog "[어비스] '우연한 만남' 토글 끔 (파티찾기 준비)"
-        } elseif ($toggleState -eq 'unknown') {
-          Write-RunLog "[경고] '우연한 만남' 토글 상태를 판별하지 못했습니다(화면 확인 불가) - 꺼짐으로 보고 진행합니다"
         } else {
           Write-RunLog "[어비스] '우연한 만남' 토글 꺼짐 확인 (파티찾기 준비)"
         }
@@ -7096,7 +7353,7 @@ try {
     Click-GamePoint -Game $game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
     Write-RunLog '[어비스] 나가기 클릭'
   }
-  Return-ToAbyssSelection -Game $game
+  Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:customMode -and $script:customCleanupOnly) { 10 } else { 0 })
   Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
   if ($script:customMode -and $script:customCleanupOnly) { exit 10 }
 } catch {
