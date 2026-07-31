@@ -4447,19 +4447,28 @@ function Set-DgToggleCard {
   # 이번 호출에서 실제 클릭이 있었는지를 호출부에 알립니다 (매 호출 초기화 - Codex 계약).
   # '방금 우리가 클릭해서 전환을 확인한' 경우 소모량 교차 검증을 생략하는 판단에 쓰입니다.
   $script:dgToggleClicked = $false
+  # 판독 영역 목록 (주 → 보조). PS 5.1 배열 풀림 방지로 쉼표 연산자를 씁니다.
+  $cardRegions = @()
+  $cardRegions += , $Region
+  if ($AltRegion) { $cardRegions += , $AltRegion }
   for ($setTry = 1; $setTry -le 6; $setTry++) {
-    $lastText = (Get-GameRegionOcrText -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
-      -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 5 -Engine $ocrKoreanEngine) -replace '\s', ''
-    # '선태되' = '선택됨' 깨짐 실측 (2026-07-19 00:21 - '됨'도 '선택'도 안 남아 판별 불가였음)
-    $isSelected = ($lastText.Contains('됨') -or $lastText.Contains('선택') -or $lastText.Contains('선태'))
-    $isChallenge = $lastText.Contains('도전')
-    if (-not ($isSelected -or $isChallenge) -and $AltRegion) {
-      $altText = (Get-GameRegionOcrText -Game $Game -ReferenceX $AltRegion[0] -ReferenceY $AltRegion[1] `
-        -RegionWidth $AltRegion[2] -RegionHeight $AltRegion[3] -Scale 5 -Engine $ocrKoreanEngine) -replace '\s', ''
-      if ($altText) { $lastText = $altText }
-      # '선태되' = '선택됨' 깨짐 실측 (2026-07-19 00:21 - '됨'도 '선택'도 안 남아 판별 불가였음)
-    $isSelected = ($lastText.Contains('됨') -or $lastText.Contains('선택') -or $lastText.Contains('선태'))
-      $isChallenge = $lastText.Contains('도전')
+    # 버튼 글자 판독: 다중 스케일 재시도 (2026-07-31 다른 PC 실기 - 창 1273x718 에서 스케일 5는
+    # '서대되'로 깨져 판별 실패했는데 같은 화면을 스케일 3으로 읽으면 '선택됨' 정확 판독.
+    # 07-29 난이도 알약과 같은 '단일 스케일 고정' 사고). 스케일 우선 순회(각 배율에서 주 →
+    # 보조)라 기존 스케일 5 성공 경로는 첫 배율에서 그대로 끝납니다 (Codex 조건).
+    $isSelected = $false
+    $isChallenge = $false
+    foreach ($cardScale in @(5, 3, 4)) {
+      foreach ($cardRegion in $cardRegions) {
+        $cardText = (Get-GameRegionOcrText -Game $Game -ReferenceX $cardRegion[0] -ReferenceY $cardRegion[1] `
+          -RegionWidth $cardRegion[2] -RegionHeight $cardRegion[3] -Scale $cardScale -Engine $ocrKoreanEngine) -replace '\s', ''
+        if ($cardText) { $lastText = $cardText }
+        # '선태되' = '선택됨' 깨짐 실측 (2026-07-19 00:21 - '됨'도 '선택'도 안 남아 판별 불가였음)
+        $isSelected = ($cardText.Contains('됨') -or $cardText.Contains('선택') -or $cardText.Contains('선태'))
+        $isChallenge = $cardText.Contains('도전')
+        if ($isSelected -or $isChallenge) { break }
+      }
+      if ($isSelected -or $isChallenge) { break }
     }
     if (-not ($isSelected -or $isChallenge)) {
       # 은동전이 부족하면 게임이 카드를 자동 해제하고 버튼을 회색 비활성('도전')으로
