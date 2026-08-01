@@ -63,4 +63,19 @@ Assert-Case '협동: 클리어 대기 루프에도 배선(반환값 소비 + con
 Assert-Case '협동: 호출 2곳(스윕 + 클리어 대기)' `
   ([regex]::Matches($workerAll, 'Close-CoopMissionScreen -Game').Count) 2
 
+# ── v1.2.1 (2026-08-01 실사고): 확인 버튼 다중 스케일 + 실측 좌표 폴백 + 시작 전 스윕 ──
+# 기본 s3 이 확인 버튼을 '>poce'/'할인'으로 깨뜨려 두 밤 연속 라이브 미감지 (오류 캡처 재현
+# 확정 - s4 정상). 실패 시 로그 없이 포기하던 구조도 폴백+로그로 보강.
+Assert-Case '협동: 확인 버튼 다중 스케일(3,4,5)' `
+  ($coopSource -match "foreach \(\`$coopBtnScale in @\(3, 4, 5\)\)") $true
+Assert-Case '협동: 폴백은 부제 재확인 후 실측 좌표(636,654)' `
+  ($coopSource -match '\$coopRecheck[\s\S]{0,400}실측 좌표로 클릭[\s\S]{0,200}-ReferenceX 636 -ReferenceY 654') $true
+# 시작 화면 판정 전 팝업 스윕 (재시도 워커 즉사 → 자가 복구 전환): 던전/심층 + 사냥터 +
+# 메인 공통 = 3곳, '닫은 경우에만 1.2초 대기, 최대 2회' 계약
+Assert-Case '시작 스윕: 3곳(던전·사냥터·메인 공통)' `
+  ([regex]::Matches($workerAll, 'if \(-not \(Invoke-PurchasePopupSweep -Game \$[Gg]ame\)\) \{ break \}\s+Start-Sleep -Milliseconds 1200').Count) 3
+Assert-Case '시작 스윕: 던전 사이클 제목 첫 판독보다 앞' `
+  ([bool]([regex]::Match($workerAll, 'function Invoke-NormalDungeonCycle[\s\S]{0,4200}').Value -match
+    'Invoke-PurchasePopupSweep[\s\S]{0,300}\$titleText = & \$readDgTitle')) $true
+
 exit $fails

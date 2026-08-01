@@ -4062,14 +4062,35 @@ function Close-CoopMissionScreen {
   if (-not (($coopText.Contains('우편으로') -and $coopText.Contains('전송')) -or $coopText.Contains('캐릭터가위치한'))) {
     return $false
   }
-  $coopConfirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
-    -RegionWidth 470 -RegionHeight 55 -SearchText '확인'
-  if (-not $coopConfirmPoint) { return $false }
-  Focus-Game -Game $Game
-  Click-ScreenPoint -X $coopConfirmPoint.X -Y $coopConfirmPoint.Y
-  Write-RunLog "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 클릭"
-  Start-Sleep -Seconds 1
-  return $true
+  # '확인' 버튼 탐색: 다중 스케일 3→4→5 (2026-08-01 실사고 - 기본 s3 은 이 버튼을
+  # '>poce'/'할인'으로 깨뜨려 두 밤 연속 라이브 미감지. s4 는 오류 캡처 2장 모두 정상 판독.
+  # 카드 버튼 '서대되'와 같은 단일 배율 결함 - Codex 승인)
+  $coopConfirmPoint = $null
+  foreach ($coopBtnScale in @(3, 4, 5)) {
+    $coopConfirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
+      -RegionWidth 470 -RegionHeight 55 -SearchText '확인' -Scale $coopBtnScale
+    if ($coopConfirmPoint) { break }
+  }
+  if ($coopConfirmPoint) {
+    Focus-Game -Game $Game
+    Click-ScreenPoint -X $coopConfirmPoint.X -Y $coopConfirmPoint.Y
+    Write-RunLog "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 클릭"
+    Start-Sleep -Seconds 1
+    return $true
+  }
+  # 전 배율 실패 폴백: 실측 고정 좌표 (2026-07-30 실측 확인 버튼 중심 636,654).
+  # 부제로 화면이 확정된 상태지만, 클릭 직전 부제를 한 번 더 재확인해 그 사이 화면 전환을
+  # 배제합니다 (상태 기반 클릭 원칙 - Codex 조건: 재확인 성공 시에만 폴백 실행)
+  $coopRecheck = (Get-GameRegionOcrText -Game $Game -ReferenceX 360 -ReferenceY 285 `
+      -RegionWidth 560 -RegionHeight 35 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ((($coopRecheck.Contains('우편으로') -and $coopRecheck.Contains('전송')) -or $coopRecheck.Contains('캐릭터가위치한'))) {
+    Write-RunLog "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 글자 탐색 실패, 실측 좌표로 클릭 (부제 재확인 완료)"
+    Focus-Game -Game $Game
+    Click-GamePoint -Game $Game -ReferenceX 636 -ReferenceY 654
+    Start-Sleep -Seconds 1
+    return $true
+  }
+  return $false
 }
 
 function Invoke-PurchasePopupSweep {
@@ -4706,6 +4727,13 @@ function Invoke-NormalDungeonCycle {
   #    (게임플레이 HUD + 퀘스트 추적기의 'N구역 클리어' 목표로 판별).
   $readDgTitle = {
     Read-DgTitleText -Game $Game   # 좁은 우선 + 심층 조건부 확장 이중 판독 (함수 주석 참고)
+  }
+  # 시작 화면 판정 전 전체 화면 팝업 정리 (2026-08-01 실사고: 물약 부족 팝업+협동 미션 완료
+  # 화면이 겹친 채 재시도 워커가 시작되자 제목/HUD 판독이 전부 가려져 "던전 화면이 아닙니다"
+  # 3연속 즉사 → 정지. 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - Codex 조건)
+  for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
+    if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
+    Start-Sleep -Milliseconds 1200
   }
   $titleText = & $readDgTitle
   $onOptionsScreen = $titleText.Contains('구역')
@@ -6079,6 +6107,12 @@ function Invoke-HuntingGroundCycle {
   $script:contentTag = '[사냥터]'
   Write-RunLog "[사냥터] 자동화 시작: 난이도 '$htDifficulty', 은동전 $(if ($htUseCoin) { '사용' } else { '미사용' })$(if ($htUseCoin -and $htDoubleLoot) { ' + 더블 루팅' }), 매칭 '$htMatching'"
 
+  # 시작 화면 판정 전 전체 화면 팝업 정리 (던전/심층 시작부와 같은 계약 - 2026-08-01 실사고)
+  for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
+    if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
+    Start-Sleep -Milliseconds 1200
+  }
+
   # 0. 현재 화면 판별: 첫 화면(입장하기 버튼) / 결과 화면(새 임무 선택) / 사냥 진행 중(임무 표시)
   $onEntryScreen = [bool](Find-HtEntryButtonPoint -Game $Game)
   $onResultScreen = $false
@@ -6849,6 +6883,15 @@ try {
         Write-RunLog "[준비] 게임 창 정렬($windowMode): ${currentWidth}x${currentHeight}@($currentX,$currentY) -> ${targetWidth}x${targetHeight}@($targetX,$targetY)"
       }
     }
+  }
+
+  # 시작 화면 판정 전 전체 화면 팝업 정리 (2026-08-01 실사고: 물약 부족 팝업+협동 미션 완료
+  # 화면이 겹친 채 재시도 워커가 시작되자 판독이 전부 가려져 3연속 즉사 → 정지. 아래
+  # 출석/이벤트 처리(Clear-EventOverlay)는 구매 팝업을 모르므로 스윕을 먼저 돌립니다.
+  # 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - Codex 조건. 콘텐츠 공통)
+  for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
+    if (-not (Invoke-PurchasePopupSweep -Game $game)) { break }
+    Start-Sleep -Milliseconds 1200
   }
 
   # 시작 시 화면 캡처가 안 되는 상태(원격 데스크톱 창 최소화 등)면 복구될 때까지 기다립니다.
