@@ -3670,6 +3670,12 @@ function Test-KnownScreen {
   $dgEnterProbe = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgEnterBtn[0] -ReferenceY $rgDgEnterBtn[1] `
     -RegionWidth $rgDgEnterBtn[2] -RegionHeight $rgDgEnterBtn[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if ($dgEnterProbe.Contains('진입')) { return $true }
+  # 클리어 화면('화면을 터치')과 던전 결과 화면(다시 하기) - 이벤트 오버레이로 오인해 중앙/
+  # X 후보를 헛클릭하지 않게 알려진 화면으로 인정 (2026-08-02 타 PC 프리즈 제보에서 발견:
+  # 클리어 화면을 '출석/이벤트 화면 추정'으로 오인해 중앙 5회 + X 후보 20회 헛클릭 - 72초
+  # 낭비. 두 화면 모두 시작 판정('클리어 화면 감지 - 터치부터'/'결과 화면 감지')이 담당)
+  if (Test-DungeonClearPrompt -Game $Game) { return $true }
+  if (Find-DgRetryButtonPoint -Game $Game) { return $true }
   # 사냥터 첫 화면 (하단 '입장하기'/'임무 시작' 버튼)
   if (Find-HtEntryButtonPoint -Game $Game) { return $true }
   # 사냥터 결과 화면 (나가기/머무르기/새 임무 선택) - 이걸 모르는 화면으로 보고 중앙을
@@ -4240,7 +4246,16 @@ function Wait-ForResultScreen {
     }
     Start-Sleep -Seconds 2
   }
-  if (-not $retryPoint) { throw $MissingMessage }
+  if (-not $retryPoint) {
+    # 타임아웃 시점에 클리어 화면이 '여전히' 보이면 = 수십 회 터치가 전부 무시된 것 - 게임
+    # 클라이언트 무응답(로딩 멈춤) 가능성이 높아 원인을 알 수 있는 문구로 바꿉니다
+    # (2026-08-02 타 PC 제보: 프리즈 상태에서 50+회 클릭 불변 → 기존 문구로는 원인 불명.
+    # Codex 조건: 이 시점에 새로 재판정해 유지 확인된 경우만 교체, 아니면 기존 문구 폴백)
+    if ((-not $script:screenCaptureFailing) -and (Test-DungeonClearPrompt -Game $Game)) {
+      throw '클리어 화면이 터치에 반응하지 않습니다 - 게임이 응답 없음(로딩 멈춤) 상태로 보입니다. 게임을 재시작한 뒤 다시 시작해 주세요.'
+    }
+    throw $MissingMessage
+  }
   return $retryPoint
 }
 

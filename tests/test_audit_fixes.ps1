@@ -159,4 +159,10 @@ Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백' `
 Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
   ($guiSource -match '\$script:lastWorkerDoneReason = ''''[\s\S]{0,400}Start-Process -FilePath ''powershell\.exe''') $true
 
+# ── v1.2.1: 게임 프리즈 제보(08-02 타 PC) 반영 ─────────────────────────────────
+Assert-Case '워커: Test-KnownScreen 에 클리어/결과 화면 포함(이벤트 오인 방지)' `
+  ($workerSource -match 'if \(Test-DungeonClearPrompt -Game \$Game\) \{ return \$true \}\s+if \(Find-DgRetryButtonPoint -Game \$Game\) \{ return \$true \}') $true
+Assert-Case '워커: 결과 대기 타임아웃 시 클리어 잔존 재판정 + 무응답 안내' `
+  ($workerSource -match 'Test-DungeonClearPrompt -Game \$Game\)\) \{\s+throw ''클리어 화면이 터치에 반응하지 않습니다[\s\S]{0,120}throw \$MissingMessage') $true
+
 exit $fails
