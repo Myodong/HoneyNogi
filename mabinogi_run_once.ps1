@@ -3728,10 +3728,25 @@ function Invoke-EventSkipOrConfirm {
     Start-Sleep -Seconds 2
     return $true
   }
+  # 주간 협동 미션 리셋 팝업 - 공용 소함수로 처리 (2026-08-03 추출)
+  if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix $LogPrefix) { return $true }
+  return $false
+}
+
+function Close-WeeklyCoopResetPopup {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$LogPrefix = ''
+  )
+
   # 주간 협동 미션 리셋 팝업 (월요일 오전 6시 - 2026-07-20 06:03 실측: '새로운 한 주가
   # 시작되었어요!' 전체 화면이 어비스 복귀를 막아 시간 초과. 알 수 없는 화면 X 후보들도
   # 이 팝업의 버튼 위치와 달라 못 닫았음). 하단 버튼 줄 판독('닫기 협동 미션 참여하기')이
   # 두 창 크기(1272/1908) 모두 또렷 - '협동'+'참여' 조합으로 감지하고 '닫기'를 클릭합니다.
+  # 2026-08-03 06:02 실사고로 소함수 추출: 이 팝업이 '다시 하기 → 옵션 복귀 대기'를 40초
+  # 막아 무인 정지 - 이벤트 스킵 외에 복귀 대기 루프들(던전/사냥터)도 공용해야 함.
+  # 예비 좌표 클릭은 '협동'+'참여' 동시 확정이 전제 (이 분기 자체가 그 게이트 - Codex 조건).
+  if ($script:screenCaptureFailing) { return $false }
   $weeklyText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
     -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if ($weeklyText.Contains('협동') -and $weeklyText.Contains('참여')) {
@@ -6136,6 +6151,18 @@ function Invoke-NormalDungeonCycle {
       Start-Sleep -Seconds 1
       continue
     }
+    # 아침 6시 리셋 블로커 처리 (2026-08-03 06:02 실사고: 월요일 주간 협동 리셋 팝업이 이
+    # 대기를 40초 막아 무인 정지 → 3연속 오류. '계속하' 처리 뒤 순서 - Space 위험 팝업 우선.
+    # 닫은 경우 continue 로 재캡처해 같은 프레임으로 다음 판정을 하지 않음 - Codex 조건)
+    if (Invoke-PurchasePopupSweep -Game $Game) { continue }
+    if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[던전] ') { continue }
+    if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+      Write-RunLog '[던전] 공지 게시판 팝업 감지 - X로 닫기 (복귀 대기 중)'
+      Start-Sleep -Seconds 2
+      continue
+    }
     $retryAgainPoint = Find-DgRetryButtonPoint -Game $Game
     if ($retryAgainPoint) {
       Write-RunLog "[던전] 결과 화면이 남아 있어 '다시 하기'를 다시 클릭합니다"
@@ -6525,6 +6552,16 @@ function Invoke-HuntingGroundCycle {
       Focus-Game -Game $Game
       Press-KeyOnce -VirtualKey ([byte]32)   # Space = 정리하기
       Write-RunLog '[사냥터] 아이템 정리 화면 감지 - Space로 정리하기'
+      Start-Sleep -Seconds 2
+      continue
+    }
+    # 아침 6시 리셋 블로커 처리 (2026-08-03 - 던전 '다시 하기' 복귀 대기와 같은 계약)
+    if (Invoke-PurchasePopupSweep -Game $Game) { continue }
+    if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[사냥터] ') { continue }
+    if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+      Write-RunLog '[사냥터] 공지 게시판 팝업 감지 - X로 닫기 (복귀 대기 중)'
       Start-Sleep -Seconds 2
       continue
     }
