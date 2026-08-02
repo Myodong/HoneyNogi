@@ -167,6 +167,16 @@ Assert-Case '워커: 보유한 재화 화면 감지 조각(유한/보유+재화)
 Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 대기)' `
   ([regex]::Matches($workerSource, 'if \(Close-CurrencyOverviewScreen -Game \$Game\) \{ continue \}').Count) 2
 
+# ── v1.2.1: 월요일 6시 주간 리셋 팝업이 복귀 대기를 막던 사고(08-03 06:02) ─────────
+Assert-Case '워커: 주간 리셋 팝업 소함수 추출' `
+  ($workerSource -match 'function Close-WeeklyCoopResetPopup[\s\S]{0,900}협동[\s\S]{0,300}참여') $true
+Assert-Case '워커: 복귀 대기 2곳(던전/사냥터)에 6시 블로커 3종 배선' `
+  ([regex]::Matches($workerSource, "if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[").Count) 2
+Assert-Case '워커: 복귀 대기 공지 팝업 닫기 2곳' `
+  ([regex]::Matches($workerSource, '공지 게시판 팝업 감지 - X로 닫기 \(복귀 대기 중\)').Count) 2
+Assert-Case '워커: 이벤트 스킵이 소함수 호출로 치환' `
+  ($workerSource -match 'if \(Close-WeeklyCoopResetPopup -Game \$Game -LogPrefix \$LogPrefix\) \{ return \$true \}') $true
+
 # ── v1.2.1: 게임 프리즈 제보(08-02 타 PC) 반영 ─────────────────────────────────
 Assert-Case '워커: Test-KnownScreen 에 클리어/결과 화면 포함(이벤트 오인 방지)' `
   ($workerSource -match 'if \(Test-DungeonClearPrompt -Game \$Game\) \{ return \$true \}\s+if \(Find-DgRetryButtonPoint -Game \$Game\) \{ return \$true \}') $true
