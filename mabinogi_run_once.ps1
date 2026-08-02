@@ -2134,7 +2134,10 @@ function Click-ScreenPoint {
   param([int]$X, [int]$Y)
 
   # SetCursorPos 뒤 실제 커서가 목표 ±3px 안인지 확인하고, 어긋나면 같은 지점으로 한 번 더
-  # 이동합니다. 확인 실패만으로 클릭을 막지는 않아 기존 자동화 흐름의 회귀를 피합니다.
+  # 이동합니다. 확인에 실패하면 클릭하지 않습니다 (2026-08-02 22:02 실사고: 사용자 마우스
+  # 간섭으로 커서가 목표를 벗어난 채 클릭이 강행돼 재화줄을 오클릭 → '보유한 재화' 전체
+  # 화면이 열려 클리어 대기가 가려짐. 이 프로젝트는 상태 기반 재확인 구조라 건너뛴 클릭은
+  # 다음 감지에서 자연 재시도됨 - Codex 승인: 커서 미확인 시 클릭 금지, 좌표 폴백 금지).
   $cursorReady = $false
   for ($cursorTry = 1; $cursorTry -le 2; $cursorTry++) {
     [HoneyNogiInput]::SetCursorPos($X, $Y) | Out-Null
@@ -2149,7 +2152,7 @@ function Click-ScreenPoint {
   # 경고는 연속 실패의 첫 1회만 (전면화 확인과 같은 억제 규칙 - Get-RepeatWarnAction)
   switch (Get-RepeatWarnAction -WasWarned $script:cursorWarnActive -Failed (-not $cursorReady)) {
     'warn' {
-      Write-RunLog "[경고] 커서를 목표 위치(${X},${Y})로 두 번 이동했지만 실제 위치를 확인하지 못했습니다 - 기존 동작대로 클릭을 계속합니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)"
+      Write-RunLog "[경고] 커서를 목표 위치(${X},${Y})로 두 번 이동했지만 실제 위치를 확인하지 못했습니다 - 오클릭 방지를 위해 이번 클릭을 건너뜁니다 (다음 감지에서 재시도. 연속 실패 중에는 이 경고를 반복하지 않습니다)"
       $script:cursorWarnActive = $true
       $script:cursorWarnSuppressed = 0
     }
@@ -2160,6 +2163,7 @@ function Click-ScreenPoint {
     }
     default { if (-not $cursorReady) { $script:cursorWarnSuppressed++ } }
   }
+  if (-not $cursorReady) { return }
   Start-Sleep -Milliseconds 250
   [HoneyNogiInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 100
@@ -3124,6 +3128,8 @@ function Wait-ForDungeonClearScreen {
       # 구매 팝업 '닫기'를 못 찾았을 때만 확인하고, 실제로 닫았을 때만 폴링을 다시 돕니다.
       # 부활 대기 상태($reviveConfirmPending)는 구매 팝업이 아니므로 건드리지 않습니다.
       if (Close-CoopMissionScreen -Game $Game) { continue }
+      # 오클릭으로 열린 '보유한 재화' 전체 화면도 같은 주기로 정리 (2026-08-02 실사고)
+      if (Close-CurrencyOverviewScreen -Game $Game) { continue }
     }
 
     # 행동불능(사망)/파티 전멸 감지 시 자동 부활:
@@ -4048,6 +4054,27 @@ function Find-HtEntryButtonPoint {
 
 # ===== 어비스/던전/사냥터 공통 블록 (2026-07-18 기술 부채 정리: 복사 코드 → 헬퍼 통일) =====
 
+function Close-CurrencyOverviewScreen {
+  param([System.Diagnostics.Process]$Game)
+
+  # '보유한 재화' 전체 화면을 감지해 우상단 X 로 닫습니다. 닫았으면 $true.
+  # (2026-08-02 22:02 실사고: 커서 간섭 오클릭이 재화줄을 눌러 이 화면이 열렸고 클리어
+  #  대기가 가려짐 - 라이브 캡처 실측: 좌상단 제목 '보유한 재화', 우상단 X ≈ (1228,67)).
+  # 제목을 좁은 ROI 에서 엄격히 확인한 경우에만 닫습니다 (Codex 조건 - 오탐 클릭 금지).
+  # 클릭은 커서 확인 게이트(Click-ScreenPoint)가 지키므로 간섭 중엔 다음 폴링에서 재시도.
+  if ($script:screenCaptureFailing) { return $false }
+  # '보유한'은 s3 에서 '모유한'으로 깨짐(실측) → '유한'+'재화' 조각 조합으로 판정
+  # (좌상단 제목 전용 ROI 라 다른 화면 오탐 없음 - 보관 93장 스윕 0건)
+  $ccTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX 25 -ReferenceY 45 `
+      -RegionWidth 260 -RegionHeight 50 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not (($ccTitle.Contains('보유') -or $ccTitle.Contains('유한')) -and $ccTitle.Contains('재화'))) { return $false }
+  Write-RunLog "$($script:contentTag) '보유한 재화' 화면 감지(오클릭 추정) - 닫기(X) 클릭"
+  Focus-Game -Game $Game
+  Click-GamePoint -Game $Game -ReferenceX 1228 -ReferenceY 67
+  Start-Sleep -Seconds 1
+  return $true
+}
+
 function Close-CoopMissionScreen {
   param([System.Diagnostics.Process]$Game)
 
@@ -4244,6 +4271,8 @@ function Wait-ForResultScreen {
       Start-Sleep -Seconds 2
       continue
     }
+    # 오클릭으로 열린 '보유한 재화' 전체 화면 정리 (2026-08-02 실사고 - 결과 대기도 가려짐)
+    if (Close-CurrencyOverviewScreen -Game $Game) { continue }
     Start-Sleep -Seconds 2
   }
   if (-not $retryPoint) {
