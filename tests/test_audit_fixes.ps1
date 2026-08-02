@@ -151,4 +151,12 @@ Assert-Case '3차: 런처 임시 파일명 PID 포함' `
 Assert-Case '3차: 런처 powershell 이름 검색 fallback 제거' `
   ($launcherSource -notmatch 'psExe = "powershell\.exe"') $true
 
+# ── v1.2.1: 코드 4 상태줄에 실제 [완료] 사유 표시 (2026-08-02 오해 실사례) ──────────
+Assert-Case 'GUI: [완료] 사유 수집 3곳(기본/복구/최종 폴링)' `
+  ([regex]::Matches($guiSource, "match '\\\[완료\\\]\\s\*\(\.\+\)'").Count) 3
+Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백' `
+  ($guiSource -match '\$code4Reason = "조건 정지: \$code4Reason"[\s\S]{0,200}elseif \(\$rbCatDeep\.Checked\)') $true
+Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
+  ($guiSource -match '\$script:lastWorkerDoneReason = ''''[\s\S]{0,400}Start-Process -FilePath ''powershell\.exe''') $true
+
 exit $fails

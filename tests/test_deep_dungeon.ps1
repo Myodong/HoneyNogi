@@ -233,6 +233,47 @@ Assert-Case '배선(워커): 입장 대기 스윕에 퀘스트 클리어 확인 
    ($workerSource -match "아이템을누르")) $true
 Assert-Case '배선(워커): 구역 좌표 소진 시 이미 선택 확인' `
   ($workerSource -match '이미 선택 확인 - 카드 클릭 불필요') $true
+# ── 카드 토글 루프 상태 기계 시뮬레이션 (2026-08-02 06:03 실사고 회귀) ─────────────
+# 사고: RDP 전환 5초가 6회 중 5회를 소모 → 복구 직후 마지막 회전에서 클릭만 하고 재확인 없이
+# 종료 → 게이트 정지. 새 계약: ①캡처 실패는 회전 미소모 ②마지막 회전 클릭 시 1회전 연장.
+# 프레임 시퀀스: FAIL=캡처실패 / SEL=선택됨 / CHA=도전 / NONE=판독불가
+function Simulate-ToggleLoop {
+  param([string[]]$Frames, [bool]$WantSelected)
+  $idx = 0; $clicked = $false; $recheckDone = $false; $extended = $false
+  $setTryMax = 6; $rounds = 0
+  for ($setTry = 1; $setTry -le $setTryMax; $setTry++) {
+    while ($idx -lt $Frames.Count -and $Frames[$idx] -eq 'FAIL') { $idx++ }   # 캡처 실패 대기 (회전 미소모)
+    $rounds++
+    $frame = $(if ($idx -lt $Frames.Count) { $Frames[$idx] } else { 'NONE' }); $idx++
+    if ($clicked -and -not $recheckDone) { $recheckDone = $true }
+    $isSelected = ($frame -eq 'SEL'); $isChallenge = ($frame -eq 'CHA')
+    if (-not ($isSelected -or $isChallenge)) {
+      if ($clicked) { return @{ Ok = $true; Via = '재확인 생략'; Rounds = $rounds; Extended = $extended } }
+      continue
+    }
+    if ($isSelected -eq $WantSelected) { return @{ Ok = $true; Via = '확인'; Rounds = $rounds; Extended = $extended } }
+    $clicked = $true
+    if ($setTry -eq $setTryMax -and $setTryMax -eq 6 -and -not $recheckDone) { $setTryMax = 7; $extended = $true }
+  }
+  return @{ Ok = $false; Via = '실패'; Rounds = $rounds; Extended = $extended }
+}
+# 사고 재현: 캡처 실패 5프레임이 회전을 소모하지 않아, 복구 후 클릭→재확인이 정상 진행
+$simCase1 = Simulate-ToggleLoop -Frames @('FAIL','FAIL','FAIL','FAIL','FAIL','SEL','CHA') -WantSelected $false
+Assert-Case '토글 시뮬: 캡처 실패 5회 미소모 → 클릭 후 재확인 성공' ($simCase1.Ok -and $simCase1.Rounds -eq 2) $true
+# 마지막(6회째) 회전 클릭 → 1회전 연장으로 재확인 보장
+$simCase2 = Simulate-ToggleLoop -Frames @('NONE','NONE','NONE','NONE','NONE','SEL','CHA') -WantSelected $false
+Assert-Case '토글 시뮬: 6회째 첫 클릭 → 연장 재확인 성공' ($simCase2.Ok -and $simCase2.Extended -and $simCase2.Rounds -eq 7) $true
+# 연장 회전에서도 반대 상태면 성공 처리 없이 실패 (게이트 유지 - Codex 조건)
+$simCase3 = Simulate-ToggleLoop -Frames @('NONE','NONE','NONE','NONE','NONE','SEL','SEL') -WantSelected $false
+Assert-Case '토글 시뮬: 연장 재확인도 반대 상태면 실패 반환' (-not $simCase3.Ok -and $simCase3.Extended) $true
+# 연장은 1회뿐 (무한 연장 금지)
+Assert-Case '토글 시뮬: 연장 후 추가 연장 없음(총 7회전)' ($simCase3.Rounds -eq 7) $true
+# 배선: 실제 함수가 시뮬과 같은 계약을 갖는지
+Assert-Case '배선(워커): 토글 루프 캡처 실패 대기(회전 미소모)' `
+  ($workerSource -match 'for \(\$setTry = 1; \$setTry -le \$setTryMax; \$setTry\+\+\) \{[\s\S]{0,700}?while \(\$script:screenCaptureFailing\)') $true
+Assert-Case '배선(워커): 마지막 회전 클릭 시 1회전 연장' `
+  ($workerSource -match 'if \(\$setTry -eq \$setTryMax -and \$setTryMax -eq 6 -and -not \$clickedRecheckDone\) \{ \$setTryMax = 7 \}') $true
+
 # 2026-07-31 다른 PC 실기(창 1273x718): 카드 버튼 '선택됨'이 스케일 5에서 '서대되'로 깨져
 # 판별 실패 → 안전 정지. 같은 화면을 스케일 3으로 읽으면 정확 판독(오프라인 재현) → 다중
 # 스케일 재시도. 스케일 우선 순회(각 배율에서 주→보조)라 기존 s5 성공 경로는 1회째 그대로

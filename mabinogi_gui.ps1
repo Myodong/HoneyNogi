@@ -1218,6 +1218,7 @@ $script:logOffset = [long]0
 $script:recoveryLogOffset = [long]0
 $script:uiReady = $false      # 초기 로딩 중 설정 저장이 일어나지 않게 하는 플래그
 $script:preparedStreak = 0    # 연속 '준비 실행'(코드 10) 횟수 - 화면 오판으로 인한 무한 준비 루프 방지 (컨트롤러와 동일)
+$script:lastWorkerDoneReason = ''  # 이번 회차 로그의 마지막 '[완료]' 사유 - 코드 4 상태줄에 실제 이유 표시용 (2026-08-02)
 # --- 커스텀 반복(던전/어비스 리스트 모드) 실행 컨텍스트 ---
 $script:customActive = $false        # 이번 실행이 커스텀 반복 모드인지 (시작 시 확정 - 실행 중 라디오 변경 영향 차단)
 $script:customConfigSection = 'customRepeat' # 실행 중 진행 기록을 읽고 쓸 config 섹션
@@ -5268,6 +5269,9 @@ function Start-NextCycle {
     $env:HONEYNOGI_LAST_RUN = $(if (($null -eq $script:targetTime) -and ($script:targetCycles -gt 0) -and
         ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
   }
+  # 이번 회차의 [완료] 사유 수집을 초기화합니다 (이전 회차 사유가 코드 4 상태줄에 오표시되는
+  # 것 방지 - Codex 조건)
+  $script:lastWorkerDoneReason = ''
   # 프로세스 생성 실패 시 UI 잠금·절전 방지가 복원되지 않던 문제 방어 (2026-08-01 전수 점검:
   # 종료 타이머 조건이 running && worker 라 worker 가 null 이면 자동 복구 경로가 없었음)
   try {
@@ -5382,6 +5386,9 @@ $timer.Add_Tick({
       $lines = Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset)
       if ($null -ne $lines) {
         for ($i = 0; $i -lt $lines.Count; $i++) {
+          # 코드 4 상태줄용 실제 사유 수집 (범용 '공물 소진 등' 문구가 실제 이유와 달라
+          # 사용자가 오해한 실사례 - 2026-08-02, Codex 승인)
+          if ($lines[$i] -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
           $displayLine = Convert-WorkerLogLineForGui -Line $lines[$i] -CustomActive $script:customActive
           if ($null -eq $displayLine) { continue }
           Add-ColoredLogLine ('  ' + $displayLine)
@@ -5392,6 +5399,7 @@ $timer.Add_Tick({
       $recoveryLines = Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset)
       if ($null -ne $recoveryLines) {
         for ($i = 0; $i -lt $recoveryLines.Count; $i++) {
+          if ($recoveryLines[$i] -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
           $displayLine = Convert-WorkerLogLineForGui -Line $recoveryLines[$i] -CustomActive $script:customActive
           if ($null -eq $displayLine) { continue }
           Add-ColoredLogLine ('  ' + $displayLine)
@@ -5542,8 +5550,30 @@ $timer.Add_Tick({
             return
           }
         }
-        Stop-AllRun $(if ($rbCatDeep.Checked) { '조건 충족으로 정지 - 마족공물 소진 등 (자세한 내용은 로그 참고)' }
-          else { '조건 충족으로 정지 - 은동전 소진 등 (자세한 내용은 로그 참고)' })
+        # 종료 직전 기록된 [완료] 사유를 놓치지 않게 잔여 로그를 한 번 더 수집합니다
+        # (타이머 tail 과 종료 사이의 경쟁 방지 - Codex 조건)
+        $finalLines = @()
+        $finalLines += @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))
+        $finalLines += @(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))
+        foreach ($finalLine in $finalLines) {
+          if ($null -eq $finalLine) { continue }
+          if ($finalLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
+          $displayLine = Convert-WorkerLogLineForGui -Line $finalLine -CustomActive $script:customActive
+          if ($null -ne $displayLine) { Add-ColoredLogLine ('  ' + $displayLine) }
+        }
+        # 상태줄에 실제 정지 사유 표시 - 범용 문구('공물 소진 등')가 실제 이유와 달라 오해를
+        # 만든 실사례(2026-08-02) 반영. 사유를 못 잡은 경우에만 기존 범용 문구 폴백
+        $code4Reason = ''
+        if ($script:lastWorkerDoneReason) {
+          $code4Reason = ($script:lastWorkerDoneReason -replace '\s+', ' ').Trim()
+          if ($code4Reason.Length -gt 80) { $code4Reason = $code4Reason.Substring(0, 80) + '…' }
+          $code4Reason = "조건 정지: $code4Reason"
+        } elseif ($rbCatDeep.Checked) {
+          $code4Reason = '조건 충족으로 정지 - 마족공물 소진 등 (자세한 내용은 로그 참고)'
+        } else {
+          $code4Reason = '조건 충족으로 정지 - 은동전 소진 등 (자세한 내용은 로그 참고)'
+        }
+        Stop-AllRun $code4Reason
         $lblStatus.ForeColor = [System.Drawing.Color]::SteelBlue
       } else {
         if ($script:customActive -and $exitCode -eq 1) {

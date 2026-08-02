@@ -4526,7 +4526,18 @@ function Set-DgToggleCard {
   $cardRegions += , $Region
   if ($AltRegion) { $cardRegions += , $AltRegion }
   $clickedRecheckDone = $false
-  for ($setTry = 1; $setTry -le 6; $setTry++) {
+  $setTryMax = 6
+  for ($setTry = 1; $setTry -le $setTryMax; $setTry++) {
+    # 캡처 실패 중에는 시도를 소모하지 않고 복구를 기다립니다 (2026-08-02 06:03 실사고:
+    # 아침 6시 리셋 + RDP 본체 전환 5초가 6회 중 5회를 태워, 복구 직후 마지막 회전에서
+    # 클릭만 하고 재확인 없이 종료 → 커스텀 게이트 정지. 입장 재시도 루프와 같은 계약 -
+    # 복구 탐침이 캡처 성공을 등록해 플래그를 갱신합니다. Codex 조건: setTry 절대 미소모)
+    while ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      Get-GameRegionOcrText -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
+        -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 5 -Engine $ocrKoreanEngine | Out-Null
+    }
     # 버튼 글자 판독: 다중 스케일 재시도 (2026-07-31 다른 PC 실기 - 창 1273x718 에서 스케일 5는
     # '서대되'로 깨져 판별 실패했는데 같은 화면을 스케일 3으로 읽으면 '선택됨' 정확 판독.
     # 07-29 난이도 알약과 같은 '단일 스케일 고정' 사고). 스케일 우선 순회(각 배율에서 주 →
@@ -4604,6 +4615,10 @@ function Set-DgToggleCard {
     Write-RunLog "$($script:contentTag) $Label 버튼 클릭 → $(if ($WantSelected) { '사용' } else { '미사용' })으로 변경"
     $clicked = $true
     $script:dgToggleClicked = $true
+    # 마지막 회전에서 클릭했다면 재확인용으로 1회전만 연장합니다 (2026-08-02 실사고 - 재확인
+    # 없이 종료돼 게이트 정지. 연장 회전에서도 반대 상태로 읽히면 성공 처리 없이 기존
+    # 경고/$false 경로로 갑니다 - Codex 조건)
+    if ($setTry -eq $setTryMax -and $setTryMax -eq 6 -and -not $clickedRecheckDone) { $setTryMax = 7 }
     Start-Sleep -Milliseconds 1100
   }
   # 여기 도달: 클릭했는데도 계속 반대 상태로 읽히거나(설정이 안 먹힘), 클릭 전부터 계속 판별 불가
