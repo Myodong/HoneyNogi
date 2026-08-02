@@ -159,6 +159,14 @@ Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백' `
 Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
   ($guiSource -match '\$script:lastWorkerDoneReason = ''''[\s\S]{0,400}Start-Process -FilePath ''powershell\.exe''') $true
 
+# ── v1.2.1: 오클릭 사고(08-02 22:02 - 커서 간섭 클릭이 재화줄을 눌러 화면 가림) ──
+Assert-Case '워커: 커서 미확인 시 클릭 건너뜀(강행 제거)' `
+  ($workerSource -match '오클릭 방지를 위해 이번 클릭을 건너뜁니다[\s\S]{0,700}if \(-not \$cursorReady\) \{ return \}') $true
+Assert-Case '워커: 보유한 재화 화면 감지 조각(유한/보유+재화)' `
+  ($workerSource -match "Contains\('보유'\) -or \`$ccTitle\.Contains\('유한'\)\) -and \`$ccTitle\.Contains\('재화'\)") $true
+Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 대기)' `
+  ([regex]::Matches($workerSource, 'if \(Close-CurrencyOverviewScreen -Game \$Game\) \{ continue \}').Count) 2
+
 # ── v1.2.1: 게임 프리즈 제보(08-02 타 PC) 반영 ─────────────────────────────────
 Assert-Case '워커: Test-KnownScreen 에 클리어/결과 화면 포함(이벤트 오인 방지)' `
   ($workerSource -match 'if \(Test-DungeonClearPrompt -Game \$Game\) \{ return \$true \}\s+if \(Find-DgRetryButtonPoint -Game \$Game\) \{ return \$true \}') $true
