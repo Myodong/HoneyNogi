@@ -211,4 +211,27 @@ Assert-Case '워커: 주간 리셋 팝업 - 클리어/결과 대기 배선 2곳'
 Assert-Case '워커: 다음 층 대기 - 스윕+주간 리셋 배선(재클릭 판정 앞)' `
   ($workerSource -match "if \(Invoke-PurchasePopupSweep -Game \`$Game\) \{ continue \}\s+if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[던전\] '\) \{ continue \}\s+\`$floorAgainPoint = Find-DgNextFloorButtonPoint") $true
 
+# ── v1.2.1: 08-01 KJM PC 네트워크 불안정 팝업 실사고 (클리어 대기 600초 소진 + 3연속 정지) ──
+# 순수 선택 소함수: '도하기' 조각 + 위치 게이트 (진리표는 test_weekly_coop_popup)
+Assert-Case '워커: 네트워크 재시도 버튼 선택 게이트(X>=640, Y 585~655)' `
+  ($workerSource -match 'if \(\$wordX -ge 640 -and \$wordY -ge 585 -and \$wordY -le 655\)') $true
+# 제목 엄격 판정('네트워크'+'불안정') - 감지 + Focus 후 재확인 2곳 (예비 좌표 오클릭 방지)
+Assert-Case '워커: 네트워크 팝업 제목 이중 확인(감지+클릭 직전)' `
+  ([regex]::Matches($workerSource, "Contains\('네트워크'\) -and \`$netTitle\.Contains\('불안정'\)").Count) 2
+# 예비 좌표 (743,620) = '다시 시도하기' 중심 실측 - 제목 재확정 전제 1곳
+Assert-Case '워커: 네트워크 재시도 예비 좌표(743,620) 1곳' `
+  ([regex]::Matches($workerSource, 'Click-GamePoint -Game \$Game -ReferenceX 743 -ReferenceY 620').Count) 1
+# 배선 ①: 입장/매칭 스윕 끝
+Assert-Case '워커: 네트워크 팝업 - 스윕 배선' `
+  ([regex]::Matches($workerSource, 'if \(Close-NetworkUnstablePopup -Game \$Game\) \{ return \$true \}').Count) 1
+# 배선 ②: 이벤트 스킵 선두 (알 수 없는 화면 루프의 정식 출구)
+Assert-Case '워커: 네트워크 팝업 - 이벤트 스킵 배선' `
+  ([regex]::Matches($workerSource, 'if \(Close-NetworkUnstablePopup -Game \$Game -LogPrefix \$LogPrefix\) \{ return \$true \}').Count) 1
+# 배선 ③: 클리어 대기 - 결과 화면 감지(FindResultButton)보다 먼저 (어휘 충돌 방지 - Codex)
+Assert-Case '워커: 네트워크 팝업 - 클리어 대기 배선(결과 감지 앞)' `
+  ($workerSource -match 'Close-NetworkUnstablePopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\)\) \{ continue \}[\s\S]{0,600}if \(\$FindResultButton -and \(\$pollCounter % 2\)') $true
+# 배선 ④: 결과 대기 - 반복 버튼 탐색보다 먼저
+Assert-Case '워커: 네트워크 팝업 - 결과 대기 배선(버튼 탐색 앞)' `
+  ($workerSource -match 'if \(Close-NetworkUnstablePopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}\s+\$retryPoint = & \$FindRetryButton') $true
+
 exit $fails
