@@ -170,8 +170,8 @@ Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 �
 # ── v1.2.1: 월요일 6시 주간 리셋 팝업이 복귀 대기를 막던 사고(08-03 06:02) ─────────
 Assert-Case '워커: 주간 리셋 팝업 소함수 추출' `
   ($workerSource -match 'function Close-WeeklyCoopResetPopup[\s\S]{0,900}협동[\s\S]{0,300}참여') $true
-Assert-Case '워커: 복귀 대기 2곳(던전/사냥터)에 6시 블로커 3종 배선' `
-  ([regex]::Matches($workerSource, "if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[").Count) 2
+Assert-Case '워커: 복귀 대기 2곳(던전/사냥터)+다음 층 대기에 주간 리셋 팝업 배선' `
+  ([regex]::Matches($workerSource, "if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[").Count) 3
 Assert-Case '워커: 복귀 대기 공지 팝업 닫기 2곳' `
   ([regex]::Matches($workerSource, '공지 게시판 팝업 감지 - X로 닫기 \(복귀 대기 중\)').Count) 2
 Assert-Case '워커: 이벤트 스킵이 소함수 호출로 치환' `
@@ -182,5 +182,27 @@ Assert-Case '워커: Test-KnownScreen 에 클리어/결과 화면 포함(이벤�
   ($workerSource -match 'if \(Test-DungeonClearPrompt -Game \$Game\) \{ return \$true \}\s+if \(Find-DgRetryButtonPoint -Game \$Game\) \{ return \$true \}') $true
 Assert-Case '워커: 결과 대기 타임아웃 시 클리어 잔존 재판정 + 무응답 안내' `
   ($workerSource -match 'Test-DungeonClearPrompt -Game \$Game\)\) \{\s+throw ''클리어 화면이 터치에 반응하지 않습니다[\s\S]{0,120}throw \$MissingMessage') $true
+
+# ── v1.2.1: 08-03 실사고 2건 (06:02 협동 미션 전체 창 / 08:50 1908 창 알약 판독 전멸) ──
+# 협동 미션 전체 창 소함수: 제목 '협동'+'미션' 이중 확인(클릭 직전 재확인 - 스테일 방지)
+Assert-Case '워커: 협동 창 제목 이중 확인(감지+클릭 직전 재확인)' `
+  ([regex]::Matches($workerSource, "-not \(\`$boardTitle\.Contains\('협동'\) -and \`$boardTitle\.Contains\('미션'\)\)").Count) 2
+# X(1228,67) 클릭 = 보유한 재화 창과 동일 위치 - 두 함수 각각 1곳씩
+Assert-Case '워커: 우상단 X(1228,67) 클릭 2곳(재화 창+협동 창)' `
+  ([regex]::Matches($workerSource, 'Click-GamePoint -Game \$Game -ReferenceX 1228 -ReferenceY 67').Count) 2
+# 배선 ①: 입장/매칭 스윕 (스윕을 쓰는 입장 대기·복귀 대기·시작 판정 일괄 커버)
+Assert-Case '워커: 협동 창 닫기 - 스윕 배선' `
+  ([regex]::Matches($workerSource, 'if \(Close-CoopMissionBoardScreen -Game \$Game\) \{ return \$true \}').Count) 1
+# 배선 ②: 이벤트 스킵 - 범용 '건너'/'지원'/'확인' 탐색보다 먼저 (Codex 순서 조건)
+Assert-Case '워커: 협동 창 닫기 - 이벤트 스킵 선두 배선' `
+  ($workerSource -match 'if \(Close-CoopMissionBoardScreen -Game \$Game -LogPrefix \$LogPrefix\) \{ return \$true \}[\s\S]{0,300}\$skipPoint = Find-GameTextPoint') $true
+# 배선 ③④: 클리어 대기 + 결과 대기 (주간 리셋 팝업과 협동 창 각 2곳)
+Assert-Case '워커: 협동 창 닫기 - 클리어/결과 대기 배선 2곳' `
+  ([regex]::Matches($workerSource, 'if \(Close-CoopMissionBoardScreen -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}').Count) 2
+Assert-Case '워커: 주간 리셋 팝업 - 클리어/결과 대기 배선 2곳' `
+  ([regex]::Matches($workerSource, 'if \(Close-WeeklyCoopResetPopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}').Count) 2
+# 배선 ⑤: '다음 층으로' 전환 대기 - 복귀 대기와 같은 블로커 계약 (스윕+주간 리셋)
+Assert-Case '워커: 다음 층 대기 - 스윕+주간 리셋 배선(재클릭 판정 앞)' `
+  ($workerSource -match "if \(Invoke-PurchasePopupSweep -Game \`$Game\) \{ continue \}\s+if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[던전\] '\) \{ continue \}\s+\`$floorAgainPoint = Find-DgNextFloorButtonPoint") $true
 
 exit $fails

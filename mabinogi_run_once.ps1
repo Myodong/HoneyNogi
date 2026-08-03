@@ -1134,8 +1134,19 @@ function Find-DgDifficultyPoint {
   # 깨짐이 달라(선택 화면은 s3 정상/s4·s5 깨짐, 키아 옵션은 s4 빈 판독/s5 정상) 단일
   # 스케일로는 전멸할 수 있음. 실측 전 케이스에서 최소 한 스케일은 정상 판독 - 첫 성공
   # 채택, 성공 시 조기 종료라 기존 성공 경로 비용 불변 (Get-DgTributeCost 전례, Codex 승인).
+  #
+  # s2 최종 폴백 (2026-08-03 08:50 실사고): 1908x1076 창은 캡처 확대가 '기준 크기x배율'
+  # 고정이라 실효 배율이 배율/1.5 로 떨어짐 - 옵션 '어려움' 알약이 s4/s3/s5(실효 2.67/2.0/
+  # 3.33) 전부 깨져('1권하움'/빈 판독) 3연속 정지. 오류 캡처 3장을 워커 동일 파이프라인으로
+  # 재현: s2(실효 1.33, 거의 원본)만 3장 모두 '어려움'(660,121) 정상 판독 + 채택 통과.
+  # s6~s8(실효 4.0~5.3)도 전부 깨짐 실측 - 고배율 확장은 답이 아님. '어려움' 키 한정인
+  # 이유: 앵커/HardX 위치 게이트가 어려움에만 있어 s2 오독이 있어도 오채택 불가지만,
+  # 일반/매우어려움은 텍스트 게이트뿐이라 판정면을 늘리지 않음 (Codex 보수 조건. 매우
+  # 어려움의 1908 실측이 모이면 확장 검토 - 백로그).
   $key = ([string]$Label) -replace '\s', ''
-  foreach ($pillScale in @(4, 3, 5)) {
+  $pillScales = @(4, 3, 5)
+  if ($key -eq '어려움') { $pillScales += 2 }
+  foreach ($pillScale in $pillScales) {
     $words = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
         -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale $pillScale -Engine $ocrKoreanEngine)
     $refPoint = Select-DgDifficultyWord -Words $words -Key $key -HardX $HardX
@@ -3130,6 +3141,10 @@ function Wait-ForDungeonClearScreen {
       if (Close-CoopMissionScreen -Game $Game) { continue }
       # 오클릭으로 열린 '보유한 재화' 전체 화면도 같은 주기로 정리 (2026-08-02 실사고)
       if (Close-CurrencyOverviewScreen -Game $Game) { continue }
+      # 월요일 06:00 주간 리셋 블로커 2종 - 리셋은 게임 상태와 무관하게 발생하므로 클리어
+      # 대기 중에도 걸릴 수 있음 (2026-08-03 06:02 실사고의 배선 확장 - Codex 권고)
+      if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
+      if (Close-CoopMissionBoardScreen -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
     }
 
     # 행동불능(사망)/파티 전멸 감지 시 자동 부활:
@@ -3699,6 +3714,9 @@ function Invoke-EventSkipOrConfirm {
   # 출석/이벤트 화면의 '출석부 건너뛰기' 또는 보상 요약의 '확인' 버튼을 찾아 클릭합니다.
   # 클릭했으면 $true, 두 버튼 모두 없으면 $false 를 반환합니다.
   # (스텔라 픽/알 수 없는 화면 폴백은 시도 횟수 상태와 묶여 있어 여기에 포함하지 않습니다)
+  # 협동 미션 전체 창은 범용 '지원'/'확인' 탐색보다 먼저 전용 제목으로 판정합니다 (이 창에
+  # 그 단어들이 없다는 실측이 없으므로 특정 화면 확인 → 전용 X 순서 - Codex 조건, 06:02 실사고)
+  if (Close-CoopMissionBoardScreen -Game $Game -LogPrefix $LogPrefix) { return $true }
   $skipPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgEventSkip[0] -ReferenceY $rgEventSkip[1] `
     -RegionWidth $rgEventSkip[2] -RegionHeight $rgEventSkip[3] -SearchText '건너'
   if ($skipPoint) {
@@ -4090,6 +4108,37 @@ function Close-CurrencyOverviewScreen {
   return $true
 }
 
+function Close-CoopMissionBoardScreen {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$LogPrefix = ''
+  )
+
+  # 친구 창의 '협동 미션' 전체 화면(참여 가능 미션 목록)을 감지해 우상단 X 로 닫습니다.
+  # (2026-08-03 06:02 실사고: 월요일 06:00 주간 리셋이 이 전체 창을 자동으로 띄워 '다시
+  #  하기' 복귀 대기가 40초 가려짐 → 3연속 오류 후에야 시작 판정의 범용 X 후보가 우연히
+  #  닫음. 기존 Close-WeeklyCoopResetPopup 은 '새로운 한 주' 팝업의 하단 버튼 줄용이라
+  #  이 전체 창은 매칭 불가 - 당시 로그로 미발동 확인.)
+  # 감지: 좌상단 제목 ROI(120,45,220,50) s3 '협동'+'미션' 동시 확인 (실측: '협동'(195,66)
+  #  '미션'(250,67) s3/s4 동일 판독. 보관+오류 캡처 96장 음성 스윕 오탐 0건).
+  # 완료 팝업(Close-CoopMissionScreen)과는 다른 화면 - 그 제목은 화면 중앙이라 이 ROI 밖.
+  # X(1228,67)는 '보유한 재화' 창과 동일 위치 (실측).
+  if ($script:screenCaptureFailing) { return $false }
+  $boardTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX 120 -ReferenceY 45 `
+      -RegionWidth 220 -RegionHeight 50 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not ($boardTitle.Contains('협동') -and $boardTitle.Contains('미션'))) { return $false }
+  Focus-Game -Game $Game
+  # 전면화 사이 화면이 바뀔 수 있어 제목 재확인 후에만 X 클릭 (스테일 클릭 방지 - Codex 조건.
+  # 주 1회 리셋에만 도달하는 분기라 추가 OCR 비용은 사실상 없음)
+  $boardTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX 120 -ReferenceY 45 `
+      -RegionWidth 220 -RegionHeight 50 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not ($boardTitle.Contains('협동') -and $boardTitle.Contains('미션'))) { return $false }
+  Click-GamePoint -Game $Game -ReferenceX 1228 -ReferenceY 67
+  Write-RunLog "[안내] ${LogPrefix}협동 미션 전체 창 감지(주간 리셋 추정) - 닫기(X) 클릭"
+  Start-Sleep -Seconds 2
+  return $true
+}
+
 function Close-CoopMissionScreen {
   param([System.Diagnostics.Process]$Game)
 
@@ -4179,6 +4228,9 @@ function Invoke-PurchasePopupSweep {
   }
   # 협동 미션 완료 전체 화면 (공용 소함수 - 클리어 대기 루프도 같은 함수를 씁니다)
   if (Close-CoopMissionScreen -Game $Game) { return $true }
+  # 주간 리셋이 자동으로 띄우는 협동 미션 전체 창 (2026-08-03 06:02 실사고 - 이 스윕을
+  # 쓰는 입장/매칭 대기·복귀 대기·시작 판정이 일괄 커버됩니다)
+  if (Close-CoopMissionBoardScreen -Game $Game) { return $true }
   return $false
 }
 
@@ -4288,6 +4340,10 @@ function Wait-ForResultScreen {
     }
     # 오클릭으로 열린 '보유한 재화' 전체 화면 정리 (2026-08-02 실사고 - 결과 대기도 가려짐)
     if (Close-CurrencyOverviewScreen -Game $Game) { continue }
+    # 월요일 06:00 주간 리셋 블로커 2종 - 클리어 직후~결과 화면 사이(최대 90초)에 리셋이
+    # 걸리면 결과 대기도 같은 방식으로 가려짐 (2026-08-03 06:02 실사고의 배선 확장 - Codex 권고)
+    if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
+    if (Close-CoopMissionBoardScreen -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
     Start-Sleep -Seconds 2
   }
   if (-not $retryPoint) {
@@ -6089,6 +6145,11 @@ function Invoke-NormalDungeonCycle {
             Start-Sleep -Seconds 1
             continue
           }
+          # 아침 6시 리셋 블로커 처리 ('다시 하기' 복귀 대기와 같은 계약 - 이 대기도 40초라
+          # 리셋 팝업/협동 창에 가려지면 동일하게 시간 초과 (2026-08-03 Codex 배선 확장.
+          # 협동 미션 전체 창은 스윕 안에서 함께 처리됨)
+          if (Invoke-PurchasePopupSweep -Game $Game) { continue }
+          if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[던전] ') { continue }
           $floorAgainPoint = Find-DgNextFloorButtonPoint -Game $Game
           if ($floorAgainPoint) {
             Write-RunLog "[던전] 결과 화면이 남아 있어 '다음 층으로'를 다시 클릭합니다"
