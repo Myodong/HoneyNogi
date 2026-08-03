@@ -3081,6 +3081,11 @@ function Wait-ForDungeonClearScreen {
       return 'clear'
     }
 
+    # 네트워크 불안정 팝업 - 결과 화면 감지보다 먼저 처리합니다 ('다시 시도하기'가
+    # Find-DgRetryButtonPoint 의 '다시/다셔/하기' 어휘와 겹쳐 오인 여지 - Codex 조건.
+    # 2026-08-01 KJM 실사고: 이 대기 중에 떠서 600초를 통째로 소진했음)
+    if (($pollCounter % 2) -eq 0 -and (Close-NetworkUnstablePopup -Game $Game -LogPrefix "$($script:contentTag) ")) { continue }
+
     # 던전/사냥터: 사용자가 클리어 화면을 직접 터치해 이미 결과 화면으로 넘어간 경우 감지
     # (2026-07-18 21:52 실측: 18초 클리어 + 수동 터치 → 워커가 클리어 문구만 계속 대기하다
     #  시간 초과. 결과 화면에는 HUD가 없으므로, 전투 중 오탐 방지로 HUD 부재를 함께 확인)
@@ -3717,6 +3722,9 @@ function Invoke-EventSkipOrConfirm {
   # 협동 미션 전체 창은 범용 '지원'/'확인' 탐색보다 먼저 전용 제목으로 판정합니다 (이 창에
   # 그 단어들이 없다는 실측이 없으므로 특정 화면 확인 → 전용 X 순서 - Codex 조건, 06:02 실사고)
   if (Close-CoopMissionBoardScreen -Game $Game -LogPrefix $LogPrefix) { return $true }
+  # 네트워크 불안정 팝업도 같은 이유로 선두 - 알 수 없는 화면 루프의 정식 출구 (08-01 KJM 실사고:
+  # 중앙/X 후보 20클릭이 전부 빗나갔음)
+  if (Close-NetworkUnstablePopup -Game $Game -LogPrefix $LogPrefix) { return $true }
   $skipPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgEventSkip[0] -ReferenceY $rgEventSkip[1] `
     -RegionWidth $rgEventSkip[2] -RegionHeight $rgEventSkip[3] -SearchText '건너'
   if ($skipPoint) {
@@ -4162,6 +4170,71 @@ function Close-CoopMissionBoardScreen {
   return $true
 }
 
+function Select-NetworkRetryWord {
+  param($Words)
+
+  # 네트워크 불안정 팝업의 '다시 시도하기'(우측 녹색) 버튼 단어를 고릅니다 (순수 - 진리표
+  # 대상). '도하기' 조각 + 위치 게이트(X>=640, Y 585~655): 실측(2026-08-01 KJM 캡처 3장)
+  # s3 'kl도하기'(764,619) / s4 '人I도하기'(764,619) - '시도' 조각은 깨짐이 불안정하지만
+  # '도하기'는 양 배율 생존. 좌측 '시작 화면으로'(488~550,619)는 타이틀 화면 이탈이라
+  # 절대 선택 금지 - X 게이트가 원천 차단합니다. 반환: @{ X; Y } (기준 좌표) 또는 $null
+  foreach ($word in $Words) {
+    if (-not ([string]$word.Text).Contains('도하기')) { continue }
+    $wordX = [int]$word.X
+    $wordY = [int]$word.Y
+    if ($wordX -ge 640 -and $wordY -ge 585 -and $wordY -le 655) {
+      return @{ X = $wordX; Y = $wordY }
+    }
+  }
+  return $null
+}
+
+function Close-NetworkUnstablePopup {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$LogPrefix = ''
+  )
+
+  # '네트워크 연결이 불안정합니다' 팝업에서 '다시 시도하기'를 클릭해 재접속을 시도합니다.
+  # (2026-08-01 KJM PC 실사고: 심층 클리어 대기 중 발생 → 전용 처리가 없어 600초 통째
+  #  소진 + 재시작 워커의 알 수 없는 화면 클릭 20회 전부 빗나감 → 3연속 정지.)
+  # 감지: 제목 ROI(420,355,440,70) s3 '네트워크'+'불안정' 엄격 확인 (실측: '네트워크'
+  #  (532,389) '불안정합니다'(718,389), s4 '불안정합LI다'도 조각 생존. '연결' 완화는
+  #  다른 연결 오류 팝업 오포섭 위험으로 기각 - Codex 조건).
+  # 버튼: rgClearExit 를 s3→s4 로 읽어 Select-NetworkRetryWord 로 선택, 전 배율 실패 시
+  #  실측 예비 좌표(743,620 = 버튼 중심). 클릭 직전 제목 재확인(전면화 사이 팝업이 사라지면
+  #  예비 좌표가 밑 화면을 누르는 사고 방지 - Codex 조건). 단어 좌표는 기준 좌표이므로
+  #  반드시 Click-GamePoint 로 클릭 (Click-ScreenPoint 직결 금지 - Codex 지적).
+  # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키 대신 상태 확정 클릭.
+  # 재접속 실패로 팝업이 다시 떠도 다음 폴링이 같은 게이트로 재클릭(자연 재시도),
+  # 네트워크가 진짜 죽어 있으면 기존 대기 한도가 오류로 정지 (최후 방어 현행 유지).
+  if ($script:screenCaptureFailing) { return $false }
+  $netTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX 420 -ReferenceY 355 `
+      -RegionWidth 440 -RegionHeight 70 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not ($netTitle.Contains('네트워크') -and $netTitle.Contains('불안정'))) { return $false }
+  # 버튼 후보 결정 (s3→s4 사다리 - 제목이 확정된 실제 팝업에서만 실행되므로 평시 비용 없음)
+  $retryWord = $null
+  foreach ($netScale in @(3, 4)) {
+    $netWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+        -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -Scale $netScale -Engine $ocrKoreanEngine)
+    $retryWord = Select-NetworkRetryWord -Words $netWords
+    if ($retryWord) { break }
+  }
+  Focus-Game -Game $Game
+  # 전면화 사이 화면이 바뀌었으면 클릭 금지 (제목 재확인 - 특히 예비 좌표 오클릭 방지)
+  $netTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX 420 -ReferenceY 355 `
+      -RegionWidth 440 -RegionHeight 70 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not ($netTitle.Contains('네트워크') -and $netTitle.Contains('불안정'))) { return $false }
+  if ($retryWord) {
+    Click-GamePoint -Game $Game -ReferenceX ([int]$retryWord.X) -ReferenceY ([int]$retryWord.Y)
+  } else {
+    Click-GamePoint -Game $Game -ReferenceX 743 -ReferenceY 620   # '다시 시도하기' 중심 실측 예비 (제목 재확정 전제)
+  }
+  Write-RunLog "[안내] ${LogPrefix}네트워크 불안정 팝업 감지 - '다시 시도하기' 클릭 (재접속 시도)"
+  Start-Sleep -Seconds 3
+  return $true
+}
+
 function Close-CoopMissionScreen {
   param([System.Diagnostics.Process]$Game)
 
@@ -4254,6 +4327,8 @@ function Invoke-PurchasePopupSweep {
   # 주간 리셋이 자동으로 띄우는 협동 미션 전체 창 (2026-08-03 06:02 실사고 - 이 스윕을
   # 쓰는 입장/매칭 대기·복귀 대기·시작 판정이 일괄 커버됩니다)
   if (Close-CoopMissionBoardScreen -Game $Game) { return $true }
+  # 네트워크 불안정 팝업 - '다시 시도하기'로 재접속 (2026-08-01 KJM PC 실사고)
+  if (Close-NetworkUnstablePopup -Game $Game) { return $true }
   return $false
 }
 
@@ -4344,6 +4419,10 @@ function Wait-ForResultScreen {
       Start-Sleep -Seconds 2
       continue
     }
+    # 네트워크 불안정 팝업 - 반복 버튼 탐색('다시/다셔/하기')과 어휘가 겹치므로 그보다 먼저
+    # 처리합니다 (Codex 조건 - 클리어 대기와 같은 계약)
+    if (Close-NetworkUnstablePopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
+
     $retryPoint = & $FindRetryButton
     if ($retryPoint) { break }
 
