@@ -4108,6 +4108,34 @@ function Close-CurrencyOverviewScreen {
   return $true
 }
 
+function Test-CoopMissionBoardTitle {
+  param([string]$TitleText)
+
+  # 친구 창 '협동 미션' 전체 화면의 좌상단 제목 판정 (순수 - 진리표 테스트 대상):
+  # '협동' AND ('미션' OR '미선'). '미선' = 1810x1020 창 s3 실측 깨짐 (2026-08-03 KJM PC
+  # 오류 캡처 - '협동'(194,64)+'미선'(250,62)). '미.' 같은 광범위 완화는 금지 - 실측된
+  # 이형만 정확히 허용합니다 (Codex 조건). '협동' 조각은 두 배율 음성 스윕에서 0건이라
+  # 이형 추가로 오탐면이 늘지 않음.
+  $t = ([string]$TitleText) -replace '\s', ''
+  return [bool]($t.Contains('협동') -and ($t.Contains('미션') -or $t.Contains('미선')))
+}
+
+function Test-CoopMissionBoardVisible {
+  param([System.Diagnostics.Process]$Game)
+
+  # 협동 미션 전체 창의 제목 ROI(120,45,220,50)를 s3→s4 사다리로 판독합니다.
+  # 판정(Test-CoopMissionBoardTitle)이 참일 때만 조기 종료 - 빈/깨진 판독은 다음 배율로
+  # 넘어갑니다 (Codex 조건: 'OCR 비어 있지 않음'이 아니라 '판정 참'이 종료 조건).
+  # 실측: 1272 창 = s3 즉시('협동'+'미션') / 1810 창 = s3 '미선' 이형 채택, s4 정상 판독.
+  # 단일 배율 함정(카드/알약/협동 확인 버튼 실사고 반복) 방지를 위한 이중 배율입니다.
+  foreach ($boardScale in @(3, 4)) {
+    $boardTitle = Get-GameRegionOcrText -Game $Game -ReferenceX 120 -ReferenceY 45 `
+      -RegionWidth 220 -RegionHeight 50 -Scale $boardScale -Engine $ocrKoreanEngine
+    if (Test-CoopMissionBoardTitle -TitleText $boardTitle) { return $true }
+  }
+  return $false
+}
+
 function Close-CoopMissionBoardScreen {
   param(
     [System.Diagnostics.Process]$Game,
@@ -4115,24 +4143,19 @@ function Close-CoopMissionBoardScreen {
   )
 
   # 친구 창의 '협동 미션' 전체 화면(참여 가능 미션 목록)을 감지해 우상단 X 로 닫습니다.
-  # (2026-08-03 06:02 실사고: 월요일 06:00 주간 리셋이 이 전체 창을 자동으로 띄워 '다시
-  #  하기' 복귀 대기가 40초 가려짐 → 3연속 오류 후에야 시작 판정의 범용 X 후보가 우연히
-  #  닫음. 기존 Close-WeeklyCoopResetPopup 은 '새로운 한 주' 팝업의 하단 버튼 줄용이라
-  #  이 전체 창은 매칭 불가 - 당시 로그로 미발동 확인.)
-  # 감지: 좌상단 제목 ROI(120,45,220,50) s3 '협동'+'미션' 동시 확인 (실측: '협동'(195,66)
-  #  '미션'(250,67) s3/s4 동일 판독. 보관+오류 캡처 96장 음성 스윕 오탐 0건).
+  # (2026-08-03 06:02 실사고 2건: 월요일 06:00 주간 리셋이 이 전체 창을 자동으로 띄워
+  #  '다시 하기' 복귀 대기가 40초 가려짐 - 개발 PC(1272)는 3연속 오류 후 범용 X 후보가
+  #  우연히 닫아 자가 복구, KJM PC(1810, v1.2.0)는 재시도 없이 그대로 정지. 기존
+  #  Close-WeeklyCoopResetPopup 은 '새로운 한 주' 팝업의 하단 버튼 줄용이라 이 전체 창은
+  #  매칭 불가 - 두 PC 로그 모두 미발동 확인.)
   # 완료 팝업(Close-CoopMissionScreen)과는 다른 화면 - 그 제목은 화면 중앙이라 이 ROI 밖.
-  # X(1228,67)는 '보유한 재화' 창과 동일 위치 (실측).
+  # X(1228,67)는 '보유한 재화' 창과 동일 위치 (1272/1810 두 캡처 실측 일치).
   if ($script:screenCaptureFailing) { return $false }
-  $boardTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX 120 -ReferenceY 45 `
-      -RegionWidth 220 -RegionHeight 50 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-  if (-not ($boardTitle.Contains('협동') -and $boardTitle.Contains('미션'))) { return $false }
+  if (-not (Test-CoopMissionBoardVisible -Game $Game)) { return $false }
   Focus-Game -Game $Game
-  # 전면화 사이 화면이 바뀔 수 있어 제목 재확인 후에만 X 클릭 (스테일 클릭 방지 - Codex 조건.
+  # 전면화 사이 화면이 바뀔 수 있어 재확인 후에만 X 클릭 (스테일 클릭 방지 - Codex 조건.
   # 주 1회 리셋에만 도달하는 분기라 추가 OCR 비용은 사실상 없음)
-  $boardTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX 120 -ReferenceY 45 `
-      -RegionWidth 220 -RegionHeight 50 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-  if (-not ($boardTitle.Contains('협동') -and $boardTitle.Contains('미션'))) { return $false }
+  if (-not (Test-CoopMissionBoardVisible -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX 1228 -ReferenceY 67
   Write-RunLog "[안내] ${LogPrefix}협동 미션 전체 창 감지(주간 리셋 추정) - 닫기(X) 클릭"
   Start-Sleep -Seconds 2
