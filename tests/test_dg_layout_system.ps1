@@ -215,10 +215,16 @@ $w = Select-DgDifficultyWord -Words @(@{ Text = '이컪울'; X = 77; Y = 186 }) 
 Assert-Case '알약: 이컪울(s5) 깨짐도 표준 자리면 채택' "$($w.X)" '77'
 Assert-Case '알약: 이컪움도 표준 자리 밖이면 채택 금지' `
   ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이컪움'; X = 841; Y = 120 }) -Key '어려움' -HardX 660)) $true
-# 다중 스케일 배선: Find-DgDifficultyPoint 가 4→3→5 순서로 재시도해야 함 (단일 s4 전멸 방지)
+# 다중 스케일 배선: Find-DgDifficultyPoint 가 4→3→5 순서 + '어려움' 한정 s2 최종 폴백
+# (2026-08-03 08:50 실사고: 1908 창 실효 배율 저하로 s4/s3/s5 전멸 - s2만 정상 판독.
+#  s2는 위치 게이트가 있는 '어려움' 키에만 추가 - Codex 보수 조건)
 $workerSource = [IO.File]::ReadAllText($workerPath)
-Assert-Case '배선: 알약 탐색 다중 스케일(4,3,5) 재시도' `
-  ($workerSource -match 'foreach \(\$pillScale in @\(4, 3, 5\)\)') $true
+Assert-Case '배선: 알약 탐색 다중 스케일(4,3,5) 사다리' `
+  ($workerSource -match '\$pillScales = @\(4, 3, 5\)') $true
+Assert-Case '배선: 어려움 키 한정 s2 최종 폴백 (1908 실사고)' `
+  ($workerSource -match "if \(\`$key -eq '어려움'\) \{ \`$pillScales \+= 2 \}") $true
+Assert-Case '배선: 사다리 변수로 재시도 순회' `
+  ($workerSource -match 'foreach \(\$pillScale in \$pillScales\)') $true
 
 # ── 4c. 옵션 제목 보조 판정 (피오듸층3구역 실사고 재현) ──────────────────────
 Assert-Case '보조: 사고 원문 제목 + 1층 라벨 2개' `
