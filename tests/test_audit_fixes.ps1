@@ -184,9 +184,15 @@ Assert-Case '워커: 결과 대기 타임아웃 시 클리어 잔존 재판정 +
   ($workerSource -match 'Test-DungeonClearPrompt -Game \$Game\)\) \{\s+throw ''클리어 화면이 터치에 반응하지 않습니다[\s\S]{0,120}throw \$MissingMessage') $true
 
 # ── v1.2.1: 08-03 실사고 2건 (06:02 협동 미션 전체 창 / 08:50 1908 창 알약 판독 전멸) ──
-# 협동 미션 전체 창 소함수: 제목 '협동'+'미션' 이중 확인(클릭 직전 재확인 - 스테일 방지)
-Assert-Case '워커: 협동 창 제목 이중 확인(감지+클릭 직전 재확인)' `
-  ([regex]::Matches($workerSource, "-not \(\`$boardTitle\.Contains\('협동'\) -and \`$boardTitle\.Contains\('미션'\)\)").Count) 2
+# 협동 미션 전체 창: 순수 판정 소함수('협동' AND ('미션' OR '미선')) - 진리표는 test_weekly_coop_popup
+Assert-Case '워커: 협동 창 제목 판정 소함수(미선 이형 포함)' `
+  ($workerSource -match "function Test-CoopMissionBoardTitle[\s\S]{0,900}Contains\('협동'\) -and \(\`$t\.Contains\('미션'\) -or \`$t\.Contains\('미선'\)\)") $true
+# 제목 ROI 판독은 s3→s4 사다리 - '판정 참'만 조기 종료 (1810 창 s3 '미선' 깨짐 실사고, KJM PC)
+Assert-Case '워커: 협동 창 판독 사다리 @(3,4)' `
+  ($workerSource -match 'foreach \(\$boardScale in @\(3, 4\)\)') $true
+# 닫기 함수: 감지 + Focus 후 재확인(스테일 방지) 두 번 모두 같은 판독 함수 사용
+Assert-Case '워커: 협동 창 닫기 - Focus 전후 이중 확인' `
+  ([regex]::Matches($workerSource, 'if \(-not \(Test-CoopMissionBoardVisible -Game \$Game\)\) \{ return \$false \}').Count) 2
 # X(1228,67) 클릭 = 보유한 재화 창과 동일 위치 - 두 함수 각각 1곳씩
 Assert-Case '워커: 우상단 X(1228,67) 클릭 2곳(재화 창+협동 창)' `
   ([regex]::Matches($workerSource, 'Click-GamePoint -Game \$Game -ReferenceX 1228 -ReferenceY 67').Count) 2
