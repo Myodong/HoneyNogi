@@ -6413,12 +6413,21 @@ $updateCategoryPanels = {
     $txtLog.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
     $txtLog.Visible = $true
   }
+  # 로그 전용 하단 컨트롤(글자 크기·지우기)은 로그가 열려 있을 때만 표시 (2026-08-04 추가 요청.
+  # 'Log 폴더 열기'/버전 표시는 로그와 무관해 항상 유지. 숨김 중에도 numFontSize.Value 는
+  # 배율 재적용/저장 로직이 정상 참조)
+  $lblFontSize.Visible = ($tabLayout.LogTop -ge 0)
+  $numFontSize.Visible = ($tabLayout.LogTop -ge 0)
+  $btnClearLog.Visible = ($tabLayout.LogTop -ge 0)
   $form.ResumeLayout($true)
   # 새 크기 확정 후 제약 재설정: 접힘 = 높이만 잠금(가로는 계속 조절 가능), 열림 = 동적 최소
   # (로그 100 + 하단 줄이 겹치지 않는 하한 - 고정 700 최소는 커스텀 상세에서 겹침 유발. Codex 조건)
   if ($tabLayout.LockHeight) {
     $form.MinimumSize = New-Object System.Drawing.Size(616, $form.Height)
-    $form.MaximumSize = New-Object System.Drawing.Size(0, $form.Height)
+    # 가로 최대는 큰 값으로 - 최상위 Form 의 MaximumSize 는 '0 = 무제한' 규칙이 적용되지
+    # 않고 문자 그대로 0 이 되어 창이 최소 크롬 폭(136px)으로 짜부라짐 (2026-08-04 실사고,
+    # 배포 전 사용자 실기에서 발견 - 컨트롤의 0 규칙과 다름)
+    $form.MaximumSize = New-Object System.Drawing.Size(65535, $form.Height)
     $form.MaximizeBox = $false
   } else {
     $form.MinimumSize = New-Object System.Drawing.Size(616, $tabLayout.MinOuterHeight)
