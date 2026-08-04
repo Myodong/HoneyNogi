@@ -50,10 +50,12 @@ Check-Pattern '권장 창 모드 버튼 폭 108' $gui `
   '\$btnRecommendedWindow\.Size\s*=\s*New-Object System\.Drawing\.Size\(108, 30\)'
 Check-Pattern '적용된 설정 버튼 폭 108' $gui `
   '\$btnAlwaysOn\.Size\s*=\s*New-Object System\.Drawing\.Size\(108, 30\)'
-Check-Pattern '진행 초기화 버튼 폭 94(리스트 버튼과 동일)' $gui `
-  '\$btnCrReset\.Size\s*=\s*New-Object System\.Drawing\.Size\(94, 26\)'
-Check-Pattern '리스트 버튼과 진행 초기화 버튼 폭 동일' $gui `
-  '\$btnCrAdd\.Size\s*=\s*New-Object System\.Drawing\.Size\(94, 30\)[\s\S]{0,9000}\$btnCrReset\.Size\s*=\s*New-Object System\.Drawing\.Size\(94, 26\)'
+# 2026-08-04 폭 560 다이어트: 진행 초기화는 80 (합계 라벨과 겹침 방지 - Codex 좌표 재배분),
+# 리스트 조작 버튼은 94 유지
+Check-Pattern '진행 초기화 버튼 폭 80(폭 560 재배분)' $gui `
+  '\$btnCrReset\.Size\s*=\s*New-Object System\.Drawing\.Size\(80, 26\)'
+Check-Pattern '리스트 조작 버튼 폭 94 유지' $gui `
+  '\$btnCrAdd\.Size\s*=\s*New-Object System\.Drawing\.Size\(94, 30\)'
 Check-Pattern '커스텀 반복 중 사냥터 선택 비활성화' $gui `
   '\$isCustom\s*=\s*\$supportsCustom\s+-and\s+\$rbCustomRepeat\.Checked[\s\S]{0,500}\$rbCatHunting\.Enabled\s*=\s*-not\s+\$isCustom'
 Check-Pattern '커스텀 반복 중 사냥터 미지원 문구 표시' $gui `
