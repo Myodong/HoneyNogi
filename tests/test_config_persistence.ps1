@@ -81,7 +81,7 @@ try {
   $defaultConfig = [pscustomobject]@{
     configSchemaVersion = 3
     coordsVersion = 6
-    ui = [pscustomobject]@{ logFontSize = 9 }
+    ui = [pscustomobject]@{ logFontSize = 9; settingsOpen = $false; logOpen = $false }
     diagnostics = [pscustomobject]@{ keepScreenshots = 10 }
     revive = [pscustomobject]@{ enabled = $false }
     afterEntry = [pscustomobject]@{ keys = @([pscustomobject]@{ key = 32; enabled = $false }) }
@@ -92,7 +92,7 @@ try {
   }
   $userConfig = [pscustomobject]@{
     coordsVersion = 6
-    ui = [pscustomobject]@{ logFontSize = 17 }
+    ui = [pscustomobject]@{ logFontSize = 17; settingsOpen = $true; logOpen = $true }
     diagnostics = [pscustomobject]@{ keepScreenshots = 7 }
     revive = [pscustomobject]@{ enabled = 'true' }
     afterEntry = [pscustomobject]@{ keys = @([pscustomobject]@{ key = 32; enabled = 'true' }) }
@@ -108,6 +108,9 @@ try {
   Assert-Case '구조이전: 심층던전 기본 섹션 추가' ($null -ne $migrationResult.deepDungeon) $true
   Assert-Case '구조이전: 심층 커스텀 기본 섹션 추가' ($null -ne $migrationResult.deepCustomRepeat) $true
   Assert-Case '구조이전: ui.logFontSize 보존' $migrationResult.ui.logFontSize 17
+  # 탭 토글 표시 상태 보존 (2026-08-04 신설 - 기본 config 에 키가 있어야 이전에서 보존됨)
+  Assert-Case '구조이전: ui.settingsOpen 보존' $migrationResult.ui.settingsOpen $true
+  Assert-Case '구조이전: ui.logOpen 보존' $migrationResult.ui.logOpen $true
   Assert-Case '구조이전: 다른 사용자 설정 보존' $migrationResult.diagnostics.keepScreenshots 7
   Assert-Case '구조이전: 문자열 revive 불리언은 최신 기본값 유지' $migrationResult.revive.enabled $false
   Assert-Case '구조이전: 문자열 키 불리언은 최신 기본값 유지' $migrationResult.afterEntry.keys[0].enabled $false

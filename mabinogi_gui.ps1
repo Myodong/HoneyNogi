@@ -1345,6 +1345,20 @@ function Update-ApprovalUi {
 #  UI 구성
 # ============================================================
 $form = New-Object System.Windows.Forms.Form
+# 허니 테마 팔레트 (컨트롤 생성 코드가 참조하므로 폼 생성보다 먼저 정의 - 테마 일괄 적용
+# 함수(Apply-HoneyTheme)는 기존대로 모든 컨트롤 생성 뒤에 실행됩니다)
+$script:themeBack     = [System.Drawing.Color]::FromArgb(253, 248, 238)  # 창 배경 (크림)
+$script:themeControl  = [System.Drawing.Color]::FromArgb(255, 253, 247)  # 일반 버튼 (밝은 크림)
+$script:themeInput    = [System.Drawing.Color]::FromArgb(255, 255, 255)  # 입력 배경 (흰색)
+$script:themeLogBack  = [System.Drawing.Color]::FromArgb(40, 34, 24)     # 로그 배경 (진한 갈색 콘솔풍)
+$script:themeText     = [System.Drawing.Color]::FromArgb(66, 50, 22)     # 기본 글자 (진한 갈색)
+$script:themeMuted    = [System.Drawing.Color]::FromArgb(158, 138, 104)  # 흐린 글자
+$script:themeBorder   = [System.Drawing.Color]::FromArgb(226, 205, 160)  # 버튼 테두리 (연한 꿀색)
+$script:themeTitle    = [System.Drawing.Color]::FromArgb(191, 128, 7)    # 섹션 제목 (꿀 갈색)
+$script:themeHoney    = [System.Drawing.Color]::FromArgb(247, 181, 0)    # 꿀색 (강조)
+$script:themeHoneyInk = [System.Drawing.Color]::FromArgb(66, 45, 0)      # 꿀색 위 글자
+$script:themeDanger   = [System.Drawing.Color]::FromArgb(222, 105, 92)   # 위험(중지)
+
 $form.Text = "꿀비노기 컨트롤 패널 v$appVersion"
 $form.Size = New-Object System.Drawing.Size(600, 872)
 # 세로 크기 조절 가능: 로그 영역이 창 크기에 맞춰 늘어나고 줄어듭니다 (Anchor 설정 참고)
@@ -3375,10 +3389,123 @@ $lnkUpdate.Visible = $false
 $lnkUpdate.Add_LinkClicked({ Start-Process 'https://github.com/Myodong/HoneyNogi/releases/latest' })
 $form.Controls.Add($lnkUpdate)
 
+# ----- 탭 토글: 설정/로그 표시 (2026-08-04 시안 확정 - 각각 독립 열림/닫힘, 설정 위·로그 아래) -----
+# CheckBox Appearance='Button' = 눌린 상태 유지 시각을 공짜로 얻음. 실행 중에도 사용해야
+# 하므로 Set-UiRunning 잠금 그룹(반복/콘텐츠/상세)에 넣지 않습니다. 배치·폼 높이는
+# updateCategoryPanels 끝의 적용부가, 순수 계산은 Get-TabToggleLayout(진리표 테스트 대상)이 담당.
+$script:logViewHeight = 300      # 로그 뷰포트 기억값 - 총 폼 높이가 아니라 로그 영역 높이만 기억해 설정을 접으면 폼도 함께 줄어듦 (Codex 계약)
+$script:logLayoutOpen = $null    # 직전 레이아웃의 로그 상태 3상태 토큰 (null=최초) - 열림이었을 때만 뷰포트를 흡수
+$script:hiddenLogErrors = 0      # 로그 접힘 중 발생한 미열람 오류/경고 수 (토글 배지)
+$script:hiddenLogWarns = 0
+$script:footerGap = 28           # ClientHeight - 하단 줄 Top (아래에서 실측으로 갱신 - Bottom 앵커 지연과 무관하게 직접 계산용)
+
+$chkTabSettings = New-Object System.Windows.Forms.CheckBox
+$chkTabSettings.Appearance = 'Button'
+$chkTabSettings.Text = '설정'
+$chkTabSettings.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$chkTabSettings.Size = New-Object System.Drawing.Size(100, 32)
+$chkTabSettings.FlatStyle = 'Flat'
+$chkTabSettings.FlatAppearance.BorderColor = $script:themeBorder
+$chkTabSettings.FlatAppearance.BorderSize = 1
+$chkTabSettings.UseVisualStyleBackColor = $false   # 커스텀 배경색 확실 적용 (Codex 조건)
+$chkTabSettings.BackColor = $script:themeControl
+$form.Controls.Add($chkTabSettings)
+
+$chkTabLog = New-Object System.Windows.Forms.CheckBox
+$chkTabLog.Appearance = 'Button'
+$chkTabLog.Text = '로그'
+$chkTabLog.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$chkTabLog.Size = New-Object System.Drawing.Size(100, 32)
+$chkTabLog.FlatStyle = 'Flat'
+$chkTabLog.FlatAppearance.BorderColor = $script:themeBorder
+$chkTabLog.FlatAppearance.BorderSize = 1
+$chkTabLog.UseVisualStyleBackColor = $false
+$chkTabLog.BackColor = $script:themeControl
+$form.Controls.Add($chkTabLog)
+
+# 접힘 중 마지막 경고/오류 1줄 미리보기 (토글 줄 우측)
+$lblLogPreview = New-Object System.Windows.Forms.Label
+$lblLogPreview.Size = New-Object System.Drawing.Size(339, 20)
+$lblLogPreview.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$lblLogPreview.AutoEllipsis = $true
+$lblLogPreview.Text = ''
+$form.Controls.Add($lblLogPreview)
+
+function Update-LogTabBadge {
+  # 접힘 중 미열람 오류/경고 배지 (오류 우선). 리셋은 로그를 실제로 열 때/로그 지우기 때만 -
+  # 배지는 '새 회차'가 아니라 '마지막으로 로그를 본 뒤'의 의미라 회차 시작에 지우지 않음 (Codex)
+  if ($script:hiddenLogErrors -gt 0) {
+    $chkTabLog.Text = "로그 ● 오류 $($script:hiddenLogErrors)"
+    $chkTabLog.BackColor = $script:themeDanger
+    $chkTabLog.ForeColor = [System.Drawing.Color]::White
+  } elseif ($script:hiddenLogWarns -gt 0) {
+    $chkTabLog.Text = "로그 ● 경고 $($script:hiddenLogWarns)"
+    $chkTabLog.BackColor = [System.Drawing.Color]::Gold
+    $chkTabLog.ForeColor = $script:themeHoneyInk
+  }
+}
+
+function Update-TabToggleStyle {
+  # 토글 눌림 배경 (안전 중지 버튼과 같은 크림). 로그 배지가 활성일 때는 배지 색이 우선.
+  $chkTabSettings.BackColor = $(if ($chkTabSettings.Checked) { [System.Drawing.Color]::FromArgb(250, 240, 218) } else { $script:themeControl })
+  if ($script:hiddenLogErrors -gt 0 -or $script:hiddenLogWarns -gt 0) { Update-LogTabBadge; return }
+  $chkTabLog.BackColor = $(if ($chkTabLog.Checked) { [System.Drawing.Color]::FromArgb(250, 240, 218) } else { $script:themeControl })
+  $chkTabLog.ForeColor = $script:themeText
+}
+
+function Reset-LogTabBadge {
+  $script:hiddenLogErrors = 0
+  $script:hiddenLogWarns = 0
+  $chkTabLog.Text = '로그'
+  $chkTabLog.ForeColor = $script:themeText
+  $lblLogPreview.Text = ''
+  Update-TabToggleStyle
+}
+
+function Save-UiToggleState {
+  # 두 토글 상태를 항상 함께 저장 (ui.logFontSize 즉시 저장 패턴, 단일 헬퍼 통일 - Codex 조건)
+  if (-not $script:uiReady) { return }
+  $cfg = Read-Config
+  if (-not $cfg) { return }
+  if (-not $cfg.PSObject.Properties['ui']) {
+    $cfg | Add-Member -NotePropertyName 'ui' -NotePropertyValue ([pscustomobject]@{})
+  }
+  foreach ($togglePair in @(, @('settingsOpen', [bool]$chkTabSettings.Checked)) + @(, @('logOpen', [bool]$chkTabLog.Checked))) {
+    if ($cfg.ui.PSObject.Properties[[string]$togglePair[0]]) { $cfg.ui.([string]$togglePair[0]) = [bool]$togglePair[1] }
+    else { $cfg.ui | Add-Member -NotePropertyName ([string]$togglePair[0]) -NotePropertyValue ([bool]$togglePair[1]) }
+  }
+  try { Save-Config $cfg }
+  catch { Add-GuiLog "[경고] 설정/로그 표시 상태 저장 실패: $($_.Exception.Message)" }
+}
+
+$chkTabSettings.Add_CheckedChanged({
+    Update-TabToggleStyle
+    if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels }
+    Save-UiToggleState
+  })
+$chkTabLog.Add_CheckedChanged({
+    if ($chkTabLog.Checked) { Reset-LogTabBadge }   # 여는 순간 미열람 배지 해소
+    Update-TabToggleStyle
+    if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels }
+    if ($chkTabLog.Checked) {
+      # 숨김 중 생략했던 표시 상태 복구: 확대 배율 재적용 + 끝으로 스크롤 1회
+      $txtLog.ZoomFactor = [float]([int]$numFontSize.Value / 9.0)
+      $txtLog.SelectionStart = $txtLog.TextLength
+      $txtLog.ScrollToCaret()
+    }
+    Save-UiToggleState
+  })
+
+# 하단 줄 간격 실측: ClientHeight - 하단 버튼 Top. 레이아웃이 폼 높이를 바꿔도 이 값으로
+# 로그 높이를 직접 계산합니다 (SuspendLayout 중 Bottom 앵커 재배치 지연과 무관 - Codex 조건)
+$script:footerGap = $form.ClientSize.Height - $btnOpenLog.Top
+
 $btnClearLog.Add_Click({
     $txtLog.Clear()
     # Clear() 후에는 확대 배율이 1.0으로 초기화되므로 다시 적용합니다
     $txtLog.ZoomFactor = [float]([int]$numFontSize.Value / 9.0)
+    # 지운 내용의 미열람 배지를 남기면 모순이므로 함께 리셋합니다 (Codex 조건)
+    Reset-LogTabBadge
     # 화면 표시만 지웁니다. Log 폴더의 파일 기록은 그대로 남습니다.
   })
 
@@ -3388,12 +3515,16 @@ $btnClearLog.Add_Click({
 function Add-ColoredLogLine {
   param([string]$Text)
 
-  # 내용에 따라 색을 입혀 로그창에 한 줄 추가합니다.
+  # 내용에 따라 색을 입혀 로그창에 한 줄 추가합니다. 색과 접힘 배지가 같은 심각도 판정을
+  # 공유합니다 (2026-08-04 탭 토글 - Codex 계약).
+  $severity = ''
   $lineColor = [System.Drawing.Color]::Gainsboro                                  # 기본(회백색)
   if ($Text -match '\[오류\]|오류 종료|실패') {
     $lineColor = [System.Drawing.Color]::FromArgb(255, 110, 110)                  # 오류 = 빨강
+    $severity = 'error'
   } elseif ($Text -match '\[경고\]') {
     $lineColor = [System.Drawing.Color]::Gold                                     # 경고 = 노랑
+    $severity = 'warn'
   } elseif ($Text -match '\[안내\]|\[진단\]|\[중단\]') {
     $lineColor = [System.Drawing.Color]::SkyBlue                                  # 안내 = 하늘색
   } elseif ($Text -match '\[완료\]|회차 완료|===|복귀 확인') {
@@ -3406,12 +3537,72 @@ function Add-ColoredLogLine {
   $txtLog.SelectionColor = $lineColor
   $txtLog.AppendText($Text + "`r`n")
   $txtLog.SelectionColor = $txtLog.ForeColor
+  # 로그 접힘 판정은 논리 상태(토글 Checked)로 - $txtLog.Visible 은 폼 표시 전엔 열림
+  # 상태여도 false 라 배지가 오작동합니다 (Codex 지적)
+  if (-not $chkTabLog.Checked) {
+    if ($severity -eq 'error') { $script:hiddenLogErrors++ }
+    elseif ($severity -eq 'warn') { $script:hiddenLogWarns++ }
+    if ($severity) {
+      $lblLogPreview.Text = $Text
+      Update-LogTabBadge
+    }
+    return   # 접힘 중에는 ScrollToCaret 생략 (열 때 1회 수행)
+  }
   $txtLog.ScrollToCaret()
 }
 
 function Add-GuiLog {
   param([string]$Message)
   Add-ColoredLogLine "$(Get-Date -Format 'HH:mm:ss') $Message"
+}
+
+function Get-TabToggleLayout {
+  param(
+    [int]$DetailBottom,
+    [bool]$SettingsOpen,
+    [bool]$LogOpen,
+    [int]$LogViewHeight,
+    [int]$SettingsHeight,
+    [int]$FooterGap,
+    [int]$NonClientHeight,
+    [int]$WorkAreaHeight
+  )
+
+  # 탭 토글 줄 이하의 세로 배치 순수 계산 (진리표 테스트 대상 - 2026-08-04 시안 확정, Codex 합의):
+  #  토글 줄(높이 32) → [설정 그룹(열림 시)] → [로그(열림 시)] → 하단 줄. 접힌 섹션만큼
+  #  ClientHeight 가 줄어듭니다. 로그는 총 폼 높이가 아니라 '뷰포트 높이'를 기억값으로 받아
+  #  설정을 접으면 폼도 함께 줄어듭니다 (Codex 지적 반영). 작업 영역을 넘으면 로그 뷰포트를
+  #  최소 100까지 축소합니다 (100 보장이 우선 - 화면 이탈은 적용부의 Top 보정이 마무리).
+  # 반환: TabRowTop / SettingsTop·LogTop(-1 = 숨김) / LogHeight / ClientHeight /
+  #        LockHeight(접힘 = 높이 잠금) / MinOuterHeight(열림 시 동적 최소 - 로그 100 보장)
+  $tabRowTop = $DetailBottom + 8
+  $stackBottom = $tabRowTop + 32
+  $settingsTop = -1
+  if ($SettingsOpen) {
+    $settingsTop = $stackBottom + 8
+    $stackBottom = $settingsTop + $SettingsHeight
+  }
+  if ($LogOpen) {
+    $logTop = $stackBottom + 8
+    $logView = [Math]::Max(100, $LogViewHeight)
+    $clientHeight = $logTop + $logView + 8 + $FooterGap
+    $maxClient = $WorkAreaHeight - $NonClientHeight
+    if ($clientHeight -gt $maxClient) {
+      $logView = [Math]::Max(100, $maxClient - $logTop - 8 - $FooterGap)
+      $clientHeight = $logTop + $logView + 8 + $FooterGap
+    }
+    return @{
+      TabRowTop = $tabRowTop; SettingsTop = $settingsTop; LogTop = $logTop; LogHeight = $logView
+      ClientHeight = $clientHeight; LockHeight = $false
+      MinOuterHeight = ($logTop + 100 + 8 + $FooterGap + $NonClientHeight)
+    }
+  }
+  $clientHeight = $stackBottom + 8 + $FooterGap
+  return @{
+    TabRowTop = $tabRowTop; SettingsTop = $settingsTop; LogTop = -1; LogHeight = 0
+    ClientHeight = $clientHeight; LockHeight = $true
+    MinOuterHeight = ($clientHeight + $NonClientHeight)
+  }
 }
 
 # ============================================================
@@ -4980,6 +5171,10 @@ function Load-SettingsToUi {
   try { $numClearWait.Value = [int]$cfg.timeoutsSeconds.dungeonClear } catch { }
   try { $numCount.Value = [int]$cfg.repeat.defaultCount } catch { }
   try { $numFontSize.Value = [int]$cfg.ui.logFontSize } catch { }
+  # 탭 토글 상태 복원 (2026-08-04 시안 - 기본 둘 다 접힘. JSON 불리언만 인정 - Codex 조건.
+  # 프로그램적 체크 변경의 CheckedChanged 저장은 uiReady 가드가 막음)
+  try { $chkTabSettings.Checked = ConvertTo-StrictBoolean $cfg.ui.settingsOpen $false } catch { }
+  try { $chkTabLog.Checked = ConvertTo-StrictBoolean $cfg.ui.logOpen $false } catch { }
 }
 
 function Save-SettingsFromUi {
@@ -5004,6 +5199,15 @@ function Save-SettingsFromUi {
       key      = 82
       maxPerCycle = 10
     })
+  }
+  # 탭 토글(설정/로그 표시) 상태도 최종 병합 - 즉시 저장(Save-UiToggleState)과 별개로 시작 시
+  # 저장 경로에서도 두 값을 함께 보존합니다 (Codex 조건)
+  if (-not $cfg.PSObject.Properties['ui']) {
+    $cfg | Add-Member -NotePropertyName 'ui' -NotePropertyValue ([pscustomobject]@{})
+  }
+  foreach ($togglePair in @(, @('settingsOpen', [bool]$chkTabSettings.Checked)) + @(, @('logOpen', [bool]$chkTabLog.Checked))) {
+    if ($cfg.ui.PSObject.Properties[[string]$togglePair[0]]) { $cfg.ui.([string]$togglePair[0]) = [bool]$togglePair[1] }
+    else { $cfg.ui | Add-Member -NotePropertyName ([string]$togglePair[0]) -NotePropertyValue ([bool]$togglePair[1]) }
   }
   # 어시스트 자동 켜기 설정 저장. assist 항목이 없던 예전 config 에는 새로 만들어 기록합니다.
   if ($cfg.PSObject.Properties['assist']) {
@@ -6174,11 +6378,59 @@ $updateCategoryPanels = {
   } else {
     $grpContentDetail.Height = 122
   }
-  $grpSettings.Top = $grpContentDetail.Bottom + 8
-  $txtLog.Top = $grpSettings.Bottom + 8
-  $logHeight = $btnOpenLog.Top - $txtLog.Top - 8
-  if ($logHeight -lt 100) { $logHeight = 100 }
-  $txtLog.Height = $logHeight
+  # ----- 탭 토글 줄 이하 배치 (2026-08-04 시안 확정: 순수 계산 Get-TabToggleLayout + 여기서 적용) -----
+  # 직전 레이아웃이 '로그 열림'이었을 때만 현재 로그 높이를 뷰포트 기억값으로 흡수합니다
+  # (사용자 세로 리사이즈 보존 + open→closed 전환의 기억 갱신을 한 줄로. 닫힘 상태의 낡은
+  # 높이를 흡수하지 않는 것이 핵심 - Codex 3상태 전이 계약)
+  if ($script:logLayoutOpen -eq $true) { $script:logViewHeight = [Math]::Max(100, [int]$txtLog.Height) }
+  $tabLayout = Get-TabToggleLayout -DetailBottom ([int]$grpContentDetail.Bottom) `
+    -SettingsOpen ([bool]$chkTabSettings.Checked) -LogOpen ([bool]$chkTabLog.Checked) `
+    -LogViewHeight $script:logViewHeight -SettingsHeight ([int]$grpSettings.Height) `
+    -FooterGap $script:footerGap -NonClientHeight ([int]($form.Height - $form.ClientSize.Height)) `
+    -WorkAreaHeight ([int][System.Windows.Forms.Screen]::FromControl($form).WorkingArea.Height)
+  # 접힘으로 높이를 잠글 때 최대화 상태면 먼저 정상 창으로 (Min=Max 잠금과 충돌 방지 - Codex 조건)
+  if ($tabLayout.LockHeight -and $form.WindowState -ne 'Normal') { $form.WindowState = 'Normal' }
+  $form.SuspendLayout()
+  # 크기 제약은 Max → Min 순서로 전부 해제한 뒤 새 크기를 적용 (이전 잠금이 방해하지 않게 - Codex 조건)
+  $form.MaximumSize = [System.Drawing.Size]::Empty
+  $form.MinimumSize = [System.Drawing.Size]::Empty
+  $chkTabSettings.Location = New-Object System.Drawing.Point(15, $tabLayout.TabRowTop)
+  $chkTabLog.Location = New-Object System.Drawing.Point(120, $tabLayout.TabRowTop)
+  $lblLogPreview.Location = New-Object System.Drawing.Point(230, ($tabLayout.TabRowTop + 6))
+  if ($tabLayout.SettingsTop -ge 0) {
+    $grpSettings.Top = $tabLayout.SettingsTop
+    $grpSettings.Visible = $true
+  } else {
+    $grpSettings.Visible = $false
+  }
+  # 로그는 프로그램적 폼 크기 변경 동안 앵커 간섭이 없도록 Top 계열로 내려 두고 마지막에 복원
+  $txtLog.Visible = $false
+  $txtLog.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+  $form.ClientSize = New-Object System.Drawing.Size($form.ClientSize.Width, $tabLayout.ClientHeight)
+  if ($tabLayout.LogTop -ge 0) {
+    $txtLog.Top = $tabLayout.LogTop
+    $txtLog.Height = $tabLayout.LogHeight
+    $txtLog.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $txtLog.Visible = $true
+  }
+  $form.ResumeLayout($true)
+  # 새 크기 확정 후 제약 재설정: 접힘 = 높이만 잠금(가로는 계속 조절 가능), 열림 = 동적 최소
+  # (로그 100 + 하단 줄이 겹치지 않는 하한 - 고정 700 최소는 커스텀 상세에서 겹침 유발. Codex 조건)
+  if ($tabLayout.LockHeight) {
+    $form.MinimumSize = New-Object System.Drawing.Size(616, $form.Height)
+    $form.MaximumSize = New-Object System.Drawing.Size(0, $form.Height)
+    $form.MaximizeBox = $false
+  } else {
+    $form.MinimumSize = New-Object System.Drawing.Size(616, $tabLayout.MinOuterHeight)
+    $form.MaximumSize = [System.Drawing.Size]::Empty
+    $form.MaximizeBox = $true
+  }
+  # 펼침으로 화면 아래를 넘으면 창을 위로 보정 (현재 모니터의 작업 영역 기준 - Codex 조건)
+  $tabWorkArea = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+  if ($form.Bottom -gt $tabWorkArea.Bottom) {
+    $form.Top = [Math]::Max($tabWorkArea.Top, $tabWorkArea.Bottom - $form.Height)
+  }
+  $script:logLayoutOpen = [bool]$chkTabLog.Checked
   # 어비스 커스텀 방식·매칭 입력 잠금 재적용 (여기서 라디오가 바뀌면 CheckedChanged 로 이 블록이
   # 한 번 더 돌아 배치가 다시 맞춰집니다 - 잠금 함수 쪽 재진입 가드로 무한 재귀는 없습니다)
   Update-AbyssInputLock
@@ -6273,17 +6525,8 @@ $hotkeyTimer.Start()
 # 모든 컨트롤 생성이 끝난 뒤 한 번에 입힙니다 (컨트롤 생성/로직 코드는 손대지 않음).
 # 색 철학: 따뜻한 크림 배경 + 꿀색 강조 + 갈색 글자. 로그만 콘솔풍으로 어둡게.
 # 실행 중 색을 바꾸는 곳은 상태 라벨뿐이며(초록/빨강/파랑/주황) 밝은 배경에서 모두 잘 보입니다.
-$script:themeBack     = [System.Drawing.Color]::FromArgb(253, 248, 238)  # 창 배경 (크림)
-$script:themeControl  = [System.Drawing.Color]::FromArgb(255, 253, 247)  # 일반 버튼 (밝은 크림)
-$script:themeInput    = [System.Drawing.Color]::FromArgb(255, 255, 255)  # 입력 배경 (흰색)
-$script:themeLogBack  = [System.Drawing.Color]::FromArgb(40, 34, 24)     # 로그 배경 (진한 갈색 콘솔풍)
-$script:themeText     = [System.Drawing.Color]::FromArgb(66, 50, 22)     # 기본 글자 (진한 갈색)
-$script:themeMuted    = [System.Drawing.Color]::FromArgb(158, 138, 104)  # 흐린 글자
-$script:themeBorder   = [System.Drawing.Color]::FromArgb(226, 205, 160)  # 버튼 테두리 (연한 꿀색)
-$script:themeTitle    = [System.Drawing.Color]::FromArgb(191, 128, 7)    # 섹션 제목 (꿀 갈색)
-$script:themeHoney    = [System.Drawing.Color]::FromArgb(247, 181, 0)    # 꿀색 (강조)
-$script:themeHoneyInk = [System.Drawing.Color]::FromArgb(66, 45, 0)      # 꿀색 위 글자
-$script:themeDanger   = [System.Drawing.Color]::FromArgb(222, 105, 92)   # 위험(중지)
+# ($script:theme* 색 변수 정의는 폼 생성 앞으로 이동 - 탭 토글 생성/초기 배지가 팔레트를
+#  먼저 쓰기 때문. 2026-08-04 Codex 지적)
 
 function Apply-HoneyTheme {
   param([System.Windows.Forms.Control]$Root)
