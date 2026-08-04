@@ -80,7 +80,7 @@ Assert-Case '가드: 크기 제약 Max→Min 순서 해제' `
   ($guiSource -match '\$form\.MaximumSize = \[System\.Drawing\.Size\]::Empty\s+\$form\.MinimumSize = \[System\.Drawing\.Size\]::Empty') $true
 # Max 가로는 0 금지 - Form 은 '0=무제한' 규칙이 없어 창이 136px 로 짜부라짐 (08-04 실사고)
 Assert-Case '가드: 접힘 = 높이만 잠금(Max 가로는 큰 값, 0 금지)' `
-  ($guiSource -match '\$form\.MinimumSize = New-Object System\.Drawing\.Size\(616, \$form\.Height\)[\s\S]{0,400}\$form\.MaximumSize = New-Object System\.Drawing\.Size\(65535, \$form\.Height\)') $true
+  ($guiSource -match '\$form\.MinimumSize = New-Object System\.Drawing\.Size\(560, \$form\.Height\)[\s\S]{0,400}\$form\.MaximumSize = New-Object System\.Drawing\.Size\(65535, \$form\.Height\)') $true
 Assert-Case '가드: MaximumSize 가로 0 사용 없음' `
   ([regex]::Matches($guiSource, 'MaximumSize = New-Object System\.Drawing\.Size\(0,').Count) 0
 Assert-Case '가드: 잠금 전 최대화 해제' `
@@ -99,7 +99,12 @@ Assert-Case '가드: 하단 줄 간격 실측' `
   ($guiSource -match '\$script:footerGap = \$form\.ClientSize\.Height - \$btnOpenLog\.Top') $true
 # 로그 전용 하단 컨트롤은 로그 열림에 연동 (2026-08-04 추가 요청 - Log 폴더 열기는 항상 유지)
 Assert-Case '가드: 로그 접힘 시 글자 크기/지우기 숨김 3건' `
-  ([regex]::Matches($guiSource, '\$(lblFontSize|numFontSize|btnClearLog)\.Visible = \(\$tabLayout\.LogTop -ge 0\)').Count) 3
+  ($guiSource -match '\$lblFontSize\.Visible = \(\$tabLayout\.LogTop -ge 0\)' -and
+   $guiSource -match '\$numFontSize\.Visible = \(\$tabLayout\.LogTop -ge 0\)' -and
+   $guiSource -match '\$btnClearLog\.Visible = \(\$tabLayout\.LogTop -ge 0\)') $true
+# 로그 기본 뷰포트 150 (2026-08-04 사용자 조정 - 300은 너무 높음)
+Assert-Case '가드: 로그 기본 뷰포트 150' `
+  ($guiSource -match '\$script:logViewHeight = 150') $true
 Assert-Case '가드: 토글 상태 저장 2경로(즉시+시작 시 병합)' `
   ([regex]::Matches($guiSource, "@\('settingsOpen', \[bool\]\`$chkTabSettings\.Checked\)").Count) 2
 Assert-Case '가드: 로드는 JSON 불리언만 인정' `
@@ -109,5 +114,13 @@ Assert-Case '가드: 로드는 JSON 불리언만 인정' `
 $configJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 Assert-Case 'config: ui.settingsOpen 기본 false' ($configJson.ui.settingsOpen -is [bool] -and -not $configJson.ui.settingsOpen) $true
 Assert-Case 'config: ui.logOpen 기본 false' ($configJson.ui.logOpen -is [bool] -and -not $configJson.ui.logOpen) $true
+
+# 폭 560 확정 (2026-08-04 시안): 최소 폭 3곳(기본+접힘+열림) 일치 + 구 616 잔재 없음
+Assert-Case '가드: 최소 폭 560 - 기본/접힘/열림 3곳' `
+  ([regex]::Matches($guiSource, 'MinimumSize = New-Object System\.Drawing\.Size\(560,').Count) 3
+Assert-Case '가드: 구 최소 폭 616 잔재 없음' `
+  ([regex]::Matches($guiSource, 'Size\(616,').Count) 0
+Assert-Case '가드: 폼 폭 560' `
+  ($guiSource -match '\$form\.Size = New-Object System\.Drawing\.Size\(560, 872\)') $true
 
 exit $fails

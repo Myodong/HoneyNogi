@@ -1360,10 +1360,10 @@ $script:themeHoneyInk = [System.Drawing.Color]::FromArgb(66, 45, 0)      # 꿀�
 $script:themeDanger   = [System.Drawing.Color]::FromArgb(222, 105, 92)   # 위험(중지)
 
 $form.Text = "꿀비노기 컨트롤 패널 v$appVersion"
-$form.Size = New-Object System.Drawing.Size(600, 872)
+$form.Size = New-Object System.Drawing.Size(560, 872)   # 폭 616→560 (2026-08-04 시안 확정 - 문구·배치 불변, 폭 상수만 축소)
 # 세로 크기 조절 가능: 로그 영역이 창 크기에 맞춰 늘어나고 줄어듭니다 (Anchor 설정 참고)
 $form.FormBorderStyle = 'Sizable'
-$form.MinimumSize = New-Object System.Drawing.Size(616, 700)
+$form.MinimumSize = New-Object System.Drawing.Size(560, 700)
 $form.MaximizeBox = $true
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
@@ -1376,7 +1376,7 @@ if (Test-Path -LiteralPath $appIconPath) {
 # --- 상태 표시 ---
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Location = New-Object System.Drawing.Point(15, 12)
-$lblStatus.Size = New-Object System.Drawing.Size(554, 26)
+$lblStatus.Size = New-Object System.Drawing.Size(514, 26)
 $lblStatus.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
 $lblStatus.Text = '대기 중'
 $lblStatus.ForeColor = [System.Drawing.Color]::DimGray
@@ -1386,19 +1386,19 @@ $form.Controls.Add($lblStatus)
 $grpApproval = New-Object System.Windows.Forms.GroupBox
 $grpApproval.Text = '사용 승인 필요'
 $grpApproval.Location = New-Object System.Drawing.Point(15, 42)
-$grpApproval.Size = New-Object System.Drawing.Size(554, 118)
+$grpApproval.Size = New-Object System.Drawing.Size(514, 118)
 $grpApproval.Visible = $false
 $form.Controls.Add($grpApproval)
 
 $lblApprovalMsg = New-Object System.Windows.Forms.Label
 $lblApprovalMsg.Location = New-Object System.Drawing.Point(12, 20)
-$lblApprovalMsg.Size = New-Object System.Drawing.Size(530, 34)
+$lblApprovalMsg.Size = New-Object System.Drawing.Size(490, 34)
 $lblApprovalMsg.Text = ''
 $grpApproval.Controls.Add($lblApprovalMsg)
 
 $txtApprovalCode = New-Object System.Windows.Forms.TextBox
 $txtApprovalCode.Location = New-Object System.Drawing.Point(12, 58)
-$txtApprovalCode.Size = New-Object System.Drawing.Size(530, 24)
+$txtApprovalCode.Size = New-Object System.Drawing.Size(490, 24)
 $txtApprovalCode.ReadOnly = $true
 $txtApprovalCode.Font = New-Object System.Drawing.Font('Consolas', 8)
 $grpApproval.Controls.Add($txtApprovalCode)
@@ -1430,7 +1430,7 @@ $btnApprovalRecheck.Add_Click({
 $grpRepeat = New-Object System.Windows.Forms.GroupBox
 $grpRepeat.Text = '반복'
 $grpRepeat.Location = New-Object System.Drawing.Point(15, 44)
-$grpRepeat.Size = New-Object System.Drawing.Size(554, 52)
+$grpRepeat.Size = New-Object System.Drawing.Size(514, 52)
 $form.Controls.Add($grpRepeat)
 
 # 4번째 라디오('커스텀 반복')를 한 줄에 넣기 위해 기존 컨트롤들의 가로 배치를 압축했습니다
@@ -1475,8 +1475,8 @@ $grpRepeat.Controls.Add($dtpUntil)
 # 선택 여부는 config(customRepeat.enabled)에 영속화됩니다 (재시작 후 옛 단일 설정 오작동 방지).
 $rbCustomRepeat = New-Object System.Windows.Forms.RadioButton
 $rbCustomRepeat.Text = '커스텀 반복'
-$rbCustomRepeat.Location = New-Object System.Drawing.Point(420, 20)
-$rbCustomRepeat.Size = New-Object System.Drawing.Size(125, 22)
+$rbCustomRepeat.Location = New-Object System.Drawing.Point(390, 20)
+$rbCustomRepeat.Size = New-Object System.Drawing.Size(110, 22)
 $rbCustomRepeat.Enabled = $false   # 던전/어비스 카테고리에서 활성 (updateCategoryPanels 가 제어)
 $grpRepeat.Controls.Add($rbCustomRepeat)
 
@@ -1524,7 +1524,7 @@ $form.Controls.Add($btnKill)
 # 선택한 콘텐츠에 맞는 사용 설명서 팝업 (어비스 설명서 / 던전 설명서 - 카테고리에 따라 자동 전환)
 $btnManual = New-Object System.Windows.Forms.Button
 $btnManual.Text = '어비스 설명서'
-$btnManual.Location = New-Object System.Drawing.Point(453, 104)
+$btnManual.Location = New-Object System.Drawing.Point(413, 104)
 $btnManual.Size = New-Object System.Drawing.Size(116, 38)
 $form.Controls.Add($btnManual)
 
@@ -1602,14 +1602,14 @@ $btnManual.Add_Click({
 $grpContent = New-Object System.Windows.Forms.GroupBox
 $grpContent.Text = '콘텐츠 선택'
 $grpContent.Location = New-Object System.Drawing.Point(15, 150)
-$grpContent.Size = New-Object System.Drawing.Size(554, 52)
+$grpContent.Size = New-Object System.Drawing.Size(514, 52)
 $form.Controls.Add($grpContent)
 
 # --- 콘텐츠 상세 설정 (입장 방식 / 난이도 / 세부 던전) ---
 $grpContentDetail = New-Object System.Windows.Forms.GroupBox
 $grpContentDetail.Text = '콘텐츠 상세 설정'
 $grpContentDetail.Location = New-Object System.Drawing.Point(15, 210)
-$grpContentDetail.Size = New-Object System.Drawing.Size(554, 122)
+$grpContentDetail.Size = New-Object System.Drawing.Size(514, 122)
 $form.Controls.Add($grpContentDetail)
 
 # 1줄: 콘텐츠 종류 (라디오 그룹 분리를 위해 Panel 로 감쌈)
@@ -1733,7 +1733,7 @@ $pnlDungeon.Controls.Add($rbDgMadness)
 $rbDgScattered = New-Object System.Windows.Forms.RadioButton
 $rbDgScattered.Text = '흩어진 물길'
 $rbDgScattered.Location = New-Object System.Drawing.Point(340, 2)
-$rbDgScattered.Size = New-Object System.Drawing.Size(185, 22)
+$rbDgScattered.Size = New-Object System.Drawing.Size(155, 22)
 $pnlDungeon.Controls.Add($rbDgScattered)
 
 # 함께하기 전용 매칭 방식 줄 (우연한 만남 / 파티 찾기). 함께하기를 선택하면 난이도
@@ -1760,19 +1760,19 @@ $pnlAbyssMatching.Controls.Add($rbAbyssChance)
 $rbAbyssFindParty = New-Object System.Windows.Forms.RadioButton
 $rbAbyssFindParty.Text = '파티 찾기'
 $rbAbyssFindParty.Location = New-Object System.Drawing.Point(190, 2)
-$rbAbyssFindParty.Size = New-Object System.Drawing.Size(100, 22)
+$rbAbyssFindParty.Size = New-Object System.Drawing.Size(85, 22)
 $pnlAbyssMatching.Controls.Add($rbAbyssFindParty)
 
 # 직접 짠 파티로 도는 모드 (파티장 = 입장하기 클릭 주도 / 파티원 = 준비·따라가기 전담)
 $rbAbyssPartyLead = New-Object System.Windows.Forms.RadioButton
 $rbAbyssPartyLead.Text = '파티(파티장)'
-$rbAbyssPartyLead.Location = New-Object System.Drawing.Point(296, 2)
-$rbAbyssPartyLead.Size = New-Object System.Drawing.Size(110, 22)
+$rbAbyssPartyLead.Location = New-Object System.Drawing.Point(280, 2)
+$rbAbyssPartyLead.Size = New-Object System.Drawing.Size(100, 22)
 $pnlAbyssMatching.Controls.Add($rbAbyssPartyLead)
 
 $rbAbyssPartyMember = New-Object System.Windows.Forms.RadioButton
 $rbAbyssPartyMember.Text = '파티(파티원)'
-$rbAbyssPartyMember.Location = New-Object System.Drawing.Point(410, 2)
+$rbAbyssPartyMember.Location = New-Object System.Drawing.Point(385, 2)
 $rbAbyssPartyMember.Size = New-Object System.Drawing.Size(110, 22)
 $pnlAbyssMatching.Controls.Add($rbAbyssPartyMember)
 
@@ -2289,7 +2289,7 @@ $chkCrDouble.Add_CheckedChanged({
 #                 / 소진 시(진행·멈춤·—) / 더블 불가 시(소탕만·멈춤·—) - 뒤 2열은 항목별 소진 대응 속성
 $lvCrList = New-Object System.Windows.Forms.ListView
 $lvCrList.Location = New-Object System.Drawing.Point(15, 52)
-$lvCrList.Size = New-Object System.Drawing.Size(420, 150)
+$lvCrList.Size = New-Object System.Drawing.Size(392, 150)
 $lvCrList.View = [System.Windows.Forms.View]::Details
 $lvCrList.GridLines = $true
 $lvCrList.CheckBoxes = $true
@@ -2299,11 +2299,11 @@ $lvCrList.HideSelection = $false
 $lvCrList.Visible = $false
 [void]$lvCrList.Columns.Add('', 28)
 [void]$lvCrList.Columns.Add('#', 32)
-[void]$lvCrList.Columns.Add('난이도', 78)   # '매우 어려움'까지 표시 (2026-07-24)
-[void]$lvCrList.Columns.Add('구역', 52)
-[void]$lvCrList.Columns.Add('은동전', 62)
-[void]$lvCrList.Columns.Add('소진 시', 78)
-[void]$lvCrList.Columns.Add('더블 불가 시', 88)
+[void]$lvCrList.Columns.Add('난이도', 74)   # '매우 어려움'까지 표시 (2026-07-24)
+[void]$lvCrList.Columns.Add('구역', 44)
+[void]$lvCrList.Columns.Add('은동전', 50)
+[void]$lvCrList.Columns.Add('소진 시', 58)
+[void]$lvCrList.Columns.Add('더블 불가 시', 82)
 $grpContentDetail.Controls.Add($lvCrList)
 
 # 0번(체크) 열 머리글 클릭 = 전체 선택/해제. WinForms ListView 에는 실제 머리글 체크박스가
@@ -2334,28 +2334,28 @@ $lvCrList.Add_ItemCheck({
 # Top 값은 라디오 줄 표시에 따라 updateCategoryPanels 가 리스트와 함께 재배치합니다
 $btnCrAdd = New-Object System.Windows.Forms.Button
 $btnCrAdd.Text = '추가'
-$btnCrAdd.Location = New-Object System.Drawing.Point(445, 52)
+$btnCrAdd.Location = New-Object System.Drawing.Point(413, 52)
 $btnCrAdd.Size = New-Object System.Drawing.Size(94, 30)
 $btnCrAdd.Visible = $false
 $grpContentDetail.Controls.Add($btnCrAdd)
 
 $btnCrDelete = New-Object System.Windows.Forms.Button
 $btnCrDelete.Text = '삭제(체크)'
-$btnCrDelete.Location = New-Object System.Drawing.Point(445, 88)
+$btnCrDelete.Location = New-Object System.Drawing.Point(413, 88)
 $btnCrDelete.Size = New-Object System.Drawing.Size(94, 30)
 $btnCrDelete.Visible = $false
 $grpContentDetail.Controls.Add($btnCrDelete)
 
 $btnCrUp = New-Object System.Windows.Forms.Button
 $btnCrUp.Text = '↑ 위로'
-$btnCrUp.Location = New-Object System.Drawing.Point(445, 124)
+$btnCrUp.Location = New-Object System.Drawing.Point(413, 124)
 $btnCrUp.Size = New-Object System.Drawing.Size(94, 30)
 $btnCrUp.Visible = $false
 $grpContentDetail.Controls.Add($btnCrUp)
 
 $btnCrDown = New-Object System.Windows.Forms.Button
 $btnCrDown.Text = '↓ 아래로'
-$btnCrDown.Location = New-Object System.Drawing.Point(445, 160)
+$btnCrDown.Location = New-Object System.Drawing.Point(413, 160)
 $btnCrDown.Size = New-Object System.Drawing.Size(94, 30)
 $btnCrDown.Visible = $false
 $grpContentDetail.Controls.Add($btnCrDown)
@@ -2449,7 +2449,7 @@ $btnCrDown.Add_Click({ Move-CustomListRow -Delta 1 })
 # (소진 대응은 항목별 속성으로 옮겨 전역 소진 대응 줄(pnlCrFallback)은 폐지됐습니다)
 $pnlCrRepeat = New-Object System.Windows.Forms.Panel
 $pnlCrRepeat.Location = New-Object System.Drawing.Point(15, 238)
-$pnlCrRepeat.Size = New-Object System.Drawing.Size(524, 28)
+$pnlCrRepeat.Size = New-Object System.Drawing.Size(494, 28)
 $pnlCrRepeat.Visible = $false
 $grpContentDetail.Controls.Add($pnlCrRepeat)
 
@@ -2491,15 +2491,15 @@ $pnlCrRepeat.Controls.Add($lblCrLaps)
 $lblCrCoinTotal = New-Object System.Windows.Forms.Label
 $lblCrCoinTotal.Text = '바퀴당 은동전 0개'
 $lblCrCoinTotal.Location = New-Object System.Drawing.Point(293, 5)
-$lblCrCoinTotal.Size = New-Object System.Drawing.Size(122, 20)
+$lblCrCoinTotal.Size = New-Object System.Drawing.Size(119, 20)
 $lblCrCoinTotal.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
 $lblCrCoinTotal.ForeColor = [System.Drawing.Color]::SteelBlue
 $pnlCrRepeat.Controls.Add($lblCrCoinTotal)
 
 $btnCrReset = New-Object System.Windows.Forms.Button
 $btnCrReset.Text = '진행 초기화'
-$btnCrReset.Location = New-Object System.Drawing.Point(430, 0)
-$btnCrReset.Size = New-Object System.Drawing.Size(94, 26)
+$btnCrReset.Location = New-Object System.Drawing.Point(414, 0)
+$btnCrReset.Size = New-Object System.Drawing.Size(80, 26)
 $pnlCrRepeat.Controls.Add($btnCrReset)
 
 # 커스텀 설정 변경 = 즉시 저장 (ui.logFontSize 즉시 저장 패턴. 로딩 중에는 가드로 억제)
@@ -2557,7 +2557,7 @@ $pnlAcrInput.Controls.Add($lblAcrDungeon)
 
 $cboAcrDungeon = New-Object System.Windows.Forms.ComboBox
 $cboAcrDungeon.Location = New-Object System.Drawing.Point(380, 1)
-$cboAcrDungeon.Size = New-Object System.Drawing.Size(144, 24)
+$cboAcrDungeon.Size = New-Object System.Drawing.Size(115, 24)
 $cboAcrDungeon.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 foreach ($acrDungeonName in @('허상의 정박지', '광기의 동굴', '흩어진 물길')) {
   [void]$cboAcrDungeon.Items.Add($acrDungeonName)
@@ -2711,7 +2711,7 @@ $lvCrList.Add_MouseUp($cellEditMouseUp)
 
 $lvAcrList = New-Object System.Windows.Forms.ListView
 $lvAcrList.Location = New-Object System.Drawing.Point(15, 52)
-$lvAcrList.Size = New-Object System.Drawing.Size(420, 150)
+$lvAcrList.Size = New-Object System.Drawing.Size(392, 150)
 $lvAcrList.View = [System.Windows.Forms.View]::Details
 $lvAcrList.GridLines = $true
 $lvAcrList.CheckBoxes = $true
@@ -2723,8 +2723,8 @@ $lvAcrList.Visible = $false
 [void]$lvAcrList.Columns.Add('#', 30)
 [void]$lvAcrList.Columns.Add('방식', 65)
 [void]$lvAcrList.Columns.Add('난이도', 72)
-[void]$lvAcrList.Columns.Add('어비스 던전', 110)
-[void]$lvAcrList.Columns.Add('매칭', 90)
+[void]$lvAcrList.Columns.Add('어비스 던전', 90)
+[void]$lvAcrList.Columns.Add('매칭', 82)
 $grpContentDetail.Controls.Add($lvAcrList)
 $lvAcrList.Add_MouseUp($cellEditMouseUp)   # 셀 편집 - 생성 직후 연결 (위 던전 리스트와 공용 핸들러)
 
@@ -2743,28 +2743,28 @@ $lvAcrList.Add_ItemCheck({
 
 $btnAcrAdd = New-Object System.Windows.Forms.Button
 $btnAcrAdd.Text = '추가'
-$btnAcrAdd.Location = New-Object System.Drawing.Point(445, 52)
+$btnAcrAdd.Location = New-Object System.Drawing.Point(413, 52)
 $btnAcrAdd.Size = New-Object System.Drawing.Size(94, 30)
 $btnAcrAdd.Visible = $false
 $grpContentDetail.Controls.Add($btnAcrAdd)
 
 $btnAcrDelete = New-Object System.Windows.Forms.Button
 $btnAcrDelete.Text = '삭제(체크)'
-$btnAcrDelete.Location = New-Object System.Drawing.Point(445, 88)
+$btnAcrDelete.Location = New-Object System.Drawing.Point(413, 88)
 $btnAcrDelete.Size = New-Object System.Drawing.Size(94, 30)
 $btnAcrDelete.Visible = $false
 $grpContentDetail.Controls.Add($btnAcrDelete)
 
 $btnAcrUp = New-Object System.Windows.Forms.Button
 $btnAcrUp.Text = '↑ 위로'
-$btnAcrUp.Location = New-Object System.Drawing.Point(445, 124)
+$btnAcrUp.Location = New-Object System.Drawing.Point(413, 124)
 $btnAcrUp.Size = New-Object System.Drawing.Size(94, 30)
 $btnAcrUp.Visible = $false
 $grpContentDetail.Controls.Add($btnAcrUp)
 
 $btnAcrDown = New-Object System.Windows.Forms.Button
 $btnAcrDown.Text = '↓ 아래로'
-$btnAcrDown.Location = New-Object System.Drawing.Point(445, 160)
+$btnAcrDown.Location = New-Object System.Drawing.Point(413, 160)
 $btnAcrDown.Size = New-Object System.Drawing.Size(94, 30)
 $btnAcrDown.Visible = $false
 $grpContentDetail.Controls.Add($btnAcrDown)
@@ -2803,7 +2803,7 @@ $btnAcrDown.Add_Click({ Move-AbyssCustomListRow -Delta 1 })
 
 $pnlAcrRepeat = New-Object System.Windows.Forms.Panel
 $pnlAcrRepeat.Location = New-Object System.Drawing.Point(15, 238)
-$pnlAcrRepeat.Size = New-Object System.Drawing.Size(524, 28)
+$pnlAcrRepeat.Size = New-Object System.Drawing.Size(494, 28)
 $pnlAcrRepeat.Visible = $false
 $grpContentDetail.Controls.Add($pnlAcrRepeat)
 
@@ -2843,8 +2843,8 @@ $pnlAcrRepeat.Controls.Add($lblAcrLaps)
 
 $btnAcrReset = New-Object System.Windows.Forms.Button
 $btnAcrReset.Text = '진행 초기화'
-$btnAcrReset.Location = New-Object System.Drawing.Point(430, 0)
-$btnAcrReset.Size = New-Object System.Drawing.Size(94, 26)
+$btnAcrReset.Location = New-Object System.Drawing.Point(414, 0)
+$btnAcrReset.Size = New-Object System.Drawing.Size(80, 26)
 $btnAcrReset.Enabled = $true
 $pnlAcrRepeat.Controls.Add($btnAcrReset)
 
@@ -2942,7 +2942,7 @@ $chkDcrTribute.Add_CheckedChanged({
 # 리스트 (표 형태): 체크 / # / 구역(D표기) / 마족공물(판당 소모량) / 소진 시
 $lvDcrList = New-Object System.Windows.Forms.ListView
 $lvDcrList.Location = New-Object System.Drawing.Point(15, 52)
-$lvDcrList.Size = New-Object System.Drawing.Size(420, 150)
+$lvDcrList.Size = New-Object System.Drawing.Size(392, 150)
 $lvDcrList.View = [System.Windows.Forms.View]::Details
 $lvDcrList.GridLines = $true
 $lvDcrList.CheckBoxes = $true
@@ -2978,28 +2978,28 @@ $lvDcrList.Add_ItemCheck({
 
 $btnDcrAdd = New-Object System.Windows.Forms.Button
 $btnDcrAdd.Text = '추가'
-$btnDcrAdd.Location = New-Object System.Drawing.Point(445, 52)
+$btnDcrAdd.Location = New-Object System.Drawing.Point(413, 52)
 $btnDcrAdd.Size = New-Object System.Drawing.Size(94, 30)
 $btnDcrAdd.Visible = $false
 $grpContentDetail.Controls.Add($btnDcrAdd)
 
 $btnDcrDelete = New-Object System.Windows.Forms.Button
 $btnDcrDelete.Text = '삭제(체크)'
-$btnDcrDelete.Location = New-Object System.Drawing.Point(445, 88)
+$btnDcrDelete.Location = New-Object System.Drawing.Point(413, 88)
 $btnDcrDelete.Size = New-Object System.Drawing.Size(94, 30)
 $btnDcrDelete.Visible = $false
 $grpContentDetail.Controls.Add($btnDcrDelete)
 
 $btnDcrUp = New-Object System.Windows.Forms.Button
 $btnDcrUp.Text = '↑ 위로'
-$btnDcrUp.Location = New-Object System.Drawing.Point(445, 124)
+$btnDcrUp.Location = New-Object System.Drawing.Point(413, 124)
 $btnDcrUp.Size = New-Object System.Drawing.Size(94, 30)
 $btnDcrUp.Visible = $false
 $grpContentDetail.Controls.Add($btnDcrUp)
 
 $btnDcrDown = New-Object System.Windows.Forms.Button
 $btnDcrDown.Text = '↓ 아래로'
-$btnDcrDown.Location = New-Object System.Drawing.Point(445, 160)
+$btnDcrDown.Location = New-Object System.Drawing.Point(413, 160)
 $btnDcrDown.Size = New-Object System.Drawing.Size(94, 30)
 $btnDcrDown.Visible = $false
 $grpContentDetail.Controls.Add($btnDcrDown)
@@ -3077,7 +3077,7 @@ $btnDcrDown.Add_Click({ Move-DeepCustomListRow -Delta 1 })
 # 하단 줄: 리스트 반복 (무한 / 횟수 N바퀴) + 공물 합계 + 진행 초기화
 $pnlDcrRepeat = New-Object System.Windows.Forms.Panel
 $pnlDcrRepeat.Location = New-Object System.Drawing.Point(15, 238)
-$pnlDcrRepeat.Size = New-Object System.Drawing.Size(524, 28)
+$pnlDcrRepeat.Size = New-Object System.Drawing.Size(494, 28)
 $pnlDcrRepeat.Visible = $false
 $grpContentDetail.Controls.Add($pnlDcrRepeat)
 
@@ -3119,15 +3119,15 @@ $pnlDcrRepeat.Controls.Add($lblDcrLaps)
 $lblDcrTributeTotal = New-Object System.Windows.Forms.Label
 $lblDcrTributeTotal.Text = '바퀴당 마족공물 0개'
 $lblDcrTributeTotal.Location = New-Object System.Drawing.Point(293, 5)
-$lblDcrTributeTotal.Size = New-Object System.Drawing.Size(122, 20)
+$lblDcrTributeTotal.Size = New-Object System.Drawing.Size(119, 20)
 $lblDcrTributeTotal.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
 $lblDcrTributeTotal.ForeColor = [System.Drawing.Color]::SteelBlue
 $pnlDcrRepeat.Controls.Add($lblDcrTributeTotal)
 
 $btnDcrReset = New-Object System.Windows.Forms.Button
 $btnDcrReset.Text = '진행 초기화'
-$btnDcrReset.Location = New-Object System.Drawing.Point(430, 0)
-$btnDcrReset.Size = New-Object System.Drawing.Size(94, 26)
+$btnDcrReset.Location = New-Object System.Drawing.Point(414, 0)
+$btnDcrReset.Size = New-Object System.Drawing.Size(80, 26)
 $pnlDcrRepeat.Controls.Add($btnDcrReset)
 
 # 커스텀 설정 변경 = 즉시 저장 (던전 커스텀과 동일 패턴 - 로딩 중 가드)
@@ -3145,7 +3145,7 @@ $btnDcrReset.Add_Click({
 $grpSettings = New-Object System.Windows.Forms.GroupBox
 $grpSettings.Text = '설정'
 $grpSettings.Location = New-Object System.Drawing.Point(15, 340)
-$grpSettings.Size = New-Object System.Drawing.Size(554, 150)
+$grpSettings.Size = New-Object System.Drawing.Size(514, 150)
 $form.Controls.Add($grpSettings)
 
 $chkSpace = New-Object System.Windows.Forms.CheckBox
@@ -3172,7 +3172,7 @@ $grpSettings.Controls.Add($chkRevive)
 $chkAssist = New-Object System.Windows.Forms.CheckBox
 $chkAssist.Text = '어시스트 자동 켜기 (H)'
 $chkAssist.Location = New-Object System.Drawing.Point(210, 25)
-$chkAssist.Size = New-Object System.Drawing.Size(185, 22)
+$chkAssist.Size = New-Object System.Drawing.Size(175, 22)
 $grpSettings.Controls.Add($chkAssist)
 
 # 권장 창 모드 버튼: 클릭하면 게임 창을 OCR 인식 최적 크기(QHD 이상=1908x1076,
@@ -3180,7 +3180,7 @@ $grpSettings.Controls.Add($chkAssist)
 # 매 회차 자동 보정이 그 크기를 그대로 유지하므로 별도 상시 설정이 필요 없습니다.
 $btnRecommendedWindow = New-Object System.Windows.Forms.Button
 $btnRecommendedWindow.Text = '권장 창 모드'
-$btnRecommendedWindow.Location = New-Object System.Drawing.Point(430, 25)
+$btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)
 $btnRecommendedWindow.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnRecommendedWindow)
 
@@ -3189,7 +3189,7 @@ $grpSettings.Controls.Add($btnRecommendedWindow)
 # 보이므로 팝업에는 넣지 않습니다. 켠 항목만 누를 때 상태를 읽어 표시합니다.
 $btnAlwaysOn = New-Object System.Windows.Forms.Button
 $btnAlwaysOn.Text = '적용된 설정'
-$btnAlwaysOn.Location = New-Object System.Drawing.Point(430, 70)
+$btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 70)
 $btnAlwaysOn.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnAlwaysOn)
 
@@ -3295,21 +3295,21 @@ $numClearWait.Add_ValueChanged($updateClearHuman)
 
 $btnSave = New-Object System.Windows.Forms.Button
 $btnSave.Text = '설정 저장'
-$btnSave.Location = New-Object System.Drawing.Point(430, 108)
+$btnSave.Location = New-Object System.Drawing.Point(390, 108)
 $btnSave.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnSave)
 
 $lblSaveInfo = New-Object System.Windows.Forms.Label
 $lblSaveInfo.Text = ''
 $lblSaveInfo.Location = New-Object System.Drawing.Point(205, 82)
-$lblSaveInfo.Size = New-Object System.Drawing.Size(220, 20)
+$lblSaveInfo.Size = New-Object System.Drawing.Size(180, 20)
 $lblSaveInfo.ForeColor = [System.Drawing.Color]::SeaGreen
 $grpSettings.Controls.Add($lblSaveInfo)
 
 # --- 로그 ---
 $txtLog = New-Object System.Windows.Forms.RichTextBox
 $txtLog.Location = New-Object System.Drawing.Point(15, 498)
-$txtLog.Size = New-Object System.Drawing.Size(554, 300)
+$txtLog.Size = New-Object System.Drawing.Size(514, 300)
 # 창 크기를 조절하면 로그 영역이 함께 늘어나고 줄어듭니다
 $txtLog.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $txtLog.ScrollBars = 'Vertical'
@@ -3363,15 +3363,15 @@ $numFontSize.Add_ValueChanged({
 
 $btnClearLog = New-Object System.Windows.Forms.Button
 $btnClearLog.Text = '로그 지우기'
-$btnClearLog.Location = New-Object System.Drawing.Point(295, 806)
-$btnClearLog.Size = New-Object System.Drawing.Size(100, 28)
+$btnClearLog.Location = New-Object System.Drawing.Point(280, 806)
+$btnClearLog.Size = New-Object System.Drawing.Size(80, 28)
 $btnClearLog.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
 $form.Controls.Add($btnClearLog)
 
 # 앱 버전 표시 (로그 지우기 버튼 옆 - 제목줄보다 눈에 잘 띄는 위치)
 $lblVersion = New-Object System.Windows.Forms.Label
 $lblVersion.Text = "v$appVersion"
-$lblVersion.Location = New-Object System.Drawing.Point(405, 812)
+$lblVersion.Location = New-Object System.Drawing.Point(369, 812)
 $lblVersion.Size = New-Object System.Drawing.Size(160, 20)
 $lblVersion.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
 $lblVersion.ForeColor = [System.Drawing.Color]::DimGray
@@ -3381,7 +3381,7 @@ $form.Controls.Add($lblVersion)
 # 새 버전 안내 링크 (평소 숨김 - 시작 시 최신 버전 확인에서 새 버전이 감지되면
 # 버전 표시 대신 이 링크가 나타나고, 클릭하면 GitHub 릴리스 페이지가 열립니다)
 $lnkUpdate = New-Object System.Windows.Forms.LinkLabel
-$lnkUpdate.Location = New-Object System.Drawing.Point(405, 812)
+$lnkUpdate.Location = New-Object System.Drawing.Point(369, 812)
 $lnkUpdate.Size = New-Object System.Drawing.Size(160, 20)
 $lnkUpdate.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
 $lnkUpdate.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
@@ -3393,7 +3393,7 @@ $form.Controls.Add($lnkUpdate)
 # CheckBox Appearance='Button' = 눌린 상태 유지 시각을 공짜로 얻음. 실행 중에도 사용해야
 # 하므로 Set-UiRunning 잠금 그룹(반복/콘텐츠/상세)에 넣지 않습니다. 배치·폼 높이는
 # updateCategoryPanels 끝의 적용부가, 순수 계산은 Get-TabToggleLayout(진리표 테스트 대상)이 담당.
-$script:logViewHeight = 300      # 로그 뷰포트 기억값 - 총 폼 높이가 아니라 로그 영역 높이만 기억해 설정을 접으면 폼도 함께 줄어듦 (Codex 계약)
+$script:logViewHeight = 150      # 로그 뷰포트 기억값 - 총 폼 높이가 아니라 로그 영역 높이만 기억해 설정을 접으면 폼도 함께 줄어듦 (Codex 계약. 기본 150 = 2026-08-04 사용자 조정 - 300은 너무 높음, 늘리면 그 높이가 유지됨)
 $script:logLayoutOpen = $null    # 직전 레이아웃의 로그 상태 3상태 토큰 (null=최초) - 열림이었을 때만 뷰포트를 흡수
 $script:hiddenLogErrors = 0      # 로그 접힘 중 발생한 미열람 오류/경고 수 (토글 배지)
 $script:hiddenLogWarns = 0
@@ -3425,7 +3425,7 @@ $form.Controls.Add($chkTabLog)
 
 # 접힘 중 마지막 경고/오류 1줄 미리보기 (토글 줄 우측)
 $lblLogPreview = New-Object System.Windows.Forms.Label
-$lblLogPreview.Size = New-Object System.Drawing.Size(339, 20)
+$lblLogPreview.Size = New-Object System.Drawing.Size(299, 20)
 $lblLogPreview.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
 $lblLogPreview.AutoEllipsis = $true
 $lblLogPreview.Text = ''
@@ -6423,14 +6423,14 @@ $updateCategoryPanels = {
   # 새 크기 확정 후 제약 재설정: 접힘 = 높이만 잠금(가로는 계속 조절 가능), 열림 = 동적 최소
   # (로그 100 + 하단 줄이 겹치지 않는 하한 - 고정 700 최소는 커스텀 상세에서 겹침 유발. Codex 조건)
   if ($tabLayout.LockHeight) {
-    $form.MinimumSize = New-Object System.Drawing.Size(616, $form.Height)
+    $form.MinimumSize = New-Object System.Drawing.Size(560, $form.Height)
     # 가로 최대는 큰 값으로 - 최상위 Form 의 MaximumSize 는 '0 = 무제한' 규칙이 적용되지
     # 않고 문자 그대로 0 이 되어 창이 최소 크롬 폭(136px)으로 짜부라짐 (2026-08-04 실사고,
     # 배포 전 사용자 실기에서 발견 - 컨트롤의 0 규칙과 다름)
     $form.MaximumSize = New-Object System.Drawing.Size(65535, $form.Height)
     $form.MaximizeBox = $false
   } else {
-    $form.MinimumSize = New-Object System.Drawing.Size(616, $tabLayout.MinOuterHeight)
+    $form.MinimumSize = New-Object System.Drawing.Size(560, $tabLayout.MinOuterHeight)
     $form.MaximumSize = [System.Drawing.Size]::Empty
     $form.MaximizeBox = $true
   }
