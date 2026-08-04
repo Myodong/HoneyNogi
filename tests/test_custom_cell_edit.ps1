@@ -105,8 +105,20 @@ Assert-Case '오버레이: 커밋은 SelectionChangeCommitted + BeginInvoke 예�
   ($guiSource -match "Add_SelectionChangeCommitted[\s\S]{0,700}BeginInvoke") $true
 Assert-Case '오버레이: DropDownClosed 는 숨기기만' `
   ($guiSource -match "Add_DropDownClosed[\s\S]{0,300}Hide-CellEditCombo") $true
-Assert-Case '오버레이: 실행 시작 시 편집 취소' `
-  ($guiSource -match "grpContentDetail\.Enabled = -not \`$IsRunning[\s\S]{0,400}Hide-CellEditCombo") $true
+# 2026-08-04 잠금 방식 변경: 그룹 통째 잠금 → 자식 개별 잠금 (커스텀 리스트는 실행 중에도
+# 스크롤 허용 - 사용자 요청). 스냅샷 멱등 + 복원 + 리스트 편집 가드가 새 계약 (Codex 합의)
+Assert-Case '오버레이: 실행 시작 시 편집 취소 (스냅샷 잠금 뒤)' `
+  ($guiSource -match "\`$IsRunning -and \`$null -eq \`$script:contentDetailEnabledSnapshot[\s\S]{0,1500}Hide-CellEditCombo") $true
+Assert-Case '잠금: 커스텀 리스트 3개는 스냅샷 제외(스크롤 허용)' `
+  ($guiSource -match "\`$scrollableLists = @\(\`$lvCrList, \`$lvAcrList, \`$lvDcrList\)") $true
+Assert-Case '잠금: 전부 캡처 후 별도 루프로 비활성' `
+  ($guiSource -match 'foreach \(\$detailChild in @\(\$detailSnapshot\.Keys\)\) \{ \$detailChild\.Enabled = \$false \}') $true
+Assert-Case '잠금: 종료 전환 시 스냅샷 복원(+IsDisposed 방어) 후 폐기' `
+  ($guiSource -match '\(-not \$IsRunning\) -and \$null -ne \$script:contentDetailEnabledSnapshot[\s\S]{0,400}IsDisposed[\s\S]{0,200}\$script:contentDetailEnabledSnapshot = \$null') $true
+Assert-Case '가드: 머리글 전체 토글 running 차단 3곳' `
+  ([regex]::Matches($guiSource, 'if \(\$script:running\) \{ return \}   # 실행 중').Count) 3
+Assert-Case '가드: 체크 토글 running 취소(ItemCheck) 3곳' `
+  ([regex]::Matches($guiSource, '\.NewValue = \$\w+\.CurrentValue').Count) 3
 Assert-Case '적용: 저장 실패 시 원복 (부채널 플래그)' `
   ([regex]::Matches($guiSource, 'lastCustomSaveOk').Count -ge 6) $true
 Assert-Case '적용: 강등 1건 이상이면 사전 확인창' `

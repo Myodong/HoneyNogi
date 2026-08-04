@@ -1210,6 +1210,9 @@ if (-not $guiMutexAcquired) {
 # ----- 상태 변수 -----
 $script:worker = $null
 $script:running = $false
+# 실행 중 콘텐츠 상세 자식들의 원래 Enabled 스냅샷 (커스텀 리스트 스크롤 허용 잠금 방식.
+# null = 미실행 상태. 스냅샷 존재 여부가 전이 토큰 - Set-UiRunning 중복 호출에도 멱등)
+$script:contentDetailEnabledSnapshot = $null
 $script:stopRequested = $false
 $script:completedCycles = 0
 $script:targetCycles = 0      # 0 = 무한
@@ -2293,6 +2296,7 @@ $grpContentDetail.Controls.Add($lvCrList)
 # 없어 열 클릭으로 구현합니다 (요청사항의 '머리글 체크박스 칸 클릭' 스펙 충족).
 $lvCrList.Add_ColumnClick({
     param($clickSender, $clickArgs)
+    if ($script:running) { return }   # 실행 중엔 리스트가 스크롤용으로만 살아 있음 - 전체 토글 금지
     if ($clickArgs.Column -ne 0) { return }
     if ($lvCrList.Items.Count -eq 0) { return }
     $allChecked = $true
@@ -2302,6 +2306,13 @@ $lvCrList.Add_ColumnClick({
     $script:crLoading = $true
     try { foreach ($crRow in $lvCrList.Items) { $crRow.Checked = $newState } }
     finally { $script:crLoading = $prevLoading }
+  })
+# 실행 중 체크 토글 금지 (마우스·Space 키 전 경로 차단): 리스트가 스크롤용으로 살아 있어
+# 클릭이 닿습니다. running 만 조건으로 - crLoading 을 넣으면 실행 중 가드가 우회될 여지
+# (Codex 계약. 세 커스텀 리스트 공통)
+$lvCrList.Add_ItemCheck({
+    param($checkSender, $checkArgs)
+    if ($script:running) { $checkArgs.NewValue = $checkArgs.CurrentValue }
   })
 
 # 리스트 옆 버튼 열: [추가] [삭제] [↑] [↓] 순서 (추가 = 입력 줄+라디오 줄의 현재 상태를
@@ -2705,10 +2716,15 @@ $lvAcrList.Add_MouseUp($cellEditMouseUp)   # 셀 편집 - 생성 직후 연결 (
 
 $lvAcrList.Add_ColumnClick({
     param($acrClickSender, $acrClickArgs)
+    if ($script:running) { return }   # 실행 중 전체 토글 금지 (던전 리스트와 동일 가드)
     if ($acrClickArgs.Column -ne 0 -or $lvAcrList.Items.Count -eq 0) { return }
     $acrAllChecked = $true
     foreach ($acrRow in $lvAcrList.Items) { if (-not $acrRow.Checked) { $acrAllChecked = $false; break } }
     foreach ($acrRow in $lvAcrList.Items) { $acrRow.Checked = -not $acrAllChecked }
+  })
+$lvAcrList.Add_ItemCheck({
+    param($acrCheckSender, $acrCheckArgs)
+    if ($script:running) { $acrCheckArgs.NewValue = $acrCheckArgs.CurrentValue }   # 실행 중 체크 토글 금지
   })
 
 $btnAcrAdd = New-Object System.Windows.Forms.Button
@@ -2931,6 +2947,7 @@ $lvDcrList.Add_MouseUp($cellEditMouseUp)   # 셀 편집 - 생성 직후 연결 (
 # 0번(체크) 열 머리글 클릭 = 전체 선택/해제 (던전 리스트와 동일 규칙)
 $lvDcrList.Add_ColumnClick({
     param($dcrClickSender, $dcrClickArgs)
+    if ($script:running) { return }   # 실행 중 전체 토글 금지 (던전 리스트와 동일 가드)
     if ($dcrClickArgs.Column -ne 0 -or $lvDcrList.Items.Count -eq 0) { return }
     $dcrAllChecked = $true
     foreach ($dcrRow in $lvDcrList.Items) { if (-not $dcrRow.Checked) { $dcrAllChecked = $false; break } }
@@ -2939,6 +2956,10 @@ $lvDcrList.Add_ColumnClick({
     $script:crLoading = $true
     try { foreach ($dcrRow in $lvDcrList.Items) { $dcrRow.Checked = $dcrNewState } }
     finally { $script:crLoading = $prevLoading }
+  })
+$lvDcrList.Add_ItemCheck({
+    param($dcrCheckSender, $dcrCheckArgs)
+    if ($script:running) { $dcrCheckArgs.NewValue = $dcrCheckArgs.CurrentValue }   # 실행 중 체크 토글 금지
   })
 
 $btnDcrAdd = New-Object System.Windows.Forms.Button
@@ -5149,7 +5170,28 @@ function Set-UiRunning {
   $btnKill.Visible = $IsRunning
   $grpRepeat.Enabled = -not $IsRunning
   $grpContent.Enabled = -not $IsRunning
-  $grpContentDetail.Enabled = -not $IsRunning
+  # 콘텐츠 상세는 그룹 통째 잠금이 아니라 '자식 개별 잠금': 커스텀 리스트 3개는 실행 중에도
+  # 살려 둬 스크롤로 진행 항목을 볼 수 있게 합니다 (2026-08-04 사용자 요청 - WinForms 는
+  # 부모 비활성 시 자식 스크롤까지 죽음). 편집은 별도 가드가 전부 차단: 셀 편집/콤보(기존
+  # running 가드) + 머리글 전체 토글·체크 토글(running 가드 추가). 스냅샷을 떠서 복원하는
+  # 이유: 조건부 Enabled 자식(주간 카드 연동 구역 콤보 등)의 상태 보존. 스냅샷 존재 여부가
+  # 전이 토큰이라 중복 호출(true→true 등)에도 원상태가 유실되지 않습니다 (Codex 합의 계약).
+  if ($IsRunning -and $null -eq $script:contentDetailEnabledSnapshot) {
+    $detailSnapshot = @{}
+    $scrollableLists = @($lvCrList, $lvAcrList, $lvDcrList)
+    foreach ($detailChild in $grpContentDetail.Controls) {
+      if ($scrollableLists -contains $detailChild) { continue }
+      $detailSnapshot[$detailChild] = [bool]$detailChild.Enabled
+    }
+    # 전부 캡처한 뒤 별도 루프로 비활성 (Enabled 게터는 조상 상태가 반영된 유효값 - Codex 지적)
+    $script:contentDetailEnabledSnapshot = $detailSnapshot
+    foreach ($detailChild in @($detailSnapshot.Keys)) { $detailChild.Enabled = $false }
+  } elseif ((-not $IsRunning) -and $null -ne $script:contentDetailEnabledSnapshot) {
+    foreach ($detailEntry in $script:contentDetailEnabledSnapshot.GetEnumerator()) {
+      if (-not $detailEntry.Key.IsDisposed) { $detailEntry.Key.Enabled = [bool]$detailEntry.Value }
+    }
+    $script:contentDetailEnabledSnapshot = $null
+  }
   if ($IsRunning) {
     # 실행 시작 시: 커밋된(적용 대기) 편집은 즉시 완료하고, 미커밋 편집만 폐기합니다
     # (Codex 지적 - 사용자가 고른 값이 실행 직전에 유실되지 않게)
