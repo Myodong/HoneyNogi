@@ -3322,7 +3322,7 @@ $form.Controls.Add($txtLog)
 $btnOpenLog = New-Object System.Windows.Forms.Button
 $btnOpenLog.Text = 'Log 폴더 열기'
 $btnOpenLog.Location = New-Object System.Drawing.Point(15, 806)
-$btnOpenLog.Size = New-Object System.Drawing.Size(110, 28)
+$btnOpenLog.Size = New-Object System.Drawing.Size(100, 28)   # [설정] 토글과 동일 폭 (2026-08-04 요청)
 $btnOpenLog.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
 $form.Controls.Add($btnOpenLog)
 
