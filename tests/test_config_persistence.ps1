@@ -119,6 +119,49 @@ try {
   Assert-Case '구조이전: 문자열 키 불리언은 최신 기본값 유지' $migrationResult.afterEntry.keys[0].enabled $false
   Assert-Case '구조이전: 성공 후 이전 오류 초기화' ($null -eq $script:configMigrationError) $true
 
+  # 5-1) schema 4 → 5 (v2.0.0 생활 대분류 신설 - Codex 검증 조건): mainCategory/life 가 없는
+  #      구 config 는 기본값 보충, 이미 생활을 쓰던 config 는 값 보존, contentCategory 불변
+  $defaultConfigV5 = [pscustomobject]@{
+    configSchemaVersion = 5
+    coordsVersion = 6
+    mainCategory = 'battle'
+    contentCategory = 'abyss'
+    life = [pscustomobject]@{ content = 'gather'; skill = 'daily'; target = '둥지'
+      bagFull = 'stop'; toolWorn = 'stop'; gatherWaitSeconds = 120 }
+    ui = [pscustomobject]@{ logFontSize = 9; settingsOpen = $false; logOpen = $false }
+  }
+  $userConfigV4 = [pscustomobject]@{
+    configSchemaVersion = 4
+    coordsVersion = 6
+    contentCategory = 'deepdungeon'
+    ui = [pscustomobject]@{ logFontSize = 17; settingsOpen = $true; logOpen = $false }
+  }
+  [System.IO.File]::WriteAllText($defaultPath, ($defaultConfigV5 | ConvertTo-Json -Depth 10), $utf8Bom)
+  [System.IO.File]::WriteAllText($configPath, ($userConfigV4 | ConvertTo-Json -Depth 10), $utf8Bom)
+  $migratedV5 = Update-ConfigToLatest
+  $resultV5 = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '4→5: 실행됨' $migratedV5 $true
+  Assert-Case '4→5: schema 5 적용' $resultV5.configSchemaVersion 5
+  Assert-Case '4→5: mainCategory 기본 battle 보충' $resultV5.mainCategory 'battle'
+  Assert-Case '4→5: life 기본 섹션 보충' $resultV5.life.skill 'daily'
+  Assert-Case '4→5: contentCategory 보존' $resultV5.contentCategory 'deepdungeon'
+  $userConfigV4Life = [pscustomobject]@{
+    configSchemaVersion = 4
+    coordsVersion = 6
+    contentCategory = 'dungeon'
+    mainCategory = 'life'
+    life = [pscustomobject]@{ content = 'gather'; skill = 'wood'; target = '뾰족 나무'
+      bagFull = 'continue'; toolWorn = 'stop'; gatherWaitSeconds = 300 }
+  }
+  [System.IO.File]::WriteAllText($configPath, ($userConfigV4Life | ConvertTo-Json -Depth 10), $utf8Bom)
+  $migratedV5Life = Update-ConfigToLatest
+  $resultV5Life = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '4→5(생활 사용자): 실행됨' $migratedV5Life $true
+  Assert-Case '4→5(생활 사용자): mainCategory 보존' $resultV5Life.mainCategory 'life'
+  Assert-Case '4→5(생활 사용자): life.skill 보존' $resultV5Life.life.skill 'wood'
+  Assert-Case '4→5(생활 사용자): life.gatherWaitSeconds 보존' $resultV5Life.life.gatherWaitSeconds 300
+  Assert-Case '4→5(생활 사용자): contentCategory 보존' $resultV5Life.contentCategory 'dungeon'
+
   # 6) 진행 저장 실패는 $null/false 로 호출부까지 전달되고 디스크 진행도는 바뀌지 않음
   $item = [pscustomobject]@{
     difficulty = '일반'; stage = '1-1'; coin = $true; doubleLoot = $false

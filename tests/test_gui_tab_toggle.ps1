@@ -123,4 +123,20 @@ Assert-Case '가드: 구 최소 폭 616 잔재 없음' `
 Assert-Case '가드: 폼 폭 560' `
   ($guiSource -match '\$form\.Size = New-Object System\.Drawing\.Size\(560, 872\)') $true
 
+# ── 8. v2.0.0 대분류(전투/생활) 신설 - 상세 Bottom 실측 3케이스 (Codex 검증 조건) ──────
+# 대분류 줄 +40 시프트로 DetailTop 210→250: 전투 기본 H=122 → Bottom 372 /
+# 생활(채집·가공 공통) H=268 → Bottom 518 / 기존 최대 커스텀 H=296 → Bottom 546
+$r = Get-TabToggleLayout -DetailBottom 372 -SettingsOpen $false -LogOpen $false @base
+Assert-Case 'v2 시프트: 전투 기본(372) 토글 줄 Top' $r.TabRowTop 380
+$r = Get-TabToggleLayout -DetailBottom 518 -SettingsOpen $true -LogOpen $false @base
+Assert-Case 'v2 시프트: 생활(518) 설정 그룹 Top' $r.SettingsTop 566
+$r = Get-TabToggleLayout -DetailBottom 546 -SettingsOpen $false -LogOpen $true @base
+Assert-Case 'v2 시프트: 최대 커스텀(546) 로그 Top' $r.LogTop 594
+# 시프트 배선: 상세 그룹이 실제로 (15,250) 으로 내려갔는지 + 대분류 버튼 줄 존재
+Assert-Case 'v2 배선: grpContentDetail Top 250' `
+  ($guiSource -match '\$grpContentDetail\.Location = New-Object System\.Drawing\.Point\(15, 250\)') $true
+Assert-Case 'v2 배선: 대분류 버튼 2개 (15,44)/(275,44)' `
+  (($guiSource -match '\$btnCatBattle\.Location = New-Object System\.Drawing\.Point\(15, 44\)') -and
+   ($guiSource -match '\$btnCatLife\.Location = New-Object System\.Drawing\.Point\(275, 44\)')) $true
+
 exit $fails

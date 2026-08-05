@@ -130,7 +130,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '1.2.1'
+$appVersion = '2.0.0'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -243,6 +243,8 @@ function Update-ConfigToLatest {
 
     # 1) 어비스 선택/카테고리 (프로파일 좌표는 최신 것 유지, 선택 값만 이전)
     if ($usr.PSObject.Properties['contentCategory']) { $def.contentCategory = $usr.contentCategory }
+    # 대분류(전투/생활)도 최상위 키로 이전 (v2.0.0 - 구 config 에 없으면 기본값 battle 유지)
+    if ($usr.PSObject.Properties['mainCategory']) { $def.mainCategory = $usr.mainCategory }
     if ($usr.PSObject.Properties['dungeons'] -and $def.PSObject.Properties['dungeons']) {
       foreach ($n in @('selected', 'mode', 'difficulty', 'matching')) {
         if ($usr.dungeons.PSObject.Properties[$n]) {
@@ -253,7 +255,7 @@ function Update-ConfigToLatest {
     }
     # 2) 값 섹션들: '_' 주석 키를 제외하고, 최신 구조에 존재하는 키만 사용자 값으로 덮어씀
     #    (최신 구조에서 사라진 키는 버리고, 새로 생긴 키는 최신 기본값 유지)
-    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'assist')) {
+    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'assist', 'life')) {
       if ($usr.PSObject.Properties[$sect] -and $def.PSObject.Properties[$sect]) {
         foreach ($prop in $usr.$sect.PSObject.Properties) {
           if ($prop.Name -like '_*') { continue }
@@ -1339,7 +1341,12 @@ function Update-ApprovalUi {
         '승인 확인에 실패했습니다 (인터넷 연결 확인). 아직 승인 전이라면 아래 기기 코드를 개발자에게 보내 주세요.'
       })
   }
-  if (-not $script:running) { $btnStart.Enabled = $approved }
+  if (-not $script:running) {
+    $btnStart.Enabled = $approved
+    # 대분류 전환도 승인 전에는 잠금 (승인 오버레이가 버튼 줄을 다 덮지만 이중 방어 - Codex 조건 A)
+    $btnCatBattle.Enabled = $approved
+    $btnCatLife.Enabled = $approved
+  }
 }
 
 # ============================================================
@@ -1383,11 +1390,38 @@ $lblStatus.Text = '대기 중'
 $lblStatus.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($lblStatus)
 
+# --- 대분류: [전투 | 생활] (v2.0.0 - 2026-08-05 시안 확정. 상태줄 아래·반복 그룹 위) ---
+# 활성 쪽 = 시작 버튼과 같은 꿀색 강조 (스타일은 Update-MainCategoryVisual 이 담당 -
+# Apply-HoneyTheme 가 모든 버튼을 일반 스타일로 덮으므로 테마 적용 '후' 반드시 재호출.
+# 기본값 'battle' - 기존 사용자 화면 변화 없음. 전환 로직은 Set-MainCategory 단일 진입점.
+$script:mainCategory = 'battle'
+$btnCatBattle = New-Object System.Windows.Forms.Button
+$btnCatBattle.Name = 'btnCatBattle'
+$btnCatBattle.Text = '전투'
+$btnCatBattle.Location = New-Object System.Drawing.Point(15, 44)
+$btnCatBattle.Size = New-Object System.Drawing.Size(254, 32)
+$form.Controls.Add($btnCatBattle)
+$btnCatLife = New-Object System.Windows.Forms.Button
+$btnCatLife.Name = 'btnCatLife'
+$btnCatLife.Text = '생활'
+$btnCatLife.Location = New-Object System.Drawing.Point(275, 44)
+$btnCatLife.Size = New-Object System.Drawing.Size(254, 32)
+$form.Controls.Add($btnCatLife)
+$btnCatBattle.Add_Click({ Set-MainCategory -Category 'battle' })
+$btnCatLife.Add_Click({ Set-MainCategory -Category 'life' })
+# 아이콘은 Button.Image 대신 Paint 로 '중앙 글자 바로 왼쪽'에 직접 그림 (2026-08-05 사용자
+# 제보 반복 수렴: 묶음 중앙 = 글자 밀림 / 독립 정렬 = 아이콘이 구석에 붙어 글자와 멀어짐.
+# 기본 정렬로는 '글자 정중앙 + 아이콘 인접' 조합이 불가 - 그리기 좌표를 글자 폭에서 계산)
+$btnCatBattle.Add_Paint({ Invoke-MainCatButtonPaint -Sender $this -PaintArgs $_ })
+$btnCatLife.Add_Paint({ Invoke-MainCatButtonPaint -Sender $this -PaintArgs $_ })
+
 # --- 사용 승인 안내 (미승인일 때만 표시 - 설정 영역 위에 겹쳐 나타남, 팝업 아님) ---
+# 높이 158: 대분류 버튼 줄 신설로 y144 의 시작 버튼 줄까지 덮어야 함 (Codex 조건 A -
+# 42+158 = 200 으로 콘텐츠 선택(190) 상단 10px 를 덮던 기존 범위도 유지)
 $grpApproval = New-Object System.Windows.Forms.GroupBox
 $grpApproval.Text = '사용 승인 필요'
 $grpApproval.Location = New-Object System.Drawing.Point(15, 42)
-$grpApproval.Size = New-Object System.Drawing.Size(514, 118)
+$grpApproval.Size = New-Object System.Drawing.Size(514, 158)
 $grpApproval.Visible = $false
 $form.Controls.Add($grpApproval)
 
@@ -1430,7 +1464,7 @@ $btnApprovalRecheck.Add_Click({
 # --- 반복 설정 (가로 한 줄로 압축) ---
 $grpRepeat = New-Object System.Windows.Forms.GroupBox
 $grpRepeat.Text = '반복'
-$grpRepeat.Location = New-Object System.Drawing.Point(15, 44)
+$grpRepeat.Location = New-Object System.Drawing.Point(15, 84)   # 대분류 줄 신설로 +40 (v2.0.0)
 $grpRepeat.Size = New-Object System.Drawing.Size(514, 52)
 $form.Controls.Add($grpRepeat)
 
@@ -1496,7 +1530,7 @@ $rbCustomRepeat.Add_CheckedChanged({
 # --- 제어 버튼 (한 줄) ---
 $btnStart = New-Object System.Windows.Forms.Button
 $btnStart.Text = '시작(F9)'
-$btnStart.Location = New-Object System.Drawing.Point(15, 104)
+$btnStart.Location = New-Object System.Drawing.Point(15, 144)   # 대분류 줄 신설로 +40 (v2.0.0)
 $btnStart.Size = New-Object System.Drawing.Size(150, 38)
 $btnStart.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 $btnStart.BackColor = [System.Drawing.Color]::FromArgb(70, 160, 90)
@@ -1508,7 +1542,7 @@ $form.Controls.Add($btnStart)
 # (대기 중 중지 오클릭 / 실행 중 시작 오클릭 방지 - Set-UiRunning 이 전환)
 $btnSafeStop = New-Object System.Windows.Forms.Button
 $btnSafeStop.Text = ("안전 중지(F9)" + [Environment]::NewLine + "(회차 완료 후)")
-$btnSafeStop.Location = New-Object System.Drawing.Point(15, 104)
+$btnSafeStop.Location = New-Object System.Drawing.Point(15, 144)   # 대분류 줄 신설로 +40 (v2.0.0)
 $btnSafeStop.Size = New-Object System.Drawing.Size(210, 38)
 $btnSafeStop.Enabled = $false
 $btnSafeStop.Visible = $false
@@ -1516,7 +1550,7 @@ $form.Controls.Add($btnSafeStop)
 
 $btnKill = New-Object System.Windows.Forms.Button
 $btnKill.Text = '즉시 중지(F10)'
-$btnKill.Location = New-Object System.Drawing.Point(231, 104)
+$btnKill.Location = New-Object System.Drawing.Point(231, 144)   # 대분류 줄 신설로 +40 (v2.0.0)
 $btnKill.Size = New-Object System.Drawing.Size(150, 38)
 $btnKill.Enabled = $false
 $btnKill.Visible = $false
@@ -1525,11 +1559,24 @@ $form.Controls.Add($btnKill)
 # 선택한 콘텐츠에 맞는 사용 설명서 팝업 (어비스 설명서 / 던전 설명서 - 카테고리에 따라 자동 전환)
 $btnManual = New-Object System.Windows.Forms.Button
 $btnManual.Text = '어비스 설명서'
-$btnManual.Location = New-Object System.Drawing.Point(413, 104)
+$btnManual.Location = New-Object System.Drawing.Point(413, 144)   # 대분류 줄 신설로 +40 (v2.0.0)
 $btnManual.Size = New-Object System.Drawing.Size(116, 38)
 $form.Controls.Add($btnManual)
 
 $btnManual.Add_Click({
+    # 생활 대분류: 숨겨진 전투 라디오 상태보다 mainCategory 를 먼저 검사 (Codex 조건 G)
+    if ($script:mainCategory -eq 'life') {
+      $lifeManualText = "생활 자동화는 준비 중입니다.`n`n" +
+      "[현재 상태]`n" +
+      " - 화면 구성(채집 스킬/대상 선택)까지 준비된 단계입니다.`n" +
+      " - 채집 자동화가 완성되면 이 설명서에 사용법이 추가됩니다.`n`n" +
+      "[예정 기능]`n" +
+      " - 채집: 스킬/대상을 고르고 캐릭터를 채집 지점 앞에 세워 두면 반복 채집`n" +
+      " - 가공: 추후 지원"
+      [System.Windows.Forms.MessageBox]::Show($lifeManualText, '생활 설명서',
+        [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+      return
+    }
     # 모든 설명서 공통 머리말 (콘텐츠와 무관하게 동일)
     $manualCommon = "이 매크로는 게임 화면을 캡처해 글자를 읽는(OCR) 방식으로 동작합니다.`n" +
     "화면 비율/크기가 기준과 다르면 OCR 인식이 어긋나 오류가 발생할 수 있으니,`n" +
@@ -1602,14 +1649,14 @@ $btnManual.Add_Click({
 # --- 콘텐츠 선택 (종류: 어비스/던전/심층던전) ---
 $grpContent = New-Object System.Windows.Forms.GroupBox
 $grpContent.Text = '콘텐츠 선택'
-$grpContent.Location = New-Object System.Drawing.Point(15, 150)
+$grpContent.Location = New-Object System.Drawing.Point(15, 190)   # 대분류 줄 신설로 +40 (v2.0.0)
 $grpContent.Size = New-Object System.Drawing.Size(514, 52)
 $form.Controls.Add($grpContent)
 
 # --- 콘텐츠 상세 설정 (입장 방식 / 난이도 / 세부 던전) ---
 $grpContentDetail = New-Object System.Windows.Forms.GroupBox
 $grpContentDetail.Text = '콘텐츠 상세 설정'
-$grpContentDetail.Location = New-Object System.Drawing.Point(15, 210)
+$grpContentDetail.Location = New-Object System.Drawing.Point(15, 250)   # 대분류 줄 신설로 +40 (v2.0.0. 탭 이하 배치는 Bottom 기준 자동)
 $grpContentDetail.Size = New-Object System.Drawing.Size(514, 122)
 $form.Controls.Add($grpContentDetail)
 
@@ -3205,6 +3252,582 @@ $btnDcrReset.Add_Click({
       -LogMessage '[안내] 심층 커스텀 반복 진행 기록을 초기화했습니다 - 다음 시작은 리스트 처음(1바퀴째 1번)부터입니다.'
   })
 
+# ============================================================
+#  생활 카테고리 UI (v2.0.0 - 2026-08-05 시안 확정. GUI 단계만 - 워커 미구현이라 시작은 차단)
+# ============================================================
+# 채집 스킬 9종 + 스킬별 채집 대상 (나무위키 '마비노기 모바일/생활 스킬' 실측 데이터.
+# Id 는 config 저장용 안정 식별자, Name 은 표시명. 대상은 게임 용어 그대로 저장 - Codex 합의)
+$script:lifeSkills = @(
+  @{ Id = 'daily';   Name = '일상 채집'; Targets = @('둥지', '거미줄', '물', '우물', '젖소', '사과 나무', '차나무', '거미줄 뭉치', '헤이즐넛', '얽힌 거미줄') }
+  @{ Id = 'wood';    Name = '나무 베기'; Targets = @('나무', '뾰족 나무', '굵은 나무', '쓸 만한 나무', '갑옷 나무', '어스름 나무', '벼락 나무', '흰 껍질 나무') }
+  @{ Id = 'mining';  Name = '광석 캐기'; Targets = @('광맥', '철 광맥', '얼음', '석탄 광맥', '동 광맥', '백동 광맥', '은 광맥', '운철 광맥', '백금 광맥') }
+  @{ Id = 'herb';    Name = '약초 채집'; Targets = @('허브', '블러디 허브', '화살꽃', '마나 허브', '새록 버섯', '튼튼 버섯', '끈기 풀', '쑥쑥 버섯', '숨숨꽃', '깔끔 버섯', '생채기꽃', '증폭 버섯', '진정초', '끈적 풀', '솔솔 버섯', '산뜻 버섯') }
+  @{ Id = 'wool';    Name = '양털 깎기'; Targets = @('양', '곱슬 양', '먹구름 양', '구름털 양', '복슬 양') }
+  @{ Id = 'harvest'; Name = '추수';      Targets = @('밀', '옥수수', '콩', '쌀', '귀리') }
+  @{ Id = 'hoe';     Name = '호미질';    Targets = @('감자', '양파', '조개', '파스닙', '양배추', '호박', '개암 버섯') }
+  @{ Id = 'insect';  Name = '곤충 채집'; Targets = @('빛 무리', '설원 빛 무리', '곤충 무리', '고요한 빛 무리', '따스한 빛 무리', '차가운 빛 무리', '삭막한 곤충 무리', '황폐한 곤충 무리', '일렁이는 빛 무리') }
+  @{ Id = 'fishing'; Name = '낚시';      Targets = @('작은 낚시터', '남쪽 성벽 낚시터', '동쪽 성벽 낚시터', '동쪽 호수 낚시터', '해변 낚시터', '옛 낚시터', '하구 낚시터', '서쪽 호수 낚시터', '산속 낚시터', '미지의 낚시터') }
+)
+# 채집 스킬 아이콘 (게임 화면 캡처 원본 104px → 24px 축소, PNG base64 내장.
+# 원본: 던전이미지\생활\*.png - exe 는 이미지 파일을 추출하지 않으므로 스크립트에 내장.
+# 채집 대상 아이콘은 캡처 수급 후 같은 방식으로 추가 예정 - 지금은 글자 카드)
+$script:lifeSkillIconB64 = @{
+  daily = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAQvSURBVEhLjVVNbFRVFL7tzHSm8/fOuT/vZ/oTWkit2I0x1KYRN2KkqW5QsVo1IUZTUYQYQuKCPxOILkBBN001xrSEykIoQReNoXEnNlLcmf6xQigbCrigJviZ+2Y6dN5U7JeczLx77/m+c8875zwh/gfZbKCZ/a2Kg32aC18oVRhSqnBcy+ADw01PCdFYH/VZE/L5/HpmfZIpWFBcgJENcFUjXPPAjCpAycI0kflISpmPcvwnpDTvM+vbSnpg9iEpgJJ+xDxo5cHoBrimAK39P5j9nihXFDVK6W+NLhKEArRSoLi2mmlZgFY+FJu9UdIyFLtfK+WD2a0wyW4VYYWxB8n2vw+tAih2B6LcgvL0ro2A2aZlbQJ2vT6VQyxWh2RdOny2HJrd+zIvO8vknCo0EZm/lKomX02AySARr0ddIo3u7s0YHBzE4UOHkbIijoErAxjyLgshYqGA4/gnpLR5riZfKUCOQaw2iXR9Fs/3voCzZ8ewtPQ3lvHO2wOI1SRh2IOnAjDr7cKWF7O5KcOKiZKX1koRZzOEl196FRcvTpRJV+L69QW0trQhn5VhqpjVuJDSfbaa3D7bHPtIJrOIx5LY+lwvJiZ+jnJW4Y3Xd4TB2BKWrO8KZrNPykjlkA8mD0LE0d7egZGRU1GeKkz+Oon3du5CU2MLyNGlHvEhmN0vKwXsS/QQj6fQ3/8mbty4GeWqwp07d9HSsgFCiBK5Dy09GBVAEJmhlQKSAwhRh23bXiwTXJn6HXt2f4ienl68sr0Po6PfVQgMDg4hHqurqDTNHowM7A3M8ZUC9SmC7zVhfn4+dB4ePoVDBz9GW1t7GKE1x2HMzxX3p6dn0NDQhGzWqeoTo/zwBruWBYhMGP1XQ9+EzmNj5zF6+kxYjgMDO5FIJEGORC7r4NKlyfDM/v0HQ1GtVmlGKyBz3pPMJhRIJFLo63stdJyZnsWxY5/h2rU/ce7ceRw4cAhC1CCfIwR+A+bnruL+/X/Q1dWNVDK9qoAtfyHEEwkiNWMFbMsPD49g8dYijh75BIu3bmN8/CdMTV3Bjh1vobY2jkw6h/ZHNoZBzM7O2WYCOao46CLRE5nTpU7mvVIaOI7CunXrw5wePfIp7t1bwonPT2J6ehatrRvC1NgUKWlw+bcp/HDhx7Dm7bALh1zFDQyIaHMo4HlehkheldJFLicRj9ejo+NxdHZ2Y+OjHdi0qQuZTD4cJdbsC21ubkF7+2PhecUBtB01/OA7way+Lw+74i2cLUS6WKrSQyZDSKVy5d+V3b68n0475XU7r5b3mM2ClLKhQqAoIvcUD0RHx9qsJHaPSD8d5S6DSO9mO8+r5tPDrVTqNvItUc4qMJtuIvcXJYNlx1WslJrSiCdpzjAHzVGuh6GW8m4/kzdO5N6xNyqaX0qFByK9QI467TjuM1HnZfwLbuEEPn8bWPEAAAAASUVORK5CYII='
+  wood = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAQbSURBVEhLlZVNbFRVFMfvfHU+OvPePefe9zGlQ0HUhS6kkkoKbaMWVIgJcYMxdaUxsRFRoK0QSEjjnkRFN0Sr0ko0WPdEWaIrQaPG2pAay6asoB/YpDZ/c+9jhr7XqR//5GQy7+P3v/ecc88T4l9ULj+oicJnlApGFPnvKQ7OKQrOMAeHiao9QrQXk+/8JzmOs41c/S7JcE5xGzxVjYVWVSj2QOT9JmVwgpmdJGNDScmHpFS3FfsGACYfigP7S2tCKQ9aBfB0FczBr0ThviQrqRSR+kSpIAba0ICDRmgV2lDkDSWhDZHyPlQqjEHqoEqZkBI5lIplKGWueTGDKIxJFYr8V5NsIaUaZG1yGoczBygWK9h23wMYHX0bvT19yOXy0KqZQd0kWGXmxxrwNqKaZLVISq8zyOfL2Lp1G6ampmA0PT0N36+iVCo3gdfTVTW1+14IkbEGitQ7WgcgFRWUKapBS0srhBA4efKUhdc1fn4CmUwO0tV3n29eE8fRB4VpL8X6pukGkgrpVAuEyNrfhx96xMKa6eWXXkFKZCzMpHH9Lkwt9SXB7O81cNdR2NJxP04cP4Xh4bcs+Nat20luQ/PzC9jxaBdyueK61VsD23V6QSjyRkzOivkydnX3JjlrtBr7t7CwgO7u3RAiBSm9Jrvw7RkRTP5ZrdrgVAi19g7Mzt6IgZK6ePFLjH30MZ4/+ALeP/sBjh4ZQjqVa2IQpUkwh+e02mQdU6kMxsbGksyGxscnbNFNnP903F5b/nMZPbv7kM0UYM5Q3KAKoah6RrMxCFEstGL79k67/aTuLN1BZ+cOZLMF27r9T+7F4uKivffzT78gCGsoliVYh9aofrIFc/B6NLiMY2C3Ozj4WpKPH679iErZgeOwLarJ/bGjxxr3Jz77HKlMHg5pa2LHBocQFeadsZNLPrLpAkaGj2NlZaUBuHLlW+TzrZAyOoyuq5DL5jE5+VXjmUOHj0CIjF2oVoanbppzlpOSp4k0SJrcVUFugHQ6hyce78c3X1+2L8/M/A6SHhxH3V1MgEKhhM21Lbh+fcY+s7S0hJ6ePhTyJWjtQ0q+YE+y66oh0wVRP0fBrK2JGQn79z+LgYEX7epNS96bU+aZLJ5+ah9WVv6yJlevXoPSPhxJkFL2WoMgCFqJvJmo1eqT0n5M4LqETKbFmtldxmaVGRUaQqRx+vSoNZj94wZqtQ4USq2TjWFnxC7viXaxFhL/LjQL0xxmJpXLEgcOPIeurp2oVNw55vZNMQNrwvpNtiv/fwYmSGpksy3me7EchmFfkt2QlPwGkVo1+V2fkvVRN/B0aGoyx8x7ksx1IqJdUurvTB9Hadt4J1HdTM/7XxBVNydZ/6S0dPwBkt4lkv68AUVxz1RKPSdd74Lrqv7ky3X9DT3tIQ2iTIRVAAAAAElFTkSuQmCC'
+  mining = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAASRSURBVEhLjVVtiFRVGL7unTs733PPOe85556ZVWnNKCl0WSrzo9hSc/1ASfFPP1OzsFVw0QL7YagEG4aZIshakrnqj0CEAkmUhIisfiRGtILu/tNsoy9ZbPWJc+/cO7OzWj3wMnPv3Pd53vd5z33Hcf4DhcJDxGSwWAi9lUSwT4rgkBRmD5HpkczMa2tryzbn/C9IKacJCt5j3FznVAGpCjRVoVU9JGkIEfzEuX6Dc15q5rgvpNQbpdS/SRmAKLAkkGTuERpKGmhtoFTwIxF1N3M1YxIJdUTJSpgoKQCJKCaSN0YApWyOLUb2NpMmECLot+QxIQmDfK4Mv0yQDUKcqfB+2svAddNwWzykUml4qVZwRrabDc3cjhDylcjXemXMl+jqWoAZjzwGL5VFNlMISWx3c+fMx7q167Fz524c2H8Q/f2H0df3Djo6HodfFnc4508k5JVKZTKR+tNWH5NnWgtYvXoNrl27hp6eTfjg8IfYvv1N7Nq1C5cufY+xsTE0YnhoGKdOncbcuc+gXBS24+8cx3FDASnV3kBXw8oi/ysoFTlmzuxAX18fBgcHx5HFuHLlCnbseAuzZ88B8wU8L4tyiZJTxhitcTh/sERkbiiKqo8FspkilnQvxejoaDMvhoaGsW3b66hWJyOV8pDPl8B8BVnjsKfPDpyEPOMoZRY2WmO/W/WUm8Hy5SswNvb3OPLbt29j4fOL4TgOGBdQKsqJ8usC9mQJof5wpDBbG4cb29P+wHRcvvzDOPIYXQsXwXE9SF3PaSyy3oWBQ2TebxQQXCPtZXF84ERC+PnZc7h6dQhDw8N4ae06bN7Si+kPz0AuX4IQOjzOSfUNoWQVjt0tjQJpL4eVK1Yl5Ec+OopMrogZj85C99LlOHvuXHj/2MBxpNx0OFwSumbLPQXMnljAVm/tuXDhy5Dk0OF+eJkc8kUfrteKqe3t+PnmzUR8/csb4DgtIFKQUt9HgJvXYgF7cp7tWhQmn/7sU2SKRRR8AWFXgFJIpdNY+cIq3Ll7N3xmZORXdMzqRCaTs2/vBAEbjubVJ+MLz81g/4GD+GVkBFPbp4XWCFkBpwCcdPg5yW3Fu3v3JV2cP/8FSkUfJZ9DhM8FoNr7RMLccDo7Oz0hgkGyHWRLODZwAq9u7MEk14OQBtzuHpsoAgiqouRL+Ezi64vfJCK7d78Np8WrFRIJhK6IYCDeQ72kAjDSMG1T4HMCJwUhbdVR5TasVaQMUuksnpo3D7du/RUK2HdjSfey0OJwIdojquyqp/mhgNY6z0he5cqgWGbwuYx8l3VrIgFTu6/htLjY0tubdPHx0QG4La2hgF3dRPKTZNlZlDlfwBq8rvteuxYmitpvZUbIFUrhzC5e/BZLl61EJleKZiaC65zz6jiBSERtDqsOvY9FmkXr3ZSZRDZfhs8UcgU//FvlFIz6RE83cyfgpDZxCu5EA47JVS3Gi9hgQodCteevc64WNHNOAGNyjhDmK5JttcSJHcRdWEvsTIRUJ5lhU5q5/g0tvm9eZKTPMAp+T8iUJTTg1krrtQgGhBDPNSfH+AevNAVav6YlcwAAAABJRU5ErkJggg=='
+  herb = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAATxSURBVEhLjVVbbBRVGB4Q2m13Ozsz5zZntosKKwKtRRLjrYBWqRY0mpCG0hJeFQOID1xiMPAATYgPJNJCuGgISRXRRIJNSVwfQNKWKpY09UbbB4OJlAUMUSuFBvjMf4YdYKmXLznZOTs53/f/3/+ffyzrP6C15r4orxNCr5c8aBEi2CdEsJ1z/aZ29dxyq7yk8Mz/grDT0yRP7/Blec5X5RhvCaHhMn/Qc9TbnufZhRz/CKXUKimD37U/xRApmYIUwT2LCw0ug1vv9Rnu+gsLuQoxQUp9IE9658qTCq4Ri8VRUhI3z8yViBUnkIi7EDwAY2JtIWkEIfQH2k/fRUxiTpIbkrKEa/aNjU1YvHgxEgkbzBN4+aVXMLd6PhyHQQofjMkVhdyWEP4b40XuOgKzZlWhqWk5MpkZePGFRcijvr4ee/fsM8/nh3OYPn0GnCSjzG4opR6PyIMgSEupRwrJOfONDT093xiS4eFhbNz4Di5evGj2hw8fMcSEa9fGUFFRBbvMgxIpCOaftizrPiMgpf+e1vdGT9akgvuROx+SEHpP9+Lo0aPmub//e/z4w0/o6+vDpk2bMXHiJBOQFCkolYLr8iVWJuPZQgQXwkLeFiG/mSdhWROwbt2GSGB0dBRtbW24fv262Q+cGUB3dzc6OjqwdGkTkrZHHQUpTcGzlpS61lfUIaRMvyH56lVr0NPzNT5s+whTp2bQ0NCIoaEhQ5rNZnH58mWMjY0hl7ud3c0bNzHn0cfMeeLyPPUndc56309BSt8s8p0zhYGBwehgf/93sG0Htp3Ehg3ro/9HRkbQ3t6O1tZWnDp1Cpcu/YaZMypNHcgqzjQsyXUrdU+Ylm+US0tsfHzwUEREWLlyFYqKipH9Iovjx7/C2bO/RO+o6M1bm1FR8QicJFlE9yUAZwEsmi2+St+ySBv/kzY3kVBUefR+24uurm6cONEJy7LQsKQxekc49+t5eC6nwkYX0mQghN4eZhDeVBKgPaUZBGlzoY4c+Twi2rlzF556stp0TF3dIpMNddn+/QfgeRycq5DcC+22hFCrfRWOAiXLwTyFeGnS2EQdVPPscxgcHDT+XvnrSiSUzX6JTGY6iotK8FDmYbgOoxsMKfWt6H0wz4elvNQT1FKm6o5EZUUVli1bjvr6BrTsaA3TPzeM2bPnYMuW5kiA0N7egeLiEthljmlpIg6XAmcSrssu0D2bzLkeyo+FysoqbNv2Ljo7uzA6ehXHjh3H7t17je/UBCdP9kQCXZ3dSMQdQ5gvbBi9NMtx2MH8HFpLN5m8Z0wYMor40KFPUVqaQEvLTsycWYFYrBQPPjANW7c2Y++e91FTUwu7jAacNt8GKmpojTDLcZx5RkApFRfC/5kEPDcsUmvrLvT19SNWXILa2jrMq65BMsmQTHoomhzD5EmlKEt4UDINSWPbI1tCAcqIufyzaNiF8yhYQEUui3tYWPcqmpu34fXXVmBu9TOm6FJSp6Xu8Dm/qN/DjglFaFz7Oc/zUncJEDjXb5GI4CnEikuRiNugrxrzQqLxBcKo7xC5yh1/fiF3BM7lGiH8G0qFs4luIxFLSYUcn5giF4xsosjlgkLOeyCEeFqKoMeXU0KPSYCKyMPvgyEn3/O/RkR+4rp6SiHXv2DzRMb0MsGDrOD6j9ttGLaiJzQc5uccTx5MJuXzhafz+Buq9FDwlVLWVAAAAABJRU5ErkJggg=='
+  wool = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAASBSURBVEhLjZRriFVVFMe33jv3zLmPc/bae5/nvT7ogQjVCKWBWEqNppkiiiaZlohQpGkpUxEFWcE0laAOQZof+uQjnTQw8tEXibQcB5JemBFlhqP4mEfiBDP/2PvOvTpnpsk/LM77/9trn7UWY/+jfD5SROFM6QUNpMItQsbbSMYbhYieJy+aUmIlO/nNLclxnNuJ1GbOi+1CFiG9GNIrDQxVhJDxaeFFrwghnKTHf0qIaBWXQQfJCCRikNDHwSFkbCDKL4JU8DNROCvpldQIJYOPPa8EKq8OtTbHyHQOLg+HBJQjglQxhApB0lufNK2KZLhdb0XFwLIcLH1qBVatfgHpmhxyeWkMk6BqyAhC6aP/TNKbcS6fVTeZ62Asgw1vNUJr64fb4bgKVq07PESYjHodISZVzamWRnHudQsZmJdcWQ6WtjF/wWID0Dpy+EuUSrchYznDQnRREAVtjC1MlQFuuEnon9kPqEAytoO6CRNx7dr1KuSbb1sRFcfAsgrDQqQsgZxgEdPlRTy4YF6mCLblIpPOI20VkM5kYVl5nDzZVgVoHfziCFxHIpsTg4xvZBGBuHdIl+R0s2IKoVQRD017BLMfnYeZs+Zg8pSpGDN6LBob3xkA0Nq18xOwERZcHvRnMjAboYP8LkYyahCqCMf1IVWE48dOVE16+/rQ0dGBxsYm/PH72er9lpYWnD37J157/Q0wVgOSYbl6BgBCKBmCEYXN1e2xOe64czxaE1uit6i5+QNz3tfXh/nzF2DPnhZzPWPGbKRSFpTSppW+6O8NGYNxHm4TFIN4CE4hUjU2/LCIT/ftHwBpanofJ1tvgC9evITOzi6cPn0GYRDDKQgI3WxVgI4iGPFoYwVAej9FADvrIGvnsXbNi7hy5aoxPHfuL6xf14Cenn9w6tT3qK+fgen1M82zrVs/AmMMeQ1JAgSPVt8MIPINhLsSjKVQV3cfdu/aa4xOnGjFkieWYt26BixauNiYNr37nnm2bNly2FnXjJb+IWg6mxUKwf3G2AASQQGsTB416SwWP/4kfvzhJ5w/346e6z2YM3eeAVh2Dl8fO24gbW3fYULdROSyLpQuU/IvMMbureGu/4ugIQA8hOjPbASzwLnCmxveRmdnJy5dvoznVq9BbTaHUWPGYsWKleju6sJn+w8gna6FFPpbb4fpZNeV63VZJc0rAEkRJIXI58ls29133YOWvfvMqjdtbjaZ6Dhw4HOcOfMrCnmum0wv6AEDCIIgR+T9NlQWNwOkCEzUWnljePDgYVy92oFx48ZjzmNz0dvbiy1bmpFKZbR5S3XYaQlX1OufmwQMCtKFECCdtjFt6nR0d//dX7jA0aNfoRiPQjZbaBdCFAcADET4a8tbpefIEOaJ0ANv0qTJePmlV7H86ZXwVIys7VxXSj2Y9K6Kc38NUdgr6BYg5MO2C2Zc1KRyegC2+yKuT3oOEpE3mXP/uO6Pco8MBdP3dGOWzwUPdxPR6KTXcBrJeWkJ8fAQ52GnzqgCNNlRBO767dz1d7iu/3Dy44r+BYXUEafdhEUlAAAAAElFTkSuQmCC'
+  harvest = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAASCSURBVEhLjZVNaB1VFMcnycvL+5g3c7/vfL0WtEqTaCwotYbYUJuksbiRil24Km4U/KiaBoMbsYi7gp+gNUIRLGhbWhdaU2sVlFpsGl2oMS4srpKuWhPJF/Uv9755j5epUQ8c5r2Zuf/fPeeec8Zx/sNcNxRUJsNchqNcRK9zGR/mMjokRPyUDKt9TpIUs2v+l3le9WbON77GRDInVAKhjVchdbVxVaoKJZMZKeMxxpiX1VjXGNNPUBFeE6oKIRNwGUHIGFLUXIgYXNauSibQwQZIlUwLEdyf1cpai+DqiJQhqApBpQbjIZiIIEQCyROoFGIAdZcqgTIRabuZkaxowzhV40JGYCJIPQShAYolilzeRaHggREFKSJIEa6B1EE6qIKr4LGstkMIf5w3hGue73BRrjBs3daHB/fsxeDgbgQ6QanoQadpywLM2UidXGdMb22IUxpVCQsWSJN4a66A/h07cebzs1hcWkLdJiensGtoN9pzRXs2NwBMuoIqpAovOY7TVgP4yatMxPB5AC5CtOWK2PPQXiws/NkQbrb5+XkMDQ4j115Mo6iB6gCpYgRBFULohx1TXoSGVyiPQFmEQpHg9p67cPXqNSv2V1Y9tdnZWXR23mbTpaQ5k6gJYFKVgItgwvGYGmRWPLTelivhyPsfWJFm8eXlFXx2egLj4+9hZmbG3vv0k9NwywSCBzVIM0AZQDzvUC5HTRka8ULJR8+WOzGfSc25L77CPb39yOfLcBwHWkU4M3HWPht7/gV7jzNlS7UZYP47lAVvMB5bgNPSgQOjY2vET5w4hYrL0NZehomU89CWa2dXD06e+hj7n3kO+/Y9ijCqgjBt8193CyAsOGwApt5z+TI+Ona8IX7x4hSEDG0frKkWXUWx5OHWzd2Y+v4H++6LLx2E05KDUCGkMumKoIIEDqXhIQPwfAWPCHw3eckuWFxcQl/fDuRyZZNL280NiIhR8QRu2rQZly//bt9fWl7GfQO7kMuXoLSJILKd7RAWPlkHmPr/afoXu+CtN99Gi9MBziObmmaA/S0SG/HQ8ANYWVm1a378eRpRshE+ESkghlOp6LtN/n2iQZiygJXVVXR33YFikYCl1WUhGecyhNOax8GXX2mk9Z13x1EsVyCU6fToiumzdkL1r6YP2jtcfP3NeRw7fhItrQUrUi/frHgd4FOJis9x9tyXFnD+wgW4HrHPuAyO2k72fTliFpRdju39A+jq3gLXE00AkyIzVZtmVQowOy1XKDbd0olnRw5gW28fPJ/bvhBC3GsBWusyYeo3c3gdBR9uhYMLs8va7v8RIIJ0l6FJBdyKsPOr5FLoIDFj4kRj2NkomBowiyjXaz1NkU2TAdkD16nXImlOmf36qXiOMRavAaSQ/RbSDFoXUKs6+0GyHhlhM/iWiEi2Z7UbRph4mnF9vRHNuoA0gtTTqTrHmBrIat5glMpeQtW3ZoSb3FNzFmaXDUD9PBS41Gl/hB9SGm7Iav2btRKSPEK5niBM/2FFeWy91tlmfkVzhMujnKud2cV1+xvpKvPOaFkZwgAAAABJRU5ErkJggg=='
+  hoe = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAQ/SURBVEhLjZVdaBxVFMenyWa/d2fnzr3nfuxsipQ0DVWKRG1paxFNtX0VrW2KINVqkrbqQ1EaqrSKlCIUbdIXkyBFNOKDVPsgxjyIvvjkg4oWReprUmqwTSR+xL/cmd3ZzSQ1Hjjs7Myd/++eM+ec6zhrWFFrLlSwRwj9AiczIoQZE8Kc41w/K4Te6QRBLvnO/zIhaht8bs4rbmakrEKqYKVTFZLMj0zUTjDGykmNWxoT8igX1d+kWg9JAYgMxCpu71s4qU5wUb3Cudqb1EraOi7lRVIBBNUgyP6uFF7NyYJkAF+Y40nR2ASpCamDcLHPNbK5ElIdWRTLLjK5PNo7Mkhnc/B8AVI6AYk2ZVNHpAaS2k5FiEFRF/c8gULJxYGDj2P45MvovXsrDj11GCMXLmDo6DEIqVCueOHaJEDImr2/xJi8Jxb3PFNjguZ9ZcB8ibLLMDYxjobdXPg9vrb26WfTMLVOuBW+IlUWRMqmV33tOE57CPAFvSmUgS81MtkiTp1+NRZbWibdtLfGJ8IUctGaKhuRjcRWXQ3ck/scW14+6Vmuqih5HBu6ujEzOxuKWPF/EsKz165hYWEB1+fm0NXdA7fiJ9JUd1mDz82Uw0jv5iqALw2yRRe77rs/Idm06elpBLUAp145Hf6/s/culMpsdQAF8Hn1puPbDtURIFeqYNuOnfjzr79bZKMYvvnuW0ij4TgO9vf3h/d2P7Q3TFNUoo30NJ1kDQ5TerQBKDOBam09fr76S126maDH+vvhpNIoMY7bujbixvw8Pv/iSzhOG3KFEqSO+qABi6474TBpxhoA66lMFm+cH10GsLv3ScH1JXwZIJ0v4enBIbx4YhhPHHoSDz/yKLL5QtQDSYAvzblWQMmtYPMdW3D917l49yOjo2hLpcGljtaRQjqbx2tnzobP7Yfv7tmMYsmLRseyCIQ+1gqwTZRKZzB88qUYMDB0BO0d6fCZkBqcJPLFEi6+82685tJHl5HOFsF81RJF1aaourUh3vCKTyi4DJ9MTYcv79t/INxxs1o0XI/BBJ34/ocrMeTwM4NhpHaMkNUSetbpdXo7GFc/2T6IIaqKfNnDptu34NLHl7Ft+46wu5vNZIebQUc6h74H92Bx8Y8QYHsjLF23AqkNmKDJeier46QtoJ5jadBoPDvomKgPN5sianYuJ4V17SmcOft6HMXA4BF0ZLIhgHN+bwiQUhY4qauiNYoGSMh67uveArDu+RykDMYn3sZ7k+9j46Ye+ILApfwwHnbWyJg+qaJDpFVgLbcfkjFCLl9GtlAE4wJC6RnGguoyQAgher5Ry0mhtTwcelGUi1ypXUnt2Djp50iaJVIWkjxUbuHSQNr1dudEfUnNFSaE2C6U/koae95aUKs3hW2kdWFbBB94Wncmtf7L2ipEB4VUU4LMjagz60difeYwMjM+qUnXpweSLzfsX7YbGg4IQ29fAAAAAElFTkSuQmCC'
+  insect = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAT1SURBVEhLjVRbbBRVGF5BA8v2sruzO3PuZ3Zm2wKaKLa0hSgvVqNQ0wfEmIiaaBQIIEQuCQFiwdsDAsFrAvqAGjE+SAIoyIuUChQEDBAvUYkPGmTxibLSRoKfOWd2h2WJly/5s2dm9nzf+b/znZNI/Acobc0JEd5PRXEl48HrjAfbmAg2cR48K2XrXUKIZP2c/wUpZci4fI2JQknIIoRqhZCtEKolLqlaoGTxB8lbVmWzxaZ6jn8EFWoRE/oilyEYD0F5AZT7YCKIi/MAUoTQsgitWs34e871A/Vc9biJUb1dGGIZghhiFhVhCoRpuEQhm2NIpz00NWbR1JBFPs+gdAt8XYQS/vJ60hiUqHeFCEFZAMoDODmG5mYXjkPAuQ9KJHy/BVM7pqO3tw8L5i/E4kVL0NHeDSfrQasQWoeQUs+v504wphcIa0eAvCuRTudx55Qu9M7qQ1fnNDw0+xHs2f0Zzp8v4dKlMmph3vX1zYaTJVAyMHW1UCh0xuSZDJOU6zIVAVyi4eY53nrzbYyOjMQkB74YwJrV/Th8eKiG+q94NDh42HbBmV/pwj85Z86csVbAJWKLUCGoKGBCKov16162k347dw7vv/cBThz/2j6XSr9j/rxFGBg4GBNXcejQkYqAhhQF+H4AxuTDCRMvj6kLJinGGq1a8Osv5zA8PIzurukYM2YcMmkXK1esikTOl/DY3CdQKl24TmDu3MfR3JSD4AUI7kOpAFyo/QlK5b12U1kBWYdhyh2ddsLQkaNINztgVIF4EjePTWLN6ufttx0ffoStW9+JyTdu3IzGhjQ4M+SBFTBdCO5fSnjUX8l4EZT5cPIUkyffjsuXR3H2p7OglMNzmfWVeMpu4qlTZ1Aul7F2bSS2b99+OI5nv5uQCBbGAkqGSBDiv2E6INSHRxWyWQ8DBwbt5Jkze5Ga0FRpO0ByfCNeevEV+23zpi04fvwkJk28DTmbnmJEbgUKECKAr1qR8Dy9zR4k6ttqSGXw1JNPV2waguO4yKTzdlXJ8SksW7bCflvXvx4dHV32sEW2FCu/ZjFGIIQvjQBVm2oFCJHIpHPYtWu3Jdqz51O0tU3C+HENaG7KYu/ez1Eu/4HOqd1obGi2qbHes1qByCKtikjkPbW4VoBxPzqVOrTkBiZRO3fuwtGhr+zzt998B0YFXJdUBPzI/wr5tT0IjEV+l0c0qkWZBhM+sg5BzvGwdOlzOHHiJC5eLNuVV9Hf/wKSyRQ4k1akSnxNwKbpQqK9vf0W15U/EuLHApRHIsQTSKWa4bkcYTARE9tuxenTZ6zAyMgoenruszYJXhEQCkJEY3MvSe7vsCeZ5NVyRgsgnra5NxW1HpV5NiITko2YNetBXLnypxU5duwYuLllPVFZuY4EhA8lfVAq77YCnuelCBE/c+KDEUOowatV277QNkkbNrwaW7V2zTqbvMj/SMCeYi4/iS87A8ZUDyUaxDPWaFCi7PVc240RMZ1QKjB48Etr07xnFqKxIVPznwI41yUhBL9OwMB1+VJGzb0fxZUQcYNdJh1uniEM2jCte4Ydm8XE5EyPCiJm1HPHoJQvoVRcZcwI8LiLalUjaDoxca4uwLzjTJUYYz31nDcgn2fTCaFDjInrNroqUJv16FIzq1cfU0pVPde/YYzr0kcJEfsZVcPVPbhGalNT4lTtcF12T/3kKv4Gzb9C+9eSXpkAAAAASUVORK5CYII='
+  fishing = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAATnSURBVEhLjZVZbFVVFIZPe+fpnD2cPZ3biwEHDAkSAymGFC8iJmqhULGlVUzkDQlUVIL6YhH1BQkR8EGDhvgixgQKBMJgEBAfHAnlycjUBF/a+IDWGmmCv9n70Gs4DLqSlbPvvXuvb6+1/nWu5/2Hlcv3hZTqx2mg1lMqtxMidlAqthAS9tFyrc3zWgrJM//LfF/cTSnfRokcZkyDsQiMGcTr2EkQgRD+MyHsdcaYn4xxWyOErSaE/8a5AGUclIagVIBSeQsXYCwEIeynSoU+kYyVtCbfDz6xh7LZItLpHDKZHCi1EOt3gsTPIODrkkEbVvbJx77PQAKB9icXo3NJFzo6liCTyaOpKYVS0QejEpwp5zeD4t8olSuTsb1yofyClAaHD32BDz/4CEePHMPIyK/47tvv0de3Fq+ufw33T52GdCqHQr58W4DNhDF5jTHW2ghOKa35Zf8PrSJcOD+E/fsPYO/evbh08SKOHfsSx4+fhLXR0VHs3LkT06fPQJOXQRDYkt0MYkyBEHna87pSDsADvlVyCRowTKpNxpQp92L+/PlYsWIF6vV5eKrzaRw4cBD423Fw5coV9K15CalUDpUKbfThRoiB76tuz8or5GJEhAqCKwQ+RSadQ2vrbFy+/Avq9UfgeZ777qHZc7Bv3/6YAuDdTZudEAKfgDHh+jPhnGlQIo56UsrHpNAIuQUYhKFEPlfAokWLXZDe3uVIpTKghCObyTvQKy+va0A29G9EqjkNzkSj+dZDbgFy1BNCrNciQhgacGEghEYhX8LChR0uQFfXMmTTeRcg5BIkYC6jlStXNSCdnUuRas66oEmIJ0P9vpJViNDe3kCENwK6u3uQyxbAaAg7eEIo97SQTZs2uz3nzp2HUhH8CksADDzB9Y4JgHOhkM8X0d6+yB3u6XkG2WwOShk3bLaEQir4FYIgoBgcPOv2vbXxHXhe6hYAYbZo1QIpIudJQHd3rxuy3bsHsPHNt10PpNRun10vW9aLXZ9+hueWPw8bhwRhozz2whaw5o6Arh40Nadx5sxZXL06jhkPPIhy2XcQm41dr1q1Gj/+cBoHDx5CsVgBI/I6QMNTqjpbyRbYMlmXwqCQr2Bh+5IGwPOaceLEV+7z4cNHXHlcqYRCLleIZwTA+Pg4Zs1qRbFQdqpkLBzxZs6cmZEyOmezmIAUCwEWdyx1h2wmtqGnTn2NsbExDAzsQ612l9O9zTiXLTkhTFh//wYnaztXjPFdbpKF0OuM+RdQKVHMqy9wB7Zt3Y65bXWMjf2JPbsH4HlN7vZKGAegRCKKahgaGnL7BwcHY8UxAULCuQ6glCpJbS5pHUNscygR2Pre9sbNLl64hLa2Okqliqu/FgZK2N61uLdt/xsb3L6TJ09dD873NF521qIoWmBMFVobJ0l7y0qFuFeFHaQpk+9BqeRDhREUN87tgCpRBecaUkWunFOnTrNyHmaMVW8AWJPSrI0hkYPYm1pIoVBxGTmlhQYqNNDWHSByWdt3T7FYtv9sf2nd8nAydsOkNC9qHV3TuuogdkJjldUghXWrtFjSFhC7gVFVSGmGpZQLkjFvMiHEHK3NN1FUhdFV6OuAGBILwZbGiCoi2QIjDbTUn1NqJiVj3cmapZTPKhUdVbL6u1Y1GD3JTatdW4gJo2HDzS7J5aPJwxP2Dymw9f+Tl5meAAAAAElFTkSuQmCC'
+  catLife = 'iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAGnSURBVDhPxdJPiE9RGMbx8S+SIgumTP78JNkiJpGoWSiU1WRBiSILQ7OwUEZsLAhZShZW7JSFUpKyZEVZz4qwUKQsPq+Oee+v68zFpORbt8593/d57nPuOQMD/4OIWI3zdf2vwV58iYiFdW/GRMS8iFhc1jgdU/TyfWk9/0ciYhGe4QweFDecw21cr+dnBA5lsj74hmX17C/BKoyWQ8DDDsNPuIVx7ImIJbXHT2AMk7VRF3iJbbXHNCJiLtbgRIfJh4jYHhGDta5P+SfY3FEvW3uPj2k2ia840J4rNwLDJUgjPJwBehGxEhsjYhYuYQg30nA3duF46nbmbsZSP5UaG1JwB0dzPd4kwLGsDWWiBRFxP2tb8Q6vI2JOE7mkeZMDO3Az13fTcEsR5GwPr7K/v9yGXF9pAjQprmXjBS7mFgoX0mgT5peTzbm3OFv+ab6P1IZr8bll9IM8hBU5c7DuF/Ckv93KdCSvRS0Yzf69jt5zLK+9+mAdHleik9l7VNWvlgOqPaYREbPLl1vCU1l/2qpN1LrfgiO5nfLsK7WIuNyqra81/4TvZ+zNNSBx/2oAAAAASUVORK5CYII='
+  catBattle = 'iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAEpSURBVDhP3ZTNKkVRGIbPgAy5ACMjBshMOZSiGChjl6EwZehEyBUY+rkJ12CiXAEiwimp59U6fVur1zrbyUR5ag/2t7736du7tVaj8S+RNAqsA1vxrEnq876ekNQEHmQAY977I8CspCeXJYAp769F0gLwEuFbYEbS9q+EIXuL4B0wkerAeTbkiOeKAIvAazbZeKpLOsum2/VckYKsM5nJjj3XARhIi2kbxPu8ySZT3WSH7vlC0hDQjsYT4N5lwGkm23PHN9K2AJ6z0E2Xf1b+zBLAdDbdUdTyyQ48U4ukfuA6wu/AVSZreX8tkgaBy0qQA+x4fy0uS6cC2Ace433DM7UAm5msDSxFPR2x6vyueq4rwArwkW4SYNnW5oCLavv0TNxzw17/Uz4BYO8JTHUO+5AAAAAASUVORK5CYII='
+}
+# 맵에는 대분류 버튼 아이콘 2종(catBattle=공격력/catLife=생활력, 20px)도 함께 들어 있어
+# 같은 디코드/실패 로그/종료 해제 계약을 공유합니다 (2026-08-05 사용자 제공)
+$script:lifeSkillIcons = @{}
+$script:lifeSkillIconLoadFailures = @()
+foreach ($lifeIconId in @($script:lifeSkillIconB64.Keys)) {
+  # 아이콘은 선택적 장식 - 실패해도 글자 카드로 계속 (단 조용히 삼키지 않고 실패 ID 를
+  # 모아 시작 로그로 경고. 임시 리소스는 finally 로 항상 정리 - Codex 조건)
+  $lifeIconStream = $null
+  $lifeIconTmp = $null
+  try {
+    $lifeIconStream = New-Object System.IO.MemoryStream(, [Convert]::FromBase64String([string]$script:lifeSkillIconB64[$lifeIconId]))
+    $lifeIconTmp = [System.Drawing.Image]::FromStream($lifeIconStream)
+    # FromStream 은 스트림 수명에 묶이므로 Bitmap 사본으로 분리해 보관
+    $script:lifeSkillIcons[$lifeIconId] = New-Object System.Drawing.Bitmap($lifeIconTmp)
+  } catch {
+    $script:lifeSkillIconLoadFailures += [string]$lifeIconId
+  } finally {
+    if ($lifeIconTmp) { try { $lifeIconTmp.Dispose() } catch { } }
+    if ($lifeIconStream) { try { $lifeIconStream.Dispose() } catch { } }
+  }
+}
+
+# 대분류 버튼 아이콘 (Paint 로 정중앙 글자 바로 왼쪽에 직접 그림 - Invoke-MainCatButtonPaint.
+# 아이콘이 없으면 글자만).
+# 원본이 흰색(투명 배경) 아이콘이라 꿀색 활성 버튼에서만 보임 → 비활성(크림)용으로
+# themeText 진갈색 틴트 사본을 만들어 상태별로 교체 (Update-MainCategoryVisual 담당.
+# 사본도 lifeSkillIcons 에 넣어 종료 해제 계약 공유)
+foreach ($catIconId in @('catBattle', 'catLife')) {
+  if (-not $script:lifeSkillIcons.ContainsKey($catIconId)) { continue }
+  $catSrcIcon = $script:lifeSkillIcons[$catIconId]
+  $catDarkIcon = New-Object System.Drawing.Bitmap($catSrcIcon.Width, $catSrcIcon.Height)
+  foreach ($catPy in 0..($catSrcIcon.Height - 1)) {
+    foreach ($catPx in 0..($catSrcIcon.Width - 1)) {
+      $catSrcPx = $catSrcIcon.GetPixel($catPx, $catPy)
+      $catDarkIcon.SetPixel($catPx, $catPy, [System.Drawing.Color]::FromArgb($catSrcPx.A, 66, 50, 22))
+    }
+  }
+  $script:lifeSkillIcons[$catIconId + 'Dark'] = $catDarkIcon
+}
+function Invoke-MainCatButtonPaint {
+  # 대분류 버튼 아이콘 그리기: 글자는 버튼 기본 정렬(정중앙) 그대로 두고, 아이콘을 글자
+  # 시작점 왼쪽 6px 에 직접 그립니다 (활성 = 흰 원본 / 비활성 = 진갈색 틴트).
+  # Button.Image 방식은 '글자 정중앙 + 아이콘 인접'을 만들 수 없음 (2026-08-05 정렬 수렴)
+  param($Sender, $PaintArgs)
+  try {
+    $paintIsBattle = ($Sender.Name -eq 'btnCatBattle')
+    $paintIconKey = $(if ($paintIsBattle) { 'catBattle' } else { 'catLife' })
+    $paintActive = ($script:mainCategory -eq $(if ($paintIsBattle) { 'battle' } else { 'life' }))
+    if (-not $paintActive) {
+      if ($script:lifeSkillIcons.ContainsKey($paintIconKey + 'Dark')) { $paintIconKey = $paintIconKey + 'Dark' }
+    }
+    if (-not $script:lifeSkillIcons.ContainsKey($paintIconKey)) { return }
+    $paintIcon = $script:lifeSkillIcons[$paintIconKey]
+    $paintTextSize = [System.Windows.Forms.TextRenderer]::MeasureText($Sender.Text, $Sender.Font)
+    $paintIconX = [int](($Sender.Width - $paintTextSize.Width) / 2) - $paintIcon.Width - 6
+    $paintIconY = [int](($Sender.Height - $paintIcon.Height) / 2)
+    $PaintArgs.Graphics.DrawImage($paintIcon, $paintIconX, $paintIconY, $paintIcon.Width, $paintIcon.Height)
+  } catch { }
+}
+
+# 슬라이더 상태: 선택 인덱스(전체 목록 기준) + 표시 페이지 (3개 단위 - Codex 합의 규칙:
+# 화살표 = 페이지 이동(끝에서 비활성), 점 = 페이지 수, 카드 클릭 = 선택,
+# 스킬 변경 시 대상은 첫 항목으로 폴백)
+$script:lifeSkillIndex = 0
+$script:lifeSkillPage = 0
+$script:lifeTargetIndex = 0
+$script:lifeTargetPage = 0
+$script:lifeCardFontNormal = New-Object System.Drawing.Font('Segoe UI', 9)
+$script:lifeCardFontBold = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+$script:lifeCardSelectedBack = [System.Drawing.Color]::FromArgb(250, 240, 218)   # 선택 카드 배경 (확정 시안 #FAF0DA - 안전 중지 버튼과 동일 계열)
+
+# 콘텐츠 선택 - 생활용 라디오 줄 (전투 pnlCategory 와 교대 표시. 라디오 상태는 서로 보존)
+$pnlLifeCategory = New-Object System.Windows.Forms.Panel
+$pnlLifeCategory.Location = New-Object System.Drawing.Point(15, 20)
+$pnlLifeCategory.Size = New-Object System.Drawing.Size(484, 26)
+$pnlLifeCategory.Visible = $false
+$grpContent.Controls.Add($pnlLifeCategory)
+
+$rbLifeGather = New-Object System.Windows.Forms.RadioButton
+$rbLifeGather.Text = '채집'
+$rbLifeGather.Location = New-Object System.Drawing.Point(0, 2)
+$rbLifeGather.Size = New-Object System.Drawing.Size(80, 22)
+$rbLifeGather.Checked = $true
+$pnlLifeCategory.Controls.Add($rbLifeGather)
+
+$rbLifeProcess = New-Object System.Windows.Forms.RadioButton
+$rbLifeProcess.Text = '가공'
+$rbLifeProcess.Location = New-Object System.Drawing.Point(100, 2)
+$rbLifeProcess.Size = New-Object System.Drawing.Size(70, 22)
+$pnlLifeCategory.Controls.Add($rbLifeProcess)
+
+# 상세 설정 - 채집: '채집 스킬' 슬라이더 줄
+$lblLifeSkillCaption = New-Object System.Windows.Forms.Label
+$lblLifeSkillCaption.Text = '채집 스킬'
+$lblLifeSkillCaption.Location = New-Object System.Drawing.Point(15, 20)
+$lblLifeSkillCaption.Size = New-Object System.Drawing.Size(200, 16)
+$lblLifeSkillCaption.Visible = $false
+$grpContentDetail.Controls.Add($lblLifeSkillCaption)
+
+$btnLifeSkillPrev = New-Object System.Windows.Forms.Button
+$btnLifeSkillPrev.Text = '◀'
+$btnLifeSkillPrev.Location = New-Object System.Drawing.Point(15, 38)
+$btnLifeSkillPrev.Size = New-Object System.Drawing.Size(24, 56)
+$btnLifeSkillPrev.Visible = $false
+$grpContentDetail.Controls.Add($btnLifeSkillPrev)
+
+$btnLifeSkillNext = New-Object System.Windows.Forms.Button
+$btnLifeSkillNext.Text = '▶'
+$btnLifeSkillNext.Location = New-Object System.Drawing.Point(475, 38)
+$btnLifeSkillNext.Size = New-Object System.Drawing.Size(24, 56)
+$btnLifeSkillNext.Visible = $false
+$grpContentDetail.Controls.Add($btnLifeSkillNext)
+
+$script:lifeSkillCards = @()
+foreach ($lifeCardSlot in 0..2) {
+  $lifeCard = New-Object System.Windows.Forms.Button
+  $lifeCard.Text = ''
+  $lifeCard.Location = New-Object System.Drawing.Point((47 + $lifeCardSlot * 142), 38)
+  $lifeCard.Size = New-Object System.Drawing.Size(134, 56)
+  $lifeCard.Visible = $false
+  $lifeCard.Tag = -1
+  # 게임 아이콘을 글자 위에 표시 (시안의 아이콘+이름 카드).
+  # 정렬은 둘 다 MiddleCenter = '아이콘+글자'를 한 덩어리로 중앙 배치 - TopCenter/BottomCenter
+  # 분리 배치는 카드 높이 56 에서 글자가 아이콘을 침범함 (2026-08-05 사용자 실기 제보,
+  # 4개 변형 렌더링 비교로 24px+중앙 쌓기 채택)
+  $lifeCard.TextImageRelation = [System.Windows.Forms.TextImageRelation]::ImageAboveText
+  $lifeCard.ImageAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+  $lifeCard.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+  $lifeCard.Add_Click({
+      # 슬라이드 애니메이션 중에는 반대 행 카드 클릭도 무시 (스트립이 낡은 대상을 보여주다
+      # 점프하는 혼선 방지 - Codex 조건)
+      if ($script:lifeSlideActive -or $script:running) { return }
+      $cardIndex = [int]$this.Tag
+      if ($cardIndex -lt 0) { return }
+      if ($script:lifeSkillIndex -ne $cardIndex) {
+        $script:lifeSkillIndex = $cardIndex
+        # 스킬이 바뀌면 대상 목록이 교체되므로 첫 항목으로 폴백 (Codex 합의)
+        $script:lifeTargetIndex = 0
+        $script:lifeTargetPage = 0
+      }
+      Update-LifeSliders
+    })
+  $grpContentDetail.Controls.Add($lifeCard)
+  $script:lifeSkillCards += , $lifeCard
+}
+
+$lblLifeSkillDots = New-Object System.Windows.Forms.Label
+$lblLifeSkillDots.Text = ''
+$lblLifeSkillDots.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$lblLifeSkillDots.Location = New-Object System.Drawing.Point(15, 96)
+$lblLifeSkillDots.Size = New-Object System.Drawing.Size(484, 14)
+$lblLifeSkillDots.Visible = $false
+$grpContentDetail.Controls.Add($lblLifeSkillDots)
+
+# 상세 설정 - 채집: '채집 대상' 슬라이더 줄 (목록은 선택한 스킬을 따라 교체)
+$lblLifeTargetCaption = New-Object System.Windows.Forms.Label
+$lblLifeTargetCaption.Text = '채집 대상'
+$lblLifeTargetCaption.Location = New-Object System.Drawing.Point(15, 116)
+$lblLifeTargetCaption.Size = New-Object System.Drawing.Size(200, 16)
+$lblLifeTargetCaption.Visible = $false
+$grpContentDetail.Controls.Add($lblLifeTargetCaption)
+
+$btnLifeTargetPrev = New-Object System.Windows.Forms.Button
+$btnLifeTargetPrev.Text = '◀'
+$btnLifeTargetPrev.Location = New-Object System.Drawing.Point(15, 134)
+$btnLifeTargetPrev.Size = New-Object System.Drawing.Size(24, 56)
+$btnLifeTargetPrev.Visible = $false
+$grpContentDetail.Controls.Add($btnLifeTargetPrev)
+
+$btnLifeTargetNext = New-Object System.Windows.Forms.Button
+$btnLifeTargetNext.Text = '▶'
+$btnLifeTargetNext.Location = New-Object System.Drawing.Point(475, 134)
+$btnLifeTargetNext.Size = New-Object System.Drawing.Size(24, 56)
+$btnLifeTargetNext.Visible = $false
+$grpContentDetail.Controls.Add($btnLifeTargetNext)
+
+$script:lifeTargetCards = @()
+foreach ($lifeCardSlot in 0..2) {
+  $lifeCard = New-Object System.Windows.Forms.Button
+  $lifeCard.Text = ''
+  $lifeCard.Location = New-Object System.Drawing.Point((47 + $lifeCardSlot * 142), 134)
+  $lifeCard.Size = New-Object System.Drawing.Size(134, 56)
+  $lifeCard.Visible = $false
+  $lifeCard.Tag = -1
+  $lifeCard.Add_Click({
+      # 슬라이드 애니메이션 중에는 반대 행 카드 클릭도 무시 (Codex 조건)
+      if ($script:lifeSlideActive -or $script:running) { return }
+      $cardIndex = [int]$this.Tag
+      if ($cardIndex -lt 0) { return }
+      $script:lifeTargetIndex = $cardIndex
+      Update-LifeSliders
+    })
+  $grpContentDetail.Controls.Add($lifeCard)
+  $script:lifeTargetCards += , $lifeCard
+}
+
+$lblLifeTargetDots = New-Object System.Windows.Forms.Label
+$lblLifeTargetDots.Text = ''
+$lblLifeTargetDots.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$lblLifeTargetDots.Location = New-Object System.Drawing.Point(15, 192)
+$lblLifeTargetDots.Size = New-Object System.Drawing.Size(484, 14)
+$lblLifeTargetDots.Visible = $false
+$grpContentDetail.Controls.Add($lblLifeTargetDots)
+
+# 상세 설정 - 채집: 소진 처리 2줄 (항목/기본값은 채집 흐름 실측 후 확정 - 요청사항.md)
+$lblLifeBag = New-Object System.Windows.Forms.Label
+$lblLifeBag.Text = '가방 가득 시:'
+$lblLifeBag.Location = New-Object System.Drawing.Point(15, 215)
+$lblLifeBag.Size = New-Object System.Drawing.Size(90, 20)
+$lblLifeBag.Visible = $false
+$grpContentDetail.Controls.Add($lblLifeBag)
+
+$pnlLifeBag = New-Object System.Windows.Forms.Panel
+$pnlLifeBag.Location = New-Object System.Drawing.Point(110, 212)
+$pnlLifeBag.Size = New-Object System.Drawing.Size(260, 24)
+$pnlLifeBag.Visible = $false
+$grpContentDetail.Controls.Add($pnlLifeBag)
+$rbLifeBagStop = New-Object System.Windows.Forms.RadioButton
+$rbLifeBagStop.Text = '멈춤'
+$rbLifeBagStop.Location = New-Object System.Drawing.Point(0, 0)
+$rbLifeBagStop.Size = New-Object System.Drawing.Size(60, 22)
+$rbLifeBagStop.Checked = $true
+$pnlLifeBag.Controls.Add($rbLifeBagStop)
+$rbLifeBagGo = New-Object System.Windows.Forms.RadioButton
+$rbLifeBagGo.Text = '계속 진행'
+$rbLifeBagGo.Location = New-Object System.Drawing.Point(70, 0)
+$rbLifeBagGo.Size = New-Object System.Drawing.Size(90, 22)
+$pnlLifeBag.Controls.Add($rbLifeBagGo)
+
+$lblLifeTool = New-Object System.Windows.Forms.Label
+$lblLifeTool.Text = '도구 내구도 소진 시:'
+$lblLifeTool.Location = New-Object System.Drawing.Point(15, 241)
+$lblLifeTool.Size = New-Object System.Drawing.Size(125, 20)
+$lblLifeTool.Visible = $false
+$grpContentDetail.Controls.Add($lblLifeTool)
+
+$pnlLifeTool = New-Object System.Windows.Forms.Panel
+$pnlLifeTool.Location = New-Object System.Drawing.Point(145, 238)
+$pnlLifeTool.Size = New-Object System.Drawing.Size(260, 24)
+$pnlLifeTool.Visible = $false
+$grpContentDetail.Controls.Add($pnlLifeTool)
+$rbLifeToolStop = New-Object System.Windows.Forms.RadioButton
+$rbLifeToolStop.Text = '멈춤'
+$rbLifeToolStop.Location = New-Object System.Drawing.Point(0, 0)
+$rbLifeToolStop.Size = New-Object System.Drawing.Size(60, 22)
+$rbLifeToolStop.Checked = $true
+$pnlLifeTool.Controls.Add($rbLifeToolStop)
+$rbLifeToolGo = New-Object System.Windows.Forms.RadioButton
+$rbLifeToolGo.Text = '계속 진행'
+$rbLifeToolGo.Location = New-Object System.Drawing.Point(70, 0)
+$rbLifeToolGo.Size = New-Object System.Drawing.Size(90, 22)
+$pnlLifeTool.Controls.Add($rbLifeToolGo)
+
+# 상세 설정 - 가공: 1차는 안내만 (높이는 채집과 같은 268 유지 - 전환 시 폼 흔들림 방지, Codex 조건)
+$lblLifeProcessInfo = New-Object System.Windows.Forms.Label
+$lblLifeProcessInfo.Text = '가공 자동화는 추후 지원 예정입니다.'
+$lblLifeProcessInfo.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$lblLifeProcessInfo.Location = New-Object System.Drawing.Point(15, 110)
+$lblLifeProcessInfo.Size = New-Object System.Drawing.Size(484, 40)
+$lblLifeProcessInfo.Visible = $false
+$grpContentDetail.Controls.Add($lblLifeProcessInfo)
+
+function Update-LifeSliders {
+  # 두 슬라이더(스킬/대상)의 카드 3개·화살표·점·선택 강조를 현재 상태로 다시 그립니다.
+  # Apply-HoneyTheme 가 버튼 스타일을 일괄 덮으므로 테마 적용 후에도 반드시 재호출 (Codex 조건 E)
+  $lifeSkillCount = @($script:lifeSkills).Count
+  $lifeSkillPages = [Math]::Ceiling($lifeSkillCount / 3.0)
+  if ($script:lifeSkillIndex -ge $lifeSkillCount) { $script:lifeSkillIndex = 0 }
+  if ($script:lifeSkillPage -ge $lifeSkillPages) { $script:lifeSkillPage = $lifeSkillPages - 1 }
+  if ($script:lifeSkillPage -lt 0) { $script:lifeSkillPage = 0 }
+  $currentSkill = $script:lifeSkills[$script:lifeSkillIndex]
+  $lifeTargets = @($currentSkill.Targets)
+  $lifeTargetPages = [Math]::Max(1, [Math]::Ceiling(@($lifeTargets).Count / 3.0))
+  if ($script:lifeTargetIndex -ge @($lifeTargets).Count) { $script:lifeTargetIndex = 0 }
+  if ($script:lifeTargetPage -ge $lifeTargetPages) { $script:lifeTargetPage = $lifeTargetPages - 1 }
+  if ($script:lifeTargetPage -lt 0) { $script:lifeTargetPage = 0 }
+  # 렌더 공통 (카드 배열 / 항목 이름 배열 / 페이지 / 선택 인덱스)
+  $lifeSliderSets = @(
+    @{ Cards = $script:lifeSkillCards; Names = @($script:lifeSkills | ForEach-Object { [string]$_.Name })
+       Icons = @($script:lifeSkills | ForEach-Object { $script:lifeSkillIcons[[string]$_.Id] })
+       Page = $script:lifeSkillPage; Pages = $lifeSkillPages; Selected = $script:lifeSkillIndex
+       Dots = $lblLifeSkillDots; Prev = $btnLifeSkillPrev; Next = $btnLifeSkillNext }
+    @{ Cards = $script:lifeTargetCards; Names = @($lifeTargets | ForEach-Object { [string]$_ })
+       Icons = $null   # 대상 아이콘은 캡처 수급 후 추가 (글자 카드)
+       Page = $script:lifeTargetPage; Pages = $lifeTargetPages; Selected = $script:lifeTargetIndex
+       Dots = $lblLifeTargetDots; Prev = $btnLifeTargetPrev; Next = $btnLifeTargetNext }
+  )
+  foreach ($sliderSet in $lifeSliderSets) {
+    $sliderNames = @($sliderSet.Names)
+    foreach ($slotIndex in 0..2) {
+      $slotCard = $sliderSet.Cards[$slotIndex]
+      $itemIndex = ([int]$sliderSet.Page) * 3 + $slotIndex
+      if ($itemIndex -lt $sliderNames.Count) {
+        $slotCard.Text = $sliderNames[$itemIndex]
+        $slotCard.Tag = $itemIndex
+        $slotCard.Enabled = $true
+        $slotCard.Image = $(if ($null -ne $sliderSet.Icons) { $sliderSet.Icons[$itemIndex] } else { $null })
+        $slotCard.FlatStyle = 'Flat'
+        if ($itemIndex -eq [int]$sliderSet.Selected) {
+          $slotCard.BackColor = $script:lifeCardSelectedBack
+          $slotCard.ForeColor = $script:themeText
+          $slotCard.FlatAppearance.BorderColor = $script:themeHoney
+          $slotCard.FlatAppearance.BorderSize = 2
+          $slotCard.Font = $script:lifeCardFontBold
+        } else {
+          $slotCard.BackColor = $script:themeControl
+          $slotCard.ForeColor = $script:themeText
+          $slotCard.FlatAppearance.BorderColor = $script:themeBorder
+          $slotCard.FlatAppearance.BorderSize = 1
+          $slotCard.Font = $script:lifeCardFontNormal
+        }
+      } else {
+        # 마지막 페이지의 빈 칸: 클릭 대상이 아님을 명확히 (빈 카드 비활성)
+        $slotCard.Text = ''
+        $slotCard.Tag = -1
+        $slotCard.Enabled = $false
+        $slotCard.Image = $null
+        $slotCard.BackColor = $script:themeControl
+        $slotCard.FlatAppearance.BorderColor = $script:themeBorder
+        $slotCard.FlatAppearance.BorderSize = 1
+        $slotCard.Font = $script:lifeCardFontNormal
+      }
+    }
+    # 페이지 점: 현재 페이지 = ●, 나머지 = ○ (페이지 수 = ceil(항목/3) - Codex 합의)
+    $dotParts = @()
+    foreach ($dotIndex in 0..([int]$sliderSet.Pages - 1)) {
+      $dotParts += $(if ($dotIndex -eq [int]$sliderSet.Page) { '●' } else { '○' })
+    }
+    $sliderSet.Dots.Text = ($dotParts -join '  ')
+    # 위치점은 흐린 색 (확정 시안 themeMuted. Apply-HoneyTheme 가 Label 을 themeText 로
+    # 덮으므로 여기서 매번 복원 - Codex 지적)
+    $sliderSet.Dots.ForeColor = $script:themeMuted
+    # 화살표: 끝 페이지에서 비활성 (순환 없음 - Codex 합의) + 애니메이션/실행 중 잠금
+    # (Start-LifeSlide 도중의 Update-LifeSliders 호출이 잠금을 되돌리지 않게 - Codex 조건)
+    $canNavigate = (-not $script:lifeSlideActive) -and (-not $script:running)
+    $sliderSet.Prev.Enabled = $canNavigate -and ([int]$sliderSet.Page -gt 0)
+    $sliderSet.Next.Enabled = $canNavigate -and ([int]$sliderSet.Page -lt ([int]$sliderSet.Pages - 1))
+  }
+}
+
+# ── 슬라이더 페이지 전환 애니메이션 (v2.0.0 - 320ms ease-out, 데모 3속도 비교로 사용자 확정) ──
+# 방식: 현재/다음 페이지 카드를 비트맵으로 합성해 임시 클리핑 Panel 위의 PictureBox 스트립을
+# 밀고, 끝나면 실제 버튼 노출. 상태는 전부 $script: (GetNewClosure 금지 - 데모 1차에서
+# 클로저 안 $script: 쓰기가 본체에 반영되지 않아 화살표 영구 잠김 실사고).
+$script:lifeSlideActive = $false
+$script:lifeSlideOverlayPanel = $null
+$script:lifeSlidePicture = $null
+$script:lifeSlideStrip = $null
+$script:lifeSlideSw = $null
+$script:lifeSlideDirection = 1
+$script:lifeSlideWidth = 0
+$script:lifeSlideDurationMs = 320.0   # 사용자 확정 속도
+$script:lifeSlideTimer = New-Object System.Windows.Forms.Timer
+$script:lifeSlideTimer.Interval = 15
+$script:lifeSlideTimer.Add_Tick({ Invoke-LifeSlideTick })
+
+function Stop-LifeSlideNow {
+  # 애니메이션 즉시 종료 + 전체 정리 (이미 반영된 새 페이지로 스냅). 어떤 중단 경로에서도
+  # 잠금이 남지 않게 스스로 UI 를 복원합니다 (Codex 조건 - SkipUiRefresh 는 폼 종료/패널
+  # 갱신용: 이어지는 흐름이 UI 를 직접 갱신하는 곳에서만 사용)
+  param([switch]$SkipUiRefresh)
+  try { $script:lifeSlideTimer.Stop() } catch { }
+  if ($script:lifeSlidePicture) {
+    try { $script:lifeSlidePicture.Image = $null } catch { }
+    try { $script:lifeSlidePicture.Dispose() } catch { }
+    $script:lifeSlidePicture = $null
+  }
+  if ($script:lifeSlideOverlayPanel) {
+    try { $grpContentDetail.Controls.Remove($script:lifeSlideOverlayPanel) } catch { }
+    try { $script:lifeSlideOverlayPanel.Dispose() } catch { }
+    $script:lifeSlideOverlayPanel = $null
+  }
+  if ($script:lifeSlideStrip) {
+    try { $script:lifeSlideStrip.Dispose() } catch { }
+    $script:lifeSlideStrip = $null
+  }
+  if ($script:lifeSlideSw) {
+    try { $script:lifeSlideSw.Stop() } catch { }
+    $script:lifeSlideSw = $null
+  }
+  $script:lifeSlideActive = $false
+  if (-not $SkipUiRefresh) { Update-LifeSliders }
+}
+
+function Invoke-LifeSlideTick {
+  # 타이머 틱 (명명 함수 - 클로저 미사용 계약). 예외는 Stop 으로 수렴해 영구 잠금 차단
+  try {
+    $slideT = [Math]::Min(1.0, $script:lifeSlideSw.Elapsed.TotalMilliseconds / $script:lifeSlideDurationMs)
+    $slideInv = 1.0 - $slideT
+    $slideEase = 1.0 - ($slideInv * $slideInv)   # ease-out (PS 에서 ^ 는 제곱이 아님 - 곱으로)
+    $slideOffset = [int]($script:lifeSlideWidth * $slideEase)
+    if ($script:lifeSlidePicture) {
+      $script:lifeSlidePicture.Left = $(if ($script:lifeSlideDirection -gt 0) { -$slideOffset } else { -$script:lifeSlideWidth + $slideOffset })
+    }
+    if ($slideT -ge 1.0) { Stop-LifeSlideNow }
+  } catch {
+    Stop-LifeSlideNow
+  }
+}
+
+function New-LifeSlideSnapshot {
+  # 카드 3장을 현재 모습 그대로 합성 (간격은 themeBack - DrawToBitmap 은 버튼만 그림)
+  param($Cards, [int]$ZoneX, [int]$ZoneW, [int]$ZoneH)
+  $snapshot = New-Object System.Drawing.Bitmap($ZoneW, $ZoneH)
+  $snapshotG = $null
+  try {
+    $snapshotG = [System.Drawing.Graphics]::FromImage($snapshot)
+    $snapshotG.Clear($script:themeBack)
+    foreach ($snapCard in @($Cards)) {
+      $snapCard.DrawToBitmap($snapshot, (New-Object System.Drawing.Rectangle(($snapCard.Left - $ZoneX), 0, $snapCard.Width, $snapCard.Height)))
+    }
+  } catch {
+    # 합성 실패 시 반환되지 못하는 Bitmap 을 여기서 직접 정리 (호출부 finally 가 못 봄 - Codex 지적)
+    if ($snapshot) { try { $snapshot.Dispose() } catch { } }
+    throw
+  } finally {
+    if ($snapshotG) { try { $snapshotG.Dispose() } catch { } }
+  }
+  return , $snapshot
+}
+
+function Start-LifeSlide {
+  param([string]$Slider, [int]$Direction)
+  if ($script:lifeSlideActive -or $script:running) { return }
+  $slideCards = $(if ($Slider -eq 'target') { $script:lifeTargetCards } else { $script:lifeSkillCards })
+  # 페이지 경계 재확인 (화살표 Enabled 가 1차 방어지만 이중 확인)
+  $slideItemCount = $(if ($Slider -eq 'target') { @($script:lifeSkills[$script:lifeSkillIndex].Targets).Count } else { @($script:lifeSkills).Count })
+  $slidePages = [Math]::Max(1, [Math]::Ceiling($slideItemCount / 3.0))
+  $slideCurPage = $(if ($Slider -eq 'target') { $script:lifeTargetPage } else { $script:lifeSkillPage })
+  $slideNewPage = $slideCurPage + $Direction
+  if ($slideNewPage -lt 0 -or $slideNewPage -ge $slidePages) { return }
+  $script:lifeSlideActive = $true
+  $slideBefore = $null
+  $slideAfter = $null
+  $slideStripG = $null
+  try {
+    # 카드 존은 런타임 값으로 계산 (상수 419 는 실폭 418 과 1px 어긋남 - Codex 지적)
+    $slideZoneX = [int]$slideCards[0].Left
+    $slideZoneY = [int]$slideCards[0].Top
+    $slideZoneW = [int]$slideCards[2].Right - $slideZoneX
+    $slideZoneH = [int]$slideCards[0].Height
+    $slideBefore = New-LifeSlideSnapshot -Cards $slideCards -ZoneX $slideZoneX -ZoneW $slideZoneW -ZoneH $slideZoneH
+    # 실제 상태를 새 페이지로 갱신 (Update-LifeSliders 의 화살표 갱신은 canNavigate 게이트가 잠금 유지)
+    if ($Slider -eq 'target') { $script:lifeTargetPage = $slideNewPage } else { $script:lifeSkillPage = $slideNewPage }
+    Update-LifeSliders
+    $slideAfter = New-LifeSlideSnapshot -Cards $slideCards -ZoneX $slideZoneX -ZoneW $slideZoneW -ZoneH $slideZoneH
+    # 두 페이지 스트립 구성 (다음 = before|after 왼쪽으로 / 이전 = after|before 오른쪽으로)
+    $script:lifeSlideStrip = New-Object System.Drawing.Bitmap(($slideZoneW * 2), $slideZoneH)
+    $slideStripG = [System.Drawing.Graphics]::FromImage($script:lifeSlideStrip)
+    if ($Direction -gt 0) {
+      $slideStripG.DrawImage($slideBefore, 0, 0)
+      $slideStripG.DrawImage($slideAfter, $slideZoneW, 0)
+    } else {
+      $slideStripG.DrawImage($slideAfter, 0, 0)
+      $slideStripG.DrawImage($slideBefore, $slideZoneW, 0)
+    }
+    # 임시 클리핑 Panel + 스트립 PictureBox (dots/화살표는 존 밖이라 안 덮임)
+    $script:lifeSlideOverlayPanel = New-Object System.Windows.Forms.Panel
+    $script:lifeSlideOverlayPanel.Location = New-Object System.Drawing.Point($slideZoneX, $slideZoneY)
+    $script:lifeSlideOverlayPanel.Size = New-Object System.Drawing.Size($slideZoneW, $slideZoneH)
+    $script:lifeSlideOverlayPanel.BackColor = $script:themeBack
+    $grpContentDetail.Controls.Add($script:lifeSlideOverlayPanel)
+    $script:lifeSlideOverlayPanel.BringToFront()
+    $script:lifeSlidePicture = New-Object System.Windows.Forms.PictureBox
+    $script:lifeSlidePicture.BorderStyle = 'None'
+    $script:lifeSlidePicture.Location = New-Object System.Drawing.Point($(if ($Direction -gt 0) { 0 } else { -$slideZoneW }), 0)
+    $script:lifeSlidePicture.Size = New-Object System.Drawing.Size(($slideZoneW * 2), $slideZoneH)
+    $script:lifeSlidePicture.Image = $script:lifeSlideStrip
+    $script:lifeSlideOverlayPanel.Controls.Add($script:lifeSlidePicture)
+    $script:lifeSlideDirection = $Direction
+    $script:lifeSlideWidth = $slideZoneW
+    $script:lifeSlideSw = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:lifeSlideTimer.Start()
+  } catch {
+    # 어떤 실패도 즉시 스냅 + 잠금 해제로 수렴 (페이지 값은 이미 반영돼 있어 즉시 전환과 동일)
+    Stop-LifeSlideNow
+  } finally {
+    if ($slideStripG) { try { $slideStripG.Dispose() } catch { } }
+    if ($slideBefore) { try { $slideBefore.Dispose() } catch { } }
+    if ($slideAfter) { try { $slideAfter.Dispose() } catch { } }
+  }
+}
+
+$btnLifeSkillPrev.Add_Click({ Start-LifeSlide -Slider 'skill' -Direction -1 })
+$btnLifeSkillNext.Add_Click({ Start-LifeSlide -Slider 'skill' -Direction 1 })
+$btnLifeTargetPrev.Add_Click({ Start-LifeSlide -Slider 'target' -Direction -1 })
+$btnLifeTargetNext.Add_Click({ Start-LifeSlide -Slider 'target' -Direction 1 })
+$rbLifeGather.Add_CheckedChanged({ if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels } })
+
+function Update-MainCategoryVisual {
+  # 대분류 버튼의 활성/비활성 스타일 전체 재설정 (활성 = 시작 버튼과 같은 꿀색 강조.
+  # 전환 시 비활성 쪽의 폰트/테두리까지 원상 복구 - Codex 조건 E)
+  foreach ($catPair in @(, @($btnCatBattle, 'battle', 'catBattle')) + @(, @($btnCatLife, 'life', 'catLife'))) {
+    $catButton = $catPair[0]
+    $catActive = ($script:mainCategory -eq [string]$catPair[1])
+    $catIconKey = [string]$catPair[2]
+    $catButton.FlatStyle = 'Flat'
+    if ($catActive) {
+      $catButton.BackColor = $script:themeHoney
+      $catButton.ForeColor = $script:themeHoneyInk
+      $catButton.FlatAppearance.BorderSize = 0
+      $catButton.Font = $script:lifeCardFontBold
+    } else {
+      $catButton.BackColor = $script:themeControl
+      $catButton.ForeColor = $script:themeText
+      $catButton.FlatAppearance.BorderColor = $script:themeBorder
+      $catButton.FlatAppearance.BorderSize = 1
+      $catButton.Font = $script:lifeCardFontNormal
+    }
+    # 아이콘은 Paint(Invoke-MainCatButtonPaint)가 상태별로 직접 그림 - 상태 변경 시 다시 그리기
+    $catButton.Invalidate()
+  }
+}
+
+function Set-MainCategory {
+  # 대분류(전투/생활) 전환 단일 진입점 (Codex 조건 B): 상태 변경 → 버튼 스타일 →
+  # 패널/설정/설명서/커스텀 처리와 레이아웃 재계산은 updateCategoryPanels 가 일괄 담당.
+  # 실행 중에는 전환 금지 (Set-UiRunning 이 버튼을 잠그지만 이중 방어 - Codex 조건 C)
+  param([string]$Category)
+  # 진행 중 슬라이드는 즉시 정리 (같은 카테고리 재클릭의 조기 반환보다 먼저 - Codex 조건:
+  # 조기 반환 경로에서 잠금이 남지 않게 Stop 이 스스로 UI 복원)
+  if ($script:lifeSlideActive) { Stop-LifeSlideNow }
+  if ($script:running) { return }
+  if ($Category -ne 'life') { $Category = 'battle' }
+  if ($script:mainCategory -eq $Category) { return }
+  $script:mainCategory = $Category
+  Update-MainCategoryVisual
+  if ($null -ne $updateCategoryPanels) { & $updateCategoryPanels }
+}
+
+function Test-LifeStartBlocked {
+  # 생활 대분류에서 시작 시도 차단 (워커 미구현 - GUI 단계). 팝업은 GUI 팝업 금지 규칙의
+  # 허용 예외 ② (사용자 버튼 클릭 즉답 - F9 도 PerformClick 경유라 같은 경로).
+  # 승인 비동기 콜백의 우회 시작을 막기 위해 Invoke-StartAutomation 서두에서도 호출 (Codex 조건 D)
+  if ($script:mainCategory -ne 'life') { return $false }
+  [System.Windows.Forms.MessageBox]::Show(
+    ("생활 자동화는 아직 개발 중입니다." + [Environment]::NewLine +
+      "현재는 화면 구성만 준비된 상태이며, 채집 자동화가 완성되면 사용할 수 있습니다."),
+    '생활 자동화 준비 중',
+    [System.Windows.Forms.MessageBoxButtons]::OK,
+    [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+  return $true
+}
+
 # --- 설정 (on/off) ---
 $grpSettings = New-Object System.Windows.Forms.GroupBox
 $grpSettings.Text = '설정'
@@ -3258,6 +3881,28 @@ $btnAlwaysOn.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnAlwaysOn)
 
 $btnAlwaysOn.Add_Click({
+    # 생활 대분류: 전투 체크박스 대신 생활 설정만 표시 (Codex 조건 G.
+    # 가공 선택 중에는 채집 전용 항목을 생략해 화면 상태와 일치 - Codex 권고)
+    if ($script:mainCategory -eq 'life') {
+      $lifeLines = New-Object System.Collections.Generic.List[string]
+      $lifeLines.Add('[생활 설정] (준비 중 - 자동화 완성 후 적용)')
+      if ($rbLifeProcess.Checked) {
+        $lifeLines.Add(' - 콘텐츠: 가공 (추후 지원)')
+      } else {
+        $lifeSkillNow = $script:lifeSkills[$script:lifeSkillIndex]
+        $lifeTargetsNow = @($lifeSkillNow.Targets)
+        $lifeTargetName = $(if ($script:lifeTargetIndex -lt $lifeTargetsNow.Count) { [string]$lifeTargetsNow[$script:lifeTargetIndex] } else { '' })
+        $lifeLines.Add(' - 콘텐츠: 채집')
+        $lifeLines.Add(" - 채집 스킬: $([string]$lifeSkillNow.Name)")
+        $lifeLines.Add(" - 채집 대상: $lifeTargetName")
+        $lifeLines.Add(" - 채집 대기: $([int]$numGatherWait.Value)초")
+        $lifeLines.Add(" - 가방 가득 시: $(if ($rbLifeBagGo.Checked) { '계속 진행' } else { '멈춤' })")
+        $lifeLines.Add(" - 도구 내구도 소진 시: $(if ($rbLifeToolGo.Checked) { '계속 진행' } else { '멈춤' })")
+      }
+      [System.Windows.Forms.MessageBox]::Show(($lifeLines -join "`n"), '적용된 설정',
+        [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+      return
+    }
     # 체크박스 항목은 켠 것만 표시합니다 (꺼진 항목은 줄 자체를 생략)
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('[내가 선택한 설정] (켠 항목만 표시)')
@@ -3346,6 +3991,41 @@ $lblClearHuman.Location = New-Object System.Drawing.Point(210, 111)
 $lblClearHuman.Size = New-Object System.Drawing.Size(160, 20)
 $lblClearHuman.ForeColor = [System.Drawing.Color]::SteelBlue
 $grpSettings.Controls.Add($lblClearHuman)
+
+# 생활(채집) 전용: '채집 대기(초)' 줄 - 전투의 체크박스/클리어 대기 줄과 교대 표시
+# (updateCategoryPanels 가 mainCategory 에 따라 Visible 전환. 기본값 120초는 임시 -
+# 채집 흐름 실측 후 확정, 요청사항.md)
+$lblGatherWait = New-Object System.Windows.Forms.Label
+$lblGatherWait.Text = '채집 대기(초):'
+$lblGatherWait.Location = New-Object System.Drawing.Point(15, 28)
+$lblGatherWait.Size = New-Object System.Drawing.Size(95, 20)
+$lblGatherWait.Visible = $false
+$grpSettings.Controls.Add($lblGatherWait)
+
+$numGatherWait = New-Object System.Windows.Forms.NumericUpDown
+$numGatherWait.Location = New-Object System.Drawing.Point(112, 25)
+$numGatherWait.Size = New-Object System.Drawing.Size(65, 24)
+$numGatherWait.Minimum = 10
+$numGatherWait.Maximum = 3600
+$numGatherWait.Value = 120
+$numGatherWait.Visible = $false
+$grpSettings.Controls.Add($numGatherWait)
+
+$lblGatherHuman = New-Object System.Windows.Forms.Label
+$lblGatherHuman.Location = New-Object System.Drawing.Point(185, 28)
+$lblGatherHuman.Size = New-Object System.Drawing.Size(160, 20)
+$lblGatherHuman.Visible = $false
+$grpSettings.Controls.Add($lblGatherHuman)
+
+$updateGatherHuman = {
+  $gatherSeconds = [int]$numGatherWait.Value
+  $gatherMinutes = [Math]::Floor($gatherSeconds / 60)
+  $gatherRemain = $gatherSeconds % 60
+  $lblGatherHuman.Text = $(if ($gatherMinutes -gt 0 -and $gatherRemain -gt 0) { "= ${gatherMinutes}분 ${gatherRemain}초" }
+    elseif ($gatherMinutes -gt 0) { "= ${gatherMinutes}분" } else { "= ${gatherSeconds}초" })
+}
+$numGatherWait.Add_ValueChanged($updateGatherHuman)
+& $updateGatherHuman
 
 $updateClearHuman = {
   $totalSeconds = [int]$numClearWait.Value
@@ -5382,6 +6062,42 @@ function Load-SettingsToUi {
       default       { $rbCatAbyss.Checked = $true }
     }
   } catch { $rbCatAbyss.Checked = $true }
+  # 저장된 대분류(전투/생활)와 생활 설정 복원 (v2.0.0. 잘못된 값은 전부 기본값 폴백 - Codex 조건 F)
+  try {
+    $lifeCfg = $null
+    if ($cfg.PSObject.Properties['life']) { $lifeCfg = $cfg.life }
+    if ($lifeCfg) {
+      $rbLifeProcess.Checked = ([string]$lifeCfg.content -eq 'process')
+      $rbLifeGather.Checked = -not $rbLifeProcess.Checked
+      $savedSkillId = [string]$lifeCfg.skill
+      $script:lifeSkillIndex = 0
+      foreach ($skillIdx in 0..(@($script:lifeSkills).Count - 1)) {
+        if ([string]$script:lifeSkills[$skillIdx].Id -eq $savedSkillId) { $script:lifeSkillIndex = $skillIdx; break }
+      }
+      $script:lifeSkillPage = [Math]::Floor($script:lifeSkillIndex / 3)
+      $savedTarget = [string]$lifeCfg.target
+      $savedTargets = @($script:lifeSkills[$script:lifeSkillIndex].Targets)
+      $script:lifeTargetIndex = 0
+      foreach ($targetIdx in 0..($savedTargets.Count - 1)) {
+        if ([string]$savedTargets[$targetIdx] -eq $savedTarget) { $script:lifeTargetIndex = $targetIdx; break }
+      }
+      $script:lifeTargetPage = [Math]::Floor($script:lifeTargetIndex / 3)
+      $rbLifeBagGo.Checked = ([string]$lifeCfg.bagFull -eq 'continue')
+      $rbLifeBagStop.Checked = -not $rbLifeBagGo.Checked
+      $rbLifeToolGo.Checked = ([string]$lifeCfg.toolWorn -eq 'continue')
+      $rbLifeToolStop.Checked = -not $rbLifeToolGo.Checked
+      $gatherWaitSaved = 120
+      try { $gatherWaitSaved = [int]$lifeCfg.gatherWaitSeconds } catch { }
+      $numGatherWait.Value = [Math]::Min([Math]::Max($gatherWaitSaved, [int]$numGatherWait.Minimum), [int]$numGatherWait.Maximum)
+    }
+  } catch {
+    Add-GuiLog "[경고] 생활 설정 복원 중 오류 - 기본값으로 시작합니다 ($($_.Exception.Message))"
+  }
+  # 대분류 복원은 생활 세부 값 복원과 분리 - 세부 복원이 실패해도 사용자가 쓰던 화면(생활)은
+  # 유지되게 합니다 (Codex 권고. Set-MainCategory 는 같은 값이면 조기 반환)
+  try {
+    if ([string]$cfg.mainCategory -eq 'life') { Set-MainCategory -Category 'life' }
+  } catch { }
   # 저장된 사냥터 설정 복원
   try {
     $ht = $cfg.huntingGround
@@ -5654,6 +6370,32 @@ function Save-SettingsFromUi {
   elseif ($rbCatHunting.Checked) { $categoryValue = 'hunting' }
   if ($cfg.PSObject.Properties['contentCategory']) { $cfg.contentCategory = $categoryValue }
   else { $cfg | Add-Member -NotePropertyName 'contentCategory' -NotePropertyValue $categoryValue }
+  # 대분류(전투/생활) 저장 (v2.0.0. contentCategory 는 전투 하위 선택이므로 그대로 두고
+  # 별도 키로 저장 - Codex 조건 F)
+  if ($cfg.PSObject.Properties['mainCategory']) { $cfg.mainCategory = [string]$script:mainCategory }
+  else { $cfg | Add-Member -NotePropertyName 'mainCategory' -NotePropertyValue ([string]$script:mainCategory) }
+  # 생활 설정 저장 (skill 은 안정 Id, target 은 게임 용어 표시명 그대로 - Codex 합의).
+  # 섹션이 이미 있으면 객체 교체가 아니라 값 6개만 갱신합니다 - 교체하면 config.json 의
+  # '_설명' 안내 키와 향후 워커 키가 저장 한 번에 삭제됨 (Codex 지적)
+  $lifeSkillSave = $script:lifeSkills[$script:lifeSkillIndex]
+  $lifeTargetsSave = @($lifeSkillSave.Targets)
+  $lifeValues = @{
+    content   = $(if ($rbLifeProcess.Checked) { 'process' } else { 'gather' })
+    skill     = [string]$lifeSkillSave.Id
+    target    = $(if ($script:lifeTargetIndex -lt $lifeTargetsSave.Count) { [string]$lifeTargetsSave[$script:lifeTargetIndex] } else { '' })
+    bagFull   = $(if ($rbLifeBagGo.Checked) { 'continue' } else { 'stop' })
+    toolWorn  = $(if ($rbLifeToolGo.Checked) { 'continue' } else { 'stop' })
+    gatherWaitSeconds = [int]$numGatherWait.Value
+  }
+  if (-not $cfg.PSObject.Properties['life']) {
+    $cfg | Add-Member -NotePropertyName 'life' -NotePropertyValue ([pscustomobject]@{
+      '_설명' = "'생활' 대분류 설정입니다 (v2.0.0 - 채집 자동화는 개발 중이라 아직 시작할 수 없습니다)"
+    })
+  }
+  foreach ($lifeKey in @('content', 'skill', 'target', 'bagFull', 'toolWorn', 'gatherWaitSeconds')) {
+    if ($cfg.life.PSObject.Properties[$lifeKey]) { $cfg.life.$lifeKey = $lifeValues[$lifeKey] }
+    else { $cfg.life | Add-Member -NotePropertyName $lifeKey -NotePropertyValue $lifeValues[$lifeKey] }
+  }
   # 던전 설정 저장 (전체 자동화: 선택 → 옵션 → 입장 → 클리어 → 다시 하기 반복)
   $ndSettings = [pscustomobject]@{
     '_설명'       = "'던전' 카테고리 전용 설정입니다 (던전 전체 자동화 - 은동전/더블 루팅/매칭 포함)"
@@ -5751,11 +6493,20 @@ function Save-SettingsFromUi {
 
 function Set-UiRunning {
   param([bool]$IsRunning)
+  # 실행 시작 시 진행 중 슬라이드 정리 (상세 Enabled 스냅샷이 오버레이/잠금 상태를 뜨지 않게 -
+  # Codex 권고. 생활에서는 시작이 차단되지만 향후 생활 실행 대비 방어).
+  # 일반 Stop(UI 복원 포함)이어야 함 - SkipUiRefresh 면 화살표 false 가 스냅샷에 저장돼
+  # 실행 종료 후 영구 비활성 (Codex 지적)
+  if ($IsRunning -and $script:lifeSlideActive) { Stop-LifeSlideNow }
   $script:running = $IsRunning
   # 랜덤 진행 표시 복원 - 모든 정지 경로가 이 함수를 지나므로 여기서 한 번에 처리
   if (-not $IsRunning) { Restore-CustomListRegisteredView }
   # 시작 버튼은 '미실행 + 사용 승인'의 합성 조건 (실행 종료 후에도 미승인이면 잠금 유지)
   $btnStart.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
+  # 대분류(전투/생활) 전환은 실행 중 잠금 - 전투 실행 중 생활 화면으로 바뀌면 상세/설정
+  # 표시가 실행 내용과 어긋남 (Codex 조건 C. 미승인 시 잠금은 Update-ApprovalUi 담당)
+  $btnCatBattle.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
+  $btnCatLife.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnSafeStop.Enabled = $IsRunning
   $btnKill.Enabled = $IsRunning
   # 대기 중에는 시작만, 실행 중에는 중지 2개만 표시 (시작 자리에 중지가 나타남 - 오클릭 방지)
@@ -6265,6 +7016,9 @@ function Invoke-StartAutomation {
   # [시작]의 실제 본문. 승인 게이트(아래 btnStart 핸들러)를 통과한 뒤에만 호출됩니다.
   # 함수로 분리한 이유: '새 자동화 시작 시 승인 검사' 스펙 - 클릭 시 비동기 조회를 먼저
   # 돌리고, 조회 완료 콜백(Complete-ApprovalCheck)이 승인 확인 후 이 함수를 호출합니다.
+    # 생활 대분류 재검사 (Codex 조건 D): 승인 조회가 비동기라 '전투에서 시작 → 조회 중
+    # 생활로 전환 → 콜백이 여기 직접 호출'로 버튼 게이트가 우회될 수 있음 - 서두에서 차단
+    if (Test-LifeStartBlocked) { return }
     $isCustomStart = ($rbCustomRepeat.Checked -and -not $rbCatHunting.Checked)
     $script:customConfigSection = $(if ($rbCatAbyss.Checked) { 'abyssCustomRepeat' }
       elseif ($rbCatDeep.Checked) { 'deepCustomRepeat' } else { 'customRepeat' })
@@ -6483,6 +7237,8 @@ function Invoke-StartAutomation {
 }
 
 $btnStart.Add_Click({
+    # 생활 대분류 시작 차단 (v2.0.0 GUI 단계 - 워커 미구현. F9 도 PerformClick 경유라 함께 차단)
+    if (Test-LifeStartBlocked) { return }
     # 사용 승인 게이트 (새 자동화 시작 시 검사 - 스펙): 미승인 상태는 즉시 거부하고,
     # 승인 상태여도 명단을 한 번 더 비동기 조회한 뒤(최대 10초) 시작합니다.
     # 조회 실패 시에는 7일 유예 캐시가 판정을 대신합니다 (무인 운용 보호).
@@ -6619,17 +7375,22 @@ $form.Add_FormClosing({
 
 # ----- 카테고리 전환: 상세 설정 패널 교체 + 그룹 높이/아래 요소 위치 재계산 -----
 $updateCategoryPanels = {
-  $isDungeon = $rbCatDungeon.Checked
-  $isDeep = $rbCatDeep.Checked
-  $isHunting = $rbCatHunting.Checked
-  $isAbyss = (-not $isDungeon -and -not $isDeep -and -not $isHunting)
+  # 대분류(전투/생활) 게이트 (v2.0.0): 생활에서는 전투 카테고리 플래그를 전부 끕니다.
+  # 전투 라디오의 Checked 는 건드리지 않아 전투 복귀 시 상태가 그대로 보존됩니다 (Codex 조건 B).
+  $isLife = ($script:mainCategory -eq 'life')
+  $isLifeGather = $isLife -and $rbLifeGather.Checked
+  $isLifeProcess = $isLife -and (-not $rbLifeGather.Checked)
+  $isDungeon = (-not $isLife) -and $rbCatDungeon.Checked
+  $isDeep = (-not $isLife) -and $rbCatDeep.Checked
+  $isHunting = (-not $isLife) -and $rbCatHunting.Checked
+  $isAbyss = (-not $isLife) -and (-not $isDungeon -and -not $isDeep -and -not $isHunting)
   # 설명서 버튼 글자를 선택한 콘텐츠에 맞게 전환
-  $btnManual.Text = $(if ($isDungeon) { '던전 설명서' } elseif ($isDeep) { '심층 설명서' }
+  $btnManual.Text = $(if ($isLife) { '생활 설명서' } elseif ($isDungeon) { '던전 설명서' } elseif ($isDeep) { '심층 설명서' }
     elseif ($isHunting) { '사냥터 설명서' } else { '어비스 설명서' })
-  # 커스텀 반복 라디오는 던전/어비스에서 활성화합니다. 사냥터로는 전환할 수 없고
-  # 선택 의도는 config 에 보존합니다.
+  # 커스텀 반복 라디오는 던전/어비스에서 활성화합니다. 사냥터/생활로는 전환할 수 없고
+  # 선택 의도는 config 에 보존합니다 (생활은 1차 미지원 - 요청사항.md).
   # crSwitching 가드: 이 프로그램적 전환이 라디오 CheckedChanged 의 enabled 저장을 오염시키지 않게 함
-  $supportsCustom = -not $isHunting
+  $supportsCustom = (-not $isHunting) -and (-not $isLife)
   $rbCustomRepeat.Enabled = $supportsCustom
   if (-not $supportsCustom) {
     if ($rbCustomRepeat.Checked) {
@@ -6649,6 +7410,41 @@ $updateCategoryPanels = {
   # 커스텀 반복을 해제하거나 다른 카테고리로 폴백하면 문구와 활성 상태가 즉시 원래대로 돌아옵니다.
   $rbCatHunting.Text = $(if ($isCustom) { '사냥터(미지원)' } else { '사냥터' })
   $rbCatHunting.Enabled = -not $isCustom
+  # ----- 생활 대분류 (v2.0.0): 콘텐츠 선택 줄 교대 + 생활 상세/설정 표시 전환 -----
+  # 채집/가공·대분류 전환 시 진행 중 슬라이드를 즉시 정리 (오버레이 잔존 방지 - Codex 조건.
+  # UI 갱신은 아래 흐름이 이어서 하므로 SkipUiRefresh)
+  if ($script:lifeSlideActive) { Stop-LifeSlideNow -SkipUiRefresh }
+  $pnlCategory.Visible = -not $isLife
+  $pnlLifeCategory.Visible = $isLife
+  $lblLifeSkillCaption.Visible = $isLifeGather
+  $btnLifeSkillPrev.Visible = $isLifeGather
+  $btnLifeSkillNext.Visible = $isLifeGather
+  foreach ($lifeCardCtl in @($script:lifeSkillCards)) { $lifeCardCtl.Visible = $isLifeGather }
+  $lblLifeSkillDots.Visible = $isLifeGather
+  $lblLifeTargetCaption.Visible = $isLifeGather
+  $btnLifeTargetPrev.Visible = $isLifeGather
+  $btnLifeTargetNext.Visible = $isLifeGather
+  foreach ($lifeCardCtl in @($script:lifeTargetCards)) { $lifeCardCtl.Visible = $isLifeGather }
+  $lblLifeTargetDots.Visible = $isLifeGather
+  $lblLifeBag.Visible = $isLifeGather
+  $pnlLifeBag.Visible = $isLifeGather
+  $lblLifeTool.Visible = $isLifeGather
+  $pnlLifeTool.Visible = $isLifeGather
+  $lblLifeProcessInfo.Visible = $isLifeProcess
+  if ($isLifeGather) { Update-LifeSliders }
+  # 설정 그룹 내용 교대: 전투(체크 4개 + 클리어 대기 줄) ↔ 생활(채집 대기 줄).
+  # 공용 버튼(권장 창 모드/적용된 설정/설정 저장)과 저장 안내 라벨은 양쪽 유지 (시안 확정)
+  $chkSpace.Visible = -not $isLife
+  $chkFood.Visible = -not $isLife
+  $chkRevive.Visible = -not $isLife
+  $chkAssist.Visible = -not $isLife
+  $btnClearHelp.Visible = -not $isLife
+  $lblClearWait.Visible = -not $isLife
+  $numClearWait.Visible = -not $isLife
+  $lblClearHuman.Visible = -not $isLife
+  $lblGatherWait.Visible = $isLife
+  $numGatherWait.Visible = $isLife
+  $lblGatherHuman.Visible = $isLife
   # 어비스용 패널 (함께하기일 때만 매칭 줄이 난이도 아래에 나타나고 던전 목록이 내려감)
   # 파티(파티원)은 난이도/던전 선택이 의미가 없어(파티장이 결정) 두 줄을 숨기고
   # 매칭 줄을 난이도 자리로 올립니다.
@@ -6727,7 +7523,11 @@ $updateCategoryPanels = {
   #  던전 + 소진 대응 5줄 = 182 / 더블 불가 대응까지 6줄 = 208 /
   #  던전 커스텀 반복 = 입력 줄 + 라디오 줄 0~2개 + 리스트 + 리스트 반복 줄: 라디오 줄 수에
   #  따라 리스트/버튼 열/하단 줄을 내리고 그룹 높이를 244~296 으로 재계산)
-  if ($isDungeon) {
+  if ($isLife) {
+    # 생활 상세: 채집(슬라이더 2줄 + 소진 2줄)·가공(안내) 모두 268 고정
+    # (채집↔가공 전환 시 탭/폼 흔들림 방지 - Codex 조건. 탭 이하 배치는 아래 공통 계산이 처리)
+    $grpContentDetail.Height = 268
+  } elseif ($isDungeon) {
     if ($isDungeonCustom) {
       $crRowTop = 50
       if ($crExhaustRowOn) { $pnlCrExhaust.Top = $crRowTop; $crRowTop += 26 }
@@ -6879,7 +7679,14 @@ $script:f10WasDown = $false
 $hotkeyTimer.Add_Tick({
     $f9Down = ([Win32.HotkeyPoll]::GetAsyncKeyState(0x78) -band 0x8000) -ne 0   # F9
     $f10Down = ([Win32.HotkeyPoll]::GetAsyncKeyState(0x79) -band 0x8000) -ne 0  # F10
-    if ($f9Down -and -not $script:f9WasDown) {
+    # 에지 판정을 먼저 래치하고 나서 동작 실행 (v2.0.0 Codex 지적: PerformClick 이 모달
+    # 팝업(생활 시작 차단 등)을 띄우면 그 메시지 루프에서 이 Tick 이 재진입하는데,
+    # 래치가 동작 뒤에 있으면 f9WasDown 이 아직 false 라 팝업이 여러 겹 뜸)
+    $f9Pressed = $f9Down -and -not $script:f9WasDown
+    $f10Pressed = $f10Down -and -not $script:f10WasDown
+    $script:f9WasDown = $f9Down
+    $script:f10WasDown = $f10Down
+    if ($f9Pressed) {
       if ($script:running) {
         # 실행 중 F9 = 안전 중지 버튼과 동일 (예약 상태에서 다시 누르면 예약 취소 - 버튼 토글 그대로)
         Add-GuiLog '[단축키] F9 - 안전 중지'
@@ -6889,20 +7696,22 @@ $hotkeyTimer.Add_Tick({
         $btnStart.PerformClick()
       }
     }
-    if ($f10Down -and -not $script:f10WasDown) {
+    if ($f10Pressed) {
       if ($script:running) {
         Add-GuiLog '[단축키] F10 - 즉시 중지'
         $btnKill.PerformClick()
       }
     }
-    $script:f9WasDown = $f9Down
-    $script:f10WasDown = $f10Down
   })
 
 $script:uiReady = $true
 Add-GuiLog '컨트롤 패널이 준비됐습니다. [시작]을 누르면 반복을 시작합니다.'
 # 폼 생성 전(구버전 정리)에 모아 둔 안내를 로그로 출력합니다
 foreach ($cleanupLine in @($script:cleanupLogLines)) { Add-GuiLog $cleanupLine }
+# 생활 스킬 아이콘 디코드 실패 경고 (실패해도 글자 카드로 동작 - Codex 조건: 조용한 생략 금지)
+if (@($script:lifeSkillIconLoadFailures).Count -gt 0) {
+  Add-GuiLog "[경고] 생활 스킬 아이콘 $((@($script:lifeSkillIconLoadFailures) -join ', ')) 을 불러오지 못했습니다 - 글자 카드로 표시합니다."
+}
 $script:cleanupLogLines = @()
 
 # --- 사용 승인 확인 (시작 시 1회) ---
@@ -6984,6 +7793,10 @@ $btnClearHelp.BackColor = $script:themeHoney
 $btnClearHelp.ForeColor = $script:themeHoneyInk
 $lblStatus.ForeColor = $script:themeTitle
 $lnkUpdate.LinkColor = $script:themeTitle          # 새 버전 링크도 꿀 갈색으로
+# 대분류 버튼·생활 슬라이더 카드의 상태 스타일 재적용 (Apply-HoneyTheme 가 모든 버튼을
+# 일반 스타일로 덮으므로 테마 '후'에 반드시 다시 그림 - Codex 조건 E)
+Update-MainCategoryVisual
+Update-LifeSliders
 
 # ============================================================
 #  최신 버전 확인 (GitHub 릴리스, 시작 시 1회)
@@ -7044,7 +7857,7 @@ try {
 } finally {
   # 창을 닫을 때 폴링 타이머·업데이트 러닝스페이스·전역 뮤텍스를 명시적으로 정리합니다.
   # 프로세스 종료에만 맡기면 업데이트 확인 중 닫은 직후 재실행 시 뮤텍스가 잠깐 남을 수 있습니다.
-  foreach ($uiTimer in @($hotkeyTimer, $timer, $script:updateTimer, $script:approvalTimer)) {
+  foreach ($uiTimer in @($hotkeyTimer, $timer, $script:updateTimer, $script:approvalTimer, $script:lifeSlideTimer)) {
     if ($uiTimer) {
       try { $uiTimer.Stop() } catch { }
       try { $uiTimer.Dispose() } catch { }
@@ -7067,7 +7880,15 @@ try {
     } catch { }
     try { $script:approvalPs.Dispose() } catch { }
   }
+  # 진행 중 슬라이드 정리 (스트립 Bitmap 등 - PictureBox.Dispose 는 Image 를 해제하지 않음.
+  # 폼 종료 경로라 UI 복원 생략 - Codex 조건)
+  try { Stop-LifeSlideNow -SkipUiRefresh } catch { }
   try { $form.Dispose() } catch { }
+  # 생활 스킬 아이콘 Bitmap 해제 - Button.Dispose 는 할당된 Image 를 해제하지 않음 (Codex 실험 확인)
+  foreach ($lifeIconBmp in @($script:lifeSkillIcons.Values)) {
+    try { $lifeIconBmp.Dispose() } catch { }
+  }
+  try { $script:lifeSkillIcons.Clear() } catch { }
   if ($guiMutexAcquired) {
     try { $script:guiMutex.ReleaseMutex() } catch { }
   }

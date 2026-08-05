@@ -95,6 +95,6 @@ $guiSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_gui.ps1'
 Assert-Case '배선(GUI): 체크박스 저장/로드' `
   (($guiSource -match '\$cfg\.assist\.autoEnable = \[bool\]\$chkAssist\.Checked') -and
    ($guiSource -match '\$chkAssist\.Checked = ConvertTo-StrictBoolean \$cfg\.assist\.autoEnable')) $true
-Assert-Case '배선(GUI): 마이그레이션 섹션 목록에 assist' ($guiSource -match "'deepCustomRepeat', 'assist'\)") $true
+Assert-Case '배선(GUI): 마이그레이션 섹션 목록에 assist' ($guiSource -match "'deepCustomRepeat', 'assist', 'life'\)") $true   # v2.0.0: life 섹션 추가
 
 exit $fails

@@ -107,7 +107,7 @@ Assert-Case '가드: 회차 시작 시 섞인 순서 표시 배선' `
 
 # config.json 기본 키
 $configJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-Case 'config: schema 4' ([int]$configJson.configSchemaVersion) 4
+Assert-Case 'config: schema 5' ([int]$configJson.configSchemaVersion) 5   # v2.0.0: mainCategory/life 신설로 인상
 Assert-Case 'config: randomOrder 기본 false 3섹션' `
   (($configJson.customRepeat.randomOrder -eq $false) -and ($configJson.deepCustomRepeat.randomOrder -eq $false) -and ($configJson.abyssCustomRepeat.randomOrder -eq $false)) $true
 
