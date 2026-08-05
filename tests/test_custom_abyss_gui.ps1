@@ -17,7 +17,7 @@ function Check-Absent {
 }
 
 Check-Pattern '어비스에서도 커스텀 반복 선택 가능' `
-  '\$supportsCustom\s*=\s*-not\s+\$isHunting[\s\S]{0,120}\$rbCustomRepeat\.Enabled\s*=\s*\$supportsCustom'
+  '\$supportsCustom\s*=\s*\(-not \$isHunting\) -and \(-not \$isLife\)[\s\S]{0,120}\$rbCustomRepeat\.Enabled\s*=\s*\$supportsCustom'   # v2.0.0: 생활 미지원 게이트 포함
 Check-Pattern '어비스 커스텀 GUI와 던전 커스텀 실행 상태 분리' `
   '\$isDungeonCustom\s*=\s*\$isDungeon\s+-and\s+\$isCustom[\s\S]{0,120}\$isAbyssCustom\s*=\s*\$isAbyss\s+-and\s+\$isCustom'
 Check-Pattern '어비스 커스텀 혼자하기·함께하기 입력' `

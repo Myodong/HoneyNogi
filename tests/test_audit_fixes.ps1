@@ -211,6 +211,113 @@ Assert-Case '워커: 주간 리셋 팝업 - 클리어/결과 대기 배선 2곳'
 Assert-Case '워커: 다음 층 대기 - 스윕+주간 리셋 배선(재클릭 판정 앞)' `
   ($workerSource -match "if \(Invoke-PurchasePopupSweep -Game \`$Game\) \{ continue \}\s+if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[던전\] '\) \{ continue \}\s+\`$floorAgainPoint = Find-DgNextFloorButtonPoint") $true
 
+# ── v2.0.0: 대분류(전투/생활) GUI 단계 (2026-08-05 시안 확정, Codex 조건 A~G) ─────────
+# 시작 이중 차단 (조건 D): 버튼 핸들러 서두 + 승인 비동기 콜백 경유(Invoke-StartAutomation) 서두
+Assert-Case 'GUI: 생활 시작 차단 - btnStart 핸들러 서두' `
+  ($guiSource -match '\$btnStart\.Add_Click\(\{\s+#[^\r\n]*\r?\n    if \(Test-LifeStartBlocked\) \{ return \}') $true
+Assert-Case 'GUI: 생활 시작 차단 - Invoke-StartAutomation 서두(비동기 우회 차단)' `
+  ($guiSource -match 'function Invoke-StartAutomation \{[\s\S]{0,900}?if \(Test-LifeStartBlocked\) \{ return \}') $true
+# 대분류 전환 단일 진입점 (조건 B) + 실행 중 전환 금지 (조건 C)
+Assert-Case 'GUI: Set-MainCategory 단일 진입점(실행 중 금지 포함)' `
+  ($guiSource -match 'function Set-MainCategory \{[\s\S]{0,700}?if \(\$script:running\) \{ return \}') $true
+Assert-Case 'GUI: 실행 중 대분류 버튼 잠금(Set-UiRunning)' `
+  (($guiSource -match '\$btnCatBattle\.Enabled = \(-not \$IsRunning\)') -and
+   ($guiSource -match '\$btnCatLife\.Enabled = \(-not \$IsRunning\)')) $true
+# 테마 일괄 적용 후 상태 스타일 재적용 (조건 E)
+Assert-Case 'GUI: 테마 후 대분류/슬라이더 스타일 재적용' `
+  ($guiSource -match 'Apply-HoneyTheme -Root \$form[\s\S]{0,1200}?Update-MainCategoryVisual\s+Update-LifeSliders') $true
+# updateCategoryPanels 생활 게이트 (조건 B): 전투 플래그 전부 (-not isLife) 게이트
+Assert-Case 'GUI: 카테고리 패널 갱신에 isLife 게이트' `
+  (($guiSource -match '\$isDungeon = \(-not \$isLife\) -and \$rbCatDungeon\.Checked') -and
+   ($guiSource -match '\$supportsCustom = \(-not \$isHunting\) -and \(-not \$isLife\)')) $true
+# 승인 오버레이 확장 (조건 A): (15,42) 유지 + 높이 158 + 미승인 시 대분류 잠금
+Assert-Case 'GUI: 승인 오버레이 514x158 + 대분류 승인 잠금' `
+  (($guiSource -match '\$grpApproval\.Size = New-Object System\.Drawing\.Size\(514, 158\)') -and
+   ($guiSource -match '\$btnCatBattle\.Enabled = \$approved')) $true
+# config 스키마 5 (조건 F): mainCategory 최상위 이전 + life 섹션 allowlist
+Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life allowlist' `
+  (($guiSource -match "if \(\`$usr\.PSObject\.Properties\['mainCategory'\]\) \{ \`$def\.mainCategory = \`$usr\.mainCategory \}") -and
+   ($guiSource -match "'deepCustomRepeat', 'assist', 'life'\)")) $true
+$auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Case 'config: 스키마 5 + mainCategory 기본 battle + life 섹션' `
+  (([int]$auditConfigJson.configSchemaVersion -eq 5) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
+   ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily')) $true
+Assert-Case 'GUI: 버전 2.0.0' `
+  ($guiSource -match "\`$appVersion = '2\.0\.0'") $true
+# 생활 스킬 아이콘: 내장 base64 9종을 실제 .NET 디코드로 검증 (2026-08-05 - 손 전사 손상으로
+# herb 등 5종이 조용히 깨졌던 사고. 회귀 가드가 실디코드를 안 해서 못 잡았음 - Codex 권고)
+Add-Type -AssemblyName System.Drawing
+$iconDecodeOk = 0
+$iconIds = @('daily', 'wood', 'mining', 'herb', 'wool', 'harvest', 'hoe', 'insect', 'fishing')
+foreach ($iconId in $iconIds) {
+  $iconMatch = [regex]::Match($guiSource, "(?m)^  $iconId = '([A-Za-z0-9+/=]+)'")
+  if (-not $iconMatch.Success) { continue }
+  try {
+    $iconStream = New-Object System.IO.MemoryStream(, [Convert]::FromBase64String($iconMatch.Groups[1].Value))
+    $iconTmp = [System.Drawing.Image]::FromStream($iconStream)
+    $iconBmp = New-Object System.Drawing.Bitmap($iconTmp)
+    $iconTmp.Dispose(); $iconStream.Dispose()
+    # 스트림 해제 후에도 픽셀 접근 가능해야 함 (Bitmap 사본 분리 계약)
+    # 24px = 카드 높이 56 에서 글자와 안 겹치는 실측 크기 (2026-08-05 배치 비교로 확정)
+    if ($iconBmp.Width -eq 24 -and $iconBmp.Height -eq 24 -and $null -ne $iconBmp.GetPixel(12, 12)) { $iconDecodeOk++ }
+    $iconBmp.Dispose()
+  } catch { }
+}
+Assert-Case 'GUI: 생활 아이콘 base64 9종 실디코드(24x24 + 사본 분리)' $iconDecodeOk 9
+# 대분류 버튼 아이콘 2종 (공격력=전투/생활력=생활, 20px - 2026-08-05 사용자 제공)
+$catIconOk = 0
+foreach ($catIconId in @('catBattle', 'catLife')) {
+  $catIconMatch = [regex]::Match($guiSource, "(?m)^  $catIconId = '([A-Za-z0-9+/=]+)'")
+  if (-not $catIconMatch.Success) { continue }
+  try {
+    $catIconStream = New-Object System.IO.MemoryStream(, [Convert]::FromBase64String($catIconMatch.Groups[1].Value))
+    $catIconTmp = [System.Drawing.Image]::FromStream($catIconStream)
+    $catIconBmp = New-Object System.Drawing.Bitmap($catIconTmp)
+    $catIconTmp.Dispose(); $catIconStream.Dispose()
+    if ($catIconBmp.Width -eq 20 -and $catIconBmp.Height -eq 20 -and $null -ne $catIconBmp.GetPixel(10, 10)) { $catIconOk++ }
+    $catIconBmp.Dispose()
+  } catch { }
+}
+Assert-Case 'GUI: 대분류 버튼 아이콘 2종 실디코드(20x20)' $catIconOk 2
+# 글자 정중앙 + 아이콘이 글자 바로 왼쪽 (2026-08-05 정렬 수렴: 묶음 중앙 = 글자 밀림 /
+# 독립 정렬 = 아이콘이 구석 - Button.Image 로는 불가 → Paint 로 글자 폭 기준 직접 그리기)
+Assert-Case 'GUI: 대분류 아이콘 - Paint 직접 그리기(글자 폭 기준 인접 좌표)' `
+  ($guiSource -match 'MeasureText\(\$Sender\.Text, \$Sender\.Font\)[\s\S]{0,300}?- \$paintIcon\.Width - 6') $true
+Assert-Case 'GUI: 대분류 Paint 배선 2곳 + 상태 변경 시 Invalidate' `
+  (([regex]::Matches($guiSource, 'Add_Paint\(\{ Invoke-MainCatButtonPaint -Sender \$this -PaintArgs \$_ \}\)').Count -eq 2) -and
+   ($guiSource -match '\$catButton\.Invalidate\(\)')) $true
+# 흰 원본 아이콘은 크림 비활성 버튼에서 안 보임 → 진갈색 틴트 사본을 상태별 사용 (스모크 실측)
+Assert-Case 'GUI: 대분류 아이콘 비활성용 틴트 사본 생성+상태별 사용' `
+  (($guiSource -match "\`$script:lifeSkillIcons\[\`$catIconId \+ 'Dark'\] = \`$catDarkIcon") -and
+   ($guiSource -match "ContainsKey\(\`$paintIconKey \+ 'Dark'\)")) $true
+# 카드 정렬 회귀 가드 (2026-08-05 실기 제보: TopCenter/BottomCenter 분리 정렬은 카드 높이
+# 56 에서 아이콘·글자가 겹침 - '중앙 쌓기' 조합을 고정. 크기 134×56 은 스킬/대상 카드 2곳)
+Assert-Case 'GUI: 생활 카드 아이콘 중앙 쌓기 정렬(겹침 회귀 방지)' `
+  ($guiSource -match '\$lifeCard\.TextImageRelation = \[System\.Windows\.Forms\.TextImageRelation\]::ImageAboveText\s+\$lifeCard\.ImageAlign = \[System\.Drawing\.ContentAlignment\]::MiddleCenter\s+\$lifeCard\.TextAlign = \[System\.Drawing\.ContentAlignment\]::MiddleCenter') $true
+Assert-Case 'GUI: 생활 카드 크기 134×56 (스킬+대상 2곳)' `
+  ([regex]::Matches($guiSource, '\$lifeCard\.Size = New-Object System\.Drawing\.Size\(134, 56\)').Count) 2
+# 슬라이더 애니메이션 (2026-08-05 사용자 확정 320ms - Codex 조건: 잠금 게이트/Stop 계약/종료 정리)
+Assert-Case 'GUI: 슬라이드 320ms 상수' `
+  ($guiSource -match '\$script:lifeSlideDurationMs = 320') $true
+Assert-Case 'GUI: 슬라이드 틱 = 명명 함수(클로저 금지 계약)' `
+  ($guiSource -match '\$script:lifeSlideTimer\.Add_Tick\(\{ Invoke-LifeSlideTick \}\)') $true
+Assert-Case 'GUI: 화살표 4곳 Start-LifeSlide 경유' `
+  ([regex]::Matches($guiSource, 'Start-LifeSlide -Slider ''(skill|target)'' -Direction -?1').Count) 4
+Assert-Case 'GUI: 슬라이드 잠금 가드(카드 2곳+Start 서두)' `
+  ([regex]::Matches($guiSource, 'if \(\$script:lifeSlideActive -or \$script:running\) \{ return \}').Count) 3
+Assert-Case 'GUI: 화살표 Enabled 에 canNavigate 게이트' `
+  ($guiSource -match '\$canNavigate = \(-not \$script:lifeSlideActive\) -and \(-not \$script:running\)') $true
+# Stop 배선: 패널 갱신/폼 종료 = SkipUiRefresh 2곳. 실행 시작(Set-UiRunning)은 일반 Stop -
+# SkipUiRefresh 면 화살표 false 가 실행 스냅샷에 저장돼 종료 후 영구 비활성 (Codex 지적)
+Assert-Case 'GUI: Stop-LifeSlideNow -SkipUiRefresh 2곳(패널 갱신/종료)' `
+  ([regex]::Matches($guiSource, 'Stop-LifeSlideNow -SkipUiRefresh').Count) 2
+Assert-Case 'GUI: 실행 시작 시 일반 Stop(스냅샷 오염 방지)' `
+  ($guiSource -match 'if \(\$IsRunning -and \$script:lifeSlideActive\) \{ Stop-LifeSlideNow \}') $true
+Assert-Case 'GUI: 종료 타이머 정리 목록에 슬라이드 타이머 포함' `
+  ($guiSource -match '\$script:approvalTimer, \$script:lifeSlideTimer\)') $true
+Assert-Case 'GUI: 폼 Dispose 전 슬라이드 정리' `
+  ($guiSource -match 'Stop-LifeSlideNow -SkipUiRefresh \} catch \{ \}\s+try \{ \$form\.Dispose\(\)') $true
+
 # ── v1.2.1: 08-01 KJM PC 네트워크 불안정 팝업 실사고 (클리어 대기 600초 소진 + 3연속 정지) ──
 # 순수 선택 소함수: '도하기' 조각 + 위치 게이트 (진리표는 test_weekly_coop_popup)
 Assert-Case '워커: 네트워크 재시도 버튼 선택 게이트(X>=640, Y 585~655)' `

@@ -119,7 +119,7 @@ Check-Pattern '이동 후 잠금 갱신' `
 Check-Pattern '설정 복원 후 잠금 갱신' `
   'function Load-SettingsToUi[\s\S]{0,60000}Update-AbyssInputLock'
 Check-Pattern '카테고리·모드 전환 후 잠금 갱신' `
-  '\$updateCategoryPanels = \{[\s\S]{0,12000}Update-AbyssInputLock[\s\S]{0,20}\}'
+  '\$updateCategoryPanels = \{[\s\S]{0,20000}Update-AbyssInputLock[\s\S]{0,20}\}'   # v2.0.0 생활 분기 추가로 블록이 길어짐 - 탐색 창 확대
 Check-Pattern '시작 게이트에서 어비스 통일 검사' `
   'abyssCustomRepeat''\s*\)\s*\{\s*\r?\n\s*\$acrGateIssues = @\(Get-AbyssMatchingIssues -Items \$crItems\)'
 Check-Pattern '게이트 위반 시 시작 거부' `
