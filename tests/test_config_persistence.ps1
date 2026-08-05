@@ -15,7 +15,8 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]
 if ($parseErrors.Count -gt 0) { throw "GUI 파서 오류: $($parseErrors[0].Message)" }
   foreach ($name in @('Read-Config', 'ConvertTo-StrictBoolean', 'Write-Utf8FileAtomic', 'Save-Config', 'Update-ConfigToLatest',
     'Format-CustomItemToken', 'Get-CustomFingerprint', 'Get-CustomNextProgress',
-    'Step-CustomProgress', 'Reset-CustomProgress')) {
+    'Step-CustomProgress', 'Reset-CustomProgress',
+    'Get-CustomRandomOrderEnabled', 'New-CustomShuffleOrder', 'Test-CustomShuffleOrder')) {
   $fn = $ast.FindAll({
       param($node)
       $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -35,6 +36,7 @@ $testRoot = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(),
 $scriptRoot = $testRoot
 $configPath = [System.IO.Path]::Combine($testRoot, 'config.json')
 $defaultPath = [System.IO.Path]::Combine($testRoot, 'config.default.json')
+$customMarkerFile = [System.IO.Path]::Combine($testRoot, 'custom_marker.json')   # Reset-CustomProgress 의 마커 무효화 경로 (2026-08-04 랜덤 진행)
 $utf8Bom = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $true
 
 try {
@@ -79,16 +81,16 @@ try {
   # 5) 좌표 버전이 같아도 구조 버전이 낮으면 마이그레이션하고 ui 값을 보존
   # (schema 3 = 2026-07-28 심층던전 섹션 추가 - deepDungeon/deepCustomRepeat 이전 검증 포함)
   $defaultConfig = [pscustomobject]@{
-    configSchemaVersion = 3
+    configSchemaVersion = 4
     coordsVersion = 6
     ui = [pscustomobject]@{ logFontSize = 9; settingsOpen = $false; logOpen = $false }
     diagnostics = [pscustomobject]@{ keepScreenshots = 10 }
     revive = [pscustomobject]@{ enabled = $false }
     afterEntry = [pscustomobject]@{ keys = @([pscustomobject]@{ key = 32; enabled = $false }) }
-    customRepeat = [pscustomobject]@{ progress = $null }
-    abyssCustomRepeat = [pscustomobject]@{ items = @(); listRepeat = 'infinite'; listRepeatCount = 1; progress = $null }
+    customRepeat = [pscustomobject]@{ randomOrder = $false; progress = $null }
+    abyssCustomRepeat = [pscustomobject]@{ randomOrder = $false; items = @(); listRepeat = 'infinite'; listRepeatCount = 1; progress = $null }
     deepDungeon = [pscustomobject]@{ difficulty = '어려움'; stage = '1-1'; useTribute = $false; continueWithoutTribute = $false; matching = '우연한 만남' }
-    deepCustomRepeat = [pscustomobject]@{ items = @(); listRepeat = 'infinite'; listRepeatCount = 1; progress = $null }
+    deepCustomRepeat = [pscustomobject]@{ randomOrder = $false; items = @(); listRepeat = 'infinite'; listRepeatCount = 1; progress = $null }
   }
   $userConfig = [pscustomobject]@{
     coordsVersion = 6
@@ -103,13 +105,14 @@ try {
   $migrated = Update-ConfigToLatest
   $migrationResult = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   Assert-Case '구조이전: schemaVersion만 낮아도 실행' $migrated $true
-  Assert-Case '구조이전: 최신 schemaVersion 적용' $migrationResult.configSchemaVersion 3
+  Assert-Case '구조이전: 최신 schemaVersion 적용' $migrationResult.configSchemaVersion 4
   Assert-Case '구조이전: 어비스 커스텀 기본 섹션 추가' ($null -ne $migrationResult.abyssCustomRepeat) $true
   Assert-Case '구조이전: 심층던전 기본 섹션 추가' ($null -ne $migrationResult.deepDungeon) $true
   Assert-Case '구조이전: 심층 커스텀 기본 섹션 추가' ($null -ne $migrationResult.deepCustomRepeat) $true
   Assert-Case '구조이전: ui.logFontSize 보존' $migrationResult.ui.logFontSize 17
   # 탭 토글 표시 상태 보존 (2026-08-04 신설 - 기본 config 에 키가 있어야 이전에서 보존됨)
   Assert-Case '구조이전: ui.settingsOpen 보존' $migrationResult.ui.settingsOpen $true
+  Assert-Case '구조이전: randomOrder 기본 보충(false)' $migrationResult.deepCustomRepeat.randomOrder $false
   Assert-Case '구조이전: ui.logOpen 보존' $migrationResult.ui.logOpen $true
   Assert-Case '구조이전: 다른 사용자 설정 보존' $migrationResult.diagnostics.keepScreenshots 7
   Assert-Case '구조이전: 문자열 revive 불리언은 최신 기본값 유지' $migrationResult.revive.enabled $false

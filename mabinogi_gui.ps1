@@ -1227,6 +1227,7 @@ $script:customActive = $false        # 이번 실행이 커스텀 반복 모드�
 $script:customConfigSection = 'customRepeat' # 실행 중 진행 기록을 읽고 쓸 config 섹션
 $script:customErrorStreak = 0        # 같은 항목 연속 오류(코드 1) 횟수 - 2회까지 자동 재시작, 초과 시 정지
 $script:customPrevItem = ''          # 직전 '완료' 항목 토큰 (HONEYNOGI_CUSTOM_PREV 용 - 빈 값이면 선택 화면 절차)
+$script:customViewShuffled = $false  # 랜덤 진행: 커스텀 리스트가 '이번 바퀴 순서' 표시 상태인지 (저장은 Tag 정렬로 등록 순서 보존)
 $script:customRestart = $false       # 다음 회차가 '오류 후 자동 재시작'인지 (복구 화면 판을 완료로 계상하는 플래그)
 $script:customRecoveryPending = $false # 완료 마커가 있는 코드 1 뒤, 같은 항목의 결과 화면 마무리만 복구 중인지
 $script:customMarkerIgnore = $false  # 실행 직전 이전 마커 삭제 실패 시 이번 회차는 마커 무시 (오계상 방지)
@@ -2289,7 +2290,7 @@ $chkCrDouble.Add_CheckedChanged({
 #                 / 소진 시(진행·멈춤·—) / 더블 불가 시(소탕만·멈춤·—) - 뒤 2열은 항목별 소진 대응 속성
 $lvCrList = New-Object System.Windows.Forms.ListView
 $lvCrList.Location = New-Object System.Drawing.Point(15, 52)
-$lvCrList.Size = New-Object System.Drawing.Size(392, 150)
+$lvCrList.Size = New-Object System.Drawing.Size(392, 174)   # 아래끝을 [랜덤] 버튼 아래끝(listTop+174)과 일치 (2026-08-04 요청)
 $lvCrList.View = [System.Windows.Forms.View]::Details
 $lvCrList.GridLines = $true
 $lvCrList.CheckBoxes = $true
@@ -2359,6 +2360,27 @@ $btnCrDown.Location = New-Object System.Drawing.Point(413, 160)
 $btnCrDown.Size = New-Object System.Drawing.Size(94, 30)
 $btnCrDown.Visible = $false
 $grpContentDetail.Controls.Add($btnCrDown)
+
+# 랜덤 진행 토글 (2026-08-04 확정 시안: 버튼 열 5번째. 층 혼합 리스트면 비활성 - Update-CustomRandomMixGate)
+$chkCrRandom = New-Object System.Windows.Forms.CheckBox
+$chkCrRandom.Appearance = 'Button'
+$chkCrRandom.Text = '랜덤'
+$chkCrRandom.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$chkCrRandom.Location = New-Object System.Drawing.Point(413, 196)
+$chkCrRandom.Size = New-Object System.Drawing.Size(94, 30)
+$chkCrRandom.FlatStyle = 'Flat'
+$chkCrRandom.FlatAppearance.BorderColor = $script:themeBorder
+$chkCrRandom.FlatAppearance.BorderSize = 1
+$chkCrRandom.UseVisualStyleBackColor = $false
+$chkCrRandom.BackColor = $script:themeControl
+$chkCrRandom.Visible = $false
+$grpContentDetail.Controls.Add($chkCrRandom)
+$chkCrRandom.Add_CheckedChanged({
+    Update-CustomRandomToggleStyle -Toggle $chkCrRandom
+    if ($script:uiReady -and -not $script:crLoading) {
+      Save-CustomRandomOrder -SectionName 'customRepeat' -Enabled ([bool]$chkCrRandom.Checked)
+    }
+  })
 
 $btnCrAdd.Add_Click({
     $crDifficultyValue = [string]$cboCrDifficulty.SelectedItem
@@ -2711,7 +2733,7 @@ $lvCrList.Add_MouseUp($cellEditMouseUp)
 
 $lvAcrList = New-Object System.Windows.Forms.ListView
 $lvAcrList.Location = New-Object System.Drawing.Point(15, 52)
-$lvAcrList.Size = New-Object System.Drawing.Size(392, 150)
+$lvAcrList.Size = New-Object System.Drawing.Size(392, 174)   # 아래끝을 [랜덤] 버튼 아래끝(listTop+174)과 일치 (2026-08-04 요청)
 $lvAcrList.View = [System.Windows.Forms.View]::Details
 $lvAcrList.GridLines = $true
 $lvAcrList.CheckBoxes = $true
@@ -2768,6 +2790,27 @@ $btnAcrDown.Location = New-Object System.Drawing.Point(413, 160)
 $btnAcrDown.Size = New-Object System.Drawing.Size(94, 30)
 $btnAcrDown.Visible = $false
 $grpContentDetail.Controls.Add($btnAcrDown)
+
+# 랜덤 진행 토글 (어비스 - 층 제약이 없어 항상 사용 가능)
+$chkAcrRandom = New-Object System.Windows.Forms.CheckBox
+$chkAcrRandom.Appearance = 'Button'
+$chkAcrRandom.Text = '랜덤'
+$chkAcrRandom.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$chkAcrRandom.Location = New-Object System.Drawing.Point(413, 196)
+$chkAcrRandom.Size = New-Object System.Drawing.Size(94, 30)
+$chkAcrRandom.FlatStyle = 'Flat'
+$chkAcrRandom.FlatAppearance.BorderColor = $script:themeBorder
+$chkAcrRandom.FlatAppearance.BorderSize = 1
+$chkAcrRandom.UseVisualStyleBackColor = $false
+$chkAcrRandom.BackColor = $script:themeControl
+$chkAcrRandom.Visible = $false
+$grpContentDetail.Controls.Add($chkAcrRandom)
+$chkAcrRandom.Add_CheckedChanged({
+    Update-CustomRandomToggleStyle -Toggle $chkAcrRandom
+    if ($script:uiReady -and -not $script:crLoading) {
+      Save-CustomRandomOrder -SectionName 'abyssCustomRepeat' -Enabled ([bool]$chkAcrRandom.Checked)
+    }
+  })
 
 $btnAcrAdd.Add_Click({
     $acrMode = $(if ($rbAcrParty.Checked) { 'party' } else { 'solo' })
@@ -2942,7 +2985,7 @@ $chkDcrTribute.Add_CheckedChanged({
 # 리스트 (표 형태): 체크 / # / 구역(D표기) / 마족공물(판당 소모량) / 소진 시
 $lvDcrList = New-Object System.Windows.Forms.ListView
 $lvDcrList.Location = New-Object System.Drawing.Point(15, 52)
-$lvDcrList.Size = New-Object System.Drawing.Size(392, 150)
+$lvDcrList.Size = New-Object System.Drawing.Size(392, 174)   # 아래끝을 [랜덤] 버튼 아래끝(listTop+174)과 일치 (2026-08-04 요청)
 $lvDcrList.View = [System.Windows.Forms.View]::Details
 $lvDcrList.GridLines = $true
 $lvDcrList.CheckBoxes = $true
@@ -3003,6 +3046,27 @@ $btnDcrDown.Location = New-Object System.Drawing.Point(413, 160)
 $btnDcrDown.Size = New-Object System.Drawing.Size(94, 30)
 $btnDcrDown.Visible = $false
 $grpContentDetail.Controls.Add($btnDcrDown)
+
+# 랜덤 진행 토글 (심층 - 층 혼합 리스트면 비활성)
+$chkDcrRandom = New-Object System.Windows.Forms.CheckBox
+$chkDcrRandom.Appearance = 'Button'
+$chkDcrRandom.Text = '랜덤'
+$chkDcrRandom.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$chkDcrRandom.Location = New-Object System.Drawing.Point(413, 196)
+$chkDcrRandom.Size = New-Object System.Drawing.Size(94, 30)
+$chkDcrRandom.FlatStyle = 'Flat'
+$chkDcrRandom.FlatAppearance.BorderColor = $script:themeBorder
+$chkDcrRandom.FlatAppearance.BorderSize = 1
+$chkDcrRandom.UseVisualStyleBackColor = $false
+$chkDcrRandom.BackColor = $script:themeControl
+$chkDcrRandom.Visible = $false
+$grpContentDetail.Controls.Add($chkDcrRandom)
+$chkDcrRandom.Add_CheckedChanged({
+    Update-CustomRandomToggleStyle -Toggle $chkDcrRandom
+    if ($script:uiReady -and -not $script:crLoading) {
+      Save-CustomRandomOrder -SectionName 'deepCustomRepeat' -Enabled ([bool]$chkDcrRandom.Checked)
+    }
+  })
 
 $btnDcrAdd.Add_Click({
     $dcrStageValue = Get-DeepStageInternal -Display ([string]$cboDcrStage.SelectedItem)
@@ -3258,6 +3322,9 @@ $toolTip = New-Object System.Windows.Forms.ToolTip
 $toolTip.SetToolTip($btnClearHelp, '클릭하면 자세한 설명이 나옵니다')
 $toolTip.SetToolTip($chkRevive, "전투 중 행동불능이 되면 남은 부활 횟수를 확인해 R키(여기서 부활)로 자동 부활합니다.`r`n남은 횟수가 없으면 '여신상에서 부활'을 클릭해 이어갑니다.`r`n불사의 가루 등 부활 재화가 소모될 수 있으니 원치 않으면 꺼 두세요.")
 $toolTip.SetToolTip($chkAssist, "전투 중 화면 우측의 ASSIST(어시스트 모드) 토글이 꺼져 있으면 자동으로 H키를 눌러 켭니다.`r`n분홍(클래스 특화)/초록(일반) 어느 쪽이든 켜져 있으면 건드리지 않습니다.")
+$toolTip.SetToolTip($chkCrRandom, "켜면 매 바퀴 시작 때 리스트 순서를 무작위로 섞어 진행합니다 (항목 구성은 동일).`r`n1층·2층이 섞인 리스트에서는 사용할 수 없습니다.")
+$toolTip.SetToolTip($chkDcrRandom, "켜면 매 바퀴 시작 때 리스트 순서를 무작위로 섞어 진행합니다 (항목 구성은 동일).`r`n1층·2층이 섞인 리스트에서는 사용할 수 없습니다.")
+$toolTip.SetToolTip($chkAcrRandom, "켜면 매 바퀴 시작 때 리스트 순서를 무작위로 섞어 진행합니다 (항목 구성은 동일).")
 
 $lblClearWait = New-Object System.Windows.Forms.Label
 $lblClearWait.Text = '클리어 대기(초):'
@@ -3447,10 +3514,12 @@ function Update-LogTabBadge {
 
 function Update-TabToggleStyle {
   # 토글 눌림 배경 (안전 중지 버튼과 같은 크림). 로그 배지가 활성일 때는 배지 색이 우선.
-  $chkTabSettings.BackColor = $(if ($chkTabSettings.Checked) { [System.Drawing.Color]::FromArgb(250, 240, 218) } else { $script:themeControl })
+  # 활성 = 캐러멜 (2026-08-04 C안 확정 - 연크림은 기본색과 구분이 안 됨)
+  $chkTabSettings.BackColor = $(if ($chkTabSettings.Checked) { [System.Drawing.Color]::FromArgb(244, 213, 141) } else { $script:themeControl })
+  $chkTabSettings.ForeColor = $(if ($chkTabSettings.Checked) { [System.Drawing.Color]::FromArgb(91, 62, 6) } else { $script:themeText })
   if ($script:hiddenLogErrors -gt 0 -or $script:hiddenLogWarns -gt 0) { Update-LogTabBadge; return }
-  $chkTabLog.BackColor = $(if ($chkTabLog.Checked) { [System.Drawing.Color]::FromArgb(250, 240, 218) } else { $script:themeControl })
-  $chkTabLog.ForeColor = $script:themeText
+  $chkTabLog.BackColor = $(if ($chkTabLog.Checked) { [System.Drawing.Color]::FromArgb(244, 213, 141) } else { $script:themeControl })
+  $chkTabLog.ForeColor = $(if ($chkTabLog.Checked) { [System.Drawing.Color]::FromArgb(91, 62, 6) } else { $script:themeText })
 }
 
 function Reset-LogTabBadge {
@@ -3651,9 +3720,12 @@ function New-CustomMarkerOwnerJson {
   # 리스트 전체 지문 + lap/index + 현재 항목 토큰을 함께 기록해 재시작 후에도 정확히 대조합니다.
   param($Context)
   if (-not $Context -or -not $Context.Item) { return '' }
+  # version 2 (2026-08-04 랜덤 진행): orderKey = 이번 바퀴 순열 식별자 (순차는 '').
+  # 진행 초기화 후 우연히 같은 lap/index 가 재현돼도 다른 순열의 낡은 마커가 일치하지 않게 함
   $owner = [pscustomobject]@{
-    version     = 1
+    version     = 2
     fingerprint = (Get-CustomFingerprint -Items $Context.Items)
+    orderKey    = (Get-CustomOrderKey -Order $Context.Order)
     lap         = [int]$Context.Lap
     index       = [int]$Context.Index
     item        = (Format-CustomItemToken -Item $Context.Item)
@@ -3667,7 +3739,7 @@ function Read-CustomMarkerOwner {
   try {
     $raw = Get-Content -LiteralPath $customMarkerFile -Raw -Encoding UTF8 -ErrorAction Stop
     $owner = $raw | ConvertFrom-Json -ErrorAction Stop
-    if (-not $owner.PSObject.Properties['version'] -or [int]$owner.version -ne 1) { return $null }
+    if (-not $owner.PSObject.Properties['version'] -or (@(1, 2) -notcontains [int]$owner.version)) { return $null }
     foreach ($required in @('fingerprint', 'lap', 'index', 'item')) {
       if (-not $owner.PSObject.Properties[$required]) { return $null }
     }
@@ -3681,7 +3753,10 @@ function Test-CustomMarkerOwnerMatchesContext {
   param($Owner, $Context)
   if (-not $Owner -or -not $Context -or -not $Context.Item) { return $false }
   try {
+    $ownerOrderKey = ''
+    if ($Owner.PSObject.Properties['orderKey']) { $ownerOrderKey = [string]$Owner.orderKey }
     return (([string]$Owner.fingerprint -eq (Get-CustomFingerprint -Items $Context.Items)) -and
+      ($ownerOrderKey -eq (Get-CustomOrderKey -Order $Context.Order)) -and
       ([int]$Owner.lap -eq [int]$Context.Lap) -and
       ([int]$Owner.index -eq [int]$Context.Index) -and
       ([string]$Owner.item -eq (Format-CustomItemToken -Item $Context.Item)))
@@ -3705,6 +3780,55 @@ function Get-CustomNextProgress {
   $index++
   if ($index -ge $ItemCount) { $index = 0; $lap++ }
   return [pscustomobject]@{ lap = $lap; index = $index }
+}
+
+function New-CustomShuffleOrder {
+  # 랜덤 진행: 이번 바퀴의 실행 순서(등록 인덱스 순열)를 만듭니다. 생성 지점은 시작 게이트
+  # (Confirm-CustomShuffleReady)와 Step 의 바퀴 전환 두 곳뿐 - getter/복구 경로는 읽기 전용
+  # (호출 횟수에 따라 순서가 바뀌는 사고 방지 - Codex 계약).
+  param([int]$ItemCount)
+  if ($ItemCount -lt 1) { return @() }
+  if ($ItemCount -eq 1) { return @(0) }
+  return @(Get-Random -InputObject @(0..($ItemCount - 1)) -Count $ItemCount)
+}
+
+function Test-CustomShuffleOrder {
+  # 순열 검증 (순수 - 진리표 대상): 길이 = 항목 수, 정수, 0..N-1 범위, 중복 없음.
+  param($Order, [int]$ItemCount)
+  $orderArr = @($Order)
+  if ($ItemCount -lt 1 -or $orderArr.Count -ne $ItemCount) { return $false }
+  $seenIdx = @{}
+  foreach ($orderVal in $orderArr) {
+    if ($null -eq $orderVal -or (([string]$orderVal) -notmatch '^\d+$')) { return $false }
+    $orderNum = [int]$orderVal
+    if ($orderNum -lt 0 -or $orderNum -ge $ItemCount) { return $false }
+    if ($seenIdx.ContainsKey($orderNum)) { return $false }
+    $seenIdx[$orderNum] = $true
+  }
+  return $true
+}
+
+function Get-CustomOrderKey {
+  # 완료 마커 대조용 순서 식별자. 순차 모드는 '' - v1 마커의 '필드 없음'과 동치 (하위 호환)
+  param($Order)
+  if ($null -eq $Order) { return '' }
+  return (@($Order) -join ',')
+}
+
+function Get-CustomExecutionItems {
+  # 등록 항목 배열 -> 실행 순서 배열 (열거용 - 호출부 @() 규약. 중복 항목도 인덱스 치환이라
+  # 정확히 1회씩 실행됩니다)
+  param($Items, $Order)
+  $execItems = @()
+  foreach ($regIndex in @($Order)) { $execItems += @($Items)[[int]$regIndex] }
+  return $execItems
+}
+
+function Get-CustomRandomOrderEnabled {
+  # 섹션 노드의 randomOrder (JSON 불리언만 인정 - ConvertTo-StrictBoolean 계약)
+  param($Node)
+  if (-not $Node -or -not $Node.PSObject.Properties['randomOrder']) { return $false }
+  return (ConvertTo-StrictBoolean $Node.randomOrder $false)
 }
 
 function Test-CustomLapComplete {
@@ -3991,6 +4115,7 @@ function Invoke-CrCellEdit {
     # 함수가 먼저 잠금을 바꿔 놓은 뒤 행만 되돌리면 잠금 상태가 리스트와 어긋남)
     Update-CustomRepeatMixLock -Items @(Get-CustomItemsFromList) `
       -RbInfinite $rbCrInfinite -RbCount $rbCrCount -NumLaps $numCrLaps -StateKey 'cr'
+    Update-CustomRandomMixGate -Toggle $chkCrRandom -Items @(Get-CustomItemsFromList) -SectionName 'customRepeat'
     Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
     return
   }
@@ -4283,7 +4408,9 @@ function Get-CustomItemsFromList {
   # 소진 시/더블 불가 시 열의 '—' 는 false 로 읽습니다 ([추가] 시 정규화와 일치 - 도달 불가/무의미 상태).
   # PS 5.1 배열 풀림 주의: 열거용이므로 return $items 그대로 두고 호출부에서 @()로 감쌉니다.
   $items = @()
-  foreach ($listRow in $lvCrList.Items) {
+  $crSourceRows = @($lvCrList.Items)
+  if ($script:customViewShuffled) { $crSourceRows = @($crSourceRows | Sort-Object { $(if ($null -ne $_.Tag) { [int]$_.Tag } else { [int]$_.Index }) }) }
+  foreach ($listRow in $crSourceRows) {
     $items += [pscustomobject]@{
       difficulty      = [string]$listRow.SubItems[2].Text
       stage           = [string]$listRow.SubItems[3].Text
@@ -4354,7 +4481,9 @@ function Move-AbyssCustomListRow {
 
 function Get-AbyssCustomItemsFromList {
   $items = @()
-  foreach ($listRow in $lvAcrList.Items) {
+  $acrSourceRows = @($lvAcrList.Items)
+  if ($script:customViewShuffled) { $acrSourceRows = @($acrSourceRows | Sort-Object { $(if ($null -ne $_.Tag) { [int]$_.Tag } else { [int]$_.Index }) }) }
+  foreach ($listRow in $acrSourceRows) {
     $mode = $(if ($listRow.SubItems[2].Text -eq '함께하기') { 'party' } else { 'solo' })
     $items += [pscustomobject]@{
       kind       = 'abyss'
@@ -4483,7 +4612,9 @@ function Get-DeepCustomItemsFromList {
   # 심층 리스트뷰 → 계약 형태 항목 배열 (던전과 동일 6필드 - 고정값 포함).
   # PS 5.1 배열 풀림 주의: 열거용이므로 return $items 그대로 두고 호출부에서 @()로 감쌉니다.
   $items = @()
-  foreach ($listRow in $lvDcrList.Items) {
+  $dcrSourceRows = @($lvDcrList.Items)
+  if ($script:customViewShuffled) { $dcrSourceRows = @($dcrSourceRows | Sort-Object { $(if ($null -ne $_.Tag) { [int]$_.Tag } else { [int]$_.Index }) }) }
+  foreach ($listRow in $dcrSourceRows) {
     $items += [pscustomobject]@{
       difficulty      = '어려움'
       stage           = (Get-DeepStageInternal -Display ([string]$listRow.SubItems[2].Text))
@@ -4565,6 +4696,7 @@ function Invoke-DcrCellEdit {
     # 롤백이 끝난 실제 리스트 기준으로 혼합 잠금을 다시 계산합니다 (2026-07-31 점검)
     Update-CustomRepeatMixLock -Items @(Get-DeepCustomItemsFromList) `
       -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
+    Update-CustomRandomMixGate -Toggle $chkDcrRandom -Items @(Get-DeepCustomItemsFromList) -SectionName 'deepCustomRepeat'
     Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
     return
   }
@@ -4604,6 +4736,7 @@ function Set-DeepCustomRepeatOnConfig {
     '_설명'         = "'심층던전 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. progress 는 이어가기용 진행 기록이므로 직접 수정하지 마세요."
     '_items'        = "각 항목: difficulty(항상 '어려움')/stage/coin(마족공물 사용)/doubleLoot(항상 false) + exhaustContinue(공물 소진 시 true=미사용으로 진행, false=멈춤) / noDoubleSweep(항상 false). 던전 커스텀과 같은 항목 계약을 사용합니다"
     items           = [array]@(Get-DeepCustomItemsFromList)
+    randomOrder     = [bool]$chkDcrRandom.Checked
     listRepeat      = $(if ($rbDcrCount.Checked) { 'count' } else { 'infinite' })
     listRepeatCount = [int]$numDcrLaps.Value
     progress        = $prevProgress
@@ -4618,6 +4751,7 @@ function Save-DeepCustomRepeatToConfig {
   # 혼합 리스트면 저장 전에 반복을 '횟수 1바퀴'로 강제해 그 값이 저장되게 합니다
   Update-CustomRepeatMixLock -Items @(Get-DeepCustomItemsFromList) `
     -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
+  Update-CustomRandomMixGate -Toggle $chkDcrRandom -Items @(Get-DeepCustomItemsFromList) -SectionName 'deepCustomRepeat'
   $script:lastCustomSaveOk = $false
   $cfg = Read-Config
   if (-not $cfg) {
@@ -4749,6 +4883,137 @@ function Update-AbyssInputLock {
   } finally { $script:acrLockUpdating = $false }
 }
 
+function Update-CustomRandomToggleStyle {
+  # 랜덤 토글 눌림 배경 (설정/로그 탭 토글과 동일한 크림 - 활성 상태를 색으로 표시)
+  param($Toggle)
+  # 활성 = 캐러멜 (설정/로그 탭 토글과 동일 - 2026-08-04 C안 확정)
+  $Toggle.BackColor = $(if ($Toggle.Checked) { [System.Drawing.Color]::FromArgb(244, 213, 141) } else { $script:themeControl })
+  $Toggle.ForeColor = $(if ($Toggle.Checked) { [System.Drawing.Color]::FromArgb(91, 62, 6) } else { $script:themeText })
+}
+
+function Save-CustomRandomOrder {
+  # 랜덤 토글 즉시 저장 + 진행/완료 마커 무효화. 켜고 끄는 것 자체가 실행 순서의 의미를
+  # 바꾸므로 진행 기록은 처음부터 - 같은 저장에서 원자적으로 처리합니다 (Codex 조건)
+  param([string]$SectionName, [bool]$Enabled)
+  $cfg = Read-Config
+  if (-not $cfg -or -not $cfg.PSObject.Properties[$SectionName] -or -not $cfg.$SectionName) {
+    Add-GuiLog '[경고] config 를 읽지 못해 랜덤 진행 설정을 저장하지 못했습니다.'
+    return
+  }
+  $node = $cfg.$SectionName
+  if ($node.PSObject.Properties['randomOrder']) { $node.randomOrder = $Enabled }
+  else { $node | Add-Member -NotePropertyName 'randomOrder' -NotePropertyValue $Enabled }
+  if ($node.PSObject.Properties['progress']) { $node.progress = $null }
+  else { $node | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
+  try {
+    Save-Config $cfg
+  } catch {
+    Add-GuiLog "[경고] 랜덤 진행 설정 저장 실패: $($_.Exception.Message) - 토글을 한 번 더 눌러 다시 시도해 주세요."
+    return
+  }
+  Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
+  Add-GuiLog $(if ($Enabled) { '[안내] 랜덤 진행 켬 - 매 바퀴 시작 때 리스트 순서를 무작위로 섞습니다 (진행 기록은 처음부터).' }
+    else { '[안내] 랜덤 진행 끔 - 등록 순서로 진행합니다 (진행 기록은 처음부터).' })
+}
+
+function Update-CustomRandomMixGate {
+  # 층 혼합 리스트의 랜덤 게이트: 혼합이면 토글 비활성 + 켜져 있으면 자동 해제 (Codex 정책:
+  # 편집 차단 대신 자동 해제 + 안내. 혼합 해소 시 재활성만 - 자동으로 다시 켜지는 않음)
+  param($Toggle, $Items, [string]$SectionName)
+  $mixGateNeeded = $false
+  if (@($Items).Count -ge 2) {
+    $mixGateIssues = @(@(Get-CustomTransitionIssues -Items $Items -ListRepeat 'infinite' -ListRepeatCount 1) |
+        Where-Object { [bool]$_.Wrap })
+    $mixGateNeeded = ($mixGateIssues.Count -gt 0)
+  }
+  if ($mixGateNeeded -and $Toggle.Checked) {
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try { $Toggle.Checked = $false } finally { $script:crLoading = $prevLoading }
+    Update-CustomRandomToggleStyle -Toggle $Toggle
+    if ($script:uiReady) { Save-CustomRandomOrder -SectionName $SectionName -Enabled $false }
+    Add-GuiLog '[안내] 층이 섞인 혼합 리스트라 랜덤 진행을 해제했습니다 (1층·2층 혼합은 랜덤 사용 불가).'
+  }
+  $Toggle.Enabled = -not $mixGateNeeded
+}
+
+function Get-CustomActiveListView {
+  param([string]$SectionName = $script:customConfigSection)
+  if ($SectionName -eq 'abyssCustomRepeat') { return $lvAcrList }
+  if ($SectionName -eq 'deepCustomRepeat') { return $lvDcrList }
+  return $lvCrList
+}
+
+function Set-CustomListRandomView {
+  # 실행 중 표시 (확정 시안): 이번 바퀴 순열 순서로 행을 재배열하고 # 열을 '진행순서 (등록번호)'
+  # 로, 현재 항목 행을 크림색으로 표시합니다. 행 객체를 재사용(Tag=등록 인덱스)해 체크/셀
+  # 텍스트 손실이 없고, 저장 함수는 Tag 순 정렬로 등록 순서를 보존합니다 (실행 중 [설정 저장]
+  # 이 화면 순서를 그대로 저장하는 사고 방어 - Codex 조건)
+  param($Context)
+  if (-not $Context -or -not $Context.RandomOrder -or -not $Context.Order) { return }
+  $view = Get-CustomActiveListView -SectionName ([string]$Context.SectionName)
+  if ($view.Items.Count -ne [int]$Context.Total) { return }   # 화면-config 불일치면 표시만 생략 (안전)
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  $view.BeginUpdate()
+  try {
+    if (-not $script:customViewShuffled) {
+      foreach ($viewRow in $view.Items) { $viewRow.Tag = [int]$viewRow.Index }   # 등록 인덱스 고정 (실행 중 편집 잠김)
+      $view.Columns[1].Width = 52   # '12 (12)' 잘림 방지 - 복원 시 원래 폭
+    }
+    $orderedRows = @()
+    foreach ($regIdx in @($Context.Order)) {
+      $foundRow = $null
+      foreach ($viewRow in $view.Items) { if ($null -ne $viewRow.Tag -and [int]$viewRow.Tag -eq [int]$regIdx) { $foundRow = $viewRow; break } }
+      if (-not $foundRow) { return }
+      $orderedRows += $foundRow
+    }
+    $view.Items.Clear()
+    for ($vi = 0; $vi -lt $orderedRows.Count; $vi++) {
+      [void]$view.Items.Add($orderedRows[$vi])
+      $orderedRows[$vi].SubItems[1].Text = ('{0} ({1})' -f ($vi + 1), ([int]$orderedRows[$vi].Tag + 1))
+      $orderedRows[$vi].BackColor = [System.Drawing.Color]::White
+    }
+    if ([int]$Context.Index -ge 0 -and [int]$Context.Index -lt $view.Items.Count) {
+      $view.Items[[int]$Context.Index].BackColor = [System.Drawing.Color]::FromArgb(245, 231, 201)
+      $view.Items[[int]$Context.Index].EnsureVisible()
+    }
+    $script:customViewShuffled = $true
+  } finally {
+    $view.EndUpdate()
+    $script:crLoading = $prevLoading
+  }
+}
+
+function Restore-CustomListRegisteredView {
+  # 등록 순서 표기 복원 - 모든 정지 경로 공용 (Set-UiRunning(false) 서두에서 호출)
+  if (-not $script:customViewShuffled) { return }
+  foreach ($view in @($lvCrList, $lvAcrList, $lvDcrList)) {
+    if ($view.Items.Count -eq 0) { continue }
+    $tagsOk = $true
+    foreach ($viewRow in $view.Items) { if ($null -eq $viewRow.Tag) { $tagsOk = $false; break } }
+    if (-not $tagsOk) { continue }
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    $view.BeginUpdate()
+    try {
+      $restoreRows = @($view.Items | Sort-Object { [int]$_.Tag })
+      $view.Items.Clear()
+      for ($vi = 0; $vi -lt $restoreRows.Count; $vi++) {
+        [void]$view.Items.Add($restoreRows[$vi])
+        $restoreRows[$vi].SubItems[1].Text = [string]($vi + 1)
+        $restoreRows[$vi].BackColor = [System.Drawing.Color]::White
+        $restoreRows[$vi].Tag = $null
+      }
+      $view.Columns[1].Width = $(if ($view -eq $lvAcrList) { 30 } else { 32 })
+    } finally {
+      $view.EndUpdate()
+      $script:crLoading = $prevLoading
+    }
+  }
+  $script:customViewShuffled = $false
+}
+
 function Set-CustomRepeatOnConfig {
   # customRepeat 섹션을 현재 UI 상태로 갱신합니다 (Save-Config 는 호출부 몫).
   # progress 는 절대 건드리지 않고 그대로 옮겨 담습니다 (진행 기록 비파괴 원칙).
@@ -4765,6 +5030,7 @@ function Set-CustomRepeatOnConfig {
     enabled         = [bool]$script:customEnabledWish
     '_items'        = '각 항목: difficulty/stage/coin/doubleLoot + exhaustContinue(동전 소진 시 true=미사용으로 진행, false=멈춤) / noDoubleSweep(더블 루팅 불가 시 true=소탕만 진행, false=멈춤). 소진/더블 대응은 항목별 속성입니다'
     items           = [array]@(Get-CustomItemsFromList)
+    randomOrder     = [bool]$chkCrRandom.Checked
     listRepeat      = $(if ($rbCrCount.Checked) { 'count' } else { 'infinite' })
     listRepeatCount = [int]$numCrLaps.Value
     progress        = $prevProgress
@@ -4784,6 +5050,7 @@ function Set-AbyssCustomRepeatOnConfig {
     '_설명'         = "'어비스 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. progress 는 이어가기용 진행 기록이므로 직접 수정하지 마세요."
     '_items'        = "각 항목: kind=abyss / mode(solo 또는 party) / difficulty / dungeon / matching. 혼자하기 항목의 matching 은 '없음'입니다."
     items           = [array]@(Get-AbyssCustomItemsFromList)
+    randomOrder     = [bool]$chkAcrRandom.Checked
     listRepeat      = $(if ($rbAcrCount.Checked) { 'count' } else { 'infinite' })
     listRepeatCount = [int]$numAcrLaps.Value
     progress        = $prevProgress
@@ -4800,6 +5067,7 @@ function Save-CustomRepeatToConfig {
   # (어비스 저장 경유 호출에서도 던전 리스트 기준으로만 동작 - 무해)
   Update-CustomRepeatMixLock -Items @(Get-CustomItemsFromList) `
     -RbInfinite $rbCrInfinite -RbCount $rbCrCount -NumLaps $numCrLaps -StateKey 'cr'
+  Update-CustomRandomMixGate -Toggle $chkCrRandom -Items @(Get-CustomItemsFromList) -SectionName 'customRepeat'
   $script:lastCustomSaveOk = $false
   $cfg = Read-Config
   if (-not $cfg) {
@@ -4866,16 +5134,41 @@ function Get-CustomCurrentContext {
   if ($node.PSObject.Properties['listRepeat']) { try { $listRepeat = [string]$node.listRepeat } catch { } }
   $listRepeatCount = 1
   if ($node.PSObject.Properties['listRepeatCount']) { try { $listRepeatCount = [int]$node.listRepeatCount } catch { } }
+  # 랜덤 진행 (2026-08-04): Items 는 항상 '등록 순서'로 유지(지문/마커 계약 불변)하고,
+  # 실행 순서는 ExecutionItems/Order 로 분리합니다. 이 getter 는 읽기·매핑만 담당 -
+  # 순열 생성은 시작 게이트와 Step 의 바퀴 전환에서만 (Codex 계약).
+  $randomOrder = Get-CustomRandomOrderEnabled -Node $node
+  $shuffleOrder = $null
+  $shuffleValid = $true
+  if ($randomOrder) {
+    $savedOrder = $null
+    if ($node.PSObject.Properties['progress'] -and $node.progress -and
+        $node.progress.PSObject.Properties['shuffleOrder']) { $savedOrder = $node.progress.shuffleOrder }
+    if (Test-CustomShuffleOrder -Order $savedOrder -ItemCount $items.Count) {
+      $shuffleOrder = @([int[]]@($savedOrder))
+    } else {
+      $shuffleValid = $false
+    }
+  }
+  $executionItems = $items
+  if ($randomOrder -and $shuffleOrder) { $executionItems = @(Get-CustomExecutionItems -Items $items -Order $shuffleOrder) }
+  $positionText = Get-CustomPositionText -Lap $lap -Index $index -Total $items.Count
+  if ($randomOrder) { $positionText += ' (랜덤)' }
   return @{
     Items           = $items
+    ExecutionItems  = $executionItems
     Total           = $items.Count
     Lap             = $lap
     Index           = $index
-    Item            = $items[$index]
+    Item            = $executionItems[$index]
+    RegisteredIndex = $(if ($randomOrder -and $shuffleOrder) { [int]$shuffleOrder[$index] } else { $index })
+    RandomOrder     = $randomOrder
+    Order           = $shuffleOrder
+    ShuffleValid    = $shuffleValid
     ListRepeat      = $listRepeat
     ListRepeatCount = $listRepeatCount
     SectionName     = $SectionName
-    Position        = (Get-CustomPositionText -Lap $lap -Index $index -Total $items.Count)
+    Position        = $positionText
   }
 }
 
@@ -4900,6 +5193,22 @@ function Step-CustomProgress {
     lap         = [int]$next.lap
     index       = [int]$next.index
     fingerprint = (Get-CustomFingerprint -Items $items)
+  }
+  # 랜덤 진행: 바퀴 전환(index=0 복귀)에서만 새 순열, 같은 바퀴 전진은 기존 순열 그대로 복사
+  # (재시도/복구 경로는 Step 을 부르지 않으므로 재셔플 없음 - Codex 계약)
+  if (Get-CustomRandomOrderEnabled -Node $node) {
+    if ([int]$next.index -eq 0) {
+      $stepShuffle = @(New-CustomShuffleOrder -ItemCount $items.Count)
+    } else {
+      $stepShuffle = $null
+      if ($prevProgress -and $prevProgress.PSObject.Properties['shuffleOrder']) { $stepShuffle = $prevProgress.shuffleOrder }
+      if (-not (Test-CustomShuffleOrder -Order $stepShuffle -ItemCount $items.Count)) {
+        Add-GuiLog '[오류] 랜덤 진행 순서 기록이 손상돼 진행을 전진시키지 못했습니다 - [진행 초기화] 후 다시 시작해 주세요.'
+        return $null
+      }
+      $stepShuffle = @([int[]]@($stepShuffle))
+    }
+    $newProgress | Add-Member -NotePropertyName 'shuffleOrder' -NotePropertyValue ([array]$stepShuffle)
   }
   if ($node.PSObject.Properties['progress']) { $node.progress = $newProgress }
   else { $node | Add-Member -NotePropertyName 'progress' -NotePropertyValue $newProgress }
@@ -4931,7 +5240,73 @@ function Reset-CustomProgress {
     Add-GuiLog "[오류] 커스텀 진행 초기화 저장 실패: $($_.Exception.Message)"
     return $false
   }
+  # 완료 마커도 함께 무효화 (랜덤 진행: 초기화 후 우연히 같은 순열이 재현돼 낡은 마커가
+  # 일치하는 사고 방지 - Codex 조건. 순차 모드에서도 초기화 = 새 출발 의도라 무해)
+  Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
   if ($LogMessage) { Add-GuiLog $LogMessage }
+  return $true
+}
+
+function Confirm-CustomShuffleReady {
+  # 랜덤 진행 시작 게이트: 이번 바퀴 순열을 '시작 전에' 확보하고 디스크에 저장합니다
+  # (저장 실패 = 시작 금지). 층 혼합 리스트 + randomOrder(config 직접 편집)는 랜덤을
+  # 해제·정규화하고 순차로 진행합니다 (던전/심층 한정 - 어비스는 층 제약 없음).
+  # 반환: 시작 가능 여부. 순차 모드는 항상 $true.
+  param([string]$SectionName = $script:customConfigSection)
+  $cfg = Read-Config
+  if ([string]::IsNullOrWhiteSpace($SectionName)) { $SectionName = 'customRepeat' }
+  if (-not $cfg -or -not $cfg.PSObject.Properties[$SectionName] -or -not $cfg.$SectionName) { return $false }
+  $node = $cfg.$SectionName
+  if (-not (Get-CustomRandomOrderEnabled -Node $node)) { return $true }
+  $gateItems = @()
+  if ($node.PSObject.Properties['items']) { $gateItems = @($node.items) }
+  if ($gateItems.Count -lt 1) { return $false }
+  if ($SectionName -ne 'abyssCustomRepeat') {
+    $gateWrapIssues = @(@(Get-CustomTransitionIssues -Items $gateItems -ListRepeat 'infinite' -ListRepeatCount 1) |
+        Where-Object { [bool]$_.Wrap })
+    if ($gateWrapIssues.Count -gt 0) {
+      $node.randomOrder = $false
+      try { Save-Config $cfg } catch {
+        Add-GuiLog "[오류] 랜덤 진행 해제 저장 실패: $($_.Exception.Message) - 시작하지 않습니다."
+        return $false
+      }
+      Add-GuiLog '[안내] 층이 섞인 혼합 리스트는 랜덤 진행을 쓸 수 없어 해제했습니다 - 등록 순서로 진행합니다.'
+      return $true
+    }
+  }
+  $gateProgress = $null
+  if ($node.PSObject.Properties['progress'] -and $node.progress) { $gateProgress = $node.progress }
+  $gateOrder = $null
+  if ($gateProgress -and $gateProgress.PSObject.Properties['shuffleOrder']) { $gateOrder = $gateProgress.shuffleOrder }
+  if ($gateProgress -and (Test-CustomShuffleOrder -Order $gateOrder -ItemCount $gateItems.Count)) { return $true }
+  $gateLap = 1
+  $gateIndex = 0
+  if ($gateProgress) {
+    try { $gateLap = [int]$gateProgress.lap } catch { $gateLap = 1 }
+    try { $gateIndex = [int]$gateProgress.index } catch { $gateIndex = 0 }
+  }
+  if ($gateLap -lt 1) { $gateLap = 1 }
+  if ($gateProgress -and $gateIndex -gt 0) {
+    # 바퀴 중간의 순열 유실/손상: 기존 index 를 새 순열에 적용하면 중복/누락이 생기므로
+    # 진행 전체를 처음부터 (Codex 조건: index>0 이면 전체 초기화)
+    Add-GuiLog '[안내] 랜덤 진행 순서 기록이 없거나 손상돼 처음(1바퀴)부터 새로 시작합니다.'
+    $gateLap = 1
+    $gateIndex = 0
+  }
+  $gateNewProgress = [pscustomobject]@{
+    lap          = $gateLap
+    index        = $gateIndex
+    fingerprint  = (Get-CustomFingerprint -Items $gateItems)
+    shuffleOrder = [array]@(New-CustomShuffleOrder -ItemCount $gateItems.Count)
+  }
+  if ($node.PSObject.Properties['progress']) { $node.progress = $gateNewProgress }
+  else { $node | Add-Member -NotePropertyName 'progress' -NotePropertyValue $gateNewProgress }
+  try {
+    Save-Config $cfg
+  } catch {
+    Add-GuiLog "[오류] 랜덤 진행 순서 저장 실패: $($_.Exception.Message) - 시작하지 않습니다."
+    return $false
+  }
   return $true
 }
 
@@ -5150,6 +5525,19 @@ function Load-SettingsToUi {
         -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
     }
   } catch { $script:crLoading = $false }
+  # 랜덤 진행 토글 복원 (3섹션 - JSON 불리언만 인정. 프로그램적 변경은 crLoading 가드로
+  # 저장 이벤트 억제, 복원 후 층 혼합 게이트를 다시 계산합니다)
+  $script:crLoading = $true
+  try {
+    try { $chkCrRandom.Checked = (Get-CustomRandomOrderEnabled -Node $cfg.customRepeat) } catch { }
+    try { $chkAcrRandom.Checked = (Get-CustomRandomOrderEnabled -Node $cfg.abyssCustomRepeat) } catch { }
+    try { $chkDcrRandom.Checked = (Get-CustomRandomOrderEnabled -Node $cfg.deepCustomRepeat) } catch { }
+  } finally { $script:crLoading = $false }
+  Update-CustomRandomToggleStyle -Toggle $chkCrRandom
+  Update-CustomRandomToggleStyle -Toggle $chkAcrRandom
+  Update-CustomRandomToggleStyle -Toggle $chkDcrRandom
+  Update-CustomRandomMixGate -Toggle $chkCrRandom -Items @(Get-CustomItemsFromList) -SectionName 'customRepeat'
+  Update-CustomRandomMixGate -Toggle $chkDcrRandom -Items @(Get-DeepCustomItemsFromList) -SectionName 'deepCustomRepeat'
   # 저장된 난이도 복원 (없거나 빈 값이면 '게임 그대로'. 목록에 없는 이름이 저장돼
   # 있으면 - 예: config 에 직접 적은 새 난이도 - 목록에 추가한 뒤 선택합니다.
   # 단, 지옥 난이도는 함께하기 전용이라 혼자하기 상태면 '게임 그대로'로 되돌립니다)
@@ -5364,6 +5752,8 @@ function Save-SettingsFromUi {
 function Set-UiRunning {
   param([bool]$IsRunning)
   $script:running = $IsRunning
+  # 랜덤 진행 표시 복원 - 모든 정지 경로가 이 함수를 지나므로 여기서 한 번에 처리
+  if (-not $IsRunning) { Restore-CustomListRegisteredView }
   # 시작 버튼은 '미실행 + 사용 승인'의 합성 조건 (실행 종료 후에도 미승인이면 잠금 유지)
   $btnStart.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnSafeStop.Enabled = $IsRunning
@@ -5473,14 +5863,18 @@ function Start-NextCycle {
     # '나가기 → 선택 화면'(다른 구역)을 결정하는 데 씁니다. 다시 하기로 온 옵션 화면에는
     # 좌상단 '<' 가 없다는 실측(2026-07-20) 때문에 회차 마무리 시점에 갈림길을 정해야 합니다.
     # 1항목 리스트면 다음 = 자기 자신(같은 구역) → 기존처럼 다시 하기.
+    # 랜덤 진행 주의: 바퀴 마지막 항목의 NEXT 는 '현재 순열의 첫 항목'입니다 (다음 바퀴의 새
+    # 순열이 아님). 랜덤은 같은 층 전용 + 워커가 NEXT 를 마무리 갈림길에만 쓰는 불변식 덕에
+    # 동작상 안전 - 혼합 랜덤을 허용하거나 워커가 NEXT 항목을 실제 소비하게 되면 다음 바퀴
+    # 순열을 미리 계산해야 합니다 (Codex 계약, test_custom_random 가드).
     $customNextIndex = ($customContext.Index + 1) % [Math]::Max(1, [int]$customContext.Total)
-    $env:HONEYNOGI_CUSTOM_NEXT = Format-CustomItemToken -Item (@($customContext.Items)[$customNextIndex])
+    $env:HONEYNOGI_CUSTOM_NEXT = Format-CustomItemToken -Item (@($customContext.ExecutionItems)[$customNextIndex])
     $env:HONEYNOGI_CUSTOM_RESTART = $(if ($script:customRestart) { '1' } else { '' })
     $env:HONEYNOGI_CUSTOM_RECOVERY = $(if ($script:customRecoveryPending) { '1' } else { '' })
     $env:HONEYNOGI_CUSTOM_POSITION = $customContext.Position
     $env:HONEYNOGI_CUSTOM_LIST = $(if ($script:customConfigSection -eq 'deepCustomRepeat') {
-        Get-DeepCustomListCompact -Items $customContext.Items
-      } else { Get-CustomListCompact -Items $customContext.Items })
+        Get-DeepCustomListCompact -Items $customContext.ExecutionItems
+      } else { Get-CustomListCompact -Items $customContext.ExecutionItems })
     $env:HONEYNOGI_CUSTOM_MARKER = $customMarkerFile
     $env:HONEYNOGI_CUSTOM_OWNER = New-CustomMarkerOwnerJson -Context $customContext
     $repeatModeText = $(if ($customContext.ListRepeat -eq 'count') { "$($customContext.ListRepeatCount)바퀴" } else { '무한' })
@@ -5490,6 +5884,8 @@ function Start-NextCycle {
     $env:HONEYNOGI_LAST_RUN = $(if (Test-CustomLastRun -ListRepeat ([string]$customContext.ListRepeat) `
         -ListRepeatCount ([int]$customContext.ListRepeatCount) -Lap ([int]$customContext.Lap) `
         -Index ([int]$customContext.Index) -Total ([int]$customContext.Total)) { '1' } else { '' })
+    # 랜덤 진행: 리스트를 이번 바퀴 순서로 표시 (순열이 같으면 하이라이트만 이동)
+    Set-CustomListRandomView -Context $customContext
     # 일반 회차는 이전 마커를 삭제하고 시작합니다. 마무리 복구 회차는 현재 항목이 이미 클리어됐다는
     # 근거이자 GUI 재시작 복구 정보이므로 같은 소유자의 마커를 보존합니다.
     # 일반 회차에서 삭제 실패(파일 잠금 등) 시에는 이번 회차 마커를 무시해 오계상을 막습니다.
@@ -6007,6 +6403,13 @@ function Invoke-StartAutomation {
           Add-GuiLog "[안내] 커스텀 반복: 저장된 진행을 이어갑니다 - $(Get-CustomPositionText -Lap $crLapNow -Index $crIndexNow -Total $crItems.Count)부터 시작합니다."
         }
       }
+      # 랜덤 진행: 이번 바퀴 순열을 시작 전에 확보합니다 (아래 마커 복구 검사의 resumeContext 가
+      # 확정된 순열로 항목을 해석해야 하므로 반드시 이 지점 - Codex 삽입 지점 합의)
+      if (-not (Confirm-CustomShuffleReady)) {
+        Add-GuiLog '[오류] 랜덤 진행 순서를 준비하지 못해 시작하지 않습니다.'
+        $script:customActive = $false
+        return
+      }
       $script:customErrorStreak = 0
       $script:customPrevItem = ''
       $script:customRestart = $false
@@ -6290,6 +6693,7 @@ $updateCategoryPanels = {
   $btnCrDelete.Visible = $isDungeonCustom
   $btnCrUp.Visible = $isDungeonCustom
   $btnCrDown.Visible = $isDungeonCustom
+  $chkCrRandom.Visible = $isDungeonCustom
   $pnlCrRepeat.Visible = $isDungeonCustom
   # 어비스 커스텀: 함께하기일 때만 입력 줄 바로 아래에 매칭 줄을 추가합니다.
   $acrPartyOn = $isAbyssCustom -and $rbAcrParty.Checked
@@ -6300,6 +6704,7 @@ $updateCategoryPanels = {
   $btnAcrDelete.Visible = $isAbyssCustom
   $btnAcrUp.Visible = $isAbyssCustom
   $btnAcrDown.Visible = $isAbyssCustom
+  $chkAcrRandom.Visible = $isAbyssCustom
   $pnlAcrRepeat.Visible = $isAbyssCustom
   # 심층 커스텀 리스트 빌더 (심층던전 + 커스텀 반복 선택 시에만 표시.
   # 소진 라디오 줄은 입력 줄의 마족공물 체크 상태를 따라갑니다)
@@ -6311,6 +6716,7 @@ $updateCategoryPanels = {
   $btnDcrDelete.Visible = $isDeepCustom
   $btnDcrUp.Visible = $isDeepCustom
   $btnDcrDown.Visible = $isDeepCustom
+  $chkDcrRandom.Visible = $isDeepCustom
   $pnlDcrRepeat.Visible = $isDeepCustom
   # 사냥터용 패널 (소진 대응 옵션 없음 - 은동전이 부족하면 나가고 자동화 종료)
   $pnlHtDifficulty.Visible = $isHunting
@@ -6332,7 +6738,8 @@ $updateCategoryPanels = {
       $btnCrDelete.Top = $crListTop + 36
       $btnCrUp.Top = $crListTop + 72
       $btnCrDown.Top = $crListTop + 108
-      $pnlCrRepeat.Top = $crListTop + 156
+      $chkCrRandom.Top = $crListTop + 144
+      $pnlCrRepeat.Top = $crListTop + 186
       $grpContentDetail.Height = $pnlCrRepeat.Top + 36
     } elseif ($ndNoDoubleRowOn) {
       $pnlNdParty.Top = 174
@@ -6354,7 +6761,8 @@ $updateCategoryPanels = {
       $btnDcrDelete.Top = $dcrListTop + 36
       $btnDcrUp.Top = $dcrListTop + 72
       $btnDcrDown.Top = $dcrListTop + 108
-      $pnlDcrRepeat.Top = $dcrListTop + 156
+      $chkDcrRandom.Top = $dcrListTop + 144
+      $pnlDcrRepeat.Top = $dcrListTop + 186
       $grpContentDetail.Height = $pnlDcrRepeat.Top + 36
     } elseif ($ddExhaustRowOn) {
       $pnlDdMatching.Top = 148
@@ -6370,7 +6778,8 @@ $updateCategoryPanels = {
     $btnAcrDelete.Top = $acrListTop + 36
     $btnAcrUp.Top = $acrListTop + 72
     $btnAcrDown.Top = $acrListTop + 108
-    $pnlAcrRepeat.Top = $acrListTop + 156
+    $chkAcrRandom.Top = $acrListTop + 144
+    $pnlAcrRepeat.Top = $acrListTop + 186
     $grpContentDetail.Height = $pnlAcrRepeat.Top + 36
   } elseif ($abyssPartyOn) {
     # 파티원은 입장 방식 + 매칭 2줄만 남아 그룹을 줄입니다
