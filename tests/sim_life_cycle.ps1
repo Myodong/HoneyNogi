@@ -9,13 +9,13 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
-    -Names @('Invoke-LifeGatherCycle', 'Get-LifeRequiredLevel', 'Get-LifeNormalizedName',
+    -Names @('Invoke-LifeGatherCycle', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeRequiredLevel', 'Get-LifeNormalizedName',
       'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus')) {
   Invoke-Expression $definition
 }
 # 소유 판정이 쓰는 실제 데이터 (이형 표 / 공통 치환 쌍) - 스텁이 아니라 본체 값을 그대로 씁니다
 $simAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'mabinogi_run_once.ps1'), [ref]$null, [ref]$null)
-foreach ($simVar in @('lifeTargetVariants', 'lifeNameRepairPairs', 'rgLifeQuestWide')) {
+foreach ($simVar in @('lifeTargetVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeQuestWide')) {
   $simAssign = $simAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and

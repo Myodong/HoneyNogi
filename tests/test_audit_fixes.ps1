@@ -244,8 +244,11 @@ $auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Enco
 Assert-Case 'config: 스키마 7 + mainCategory 기본 battle + life 섹션' `
   (([int]$auditConfigJson.configSchemaVersion -eq 7) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
    ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily')) $true
-Assert-Case 'GUI: 버전 2.0.0' `
-  ($guiSource -match "\`$appVersion = '2\.0\.0'") $true
+# 버전 번호를 고정값으로 박으면 올릴 때마다 이 테스트가 깨집니다 (2026-08-09 v2.0.1 에서 발생).
+# 여기서 지켜야 할 계약은 '어떤 번호인가'가 아니라 **$appVersion 이 GUI 에 단일 선언으로
+# 존재하고 형식이 유효한가**(빌드가 이 값을 exe 버전으로 삼음) 입니다.
+Assert-Case 'GUI: $appVersion 단일 선언 + 형식 유효' `
+  ([regex]::Matches($guiSource, "(?m)^\`$appVersion = '\d+\.\d+\.\d+'").Count) 1
 # 생활 스킬 아이콘: 내장 base64 9종을 실제 .NET 디코드로 검증 (2026-08-05 - 손 전사 손상으로
 # herb 등 5종이 조용히 깨졌던 사고. 회귀 가드가 실디코드를 안 해서 못 잡았음 - 리뷰 권고)
 Add-Type -AssemblyName System.Drawing

@@ -15,13 +15,13 @@ function Assert-Case {
 
 # ── 본체에서 순수 판정 함수/데이터 추출 ──
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
-    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeWindowClosePixels')) {
+    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeWindowClosePixels')) {
   Invoke-Expression $definition
 }
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgQuestTracker', 'rgLifeQuestWide', 'lifeListRowGap', 'lifeListFirstRowY')) {
+foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgQuestTracker', 'rgLifeQuestWide', 'lifeListRowGap', 'lifeListFirstRowY')) {
   $assign = $sourceAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
@@ -789,7 +789,46 @@ Assert-Case '배선: 요구 레벨 안내 전 대상 재대조' `
   ([bool]($workerText -match "\`$detailRecord.Target\) -eq \(\[string\]\`$lifeTargetName\)")) 'True'
 Assert-Case '배선: 상세 팝업 판정이 순수 함수 경유(깨짐 대응 + 제목 대조)' ($workerText -match 'Get-LifeDetailVerdict -DetailText \$detailText -TargetName \$TargetName') 'True'
 Assert-Case '배선: 상세 판독 s3→s4 사다리 (한 스케일 깨짐으로 wrong 확정 금지)' ($workerText -match 'foreach \(\$detailScale in @\(3, 4\)\)') 'True'
-Assert-Case "배선: 시작 정리 팝업 검출도 '집물' 조각" ($workerText -match "if \(\`$detailText\.Contains\('집물'\)\)") 'True'
+# 라벨 앵커는 2026-08-09 제보('채집물'->'채집묻')로 단일 진입점으로 모았습니다.
+# 이 앵커 하나가 제목부 절단·요구 레벨·팝업 인식을 전부 좌우하므로, 리터럴이 다시
+# 흩어지지 않게 '직접 참조 0건 + 진입점 경유'를 함께 못 박습니다.
+Assert-Case '배선: 시작 정리 팝업 검출이 라벨 진입점 경유' `
+  ($workerText -match "if \(Test-LifeDetailHasLabel -Text \`$detailText\)") 'True'
+# 주석에는 설명용으로 '집물' 이 여러 번 나오므로 주석 줄을 걷어내고 **실제 코드만** 셉니다
+$workerCodeOnly = (@($workerText -split "`n") | Where-Object { $_.TrimStart() -notlike '#*' }) -join "`n"
+Assert-Case "배선: 라벨 리터럴 직접 참조 없음 (조각 배열 선언 1곳만)" `
+  ([regex]::Matches($workerCodeOnly, "'집물'").Count) '1'
+Assert-Case '배선: 라벨 조각에 실측 깨짐 포함' `
+  ($workerText.Contains("`$lifeDetailLabelFragments = @('집물', '집묻')")) 'True'
+Assert-Case '배선: 라벨 탐색이 가장 앞 조각 채택' `
+  ($workerText -match "function Get-LifeDetailLabelIndex[\s\S]{0,600}?\`$found -lt \`$best") 'True'
+# 판정: 깨진 라벨에서도 제목부가 잘리고 대상이 확정돼야 한다 (제보 원문)
+$chyuiDetail = '문철광맥채집묻광석개기레豊30이상문철이섞인단단한드무더기.곡생OI로문철광석을수있다.[人}는,;테센마이평원가까운위치찾기41수'
+Assert-Case "라벨: '채집묻' 깨짐에서도 제목부 절단" `
+  (Get-LifeTitleFromDetailText -DetailText $chyuiDetail) '문철광맥채'
+Assert-Case "라벨: '채집묻' 깨짐에서도 대상 확정 (제보 재현)" `
+  (Get-LifeTitleVerdictFromDetail -DetailText $chyuiDetail -TargetName '운철 광맥') 'mine'
+Assert-Case "라벨: '레벨'이 '레豊'로 깨져도 요구 레벨 판독" `
+  (Get-LifeRequiredLevel -DetailText $chyuiDetail) '30'
+Assert-Case '라벨: 라벨이 아예 없으면 -1 (팝업 아님)' `
+  (Get-LifeDetailLabelIndex -Text '아무의미없는문자열') '-1'
+# 아래 3건은 2026-08-09 교차 리뷰가 제시한 반례입니다. 전부 '조용히 엉뚱한 값을 확정'하는
+# 종류라 로그만 보고는 못 잡습니다.
+# ① 진짜 라벨을 놓친 뒤 설명 본문의 같은 조각을 라벨로 인정하면 제목이 통째로 잘못 잘립니다
+Assert-Case '라벨: 위치 상한 밖의 조각은 라벨로 보지 않음 (오클릭 확정 방지)' `
+  (Get-LifeDetailLabelIndex -Text '운철광맥채집들광석캐기레벨30이상설명집묻뒤') '-1'
+Assert-Case '라벨: 상한 밖이면 제목부도 빈 값' `
+  (Get-LifeTitleFromDetailText -DetailText '운철광맥채집들광석캐기레벨30이상설명집묻뒤') ''
+# ② 요구 레벨은 라벨 바로 뒤만 봐야 합니다 - 설명 속 숫자를 요구치로 오독하면 사용자가 오판
+Assert-Case '레벨: 진짜 요구치가 깨졌으면 설명 속 숫자를 쓰지 않음' `
+  (Get-LifeRequiredLevel -DetailText '감자채집물호미질레X1이상설명설명설명설명설명설명설명설명레豊30') '0'
+# ③ 제목 띠는 라벨 후보 중 가장 위를 써야 합니다 (단어 열거 순서는 보장되지 않음)
+$stripWords = @(
+  [pscustomobject]@{ Text = '설명집물비슷'; Y = 330 }
+  [pscustomobject]@{ Text = '채집물';       Y = 218 }
+)
+Assert-Case '제목 띠: 라벨 후보 중 최소 Y 채택' `
+  ((Get-LifeTitleStripRegion -Words $stripWords) -join ',') '440,174,300,36'
 Assert-Case "배선: '생활 스킬' 클릭 후 화면 전환 확인 게이트" ($workerText.Contains("'생활 스킬' 화면 전환을 확인하지 못했습니다")) 'True'
 Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,700}Test-GameForeground -Game \$Game') 'True'
 # 2차 리뷰 반영 계약 (리뷰): deadline 하드 상한 + 캡처 실패 판독 무효 + 휠 증거

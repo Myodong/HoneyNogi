@@ -7226,6 +7226,39 @@ $rgLifeQuestWide = @(955, 195, 315, 240)
 $rgLifeStats = @(150, 330, 300, 180)     # 내 정보 능력치 라벨 영역 ('생활력' = 화면 확정 신호)
 $rgLifeTargetList = @(700, 140, 520, 540) # 생활 스킬 창 우측 대상 목록 (행 간격 ~90px, 레벨 열 x>1100)
 $rgLifeDetail = @(430, 150, 420, 300)     # 대상 상세 팝업 (제목 y~191, '채집물' y~218)
+# 상세 팝업 라벨('채집물')의 안정 조각. 제목부 절단·요구 레벨 탐색·팝업 인식이 전부 이 앵커
+# 하나에 걸려 있어, 여기서 못 찾으면 팝업이 멀쩡히 떠 있어도 '확인 실패'로 3회 소진합니다
+# (2026-08-09 제보: '채집물' -> '채집묻' 으로 받침이 깨져 전체가 무너짐).
+# **조각을 늘릴 때는 반드시 실측 근거가 있어야 합니다** - 느슨하면 설명 본문에서 잘못 끊깁니다.
+$lifeDetailLabelFragments = @('집물', '집묻')
+
+# 라벨이 나올 수 있는 최대 위치(문자 수). 팝업 구조가 '이름 → 채집물' 이라 라벨은 제목
+# 바로 뒤입니다. 정규화된 대상 이름은 가장 긴 것이 7자, 관측된 제목 깨짐이 8자라 16이면
+# 충분히 넉넉합니다. **상한이 없으면** 진짜 라벨을 놓쳤을 때 설명 본문에 우연히 있는 같은
+# 조각을 라벨로 인정해 **제목이 통째로 엉뚱하게 잘립니다**(2026-08-09 교차 리뷰 반례:
+# '운철광맥채집들…설명집묻뒤' → 제목을 '…설명' 까지로 잡음). 오클릭 확정으로 이어질 수 있어
+# 위치 상한이 안전장치입니다.
+$lifeDetailLabelMaxIndex = 16
+
+function Get-LifeDetailLabelIndex {
+  # 판독 문자열에서 라벨 위치를 찾습니다 (순수 - 진리표 대상). 못 찾으면 -1.
+  # 여러 조각 중 **가장 앞에 나오는** 것을 쓰되, 위치 상한을 넘으면 라벨로 보지 않습니다.
+  # 조각은 전부 2글자라 호출부의 '+2' 계산이 그대로 유효합니다.
+  param([string]$Text, [int]$MaxIndex = $lifeDetailLabelMaxIndex)
+  $best = -1
+  foreach ($fragment in $lifeDetailLabelFragments) {
+    $found = ([string]$Text).IndexOf($fragment)
+    if ($found -ge 0 -and ($best -lt 0 -or $found -lt $best)) { $best = $found }
+  }
+  if ($best -gt $MaxIndex) { return -1 }
+  return $best
+}
+
+function Test-LifeDetailHasLabel {
+  # 라벨이 있는가 (= 상세 팝업 판독인가). 순수 - 진리표 대상
+  param([string]$Text)
+  return ((Get-LifeDetailLabelIndex -Text $Text) -ge 0)
+}
 $rgLifeFindLink = @(430, 150, 420, 470)   # '가까운 위치 찾기' 링크 탐색 영역 (팝업 전체 높이 -
                                           # 링크 y 는 설명 길이에 따라 대상별 상이. 00:53 실사고)
 $ptLifeSkillMenu = @(68, 393)             # 내 정보 좌측 '생활 스킬' 메뉴 (실측 50~86,393)
@@ -7379,17 +7412,17 @@ function Get-LifeDetailTitleFromWords {
   # 이름 줄이 통째로 안 읽히면 최상단 행이 라벨('채집물')이 됩니다 - 실측 전수 확인에서
   # '채집물'/'자|집물' 로 나온 사례 4건 (물·우물·젖소·추수 대상들. 2026-08-07).
   # 라벨을 제목으로 넘기면 '읽었는데 이름이 다르다' 로 오해할 소지가 있어 빈 값으로 둡니다.
-  if ($titleText.Contains('집물')) { return '' }
+  if (Test-LifeDetailHasLabel -Text $titleText) { return '' }
   return $titleText
 }
 
 function Get-LifeTitleFromDetailText {
   # 상세 영역 판독 문자열에서 제목부만 잘라 냅니다 (순수 - 진리표 대상).
-  # 구조가 '이름 → 채집물(라벨) → …' 이라 라벨 조각 '집물' 앞이 제목입니다.
+  # 구조가 '이름 → 채집물(라벨) → …' 이라 라벨 앞이 제목입니다.
   # 라벨이 없으면 팝업 판독이 아니므로 빈 값 (클릭 직전 재확인을 건너뜁니다).
   param([string]$DetailText)
   $normalized = ([string]$DetailText) -replace '\s', ''
-  $labelIndex = $normalized.IndexOf('집물')
+  $labelIndex = Get-LifeDetailLabelIndex -Text $normalized
   if ($labelIndex -lt 1) { return '' }
   return $normalized.Substring(0, $labelIndex)
 }
@@ -7401,13 +7434,19 @@ function Get-LifeTitleStripRegion {
   # 왜 필요한가: 넓은 영역 저배율로는 아예 안 읽히는 이름이 **좁은 띠 고배율에서는 읽힙니다**
   # (2026-08-08 실측: '숨숨꽃'은 s6 에서만, '옥수수'는 s4·s6 에서, '흰 껍질 나무'·'운철 광맥'
   #  은 s6 에서 깨짐 없이 판독). 라벨을 못 찾으면 $null (재확인 생략).
+  # 후보가 여럿이면 **가장 위(Y 최소)** 를 씁니다 - 단어 배열의 열거 순서는 보장되지 않아
+  # 설명 쪽 단어가 먼저 걸리면 제목 띠가 아래로 밀려 엉뚱한 줄을 읽습니다
+  # (2026-08-09 교차 리뷰 반례: 440,174 대신 440,286 이 나옴). 라벨은 팝업에서 제목 바로
+  # 아래 한 줄뿐이므로 최소 Y 가 곧 진짜 라벨입니다.
   param($Words)
+  $labelY = $null
   foreach ($word in @($Words)) {
-    if (([string]$word.Text).Contains('집물')) {
-      return @(440, ([int]$word.Y - 44), 300, 36)
-    }
+    if (-not (Test-LifeDetailHasLabel -Text ([string]$word.Text))) { continue }
+    $wordY = [int]$word.Y
+    if ($null -eq $labelY -or $wordY -lt $labelY) { $labelY = $wordY }
   }
-  return $null
+  if ($null -eq $labelY) { return $null }
+  return @(440, ($labelY - 44), 300, 36)
 }
 
 function Get-LifeProgressValue {
@@ -7575,7 +7614,7 @@ function Get-LifeDetailVerdict {
   # (한글 1/3) 처럼 깨진 제목을 오클릭으로 확정해 3회 소진하던 사고 - 정상 오클릭이면
   # 제목이 그 대상 이름으로 또렷이(한글 비율 0.8+) 읽힌다는 실측 성질을 이용합니다.
   param([string]$DetailText, [string]$TargetName, [string[]]$Order = @(), [string]$SkillName = '')
-  $labelIndex = ([string]$DetailText).IndexOf('집물')
+  $labelIndex = Get-LifeDetailLabelIndex -Text ([string]$DetailText)
   if ($labelIndex -lt 0) { return 'no-label' }
   $detailTitle = ([string]$DetailText).Substring(0, $labelIndex)
   # ⓪ 제목이 '깎아내지 않은 그대로' 목표와 일치하면 그 자리에서 확정합니다.
@@ -7654,12 +7693,20 @@ function Get-LifeRequiredLevel {
   # 라벨이 없으면 상세 팝업이 아니거나 판독이 깨진 것이므로 안내하지 않습니다 (리뷰 지적).
   param([string]$DetailText)
   $normalized = ([string]$DetailText) -replace '\s', ''
-  $labelIndex = $normalized.IndexOf('집물')
+  $labelIndex = Get-LifeDetailLabelIndex -Text $normalized
   if ($labelIndex -lt 0) { return 0 }
-  $afterLabel = $normalized.Substring([Math]::Min($labelIndex + 2, $normalized.Length))
+  # 라벨 **바로 뒤 짧은 구간만** 봅니다. 팝업 구조가 '채집물 → 스킬명 레벨 N 이상 → 설명'
+  # 이라 요구치는 라벨 직후에 오고, 뒤 설명까지 훑으면 설명 속 숫자를 요구치로 오독합니다
+  # (2026-08-09 교차 리뷰 반례: 진짜 요구치가 깨져 사라지고 설명의 '레豊30' 만 잡힘).
+  # 24자면 실측 '광석개기레豊30이상'(9자)에 스킬명이 긴 경우까지 충분히 들어옵니다.
+  $afterStart = [Math]::Min($labelIndex + 2, $normalized.Length)
+  $afterLength = [Math]::Min(24, $normalized.Length - $afterStart)
+  $afterLabel = $normalized.Substring($afterStart, $afterLength)
   # (?!\d) 로 숫자 뒤가 더 이어지면 매칭하지 않습니다 - 없으면 '레벨1000'이 앞 세 자리만
-  # 잘려 100 으로 읽힙니다 (리뷰 지적: 상한 검사만으로는 못 막는 접두부 절단)
-  $levelMatches = [regex]::Matches($afterLabel, '레벨(\d{1,3})(?!\d)')
+  # 잘려 100 으로 읽힙니다 (리뷰 지적: 상한 검사만으로는 못 막는 접두부 절단).
+  # '레벨' 자체도 깨집니다 - 2026-08-09 제보에서 '레豊30이상' 관측. 임의로 느슨하게 하면
+  # 설명 본문의 숫자를 요구치로 오독할 수 있으므로 **실측된 깨짐만** 후보로 둡니다.
+  $levelMatches = [regex]::Matches($afterLabel, '레[벨豊](\d{1,3})(?!\d)')
   if ($levelMatches.Count -eq 0) { return 0 }
   # 서로 다른 값이 둘 이상 잡히면 어느 쪽이 요구치인지 확신할 수 없어 안내를 생략합니다
   $distinctLevels = @($levelMatches | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique)
@@ -8074,7 +8121,14 @@ function Find-LifeCloseGlyph {
   #   - 팔 길이를 여러 개 보고 과반을 요구해 안티앨리어싱 한 칸에 좌우되지 않게 합니다.
   # 입력은 [int[][]] 밝기(0~255) 행 배열 - Drawing 없이 진리표를 돌리기 위함입니다.
   # 반환: @{ Found; X; Y; Score } (X/Y 는 배열 안 좌표. 못 찾으면 Found=$false)
-  param([int[][]]$Luma, [int]$BrightMin = 170, [int]$DarkMax = 110, [int[]]$Arms = @(6, 8, 10))
+  #
+  # 축의 '어두움'은 **절대 임계가 아니라 중심과의 상대 대비**로 봅니다 (2026-08-09 제보).
+  # 처음엔 절대 임계(110)를 썼는데, 생활 스킬 창의 **파란 배경(밝기 약 136)** 위에서는
+  # X 가 또렷한데도 축이 '어둡지 않다'로 걸려 창을 통째로 못 봤습니다 - 어제 제보와 같은
+  # 고착(창 열림 미감지 → C 무시 → 재시도 소진)으로 이어지는 경로입니다.
+  # 상대 대비는 배경이 밝든 어둡든 'X 획과 그 사이 빈틈의 명암차'라는 성질만 보므로
+  # 배경색에 영향받지 않습니다 (형제 함수 Test-LifeWindowClosePixels 의 상대 대비와 같은 결).
+  param([int[][]]$Luma, [int]$BrightMin = 170, [int]$MinContrast = 90, [int[]]$Arms = @(6, 8, 10))
   $rows = @($Luma).Count
   if ($rows -lt 1) { return @{ Found = $false; X = -1; Y = -1; Score = 0 } }
   $cols = @($Luma[0]).Count
@@ -8084,18 +8138,20 @@ function Find-LifeCloseGlyph {
   $bestScore = 0; $bestX = -1; $bestY = -1
   for ($y = $maxArm; $y -lt ($rows - $maxArm); $y++) {
     for ($x = $maxArm; $x -lt ($cols - $maxArm); $x++) {
-      if ($Luma[$y][$x] -lt $BrightMin) { continue }
+      $center = $Luma[$y][$x]
+      if ($center -lt $BrightMin) { continue }
+      $darkCeiling = $center - $MinContrast   # 축은 중심보다 이만큼은 어두워야 함
       $armHits = 0
       foreach ($arm in $Arms) {
-        # 네 대각선이 전부 밝고, 네 축이 전부 어두워야 이 팔 길이가 '통과'입니다
+        # 네 대각선이 전부 밝고, 네 축이 전부 '중심보다 충분히 어두워야' 이 팔이 통과합니다
         if ($Luma[$y - $arm][$x - $arm] -lt $BrightMin) { continue }
         if ($Luma[$y - $arm][$x + $arm] -lt $BrightMin) { continue }
         if ($Luma[$y + $arm][$x - $arm] -lt $BrightMin) { continue }
         if ($Luma[$y + $arm][$x + $arm] -lt $BrightMin) { continue }
-        if ($Luma[$y - $arm][$x] -gt $DarkMax) { continue }
-        if ($Luma[$y + $arm][$x] -gt $DarkMax) { continue }
-        if ($Luma[$y][$x - $arm] -gt $DarkMax) { continue }
-        if ($Luma[$y][$x + $arm] -gt $DarkMax) { continue }
+        if ($Luma[$y - $arm][$x] -gt $darkCeiling) { continue }
+        if ($Luma[$y + $arm][$x] -gt $darkCeiling) { continue }
+        if ($Luma[$y][$x - $arm] -gt $darkCeiling) { continue }
+        if ($Luma[$y][$x + $arm] -gt $darkCeiling) { continue }
         $armHits++
       }
       # 과반(3개 중 2개 이상) 통과만 인정 - 한 칸짜리 얼룩으로 열리지 않게
@@ -8320,7 +8376,7 @@ function Close-LifeOpenWindows {
   $closed = $false
   $detailText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
       -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-  if ($detailText.Contains('집물')) {
+  if (Test-LifeDetailHasLabel -Text $detailText) {
     # '집물' = '채집물'의 안정 조각 (2차 실기: '채'가 '자|'로 깨져 팝업을 못 알아보고
     # X 를 눌러 모달에 막히던 사고 - 팝업은 반드시 '확인'으로 먼저 닫아야 함)
     Focus-Game -Game $Game

@@ -32,13 +32,13 @@ if (-not $ocrKoreanEngine) {
 # ── 워커에서 함수/데이터 추출 (배포될 코드 그대로 검증) ──
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
-    -Names @('Invoke-OcrOnBitmap', 'Await-WinRt', 'Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Test-LifeWindowClosePixels')) {
+    -Names @('Invoke-OcrOnBitmap', 'Await-WinRt', 'Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Test-LifeWindowClosePixels')) {
   Invoke-Expression $definition
 }
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeFindLink', 'rgQuestTracker')) {
+foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeFindLink', 'rgQuestTracker')) {
   $assign = $sourceAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and

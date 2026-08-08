@@ -52,6 +52,14 @@ $size = 41
 $mid = 20
 # X 자: 두 대각선만 밝음
 $xShape = New-LumaMap $size $size { param($x, $y) if ([Math]::Abs(($x - 20) - ($y - 20)) -le 1 -or [Math]::Abs(($x - 20) + ($y - 20)) -le 1) { 255 } else { 5 } }
+# 배경이 밝아도(생활 스킬 창의 파란 바탕 = 밝기 약 136) 인정해야 합니다. 처음엔 축의 어두움을
+# **절대 임계(110)** 로 봤다가 이 화면에서 창을 통째로 못 봤습니다 (2026-08-09 제보) -
+# 어제와 같은 고착(창 열림 미감지 → C 무시 → 재시도 소진)으로 이어지는 경로였습니다.
+$xOnBlue = New-LumaMap $size $size { param($x, $y) if ([Math]::Abs(($x - 20) - ($y - 20)) -le 1 -or [Math]::Abs(($x - 20) + ($y - 20)) -le 1) { 255 } else { 136 } }
+Assert-Case '형태: 밝은(파란) 배경 위의 X 도 인정 - 상대 대비' ([bool](Find-LifeCloseGlyph -Luma $xOnBlue).Found) 'True'
+# 반대로 대비가 없으면(중심과 축이 비슷하게 밝음) 거부해야 합니다
+$xNoContrast = New-LumaMap $size $size { param($x, $y) if ([Math]::Abs(($x - 20) - ($y - 20)) -le 1 -or [Math]::Abs(($x - 20) + ($y - 20)) -le 1) { 255 } else { 200 } }
+Assert-Case '형태: 대비가 부족하면 거부 (중심-축 90 미만)' ([bool](Find-LifeCloseGlyph -Luma $xNoContrast).Found) 'False'
 Assert-Case '형태: X 자는 인정' ([bool](Find-LifeCloseGlyph -Luma $xShape).Found) 'True'
 # 획에 폭이 있으면 교차 근처 여러 점이 서명을 만족하므로 '정확히 한 점'이 아니라
 # '교차점에서 2px 이내'로 고정합니다 (클릭에 쓰기엔 이 정밀도면 충분 - 실측 캡처에서는
@@ -138,6 +146,20 @@ if ($reportShots.Count -gt 0) {
   $reportRefY = $rgLifeCloseGlyph[1] + [int]$reportHit.Y
   Assert-Case '1908 글리프 중심은 기준 상수(67)보다 위' ([bool]($reportRefY -lt 67)) 'True'
   Assert-Case '1908 글리프 중심이 옛 4점과 어긋난 폭 5px 이상' ([bool]((67 - $reportRefY) -ge 5)) 'True'
+}
+
+# chyui 제보 1273x718 (2026-08-09). 02:32:49 는 **생활 스킬 그리드(파란 배경)** 라
+# 절대 임계 방식이 여기서 깨졌습니다 - 상대 대비로 바꾼 뒤의 회귀 자산입니다.
+$blueDir = Join-Path $projectRoot '던전이미지\생활\1273캡처'
+$blueShots = @(Get-ChildItem $blueDir -Filter 'chyui_1273_error_*.png' -ErrorAction SilentlyContinue)
+if ($blueShots.Count -lt 1) { "SKIP chyui 1273 캡처가 없어 재현 검증을 건너뜁니다: $blueDir" }
+foreach ($shot in $blueShots) {
+  Assert-Case "1273 '$($shot.Name)' 창 열림 감지" ([bool](Get-CaptureGlyphHit -Path $shot.FullName).Found) 'True'
+}
+# 같은 세션의 필드 프레임은 반드시 미검출이어야 합니다 (오탐 0 확인)
+$blueField = @(Get-ChildItem $blueDir -Filter 'chyui_1273_field_*.png' -ErrorAction SilentlyContinue)
+foreach ($shot in $blueField) {
+  Assert-Case "1273 '$($shot.Name)' 필드는 미검출" ([bool](Get-CaptureGlyphHit -Path $shot.FullName).Found) 'False'
 }
 
 # 개발 1272 캡처 전수 - 회귀 확인 (창 열림은 True, 필드/채집 화면은 False)
