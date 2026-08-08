@@ -1,7 +1,7 @@
 ﻿# 사용 승인(화이트리스트) + 구버전 exe 자동 삭제 판정 진리표
 # 본체: mabinogi_gui.ps1 (Get-DeviceCode / Test-WhitelistResponse / Get-ApprovalDecision /
 #       Get-CleanupPlan / Test-OldGuiTitle / Select-OldGuiProcesses / Test-ReleaseManifest /
-#       Select-OldExeTargets) - 실함수를 AST 로 추출해 진리표 검증 (2026-07-27 Codex 설계 합의)
+#       Select-OldExeTargets) - 실함수를 AST 로 추출해 진리표 검증 (2026-07-27 설계 합의)
 $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -112,7 +112,7 @@ $procSnapshots = @(
   @{ Id = 1003; Title = '';                             CommandLine = $guiCmd }                       # 제목 없음 = 보존
   @{ Id = 1004; Title = '꿀비노기 컨트롤 패널 v1.2.0'; CommandLine = $guiCmd }                       # 현재 버전 = 보존
   @{ Id = $PID; Title = '꿀비노기 컨트롤 패널 v1.1.3'; CommandLine = $guiCmd }                       # 자기 PID = 보존
-  @{ Id = 1005; Title = '꿀비노기 컨트롤 패널 v1.1.3';                                               # 다른 윈도우 사용자 세션 = 보존 (Codex #1)
+  @{ Id = 1005; Title = '꿀비노기 컨트롤 패널 v1.1.3';                                               # 다른 윈도우 사용자 세션 = 보존 (리뷰 #1)
      CommandLine = 'powershell.exe -File C:\Users\OTHER\AppData\Local\HoneyNogi\mabinogi_gui.ps1' }
   @{ Id = 1006; Title = '꿀비노기 컨트롤 패널 v1.1.3';                                               # 대소문자 차이는 같은 경로로 인정
      CommandLine = 'powershell.exe -File C:\USERS\U\APPDATA\Local\HoneyNogi\MABINOGI_GUI.PS1' }

@@ -1,4 +1,4 @@
-﻿# 2026-08-01 전수 점검(Codex 협업) 수정 배선 가드 - 워커/GUI/빌드/런처 일괄
+﻿# 2026-08-01 전수 점검(교차 리뷰) 수정 배선 가드 - 워커/GUI/빌드/런처 일괄
 # 각 수정의 근거·경위는 이슈_개선점_목록.md '2026-08-01 - 전수 점검 결함 일괄 수정' 참고
 $ErrorActionPreference = 'Stop'
 $fails = 0
@@ -107,7 +107,7 @@ Assert-Case '런처: config 이전은 임시 파일 경유' `
 Assert-Case '런처: 시스템 PowerShell 절대 경로 우선' `
   ($launcherSource -match 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe') $true
 
-# ── 3차 전수 검사 반영 (2026-08-01 - Codex 조건 포함) ─────────────────────────
+# ── 3차 전수 검사 반영 (2026-08-01 - 리뷰 조건 포함) ─────────────────────────
 # 회귀: 복구 회차가 복귀로 확정된 선택 화면 플래그를 신뢰
 Assert-Case '3차: 복구 판정이 onSelectionScreen 플래그 신뢰' `
   ($workerSource -match '\$recoveryOnSelection = \(\$onSelectionScreen -or \(Test-DgSelectionTitle') $true
@@ -199,7 +199,7 @@ Assert-Case '워커: 우상단 X(1228,67) 클릭 2곳(재화 창+협동 창)' `
 # 배선 ①: 입장/매칭 스윕 (스윕을 쓰는 입장 대기·복귀 대기·시작 판정 일괄 커버)
 Assert-Case '워커: 협동 창 닫기 - 스윕 배선' `
   ([regex]::Matches($workerSource, 'if \(Close-CoopMissionBoardScreen -Game \$Game\) \{ return \$true \}').Count) 1
-# 배선 ②: 이벤트 스킵 - 범용 '건너'/'지원'/'확인' 탐색보다 먼저 (Codex 순서 조건)
+# 배선 ②: 이벤트 스킵 - 범용 '건너'/'지원'/'확인' 탐색보다 먼저 (리뷰 순서 조건)
 Assert-Case '워커: 협동 창 닫기 - 이벤트 스킵 선두 배선' `
   ($workerSource -match 'if \(Close-CoopMissionBoardScreen -Game \$Game -LogPrefix \$LogPrefix\) \{ return \$true \}[\s\S]{0,300}\$skipPoint = Find-GameTextPoint') $true
 # 배선 ③④: 클리어 대기 + 결과 대기 (주간 리셋 팝업과 협동 창 각 2곳)
@@ -211,7 +211,7 @@ Assert-Case '워커: 주간 리셋 팝업 - 클리어/결과 대기 배선 2곳'
 Assert-Case '워커: 다음 층 대기 - 스윕+주간 리셋 배선(재클릭 판정 앞)' `
   ($workerSource -match "if \(Invoke-PurchasePopupSweep -Game \`$Game\) \{ continue \}\s+if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[던전\] '\) \{ continue \}\s+\`$floorAgainPoint = Find-DgNextFloorButtonPoint") $true
 
-# ── v2.0.0: 대분류(전투/생활) GUI 단계 (2026-08-05 시안 확정, Codex 조건 A~G) ─────────
+# ── v2.0.0: 대분류(전투/생활) GUI 단계 (2026-08-05 시안 확정, 리뷰 조건 A~G) ─────────
 # 시작 이중 차단 (조건 D): 버튼 핸들러 서두 + 승인 비동기 콜백 경유(Invoke-StartAutomation) 서두
 Assert-Case 'GUI: 생활 시작 차단 - btnStart 핸들러 서두' `
   ($guiSource -match '\$btnStart\.Add_Click\(\{\s+#[^\r\n]*\r?\n    if \(Test-LifeStartBlocked\) \{ return \}') $true
@@ -247,7 +247,7 @@ Assert-Case 'config: 스키마 7 + mainCategory 기본 battle + life 섹션' `
 Assert-Case 'GUI: 버전 2.0.0' `
   ($guiSource -match "\`$appVersion = '2\.0\.0'") $true
 # 생활 스킬 아이콘: 내장 base64 9종을 실제 .NET 디코드로 검증 (2026-08-05 - 손 전사 손상으로
-# herb 등 5종이 조용히 깨졌던 사고. 회귀 가드가 실디코드를 안 해서 못 잡았음 - Codex 권고)
+# herb 등 5종이 조용히 깨졌던 사고. 회귀 가드가 실디코드를 안 해서 못 잡았음 - 리뷰 권고)
 Add-Type -AssemblyName System.Drawing
 $iconDecodeOk = 0
 $iconIds = @('daily', 'wood', 'mining', 'herb', 'wool', 'harvest', 'hoe', 'insect', 'fishing')
@@ -298,7 +298,7 @@ Assert-Case 'GUI: 생활 카드 아이콘 중앙 쌓기 정렬(겹침 회귀 방
   ($guiSource -match '\$lifeCard\.TextImageRelation = \[System\.Windows\.Forms\.TextImageRelation\]::ImageAboveText\s+\$lifeCard\.ImageAlign = \[System\.Drawing\.ContentAlignment\]::MiddleCenter\s+\$lifeCard\.TextAlign = \[System\.Drawing\.ContentAlignment\]::MiddleCenter') $true
 Assert-Case 'GUI: 생활 카드 크기 134×56 (스킬+대상 2곳)' `
   ([regex]::Matches($guiSource, '\$lifeCard\.Size = New-Object System\.Drawing\.Size\(134, 56\)').Count) 2
-# 슬라이더 애니메이션 (2026-08-05 사용자 확정 320ms - Codex 조건: 잠금 게이트/Stop 계약/종료 정리)
+# 슬라이더 애니메이션 (2026-08-05 사용자 확정 320ms - 리뷰 조건: 잠금 게이트/Stop 계약/종료 정리)
 Assert-Case 'GUI: 슬라이드 320ms 상수' `
   ($guiSource -match '\$script:lifeSlideDurationMs = 320') $true
 Assert-Case 'GUI: 슬라이드 틱 = 명명 함수(클로저 금지 계약)' `
@@ -310,7 +310,7 @@ Assert-Case 'GUI: 슬라이드 잠금 가드(카드 2곳+Start 서두)' `
 Assert-Case 'GUI: 화살표 Enabled 에 canNavigate 게이트' `
   ($guiSource -match '\$canNavigate = \(-not \$script:lifeSlideActive\) -and \(-not \$script:running\)') $true
 # Stop 배선: 패널 갱신/폼 종료 = SkipUiRefresh 2곳. 실행 시작(Set-UiRunning)은 일반 Stop -
-# SkipUiRefresh 면 화살표 false 가 실행 스냅샷에 저장돼 종료 후 영구 비활성 (Codex 지적)
+# SkipUiRefresh 면 화살표 false 가 실행 스냅샷에 저장돼 종료 후 영구 비활성 (리뷰 지적)
 Assert-Case 'GUI: Stop-LifeSlideNow -SkipUiRefresh 2곳(패널 갱신/종료)' `
   ([regex]::Matches($guiSource, 'Stop-LifeSlideNow -SkipUiRefresh').Count) 2
 Assert-Case 'GUI: 실행 시작 시 일반 Stop(스냅샷 오염 방지)' `
@@ -336,7 +336,7 @@ Assert-Case '워커: 네트워크 팝업 - 스윕 배선' `
 # 배선 ②: 이벤트 스킵 선두 (알 수 없는 화면 루프의 정식 출구)
 Assert-Case '워커: 네트워크 팝업 - 이벤트 스킵 배선' `
   ([regex]::Matches($workerSource, 'if \(Close-NetworkUnstablePopup -Game \$Game -LogPrefix \$LogPrefix\) \{ return \$true \}').Count) 1
-# 배선 ③: 클리어 대기 - 결과 화면 감지(FindResultButton)보다 먼저 (어휘 충돌 방지 - Codex)
+# 배선 ③: 클리어 대기 - 결과 화면 감지(FindResultButton)보다 먼저 (어휘 충돌 방지 - 리뷰)
 Assert-Case '워커: 네트워크 팝업 - 클리어 대기 배선(결과 감지 앞)' `
   ($workerSource -match 'Close-NetworkUnstablePopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\)\) \{ continue \}[\s\S]{0,600}if \(\$FindResultButton -and \(\$pollCounter % 2\)') $true
 # 배선 ④: 결과 대기 - 반복 버튼 탐색보다 먼저
@@ -353,10 +353,10 @@ Assert-Case 'GUI: 로그 폴더 워커와 같은 규칙 + 폴더 생성' `
 Assert-Case "GUI: scriptRoot 기준 'Log' 는 honeyLogDir 폴백 정의 1곳만 (신호/마커 어긋남 방지)" `
   (([regex]::Matches($guiSource, "Join-Path \`$scriptRoot 'Log").Count -eq 1) -and
    ([regex]::Matches($guiSource, 'Join-Path \$scriptRoot \("Log').Count -eq 0)) $true
-# 워커 부트스트랩 trap 도 같은 규칙 (초기화 오류가 옛 폴더로 가면 GUI 폴링이 못 봄 - Codex)
+# 워커 부트스트랩 trap 도 같은 규칙 (초기화 오류가 옛 폴더로 가면 GUI 폴링이 못 봄 - 리뷰)
 Assert-Case '워커: 부트스트랩 trap 로그도 LOCALAPPDATA 규칙' `
   ($workerSource -match '\$bootLogBase = \[string\]\[Environment\]::GetFolderPath\(''LocalApplicationData''\)[\s\S]{0,300}HoneyNogi\\Log') $true
-# 회차 보관도 통일 폴더 기준 (scriptRoot 로 남아 있으면 저장소 실행에서 보관 실패 - Codex)
+# 회차 보관도 통일 폴더 기준 (scriptRoot 로 남아 있으면 저장소 실행에서 보관 실패 - 리뷰)
 Assert-Case 'GUI: 회차 로그 보관(run_*.log)이 honeyLogDir 기준' `
   ($guiSource -match '\$archivePath = Join-Path \$honeyLogDir \("run_') $true
 

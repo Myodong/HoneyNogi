@@ -67,7 +67,7 @@ if (Test-Path -LiteralPath $assistDir) {
 }
 
 # 비전투 화면(던전/심층 선택·옵션 캡처 전수)에서 'off' 판정 = H 오입력 트리거이므로 0건이어야 함
-# ('on'/'unknown'은 무동작이라 허용 - Codex 오탐 검증 요구)
+# ('on'/'unknown'은 무동작이라 허용 - 리뷰 오탐 검증 요구)
 $sweepDirs = @((Join-Path $projectRoot '던전이미지\던전'), (Join-Path $projectRoot '던전이미지\심층던전'))
 $sweepTotal = 0
 $sweepOffHits = @()

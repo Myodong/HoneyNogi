@@ -29,7 +29,7 @@ foreach ($simVar in @('lifeTargetVariants', 'lifeNameRepairPairs', 'rgLifeQuestW
 function Write-RunLog { param([string]$Message) [Console]::WriteLine("LOG $Message") }
 # 가상 시계: '한도 초과'를 검증하려면 시간이 흘러야 하는데(deadline 은 사이클 함수 내부의
 # 지역 변수라 밖에서 앞당길 수 없음), 실제로 기다리면 느린 머신에서 초기 확인 단계가 먼저
-# 만료되는 플래키가 생깁니다 (Codex 지적). Get-Date 를 덮고 Start-Sleep 이 가상 시각만
+# 만료되는 플래키가 생깁니다 (리뷰 지적). Get-Date 를 덮고 Start-Sleep 이 가상 시각만
 # 앞으로 돌리면 대기 없이 결정적으로 재현됩니다 - 운영 코드는 그대로.
 $script:useVirtualClock = $false
 $script:virtualNow = [datetime]'2026-08-07T00:00:00'
@@ -133,7 +133,7 @@ function Get-LifeQuestState {
   param($Game)
   $script:stateCalls++
   # -eq 로 '그 판독에서 한 번만' 장애를 주입합니다 (-ge 면 복구된 뒤 판독마다 다시 켜져
-  # 일회성 장애 재현이 아니게 됨 - Codex 지적)
+  # 일회성 장애 재현이 아니게 됨 - 리뷰 지적)
   if ($script:captureFailAfterStateCalls -gt 0 -and $script:stateCalls -eq $script:captureFailAfterStateCalls) {
     $script:screenCaptureFailing = $true
   }
@@ -220,7 +220,7 @@ switch ($Scenario) {
     # 2026-08-07 실사고 재현: 곤충 채집 '일렁이는 빛 무리'(레벨 27 이상, 캐릭터 25).
     # 메뉴 시퀀스는 **성공**합니다 - 상세도 확인하고 '가까운 위치 찾기'까지 눌렀습니다.
     # 그런데 레벨이 모자라 게임이 퀘스트를 만들지 않아 생성 확인 8회가 전부 실패하고,
-    # 그게 3회 반복돼 소진됐습니다 (메뉴 자체를 실패시키면 이 경로를 안 탐 - Codex 지적).
+    # 그게 3회 반복돼 소진됐습니다 (메뉴 자체를 실패시키면 이 경로를 안 탐 - 리뷰 지적).
     $script:menuResults = @($true, $true, $true)
     $script:stateSeq = @('absent', 'absent', 'absent')
     $script:stateTail = 'absent'

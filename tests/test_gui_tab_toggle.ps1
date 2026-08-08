@@ -1,4 +1,4 @@
-﻿# GUI 탭 토글(설정/로그 표시) 레이아웃 진리표 + 배선 가드 (2026-08-04 시안 확정, Codex 합의)
+﻿# GUI 탭 토글(설정/로그 표시) 레이아웃 진리표 + 배선 가드 (2026-08-04 시안 확정, 설계 합의)
 # 본체: mabinogi_gui.ps1 - 순수 계산 Get-TabToggleLayout + updateCategoryPanels 적용부
 $ErrorActionPreference = 'Stop'
 $fails = 0
@@ -43,7 +43,7 @@ $r = Get-TabToggleLayout -DetailBottom 332 -SettingsOpen $true -LogOpen $true @b
 Assert-Case '조합: 둘 다 열림 - 설정 위/로그 아래' "$($r.SettingsTop),$($r.LogTop)" '380,538'
 Assert-Case '조합: 둘 다 열림 - ClientHeight' $r.ClientHeight 874
 
-# ── 3. 핵심 계약: 설정을 접으면 폼도 함께 줄어듦 (총높이가 아니라 뷰포트 기억 - Codex 지적) ──
+# ── 3. 핵심 계약: 설정을 접으면 폼도 함께 줄어듦 (총높이가 아니라 뷰포트 기억 - 리뷰 지적) ──
 $both = Get-TabToggleLayout -DetailBottom 332 -SettingsOpen $true -LogOpen $true @base
 $logOnly = Get-TabToggleLayout -DetailBottom 332 -SettingsOpen $false -LogOpen $true @base
 Assert-Case '계약: 설정 접기 = 폼 158px 축소(로그 뷰포트 불변)' ($both.ClientHeight - $logOnly.ClientHeight) 158
@@ -123,7 +123,7 @@ Assert-Case '가드: 구 최소 폭 616 잔재 없음' `
 Assert-Case '가드: 폼 폭 560' `
   ($guiSource -match '\$form\.Size = New-Object System\.Drawing\.Size\(560, 872\)') $true
 
-# ── 8. v2.0.0 대분류(전투/생활) 신설 - 상세 Bottom 실측 3케이스 (Codex 검증 조건) ──────
+# ── 8. v2.0.0 대분류(전투/생활) 신설 - 상세 Bottom 실측 3케이스 (리뷰 검증 조건) ──────
 # 대분류 줄 +40 시프트로 DetailTop 210→250: 전투 기본 H=122 → Bottom 372 /
 # 생활(채집·가공 공통) H=268 → Bottom 518 / 기존 최대 커스텀 H=296 → Bottom 546
 $r = Get-TabToggleLayout -DetailBottom 372 -SettingsOpen $false -LogOpen $false @base

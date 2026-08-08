@@ -359,7 +359,7 @@ function Update-ConfigToLatest {
     }
     # 5) 사용 승인 캐시/구버전 정리 마커: 최상위 키를 그대로 이전합니다.
     #    기본 config 에는 이 키들이 없어서, 여기서 놓치면 업데이트 때마다 승인 유예가
-    #    초기화되고(오프라인 무인 PC 가 차단됨) 정리 안내 팝업이 다시 뜹니다 (Codex 합의).
+    #    초기화되고(오프라인 무인 PC 가 차단됨) 정리 안내 팝업이 다시 뜹니다 (설계 합의).
     foreach ($keepKey in @('approval', 'oldExeCleanup')) {
       if ($usr.PSObject.Properties[$keepKey]) {
         if ($def.PSObject.Properties[$keepKey]) { $def.$keepKey = $usr.$keepKey }
@@ -516,7 +516,7 @@ function Convert-WorkerLogLineForGui {
 }
 
 # ============================================================
-#  사용 승인(화이트리스트) + 구버전 정리 (2026-07-27, Codex 설계 합의)
+#  사용 승인(화이트리스트) + 구버전 정리 (2026-07-27, 설계 합의)
 #  - 승인: 비공개 구글 시트 명단(Apps Script /exec)이 활성 기기 코드만 텍스트로 응답.
 #    검사는 GUI 시작·새 자동화 시작 시만, 실행 중 자동화는 어떤 전이에도 중단하지 않음.
 #    조회 실패(전송/형식)는 캐시 유예 7일, 유효 명단에서 명시적 부재만 즉시 차단.
@@ -567,7 +567,7 @@ function Test-WhitelistResponse {
   while ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') { $lines.RemoveAt($lines.Count - 1) }
   if ($lines.Count -lt 2 -or $lines.Count -gt 1002) { return $invalid }
   if ($lines[0] -ne 'HONEYNOGI-WL-V1') { return $invalid }
-  if ($lines[1] -notmatch '^COUNT=([0-9]{1,4})$') { return $invalid }   # \d 는 유니코드 숫자까지 허용해 [int] 변환 예외 가능 (Codex #7)
+  if ($lines[1] -notmatch '^COUNT=([0-9]{1,4})$') { return $invalid }   # \d 는 유니코드 숫자까지 허용해 [int] 변환 예외 가능 (리뷰 #7)
   $expectedCount = [int]$Matches[1]
   $codeLines = @($lines | Select-Object -Skip 2)
   if ($codeLines.Count -ne $expectedCount) { return $invalid }
@@ -641,7 +641,7 @@ function Select-OldGuiProcesses {
   param($Snapshots, [string]$CurrentVersion, [string]$GuiScriptPath)
   # 종료 대상 구버전 GUI 선정 (순수부). 제목과 명령줄 이중 확인 - 명령줄은 '우리 사용자의
   # 추출 경로 전체'와 대조합니다 (다른 윈도우 사용자 세션의 HoneyNogi 는 프로필 경로가 달라
-  # 제외됨 - Codex 리뷰 #1). 제목이 비어 있거나(식별 불가) 명령줄이 다르면 '보존'합니다
+  # 제외됨 - 교차 리뷰 #1). 제목이 비어 있거나(식별 불가) 명령줄이 다르면 '보존'합니다
   # (과잉 종료 방향으로는 실패하지 않음).
   $selected = @()
   foreach ($snapshot in @($Snapshots)) {
@@ -762,7 +762,7 @@ function Set-ApprovalCache {
 function Clear-ApprovalCache {
   # 유효 명단에서 명시적 부재(철회) 확인 시 호출 - 이후 조회 실패가 유예로 살아나는 구멍을 막습니다.
   # 저장 실패는 경고로 남깁니다 (재시작+오프라인 조합에서 과거 캐시가 유예로 통과할 수 있는
-  # 잔여 위험 - config 원자 저장이라 극히 드묾, 이슈 문서에 한계 명시. Codex #4)
+  # 잔여 위험 - config 원자 저장이라 극히 드묾, 이슈 문서에 한계 명시. 리뷰 #4)
   try {
     $cacheConfig = Read-Config
     if (-not $cacheConfig -or -not $cacheConfig.PSObject.Properties['approval']) { return }
@@ -907,7 +907,7 @@ function Get-ZipEntryInfos {
       $entryStream = $archiveEntry.Open()
       try {
         # 헤더의 Length 는 위조 가능하므로 '실제 읽은 누적량'으로 상한을 검사합니다
-        # (압축폭탄 방어 - Codex 지적). 초과 시 즉시 중단하고 zip 전체를 보존합니다.
+        # (압축폭탄 방어 - 리뷰 지적). 초과 시 즉시 중단하고 zip 전체를 보존합니다.
         $buffer = New-Object byte[] 81920
         $totalRead = [long]0
         while ($true) {
@@ -940,7 +940,7 @@ function Invoke-OldExeFileSweep {
   # 반환: @{ Deleted; Unverified; Failed; Pending }
   $result = @{ Deleted = 0; Unverified = 0; Failed = 0; Pending = $false }
   # 대장이 없거나 손상이면 이번 실행은 정리 불가 - '완료'가 아니라 '재시도 대기'로 남깁니다
-  # (일시적 추출 실패가 이 버전의 정리를 영구히 건너뛰게 하지 않음 - Codex #6)
+  # (일시적 추출 실패가 이 버전의 정리를 영구히 건너뛰게 하지 않음 - 리뷰 #6)
   if (-not (Test-ReleaseManifest -Manifest $Manifest)) {
     $script:cleanupLogLines += '[경고] 공식 릴리스 해시 목록을 읽지 못해 이번에는 구버전 파일을 정리하지 않습니다 (다음 실행 때 재시도)'
     $result.Pending = $true
@@ -956,7 +956,7 @@ function Invoke-OldExeFileSweep {
   $zipFiles = @($found.ZipFiles)
   if (($candidateFiles.Count + $zipFiles.Count) -eq 0) { return $result }
   if (($candidateFiles.Count + $zipFiles.Count) -gt 20) {
-    # 비정상적으로 많은 후보 = 오판 가능성 → 한 건도 삭제하지 않고 중단 (Codex 합의)
+    # 비정상적으로 많은 후보 = 오판 가능성 → 한 건도 삭제하지 않고 중단 (설계 합의)
     $script:cleanupLogLines += ('[경고] HoneyNogi exe/zip 후보가 {0}개로 비정상적으로 많아 정리를 건너뜁니다' -f ($candidateFiles.Count + $zipFiles.Count))
     $result.Pending = $true
     return $result
@@ -1045,7 +1045,7 @@ function Invoke-OldProcessShutdown {
   # 실행 중 구버전 = 구버전이 띄운 powershell(GUI/워커). exe 파일은 잠기지 않지만(런처는
   # 즉시 종료) 구 GUI 가 전역 뮤텍스를 쥐고 있으면 새 버전이 못 뜨고, 구 워커는 계속
   # 게임을 조작하므로 반드시 정리합니다. 워커 스냅샷을 GUI 종료 '전'에 수집합니다.
-  # 명령줄 대조는 '우리 사용자의 추출 경로 전체'로 - 다른 윈도우 사용자 세션 제외 (Codex #1).
+  # 명령줄 대조는 '우리 사용자의 추출 경로 전체'로 - 다른 윈도우 사용자 세션 제외 (리뷰 #1).
   $shutdown = @{ GuiKilled = 0; WorkerKilled = 0 }
   $guiScriptPath = Join-Path $scriptRoot 'mabinogi_gui.ps1'
   $cimRows = @()
@@ -1053,7 +1053,7 @@ function Invoke-OldProcessShutdown {
   $commandLineByPid = @{}
   foreach ($cimRow in $cimRows) { $commandLineByPid[[int]$cimRow.ProcessId] = [string]$cimRow.CommandLine }
   # 워커 스냅샷: 우리 추출 경로의 run_once 만. .Handle 접근으로 핸들을 지금 바인딩해
-  # PID 재사용에도 '그 프로세스'만 가리키게 합니다 (Kill 은 캐시된 핸들 사용 - Codex #3)
+  # PID 재사용에도 '그 프로세스'만 가리키게 합니다 (Kill 은 캐시된 핸들 사용 - 리뷰 #3)
   $workerProcs = @()
   foreach ($cimRow in $cimRows) {
     if (([string]$cimRow.CommandLine).IndexOf($workerScript, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
@@ -1069,12 +1069,12 @@ function Invoke-OldProcessShutdown {
   $snapshots = @()
   $currentGuiElsewhere = $false
   foreach ($psProc in @(Get-Process -Name 'powershell' -ErrorAction SilentlyContinue)) {
-    try { [void]$psProc.Handle } catch { }   # 스냅샷 시점 핸들 바인딩 - 이후 Kill 이 PID 재사용본을 잡지 않음 (Codex #3)
+    try { [void]$psProc.Handle } catch { }   # 스냅샷 시점 핸들 바인딩 - 이후 Kill 이 PID 재사용본을 잡지 않음 (리뷰 #3)
     $processByPid[[int]$psProc.Id] = $psProc
     $procTitle = [string]$psProc.MainWindowTitle
     $procCmd = [string]$commandLineByPid[[int]$psProc.Id]
     $snapshots += , @{ Id = $psProc.Id; Title = $procTitle; CommandLine = $procCmd }
-    # 현재 버전 GUI 가 이미 떠 있는지 (동시 기동 레이스에서 그쪽 워커를 죽이지 않기 위함 - Codex #1/#2)
+    # 현재 버전 GUI 가 이미 떠 있는지 (동시 기동 레이스에서 그쪽 워커를 죽이지 않기 위함 - 리뷰 #1/#2)
     if ([int]$psProc.Id -ne $PID -and $procTitle -eq ('꿀비노기 컨트롤 패널 v' + $appVersion) -and
         $procCmd.IndexOf($guiScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
       $currentGuiElsewhere = $true
@@ -1146,7 +1146,7 @@ function Show-CleanupPopup {
 
 function Invoke-OldExeCleanup {
   # 구버전 정리 전체 오케스트레이션. 동시 최초 실행 레이스는 전용 뮤텍스로 직렬화하고,
-  # 획득 후 config 를 다시 읽어 판정합니다 (Codex 합의). 프로세스 종료는 최초 1회(full)만,
+  # 획득 후 config 를 다시 읽어 판정합니다 (설계 합의). 프로세스 종료는 최초 1회(full)만,
   # pending 재시도는 파일만 건드립니다.
   if ($script:cleanupInProgress) { return }
   $script:cleanupInProgress = $true
@@ -1158,14 +1158,14 @@ function Invoke-OldExeCleanup {
     $cleanupMutex = New-Object System.Threading.Mutex($false, 'Global\HoneyNogiCleanup')
     try {
       # 대기 40초 = 정리 최대 소요(탐색 20초 + 프로세스 정리 + 해싱)보다 길게 - 동시 기동 시
-      # 두 번째 인스턴스가 첫 인스턴스의 정리 완료를 실제로 기다리게 합니다 (Codex #2)
+      # 두 번째 인스턴스가 첫 인스턴스의 정리 완료를 실제로 기다리게 합니다 (리뷰 #2)
       $cleanupMutexHeld = $cleanupMutex.WaitOne(40000)
     } catch [System.Threading.AbandonedMutexException] {
       $cleanupMutexHeld = $true
     }
     if (-not $cleanupMutexHeld) {
       # 다른 인스턴스가 40초 넘게 정리 중 = 그쪽이 GUI 가 됩니다. 이 인스턴스가 정리 없이
-      # 계속 진행하면 그쪽 정리와 레이스가 생기므로 조용히 종료합니다 (Codex #2)
+      # 계속 진행하면 그쪽 정리와 레이스가 생기므로 조용히 종료합니다 (리뷰 #2)
       $script:cleanupMutexTimedOut = $true
       return
     }
@@ -1188,7 +1188,7 @@ function Invoke-OldExeCleanup {
     # full: 신규 버전 최초 실행 1회
     $popup = Show-CleanupPopup -Text ('구버전 확인 및 삭제를 진행합니다.' + [Environment]::NewLine + '잠시만 기다려주세요…')
     $shutdown = Invoke-OldProcessShutdown
-    $script:cleanupProcessPhaseDone = $true   # 여기 도달 = 프로세스 정리 완료 (Codex #5)
+    $script:cleanupProcessPhaseDone = $true   # 여기 도달 = 프로세스 정리 완료 (리뷰 #5)
     if ($shutdown.WorkerKilled -gt 0) { Release-StuckInput }   # 워커 강제 종료 시 키/마우스 눌림 해제
     $sweep = Invoke-OldExeFileSweep -Manifest $manifest
     Set-CleanupMarker -DoneVersion $appVersion -Pending ([bool]$sweep.Pending)
@@ -1206,7 +1206,7 @@ function Invoke-OldExeCleanup {
   } catch {
     # 어떤 오류도 프로그램 시작을 막지 않습니다 (예외 경로 MessageBox 금지 - 무인 운용 보호).
     # 마커는 '프로세스 정리까지 끝난 경우'에만 남깁니다 - 그 전에 실패했으면 다음 실행이
-    # full 정리(구버전 종료 포함)를 다시 시도해야 하기 때문입니다 (Codex #5)
+    # full 정리(구버전 종료 포함)를 다시 시도해야 하기 때문입니다 (리뷰 #5)
     $script:cleanupLogLines += ('[경고] 구버전 정리 중 오류: {0}' -f $_.Exception.Message)
     if ($script:cleanupProcessPhaseDone) {
       try { Set-CleanupMarker -DoneVersion $appVersion -Pending $true } catch { }
@@ -1294,7 +1294,7 @@ $script:deviceCode = Get-LocalDeviceCode   # 이 PC 의 식별 코드 (빈 값 =
 $script:approvalState = 'no-cache'   # 'approved-live'|'approved-grace'|'denied'|'no-cache' (시작 시 캐시로 잠정 판정)
 $script:approvalPendingStart = $false # 시작 버튼이 눌려 '조회 완료 후 시작'이 예약된 상태 (새 자동화 시작 시 검사 스펙)
 $script:approvalDeniedSeen = $false  # 이 세션에서 '유효 명단에 부재(철회)'를 확인한 적 있음 - 캐시 삭제가
-                                     # 실패해도 세션 내에서는 이후 조회 실패가 유예로 되살아나지 않게 함 (Codex #4)
+                                     # 실패해도 세션 내에서는 이후 조회 실패가 유예로 되살아나지 않게 함 (리뷰 #4)
 $script:approvalPs = $null           # 진행 중 명단 조회 러닝스페이스 (null = 조회 없음, single-flight 가드)
 $script:approvalAsync = $null
 
@@ -1322,7 +1322,7 @@ function Start-ApprovalCheck {
     if ($script:approvalTimer) { $script:approvalTimer.Start() }
   } catch {
     # 조회 기동 자체가 실패하면(러닝스페이스 생성 불가 등) '조회 실패'로 즉시 판정합니다 -
-    # 방치하면 single-flight 가드와 예약된 시작이 영구 고착됨 (Codex #9)
+    # 방치하면 single-flight 가드와 예약된 시작이 영구 고착됨 (리뷰 #9)
     try { if ($script:approvalPs) { $script:approvalPs.Dispose() } } catch { }
     $script:approvalPs = $null
     $script:approvalAsync = $null
@@ -1339,7 +1339,7 @@ function Complete-ApprovalCheck {
   $decision = Get-ApprovalDecision -FetchOk ([bool]$parsed.Valid) -Codes $parsed.Codes -DeviceCode $script:deviceCode `
     -CacheApprovedAtUtc $cache.At -CacheDeviceCode $cache.Code -NowUtc ([DateTime]::UtcNow) -GraceDays $approvalGraceDays
   # 세션 내 철회 tombstone: 이 세션에서 denied 를 확인했다면, 캐시 삭제 성패와 무관하게
-  # 이후 조회 실패가 grace 로 되살아나지 못하게 합니다 (Codex #4)
+  # 이후 조회 실패가 grace 로 되살아나지 못하게 합니다 (리뷰 #4)
   if ($decision -eq 'approved-grace' -and $script:approvalDeniedSeen) { $decision = 'no-cache' }
   $script:approvalState = $decision
   switch ($decision) {
@@ -1385,7 +1385,7 @@ function Update-ApprovalUi {
   }
   if (-not $script:running) {
     $btnStart.Enabled = $approved
-    # 대분류 전환도 승인 전에는 잠금 (승인 오버레이가 버튼 줄을 다 덮지만 이중 방어 - Codex 조건 A)
+    # 대분류 전환도 승인 전에는 잠금 (승인 오버레이가 버튼 줄을 다 덮지만 이중 방어 - 리뷰 조건 A)
     $btnCatBattle.Enabled = $approved
     $btnCatLife.Enabled = $approved
   }
@@ -1458,7 +1458,7 @@ $btnCatBattle.Add_Paint({ Invoke-MainCatButtonPaint -Sender $this -PaintArgs $_ 
 $btnCatLife.Add_Paint({ Invoke-MainCatButtonPaint -Sender $this -PaintArgs $_ })
 
 # --- 사용 승인 안내 (미승인일 때만 표시 - 설정 영역 위에 겹쳐 나타남, 팝업 아님) ---
-# 높이 158: 대분류 버튼 줄 신설로 y144 의 시작 버튼 줄까지 덮어야 함 (Codex 조건 A -
+# 높이 158: 대분류 버튼 줄 신설로 y144 의 시작 버튼 줄까지 덮어야 함 (리뷰 조건 A -
 # 42+158 = 200 으로 콘텐츠 선택(190) 상단 10px 를 덮던 기존 범위도 유지)
 $grpApproval = New-Object System.Windows.Forms.GroupBox
 $grpApproval.Text = '사용 승인 필요'
@@ -1606,7 +1606,7 @@ $btnManual.Size = New-Object System.Drawing.Size(116, 38)
 $form.Controls.Add($btnManual)
 
 $btnManual.Add_Click({
-    # 생활 대분류: 숨겨진 전투 라디오 상태보다 mainCategory 를 먼저 검사 (Codex 조건 G)
+    # 생활 대분류: 숨겨진 전투 라디오 상태보다 mainCategory 를 먼저 검사 (리뷰 조건 G)
     if ($script:mainCategory -eq 'life') {
       $lifeManualText = "생활 자동화는 준비 중입니다.`n`n" +
       "[현재 상태]`n" +
@@ -2413,7 +2413,7 @@ $lvCrList.Add_ColumnClick({
   })
 # 실행 중 체크 토글 금지 (마우스·Space 키 전 경로 차단): 리스트가 스크롤용으로 살아 있어
 # 클릭이 닿습니다. running 만 조건으로 - crLoading 을 넣으면 실행 중 가드가 우회될 여지
-# (Codex 계약. 세 커스텀 리스트 공통)
+# (리뷰 계약. 세 커스텀 리스트 공통)
 $lvCrList.Add_ItemCheck({
     param($checkSender, $checkArgs)
     if ($script:running) { $checkArgs.NewValue = $checkArgs.CurrentValue }
@@ -2767,7 +2767,7 @@ foreach ($acrTipPanel in @($pnlAcrInput, $pnlAcrMatching)) {
 #  커스텀 리스트 셀 편집 오버레이 (2026-07-25): 셀 클릭 → 그 자리 드롭다운으로 수정.
 #  에디터는 드롭다운이 열려 있는 동안만 존재합니다 (닫히면 즉시 숨김 - 스크롤/리사이즈
 #  동기화 문제 원천 제거). 적용은 SelectionChangeCommitted 에서 '예약'(BeginInvoke)만 하고
-#  DropDownClosed 는 숨기기만 합니다 (ESC/외부 클릭은 커밋 없이 닫힘 - Codex 설계 합의).
+#  DropDownClosed 는 숨기기만 합니다 (ESC/외부 클릭은 커밋 없이 닫힘 - 설계 합의).
 # ============================================================
 $script:cellEditCombo = New-Object System.Windows.Forms.ComboBox
 $script:cellEditCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
@@ -2781,7 +2781,7 @@ $script:cellEditCombo.Add_SelectionChangeCommitted({
     $commitContext.Applied = $true
     $commitContext.Value = [string]$script:cellEditCombo.SelectedItem
     # 이벤트 연쇄가 끝난 뒤 적용. 예약 시점의 세션을 클로저로 캡처해 오래된 callback 이
-    # 새 편집 세션의 컨텍스트를 건드리지 못하게 합니다 (Codex 지적).
+    # 새 편집 세션의 컨텍스트를 건드리지 못하게 합니다 (리뷰 지적).
     $commitSession = [int]$commitContext.Session
     $null = $script:cellEditCombo.BeginInvoke([Action] ({ Invoke-CellEditApply -ExpectedSession $commitSession }.GetNewClosure()))
   })
@@ -2833,7 +2833,7 @@ $cellEditMouseUp = {
     -Options ([string[]]$cellPlan.Options) -Current ([string]$cellPlan.Current)
 }
 # 주의: 이벤트 연결은 각 ListView 가 '생성된 뒤'에 합니다 - $lvAcrList 는 이 아래에서
-# 생성되므로 여기서는 던전 리스트만 연결하고, 어비스는 생성 직후에 연결합니다 (Codex 지적).
+# 생성되므로 여기서는 던전 리스트만 연결하고, 어비스는 생성 직후에 연결합니다 (리뷰 지적).
 $lvCrList.Add_MouseUp($cellEditMouseUp)
 
 $lvAcrList = New-Object System.Windows.Forms.ListView
@@ -3022,7 +3022,7 @@ $rbAcrParty.Add_CheckedChanged({
 # ============================================================
 #  '심층던전 + 커스텀 반복' 목록/설정 화면 (2026-07-28)
 #  던전 커스텀과 같은 항목 계약(6조각 토큰)을 쓰되 컨트롤·저장 섹션(deepCustomRepeat)·
-#  완료 마커를 완전히 분리합니다 (Codex A-lite 합의 - 기존 던전 커스텀 코드 무접촉).
+#  완료 마커를 완전히 분리합니다 (경량안 합의 - 기존 던전 커스텀 코드 무접촉).
 #  난이도는 어려움 고정/더블 루팅 없음이라 입력은 구역 + 마족공물 + 소진 대응만 받습니다.
 # ============================================================
 $pnlDcrInput = New-Object System.Windows.Forms.Panel
@@ -3033,7 +3033,7 @@ $grpContentDetail.Controls.Add($pnlDcrInput)
 
 # 난이도 고정 안내 라벨: 심층 커스텀은 어려움 고정이라 난이도 입력이 없는데, 던전 커스텀
 # 입력 줄(난이도 콤보 시작)과 비교하면 빠진 것처럼 보임 (2026-07-28 사용자 피드백 →
-# Codex 합의: 입력 줄에서 고정 제약을 설명하고 리스트에는 변동값만 표시)
+# 설계 합의: 입력 줄에서 고정 제약을 설명하고 리스트에는 변동값만 표시)
 $lblDcrDifficulty = New-Object System.Windows.Forms.Label
 $lblDcrDifficulty.Text = '난이도: 어려움 (고정)'
 $lblDcrDifficulty.Location = New-Object System.Drawing.Point(0, 5)
@@ -3553,7 +3553,7 @@ $btnLcrReset.Add_Click({
 #  생활 카테고리 UI (v2.0.0 - 2026-08-05 시안 확정. 워커는 낚시 외 채집 8종 지원 - 2026-08-07)
 # ============================================================
 # 채집 스킬 9종 + 스킬별 채집 대상 (나무위키 '마비노기 모바일/생활 스킬' 실측 데이터.
-# Id 는 config 저장용 안정 식별자, Name 은 표시명. 대상은 게임 용어 그대로 저장 - Codex 합의)
+# Id 는 config 저장용 안정 식별자, Name 은 표시명. 대상은 게임 용어 그대로 저장 - 설계 합의)
 $script:lifeSkills = @(
   @{ Id = 'daily';   Name = '일상 채집'; Targets = @('둥지', '거미줄', '물', '우물', '젖소', '사과 나무', '차나무', '거미줄 뭉치', '헤이즐넛', '얽힌 거미줄') }
   @{ Id = 'wood';    Name = '나무 베기'; Targets = @('나무', '뾰족 나무', '굵은 나무', '쓸 만한 나무', '갑옷 나무', '어스름 나무', '벼락 나무', '흰 껍질 나무') }
@@ -3587,7 +3587,7 @@ $script:lifeSkillIcons = @{}
 $script:lifeSkillIconLoadFailures = @()
 foreach ($lifeIconId in @($script:lifeSkillIconB64.Keys)) {
   # 아이콘은 선택적 장식 - 실패해도 글자 카드로 계속 (단 조용히 삼키지 않고 실패 ID 를
-  # 모아 시작 로그로 경고. 임시 리소스는 finally 로 항상 정리 - Codex 조건)
+  # 모아 시작 로그로 경고. 임시 리소스는 finally 로 항상 정리 - 리뷰 조건)
   $lifeIconStream = $null
   $lifeIconTmp = $null
   try {
@@ -3641,7 +3641,7 @@ function Invoke-MainCatButtonPaint {
   } catch { }
 }
 
-# 슬라이더 상태: 선택 인덱스(전체 목록 기준) + 표시 페이지 (3개 단위 - Codex 합의 규칙:
+# 슬라이더 상태: 선택 인덱스(전체 목록 기준) + 표시 페이지 (3개 단위 - 설계 합의 규칙:
 # 화살표 = 페이지 이동(끝에서 비활성), 점 = 페이지 수, 카드 클릭 = 선택,
 # 스킬 변경 시 대상은 첫 항목으로 폴백)
 $script:lifeSkillIndex = 0
@@ -3715,13 +3715,13 @@ foreach ($lifeCardSlot in 0..2) {
   $lifeCard.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
   $lifeCard.Add_Click({
       # 슬라이드 애니메이션 중에는 반대 행 카드 클릭도 무시 (스트립이 낡은 대상을 보여주다
-      # 점프하는 혼선 방지 - Codex 조건)
+      # 점프하는 혼선 방지 - 리뷰 조건)
       if ($script:lifeSlideActive -or $script:running) { return }
       $cardIndex = [int]$this.Tag
       if ($cardIndex -lt 0) { return }
       if ($script:lifeSkillIndex -ne $cardIndex) {
         $script:lifeSkillIndex = $cardIndex
-        # 스킬이 바뀌면 대상 목록이 교체되므로 첫 항목으로 폴백 (Codex 합의)
+        # 스킬이 바뀌면 대상 목록이 교체되므로 첫 항목으로 폴백 (설계 합의)
         $script:lifeTargetIndex = 0
         $script:lifeTargetPage = 0
       }
@@ -3770,7 +3770,7 @@ foreach ($lifeCardSlot in 0..2) {
   $lifeCard.Visible = $false
   $lifeCard.Tag = -1
   $lifeCard.Add_Click({
-      # 슬라이드 애니메이션 중에는 반대 행 카드 클릭도 무시 (Codex 조건)
+      # 슬라이드 애니메이션 중에는 반대 행 카드 클릭도 무시 (리뷰 조건)
       if ($script:lifeSlideActive -or $script:running) { return }
       $cardIndex = [int]$this.Tag
       if ($cardIndex -lt 0) { return }
@@ -3795,7 +3795,7 @@ $grpContentDetail.Controls.Add($lblLifeTargetDots)
 # 오해만 됩니다 (워커는 이 값을 읽은 적이 없음). 준비물 부족 '감지'는 옵션이 아니라
 # 안내이므로 그대로 둡니다 (필요한 아이템 이름을 로그에 남기고 즉시 정지).
 
-# 상세 설정 - 가공: 1차는 안내만 (높이는 채집과 같은 268 유지 - 전환 시 폼 흔들림 방지, Codex 조건)
+# 상세 설정 - 가공: 1차는 안내만 (높이는 채집과 같은 268 유지 - 전환 시 폼 흔들림 방지, 리뷰 조건)
 $lblLifeProcessInfo = New-Object System.Windows.Forms.Label
 $lblLifeProcessInfo.Text = '가공 자동화는 추후 지원 예정입니다.'
 $lblLifeProcessInfo.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
@@ -3806,7 +3806,7 @@ $grpContentDetail.Controls.Add($lblLifeProcessInfo)
 
 function Update-LifeSliders {
   # 두 슬라이더(스킬/대상)의 카드 3개·화살표·점·선택 강조를 현재 상태로 다시 그립니다.
-  # Apply-HoneyTheme 가 버튼 스타일을 일괄 덮으므로 테마 적용 후에도 반드시 재호출 (Codex 조건 E)
+  # Apply-HoneyTheme 가 버튼 스타일을 일괄 덮으므로 테마 적용 후에도 반드시 재호출 (리뷰 조건 E)
   $lifeSkillCount = @($script:lifeSkills).Count
   $lifeSkillPages = [Math]::Ceiling($lifeSkillCount / 3.0)
   if ($script:lifeSkillIndex -ge $lifeSkillCount) { $script:lifeSkillIndex = 0 }
@@ -3868,17 +3868,17 @@ function Update-LifeSliders {
         $slotCard.Font = $script:lifeCardFontNormal
       }
     }
-    # 페이지 점: 현재 페이지 = ●, 나머지 = ○ (페이지 수 = ceil(항목/3) - Codex 합의)
+    # 페이지 점: 현재 페이지 = ●, 나머지 = ○ (페이지 수 = ceil(항목/3) - 설계 합의)
     $dotParts = @()
     foreach ($dotIndex in 0..([int]$sliderSet.Pages - 1)) {
       $dotParts += $(if ($dotIndex -eq [int]$sliderSet.Page) { '●' } else { '○' })
     }
     $sliderSet.Dots.Text = ($dotParts -join '  ')
     # 위치점은 흐린 색 (확정 시안 themeMuted. Apply-HoneyTheme 가 Label 을 themeText 로
-    # 덮으므로 여기서 매번 복원 - Codex 지적)
+    # 덮으므로 여기서 매번 복원 - 리뷰 지적)
     $sliderSet.Dots.ForeColor = $script:themeMuted
-    # 화살표: 끝 페이지에서 비활성 (순환 없음 - Codex 합의) + 애니메이션/실행 중 잠금
-    # (Start-LifeSlide 도중의 Update-LifeSliders 호출이 잠금을 되돌리지 않게 - Codex 조건)
+    # 화살표: 끝 페이지에서 비활성 (순환 없음 - 설계 합의) + 애니메이션/실행 중 잠금
+    # (Start-LifeSlide 도중의 Update-LifeSliders 호출이 잠금을 되돌리지 않게 - 리뷰 조건)
     $canNavigate = (-not $script:lifeSlideActive) -and (-not $script:running)
     $sliderSet.Prev.Enabled = $canNavigate -and ([int]$sliderSet.Page -gt 0)
     $sliderSet.Next.Enabled = $canNavigate -and ([int]$sliderSet.Page -lt ([int]$sliderSet.Pages - 1))
@@ -3903,7 +3903,7 @@ $script:lifeSlideTimer.Add_Tick({ Invoke-LifeSlideTick })
 
 function Stop-LifeSlideNow {
   # 애니메이션 즉시 종료 + 전체 정리 (이미 반영된 새 페이지로 스냅). 어떤 중단 경로에서도
-  # 잠금이 남지 않게 스스로 UI 를 복원합니다 (Codex 조건 - SkipUiRefresh 는 폼 종료/패널
+  # 잠금이 남지 않게 스스로 UI 를 복원합니다 (리뷰 조건 - SkipUiRefresh 는 폼 종료/패널
   # 갱신용: 이어지는 흐름이 UI 를 직접 갱신하는 곳에서만 사용)
   param([switch]$SkipUiRefresh)
   try { $script:lifeSlideTimer.Stop() } catch { }
@@ -3957,7 +3957,7 @@ function New-LifeSlideSnapshot {
       $snapCard.DrawToBitmap($snapshot, (New-Object System.Drawing.Rectangle(($snapCard.Left - $ZoneX), 0, $snapCard.Width, $snapCard.Height)))
     }
   } catch {
-    # 합성 실패 시 반환되지 못하는 Bitmap 을 여기서 직접 정리 (호출부 finally 가 못 봄 - Codex 지적)
+    # 합성 실패 시 반환되지 못하는 Bitmap 을 여기서 직접 정리 (호출부 finally 가 못 봄 - 리뷰 지적)
     if ($snapshot) { try { $snapshot.Dispose() } catch { } }
     throw
   } finally {
@@ -3981,7 +3981,7 @@ function Start-LifeSlide {
   $slideAfter = $null
   $slideStripG = $null
   try {
-    # 카드 존은 런타임 값으로 계산 (상수 419 는 실폭 418 과 1px 어긋남 - Codex 지적)
+    # 카드 존은 런타임 값으로 계산 (상수 419 는 실폭 418 과 1px 어긋남 - 리뷰 지적)
     $slideZoneX = [int]$slideCards[0].Left
     $slideZoneY = [int]$slideCards[0].Top
     $slideZoneW = [int]$slideCards[2].Right - $slideZoneX
@@ -4036,7 +4036,7 @@ $rbLifeGather.Add_CheckedChanged({ if ($null -ne $updateCategoryPanels) { & $upd
 
 function Update-MainCategoryVisual {
   # 대분류 버튼의 활성/비활성 스타일 전체 재설정 (활성 = 시작 버튼과 같은 꿀색 강조.
-  # 전환 시 비활성 쪽의 폰트/테두리까지 원상 복구 - Codex 조건 E)
+  # 전환 시 비활성 쪽의 폰트/테두리까지 원상 복구 - 리뷰 조건 E)
   foreach ($catPair in @(, @($btnCatBattle, 'battle', 'catBattle')) + @(, @($btnCatLife, 'life', 'catLife'))) {
     $catButton = $catPair[0]
     $catActive = ($script:mainCategory -eq [string]$catPair[1])
@@ -4060,11 +4060,11 @@ function Update-MainCategoryVisual {
 }
 
 function Set-MainCategory {
-  # 대분류(전투/생활) 전환 단일 진입점 (Codex 조건 B): 상태 변경 → 버튼 스타일 →
+  # 대분류(전투/생활) 전환 단일 진입점 (리뷰 조건 B): 상태 변경 → 버튼 스타일 →
   # 패널/설정/설명서/커스텀 처리와 레이아웃 재계산은 updateCategoryPanels 가 일괄 담당.
-  # 실행 중에는 전환 금지 (Set-UiRunning 이 버튼을 잠그지만 이중 방어 - Codex 조건 C)
+  # 실행 중에는 전환 금지 (Set-UiRunning 이 버튼을 잠그지만 이중 방어 - 리뷰 조건 C)
   param([string]$Category)
-  # 진행 중 슬라이드는 즉시 정리 (같은 카테고리 재클릭의 조기 반환보다 먼저 - Codex 조건:
+  # 진행 중 슬라이드는 즉시 정리 (같은 카테고리 재클릭의 조기 반환보다 먼저 - 리뷰 조건:
   # 조기 반환 경로에서 잠금이 남지 않게 Stop 이 스스로 UI 복원)
   if ($script:lifeSlideActive) { Stop-LifeSlideNow }
   if ($script:running) { return }
@@ -4078,11 +4078,11 @@ function Set-MainCategory {
 function Test-LifeStartBlocked {
   # 생활 대분류 시작 게이트 (v2.0.0): 낚시를 제외한 채집 8종만 시작 허용
   # (2026-08-07 양털 깎기·추수·호미질·곤충 채집 추가 - 전 대상 전수 배치 검증 완료).
-  # 채집 자동화 자체는 2026-08-05 워커 단독 실기 1사이클 통과로 차단 해제 (Codex 합의 조건).
+  # 채집 자동화 자체는 2026-08-05 워커 단독 실기 1사이클 통과로 차단 해제 (설계 합의 조건).
   # 가공·미지원 스킬은 워커가 어차피 코드 4로 안내 정지하지만, 시작 전에 즉답 팝업으로
   # 알려 주는 쪽이 무인 반복 진입을 막습니다. 팝업은 GUI 팝업 금지 규칙의 허용 예외 ②
   # (사용자 버튼 클릭 즉답 - F9 도 PerformClick 경유라 같은 경로).
-  # 승인 비동기 콜백의 우회 시작을 막기 위해 Invoke-StartAutomation 서두에서도 호출 (Codex 조건 D)
+  # 승인 비동기 콜백의 우회 시작을 막기 위해 Invoke-StartAutomation 서두에서도 호출 (리뷰 조건 D)
   if ($script:mainCategory -ne 'life') { return $false }
   if ($rbLifeProcess.Checked) {
     [System.Windows.Forms.MessageBox]::Show(
@@ -4136,7 +4136,7 @@ $grpSettings.Controls.Add($chkRevive)
 
 # 어시스트 자동 켜기 (2026-07-28 사용자 요청): 전투 중 우측 ASSIST 토글이 꺼져 있으면 H키로 켬.
 # 배치는 2열 상단 - 1열 4번째 줄(y106)은 클리어 대기 줄(도움말?+라벨+숫자, y108~132)과 겹침
-# (Codex 리뷰 지적으로 이동. 2열 y82 의 저장 안내 라벨과도 안 겹치는 자리)
+# (교차 리뷰 지적으로 이동. 2열 y82 의 저장 안내 라벨과도 안 겹치는 자리)
 $chkAssist = New-Object System.Windows.Forms.CheckBox
 $chkAssist.Text = '어시스트 자동 켜기 (H)'
 $chkAssist.Location = New-Object System.Drawing.Point(210, 25)
@@ -4162,8 +4162,8 @@ $btnAlwaysOn.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnAlwaysOn)
 
 $btnAlwaysOn.Add_Click({
-    # 생활 대분류: 전투 체크박스 대신 생활 설정만 표시 (Codex 조건 G.
-    # 가공 선택 중에는 채집 전용 항목을 생략해 화면 상태와 일치 - Codex 권고)
+    # 생활 대분류: 전투 체크박스 대신 생활 설정만 표시 (리뷰 조건 G.
+    # 가공 선택 중에는 채집 전용 항목을 생략해 화면 상태와 일치 - 리뷰 권고)
     if ($script:mainCategory -eq 'life') {
       # '준비 중' 안내는 **아직 지원하지 않는 것에만** 붙입니다 (2026-08-08 사용자 지시).
       # 채집 8종은 전 대상 실기 검증까지 끝났는데 머리글이 계속 '준비 중'이라 사실과 달랐습니다.
@@ -4428,7 +4428,7 @@ $form.Controls.Add($lnkUpdate)
 # CheckBox Appearance='Button' = 눌린 상태 유지 시각을 공짜로 얻음. 실행 중에도 사용해야
 # 하므로 Set-UiRunning 잠금 그룹(반복/콘텐츠/상세)에 넣지 않습니다. 배치·폼 높이는
 # updateCategoryPanels 끝의 적용부가, 순수 계산은 Get-TabToggleLayout(진리표 테스트 대상)이 담당.
-$script:logViewHeight = 150      # 로그 뷰포트 기억값 - 총 폼 높이가 아니라 로그 영역 높이만 기억해 설정을 접으면 폼도 함께 줄어듦 (Codex 계약. 기본 150 = 2026-08-04 사용자 조정 - 300은 너무 높음, 늘리면 그 높이가 유지됨)
+$script:logViewHeight = 150      # 로그 뷰포트 기억값 - 총 폼 높이가 아니라 로그 영역 높이만 기억해 설정을 접으면 폼도 함께 줄어듦 (리뷰 계약. 기본 150 = 2026-08-04 사용자 조정 - 300은 너무 높음, 늘리면 그 높이가 유지됨)
 $script:logLayoutOpen = $null    # 직전 레이아웃의 로그 상태 3상태 토큰 (null=최초) - 열림이었을 때만 뷰포트를 흡수
 $script:hiddenLogErrors = 0      # 로그 접힘 중 발생한 미열람 오류/경고 수 (토글 배지)
 $script:hiddenLogWarns = 0
@@ -4442,7 +4442,7 @@ $chkTabSettings.Size = New-Object System.Drawing.Size(100, 32)
 $chkTabSettings.FlatStyle = 'Flat'
 $chkTabSettings.FlatAppearance.BorderColor = $script:themeBorder
 $chkTabSettings.FlatAppearance.BorderSize = 1
-$chkTabSettings.UseVisualStyleBackColor = $false   # 커스텀 배경색 확실 적용 (Codex 조건)
+$chkTabSettings.UseVisualStyleBackColor = $false   # 커스텀 배경색 확실 적용 (리뷰 조건)
 $chkTabSettings.BackColor = $script:themeControl
 $form.Controls.Add($chkTabSettings)
 
@@ -4468,7 +4468,7 @@ $form.Controls.Add($lblLogPreview)
 
 function Update-LogTabBadge {
   # 접힘 중 미열람 오류/경고 배지 (오류 우선). 리셋은 로그를 실제로 열 때/로그 지우기 때만 -
-  # 배지는 '새 회차'가 아니라 '마지막으로 로그를 본 뒤'의 의미라 회차 시작에 지우지 않음 (Codex)
+  # 배지는 '새 회차'가 아니라 '마지막으로 로그를 본 뒤'의 의미라 회차 시작에 지우지 않음 (리뷰)
   if ($script:hiddenLogErrors -gt 0) {
     $chkTabLog.Text = "로그 ● 오류 $($script:hiddenLogErrors)"
     $chkTabLog.BackColor = $script:themeDanger
@@ -4500,7 +4500,7 @@ function Reset-LogTabBadge {
 }
 
 function Save-UiToggleState {
-  # 두 토글 상태를 항상 함께 저장 (ui.logFontSize 즉시 저장 패턴, 단일 헬퍼 통일 - Codex 조건)
+  # 두 토글 상태를 항상 함께 저장 (ui.logFontSize 즉시 저장 패턴, 단일 헬퍼 통일 - 리뷰 조건)
   if (-not $script:uiReady) { return }
   $cfg = Read-Config
   if (-not $cfg) { return }
@@ -4534,14 +4534,14 @@ $chkTabLog.Add_CheckedChanged({
   })
 
 # 하단 줄 간격 실측: ClientHeight - 하단 버튼 Top. 레이아웃이 폼 높이를 바꿔도 이 값으로
-# 로그 높이를 직접 계산합니다 (SuspendLayout 중 Bottom 앵커 재배치 지연과 무관 - Codex 조건)
+# 로그 높이를 직접 계산합니다 (SuspendLayout 중 Bottom 앵커 재배치 지연과 무관 - 리뷰 조건)
 $script:footerGap = $form.ClientSize.Height - $btnOpenLog.Top
 
 $btnClearLog.Add_Click({
     $txtLog.Clear()
     # Clear() 후에는 확대 배율이 1.0으로 초기화되므로 다시 적용합니다
     $txtLog.ZoomFactor = [float]([int]$numFontSize.Value / 9.0)
-    # 지운 내용의 미열람 배지를 남기면 모순이므로 함께 리셋합니다 (Codex 조건)
+    # 지운 내용의 미열람 배지를 남기면 모순이므로 함께 리셋합니다 (리뷰 조건)
     Reset-LogTabBadge
     # 화면 표시만 지웁니다. Log 폴더의 파일 기록은 그대로 남습니다.
   })
@@ -4553,7 +4553,7 @@ function Add-ColoredLogLine {
   param([string]$Text)
 
   # 내용에 따라 색을 입혀 로그창에 한 줄 추가합니다. 색과 접힘 배지가 같은 심각도 판정을
-  # 공유합니다 (2026-08-04 탭 토글 - Codex 계약).
+  # 공유합니다 (2026-08-04 탭 토글 - 리뷰 계약).
   $severity = ''
   $lineColor = [System.Drawing.Color]::Gainsboro                                  # 기본(회백색)
   if ($Text -match '\[오류\]|오류 종료|실패') {
@@ -4575,7 +4575,7 @@ function Add-ColoredLogLine {
   $txtLog.AppendText($Text + "`r`n")
   $txtLog.SelectionColor = $txtLog.ForeColor
   # 로그 접힘 판정은 논리 상태(토글 Checked)로 - $txtLog.Visible 은 폼 표시 전엔 열림
-  # 상태여도 false 라 배지가 오작동합니다 (Codex 지적)
+  # 상태여도 false 라 배지가 오작동합니다 (리뷰 지적)
   if (-not $chkTabLog.Checked) {
     if ($severity -eq 'error') { $script:hiddenLogErrors++ }
     elseif ($severity -eq 'warn') { $script:hiddenLogWarns++ }
@@ -4605,10 +4605,10 @@ function Get-TabToggleLayout {
     [int]$WorkAreaHeight
   )
 
-  # 탭 토글 줄 이하의 세로 배치 순수 계산 (진리표 테스트 대상 - 2026-08-04 시안 확정, Codex 합의):
+  # 탭 토글 줄 이하의 세로 배치 순수 계산 (진리표 테스트 대상 - 2026-08-04 시안 확정, 설계 합의):
   #  토글 줄(높이 32) → [설정 그룹(열림 시)] → [로그(열림 시)] → 하단 줄. 접힌 섹션만큼
   #  ClientHeight 가 줄어듭니다. 로그는 총 폼 높이가 아니라 '뷰포트 높이'를 기억값으로 받아
-  #  설정을 접으면 폼도 함께 줄어듭니다 (Codex 지적 반영). 작업 영역을 넘으면 로그 뷰포트를
+  #  설정을 접으면 폼도 함께 줄어듭니다 (리뷰 지적 반영). 작업 영역을 넘으면 로그 뷰포트를
   #  최소 100까지 축소합니다 (100 보장이 우선 - 화면 이탈은 적용부의 Top 보정이 마무리).
   # 반환: TabRowTop / SettingsTop·LogTop(-1 = 숨김) / LogHeight / ClientHeight /
   #        LockHeight(접힘 = 높이 잠금) / MinOuterHeight(열림 시 동적 최소 - 로그 100 보장)
@@ -4767,7 +4767,7 @@ function Get-CustomNextProgress {
 function New-CustomShuffleOrder {
   # 랜덤 진행: 이번 바퀴의 실행 순서(등록 인덱스 순열)를 만듭니다. 생성 지점은 시작 게이트
   # (Confirm-CustomShuffleReady)와 Step 의 바퀴 전환 두 곳뿐 - getter/복구 경로는 읽기 전용
-  # (호출 횟수에 따라 순서가 바뀌는 사고 방지 - Codex 계약).
+  # (호출 횟수에 따라 순서가 바뀌는 사고 방지 - 리뷰 계약).
   param([int]$ItemCount)
   if ($ItemCount -lt 1) { return @() }
   if ($ItemCount -eq 1) { return @(0) }
@@ -4905,7 +4905,7 @@ function Get-CustomCoinTotalPerLap {
 }
 
 function Update-CustomRepeatMixLock {
-  # 혼합 리스트 자동 잠금 (2026-07-30 사용자 요청, Codex 승인): 마지막→첫 항목의 바퀴 순환이
+  # 혼합 리스트 자동 잠금 (2026-07-30 사용자 요청, 리뷰 승인): 마지막→첫 항목의 바퀴 순환이
   # 게임에서 불가능한 층 조합(Get-CustomTransitionIssues 의 Wrap 이슈)이면 리스트 반복을
   # '횟수 1바퀴'로 강제하고 무한 라디오·바퀴 수 입력을 잠급니다. 혼합이 해소되면 자동 해제.
   # 기존에는 시작 게이트가 거부하고 수동 변경을 안내했음 - 그 게이트는 config 직접 편집
@@ -4924,7 +4924,7 @@ function Update-CustomRepeatMixLock {
   if ($mixLockNeeded -and -not $mixWasLocked) {
     # 잠금 진입 시에만 이전 반복 상태를 저장합니다 (2026-08-01 3차 점검: 해제 때 Enabled 만
     # 복원하고 무한/바퀴 수는 잠금이 바꾼 '횟수 1바퀴'로 남아, 저장 실패 롤백 등으로 잠금이
-    # 풀리면 사용자의 원래 반복 설정이 유실됐음 - Codex 조건: 진입 시 저장/해제 시 복원)
+    # 풀리면 사용자의 원래 반복 설정이 유실됐음 - 리뷰 조건: 진입 시 저장/해제 시 복원)
     $mixState.PrevInfinite = -not [bool]$RbCount.Checked
     $mixState.PrevLaps = [int]$NumLaps.Value
     $prevLoading = $script:crLoading
@@ -4946,7 +4946,7 @@ function Update-CustomRepeatMixLock {
     $prevLoading = $script:crLoading
     $script:crLoading = $true
     try {
-      # 이전 반복 상태 복원 (범위 보정: NumericUpDown 한계 밖 값 방어 - Codex 조건)
+      # 이전 반복 상태 복원 (범위 보정: NumericUpDown 한계 밖 값 방어 - 리뷰 조건)
       if ([bool]$mixState.PrevInfinite) { $RbInfinite.Checked = $true }
       $restoreLaps = [int]$mixState.PrevLaps
       if ($restoreLaps -lt [int]$NumLaps.Minimum) { $restoreLaps = [int]$NumLaps.Minimum }
@@ -5074,7 +5074,7 @@ function Open-CellEditDropDown {
 function Invoke-CellEditApply {
   # SelectionChangeCommitted 가 예약한 적용 실행부. 지연 실행 사이에 행이 사라졌거나
   # 세션이 바뀐 경우를 방어합니다. 검증이 전부 통과한 뒤에만 컨텍스트를 제거합니다 -
-  # 오래된 예약이 새 세션의 컨텍스트를 지우지 못하게 (Codex 지적).
+  # 오래된 예약이 새 세션의 컨텍스트를 지우지 못하게 (리뷰 지적).
   param([int]$ExpectedSession = -1)
   $applyContext = $script:cellEditContext
   if (-not $applyContext -or -not $applyContext.Applied) { return }
@@ -5120,7 +5120,7 @@ function Invoke-CrCellEdit {
   if ($script:uiReady) { Save-CustomRepeatToConfig }
   if (-not $script:lastCustomSaveOk) {
     # 저장 실패: 화면과 config 이 어긋나지 않게 행을 원복하고 은동전 합계도 되돌립니다
-    # (저장 시도 중 변경된 행 기준으로 합계가 이미 갱신됐음 - Codex 지적)
+    # (저장 시도 중 변경된 행 기준으로 합계가 이미 갱신됐음 - 리뷰 지적)
     $prevLoading = $script:crLoading
     $script:crLoading = $true
     try { Set-CustomListRowTexts -Row $lvCrList.Items[$RowIndex] -Item $beforeItem } finally { $script:crLoading = $prevLoading }
@@ -5231,7 +5231,7 @@ function Invoke-AcrCellEdit {
 # ============================================================
 #  커스텀 리스트 셀 편집 판정 (2026-07-25) - 순수 함수 (진리표 테스트 대상)
 #  셀 클릭 → 오버레이 드롭다운으로 값 변경. 어비스의 방식/매칭 열은 통일 규칙 때문에
-#  '리스트 전체 일괄 변경' 진입점으로 동작합니다 (Codex 설계 합의).
+#  '리스트 전체 일괄 변경' 진입점으로 동작합니다 (설계 합의).
 # ============================================================
 function Get-CrCellEditPlan {
   # 던전 리스트 셀 편집 계획: 편집 가능하면 @{ Options; Current }, 아니면 $null.
@@ -5315,7 +5315,7 @@ function Get-AcrCellEditPlan {
 }
 
 function ConvertFrom-AcrModeOption {
-  # 방식 열 드롭다운 표시 문구 → 구조화 키 (파싱 대신 고정 매핑 - Codex 합의)
+  # 방식 열 드롭다운 표시 문구 → 구조화 키 (파싱 대신 고정 매핑 - 설계 합의)
   param([string]$OptionText)
   switch ([string]$OptionText) {
     '혼자하기'                { return @{ Mode = 'solo'; Matching = '없음' } }
@@ -5511,7 +5511,7 @@ function Get-AbyssCustomItemsFromList {
 }
 
 # ============================================================
-#  심층던전 커스텀 반복 - 헬퍼 (2026-07-28, Codex A-lite 합의로 던전 커스텀과 분리)
+#  심층던전 커스텀 반복 - 헬퍼 (2026-07-28, 경량안 합의로 던전 커스텀과 분리)
 #  항목 계약은 던전과 동일한 6필드(difficulty/stage/coin/doubleLoot/exhaustContinue/
 #  noDoubleSweep)를 쓰되 difficulty='어려움'/doubleLoot=false/noDoubleSweep=false 고정 -
 #  토큰·지문·마커·워커 env 계약(Format-CustomItemToken)을 그대로 재사용하기 위함입니다.
@@ -5797,7 +5797,7 @@ function Set-DeepCustomRepeatOnConfig {
 
 function Save-DeepCustomRepeatToConfig {
   # 심층 커스텀 즉시 저장 경로 (던전/어비스 공용 Save-CustomRepeatToConfig 와 분리 -
-  # Codex A-lite 합의: 기존 저장 경로 무접촉. 실패 신호는 같은 부채널을 사용합니다)
+  # 경량안 합의: 기존 저장 경로 무접촉. 실패 신호는 같은 부채널을 사용합니다)
   # 혼합 리스트면 저장 전에 반복을 '횟수 1바퀴'로 강제해 그 값이 저장되게 합니다
   Update-CustomRepeatMixLock -Items @(Get-DeepCustomItemsFromList) `
     -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
@@ -6169,7 +6169,7 @@ function Set-LcrItemCellValue {
   # 이전 대상이 새 스킬에 없을 수 있고, 그대로 두면 워커가 대상 행을 못 찾아 반드시 멈춥니다.
   # 판정은 '스킬이 바뀌었는가'가 아니라 **'지금 대상이 새 스킬에 있는가'** 입니다 - 같은 스킬을
   # 다시 골랐을 때 대상이 보존돼야 '변경 없음' 조기 반환이 성립합니다(조용한 재저장 방지).
-  # 슬라이더도 같은 규칙을 씁니다(스킬 변경 시 대상은 첫 항목으로 폴백 - Codex 합의).
+  # 슬라이더도 같은 규칙을 씁니다(스킬 변경 시 대상은 첫 항목으로 폴백 - 설계 합의).
   $newTargets = @(Get-LifeSkillTargets -SkillId $newSkill)
   if ($newTargets.Count -gt 0 -and ($newTargets -notcontains $newTarget)) {
     $newTarget = [string]$newTargets[0]
@@ -6304,7 +6304,7 @@ function Update-CustomRandomToggleStyle {
 
 function Save-CustomRandomOrder {
   # 랜덤 토글 즉시 저장 + 진행/완료 마커 무효화. 켜고 끄는 것 자체가 실행 순서의 의미를
-  # 바꾸므로 진행 기록은 처음부터 - 같은 저장에서 원자적으로 처리합니다 (Codex 조건)
+  # 바꾸므로 진행 기록은 처음부터 - 같은 저장에서 원자적으로 처리합니다 (리뷰 조건)
   param([string]$SectionName, [bool]$Enabled)
   $cfg = Read-Config
   if (-not $cfg -or -not $cfg.PSObject.Properties[$SectionName] -or -not $cfg.$SectionName) {
@@ -6328,7 +6328,7 @@ function Save-CustomRandomOrder {
 }
 
 function Update-CustomRandomMixGate {
-  # 층 혼합 리스트의 랜덤 게이트: 혼합이면 토글 비활성 + 켜져 있으면 자동 해제 (Codex 정책:
+  # 층 혼합 리스트의 랜덤 게이트: 혼합이면 토글 비활성 + 켜져 있으면 자동 해제 (리뷰 정책:
   # 편집 차단 대신 자동 해제 + 안내. 혼합 해소 시 재활성만 - 자동으로 다시 켜지는 않음)
   param($Toggle, $Items, [string]$SectionName)
   $mixGateNeeded = $false
@@ -6360,7 +6360,7 @@ function Set-CustomListRandomView {
   # 실행 중 표시 (확정 시안): 이번 바퀴 순열 순서로 행을 재배열하고 # 열을 '진행순서 (등록번호)'
   # 로, 현재 항목 행을 크림색으로 표시합니다. 행 객체를 재사용(Tag=등록 인덱스)해 체크/셀
   # 텍스트 손실이 없고, 저장 함수는 Tag 순 정렬로 등록 순서를 보존합니다 (실행 중 [설정 저장]
-  # 이 화면 순서를 그대로 저장하는 사고 방어 - Codex 조건)
+  # 이 화면 순서를 그대로 저장하는 사고 방어 - 리뷰 조건)
   param($Context)
   if (-not $Context -or -not $Context.RandomOrder -or -not $Context.Order) { return }
   $view = Get-CustomActiveListView -SectionName ([string]$Context.SectionName)
@@ -6561,7 +6561,7 @@ function Get-CustomCurrentContext {
   if ($node.PSObject.Properties['listRepeatCount']) { try { $listRepeatCount = [int]$node.listRepeatCount } catch { } }
   # 랜덤 진행 (2026-08-04): Items 는 항상 '등록 순서'로 유지(지문/마커 계약 불변)하고,
   # 실행 순서는 ExecutionItems/Order 로 분리합니다. 이 getter 는 읽기·매핑만 담당 -
-  # 순열 생성은 시작 게이트와 Step 의 바퀴 전환에서만 (Codex 계약).
+  # 순열 생성은 시작 게이트와 Step 의 바퀴 전환에서만 (리뷰 계약).
   $randomOrder = Get-CustomRandomOrderEnabled -Node $node
   $shuffleOrder = $null
   $shuffleValid = $true
@@ -6645,7 +6645,7 @@ function Step-CustomProgress {
     fingerprint = (Get-CustomFingerprint -Items $items)
   }
   # 랜덤 진행: 바퀴 전환(index=0 복귀)에서만 새 순열, 같은 바퀴 전진은 기존 순열 그대로 복사
-  # (재시도/복구 경로는 Step 을 부르지 않으므로 재셔플 없음 - Codex 계약)
+  # (재시도/복구 경로는 Step 을 부르지 않으므로 재셔플 없음 - 리뷰 계약)
   if (Get-CustomRandomOrderEnabled -Node $node) {
     if ([int]$next.index -eq 0) {
       $stepShuffle = @(New-CustomShuffleOrder -ItemCount $items.Count)
@@ -6691,7 +6691,7 @@ function Reset-CustomProgress {
     return $false
   }
   # 완료 마커도 함께 무효화 (랜덤 진행: 초기화 후 우연히 같은 순열이 재현돼 낡은 마커가
-  # 일치하는 사고 방지 - Codex 조건. 순차 모드에서도 초기화 = 새 출발 의도라 무해)
+  # 일치하는 사고 방지 - 리뷰 조건. 순차 모드에서도 초기화 = 새 출발 의도라 무해)
   Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
   if ($LogMessage) { Add-GuiLog $LogMessage }
   return $true
@@ -6740,7 +6740,7 @@ function Confirm-CustomShuffleReady {
   if ($gateLap -lt 1) { $gateLap = 1 }
   if ($gateProgress -and $gateIndex -gt 0) {
     # 바퀴 중간의 순열 유실/손상: 기존 index 를 새 순열에 적용하면 중복/누락이 생기므로
-    # 진행 전체를 처음부터 (Codex 조건: index>0 이면 전체 초기화)
+    # 진행 전체를 처음부터 (리뷰 조건: index>0 이면 전체 초기화)
     Add-GuiLog '[안내] 랜덤 진행 순서 기록이 없거나 손상돼 처음(1바퀴)부터 새로 시작합니다.'
     $gateLap = 1
     $gateIndex = 0
@@ -6834,7 +6834,7 @@ function Load-SettingsToUi {
       default       { $rbCatAbyss.Checked = $true }
     }
   } catch { $rbCatAbyss.Checked = $true }
-  # 저장된 대분류(전투/생활)와 생활 설정 복원 (v2.0.0. 잘못된 값은 전부 기본값 폴백 - Codex 조건 F)
+  # 저장된 대분류(전투/생활)와 생활 설정 복원 (v2.0.0. 잘못된 값은 전부 기본값 폴백 - 리뷰 조건 F)
   try {
     $lifeCfg = $null
     if ($cfg.PSObject.Properties['life']) { $lifeCfg = $cfg.life }
@@ -6862,7 +6862,7 @@ function Load-SettingsToUi {
     Add-GuiLog "[경고] 생활 설정 복원 중 오류 - 기본값으로 시작합니다 ($($_.Exception.Message))"
   }
   # 대분류 복원은 생활 세부 값 복원과 분리 - 세부 복원이 실패해도 사용자가 쓰던 화면(생활)은
-  # 유지되게 합니다 (Codex 권고. Set-MainCategory 는 같은 값이면 조기 반환)
+  # 유지되게 합니다 (리뷰 권고. Set-MainCategory 는 같은 값이면 조기 반환)
   try {
     if ([string]$cfg.mainCategory -eq 'life') { Set-MainCategory -Category 'life' }
   } catch { }
@@ -6990,7 +6990,7 @@ function Load-SettingsToUi {
           foreach ($dcrSavedItem in @($dcr.items)) {
             if ($null -eq $dcrSavedItem) { continue }
             # 계약 밖 stage 값(직접 편집 등)은 행으로 넣지 않습니다 - 내부 형식('1-1'~'2-3')만 인정
-            # (Codex 지적: D 접두 검사만으로는 'D3-1' 같은 범위 밖 값이 통과해 워커 파싱에서 실패)
+            # (리뷰 지적: D 접두 검사만으로는 'D3-1' 같은 범위 밖 값이 통과해 워커 파싱에서 실패)
             $dcrSavedStage = [string]$dcrSavedItem.stage
             if ($dcrSavedStage -notmatch '^[12]-[123]$') { continue }
             $dcrSavedCoin = ConvertTo-StrictBoolean $dcrSavedItem.coin $false
@@ -7077,7 +7077,7 @@ function Load-SettingsToUi {
   try { $numClearWait.Value = [int]$cfg.timeoutsSeconds.dungeonClear } catch { }
   try { $numCount.Value = [int]$cfg.repeat.defaultCount } catch { }
   try { $numFontSize.Value = [int]$cfg.ui.logFontSize } catch { }
-  # 탭 토글 상태 복원 (2026-08-04 시안 - 기본 둘 다 접힘. JSON 불리언만 인정 - Codex 조건.
+  # 탭 토글 상태 복원 (2026-08-04 시안 - 기본 둘 다 접힘. JSON 불리언만 인정 - 리뷰 조건.
   # 프로그램적 체크 변경의 CheckedChanged 저장은 uiReady 가드가 막음)
   try { $chkTabSettings.Checked = ConvertTo-StrictBoolean $cfg.ui.settingsOpen $false } catch { }
   try { $chkTabLog.Checked = ConvertTo-StrictBoolean $cfg.ui.logOpen $false } catch { }
@@ -7107,7 +7107,7 @@ function Save-SettingsFromUi {
     })
   }
   # 탭 토글(설정/로그 표시) 상태도 최종 병합 - 즉시 저장(Save-UiToggleState)과 별개로 시작 시
-  # 저장 경로에서도 두 값을 함께 보존합니다 (Codex 조건)
+  # 저장 경로에서도 두 값을 함께 보존합니다 (리뷰 조건)
   if (-not $cfg.PSObject.Properties['ui']) {
     $cfg | Add-Member -NotePropertyName 'ui' -NotePropertyValue ([pscustomobject]@{})
   }
@@ -7173,12 +7173,12 @@ function Save-SettingsFromUi {
   if ($cfg.PSObject.Properties['contentCategory']) { $cfg.contentCategory = $categoryValue }
   else { $cfg | Add-Member -NotePropertyName 'contentCategory' -NotePropertyValue $categoryValue }
   # 대분류(전투/생활) 저장 (v2.0.0. contentCategory 는 전투 하위 선택이므로 그대로 두고
-  # 별도 키로 저장 - Codex 조건 F)
+  # 별도 키로 저장 - 리뷰 조건 F)
   if ($cfg.PSObject.Properties['mainCategory']) { $cfg.mainCategory = [string]$script:mainCategory }
   else { $cfg | Add-Member -NotePropertyName 'mainCategory' -NotePropertyValue ([string]$script:mainCategory) }
-  # 생활 설정 저장 (skill 은 안정 Id, target 은 게임 용어 표시명 그대로 - Codex 합의).
+  # 생활 설정 저장 (skill 은 안정 Id, target 은 게임 용어 표시명 그대로 - 설계 합의).
   # 섹션이 이미 있으면 객체 교체가 아니라 값 6개만 갱신합니다 - 교체하면 config.json 의
-  # '_설명' 안내 키와 향후 워커 키가 저장 한 번에 삭제됨 (Codex 지적)
+  # '_설명' 안내 키와 향후 워커 키가 저장 한 번에 삭제됨 (리뷰 지적)
   $lifeSkillSave = $script:lifeSkills[$script:lifeSkillIndex]
   $lifeTargetsSave = @($lifeSkillSave.Targets)
   $lifeValues = @{
@@ -7295,9 +7295,9 @@ function Save-SettingsFromUi {
 function Set-UiRunning {
   param([bool]$IsRunning)
   # 실행 시작 시 진행 중 슬라이드 정리 (상세 Enabled 스냅샷이 오버레이/잠금 상태를 뜨지 않게 -
-  # Codex 권고. 생활에서는 시작이 차단되지만 향후 생활 실행 대비 방어).
+  # 리뷰 권고. 생활에서는 시작이 차단되지만 향후 생활 실행 대비 방어).
   # 일반 Stop(UI 복원 포함)이어야 함 - SkipUiRefresh 면 화살표 false 가 스냅샷에 저장돼
-  # 실행 종료 후 영구 비활성 (Codex 지적)
+  # 실행 종료 후 영구 비활성 (리뷰 지적)
   if ($IsRunning -and $script:lifeSlideActive) { Stop-LifeSlideNow }
   $script:running = $IsRunning
   # 랜덤 진행 표시 복원 - 모든 정지 경로가 이 함수를 지나므로 여기서 한 번에 처리
@@ -7305,7 +7305,7 @@ function Set-UiRunning {
   # 시작 버튼은 '미실행 + 사용 승인'의 합성 조건 (실행 종료 후에도 미승인이면 잠금 유지)
   $btnStart.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   # 대분류(전투/생활) 전환은 실행 중 잠금 - 전투 실행 중 생활 화면으로 바뀌면 상세/설정
-  # 표시가 실행 내용과 어긋남 (Codex 조건 C. 미승인 시 잠금은 Update-ApprovalUi 담당)
+  # 표시가 실행 내용과 어긋남 (리뷰 조건 C. 미승인 시 잠금은 Update-ApprovalUi 담당)
   $btnCatBattle.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnCatLife.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnSafeStop.Enabled = $IsRunning
@@ -7321,7 +7321,7 @@ function Set-UiRunning {
   # 부모 비활성 시 자식 스크롤까지 죽음). 편집은 별도 가드가 전부 차단: 셀 편집/콤보(기존
   # running 가드) + 머리글 전체 토글·체크 토글(running 가드 추가). 스냅샷을 떠서 복원하는
   # 이유: 조건부 Enabled 자식(주간 카드 연동 구역 콤보 등)의 상태 보존. 스냅샷 존재 여부가
-  # 전이 토큰이라 중복 호출(true→true 등)에도 원상태가 유실되지 않습니다 (Codex 합의 계약).
+  # 전이 토큰이라 중복 호출(true→true 등)에도 원상태가 유실되지 않습니다 (설계 합의 계약).
   if ($IsRunning -and $null -eq $script:contentDetailEnabledSnapshot) {
     $detailSnapshot = @{}
     $scrollableLists = @($lvCrList, $lvAcrList, $lvDcrList, $lvLcrList)
@@ -7329,7 +7329,7 @@ function Set-UiRunning {
       if ($scrollableLists -contains $detailChild) { continue }
       $detailSnapshot[$detailChild] = [bool]$detailChild.Enabled
     }
-    # 전부 캡처한 뒤 별도 루프로 비활성 (Enabled 게터는 조상 상태가 반영된 유효값 - Codex 지적)
+    # 전부 캡처한 뒤 별도 루프로 비활성 (Enabled 게터는 조상 상태가 반영된 유효값 - 리뷰 지적)
     $script:contentDetailEnabledSnapshot = $detailSnapshot
     foreach ($detailChild in @($detailSnapshot.Keys)) { $detailChild.Enabled = $false }
   } elseif ((-not $IsRunning) -and $null -ne $script:contentDetailEnabledSnapshot) {
@@ -7340,7 +7340,7 @@ function Set-UiRunning {
   }
   if ($IsRunning) {
     # 실행 시작 시: 커밋된(적용 대기) 편집은 즉시 완료하고, 미커밋 편집만 폐기합니다
-    # (Codex 지적 - 사용자가 고른 값이 실행 직전에 유실되지 않게)
+    # (리뷰 지적 - 사용자가 고른 값이 실행 직전에 유실되지 않게)
     $pendingCellEdit = $script:cellEditContext
     if ($pendingCellEdit -and [bool]$pendingCellEdit.Applied) {
       Invoke-CellEditApply
@@ -7353,7 +7353,7 @@ function Set-UiRunning {
 
 function Get-CycleWaitSecondsForEstimate {
   # 시간 지정 판단에 쓸 '한 사이클 예상 상한' - 대분류별 설정을 따릅니다
-  # (생활에서 숨겨진 전투 클리어 대기값을 참조하면 목표 시각을 크게 넘기거나 잘못 거부 - Codex)
+  # (생활에서 숨겨진 전투 클리어 대기값을 참조하면 목표 시각을 크게 넘기거나 잘못 거부 - 리뷰)
   if ($script:mainCategory -eq 'life') { return [int]$numGatherWait.Value }
   return [int]$numClearWait.Value
 }
@@ -7425,7 +7425,7 @@ function Start-NextCycle {
     # 랜덤 진행 주의: 바퀴 마지막 항목의 NEXT 는 '현재 순열의 첫 항목'입니다 (다음 바퀴의 새
     # 순열이 아님). 랜덤은 같은 층 전용 + 워커가 NEXT 를 마무리 갈림길에만 쓰는 불변식 덕에
     # 동작상 안전 - 혼합 랜덤을 허용하거나 워커가 NEXT 항목을 실제 소비하게 되면 다음 바퀴
-    # 순열을 미리 계산해야 합니다 (Codex 계약, test_custom_random 가드).
+    # 순열을 미리 계산해야 합니다 (리뷰 계약, test_custom_random 가드).
     $customNextIndex = ($customContext.Index + 1) % [Math]::Max(1, [int]$customContext.Total)
     $env:HONEYNOGI_CUSTOM_NEXT = Format-CustomItemToken -Item (@($customContext.ExecutionItems)[$customNextIndex])
     $env:HONEYNOGI_CUSTOM_RESTART = $(if ($script:customRestart) { '1' } else { '' })
@@ -7475,7 +7475,7 @@ function Start-NextCycle {
         ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
   }
   # 이번 회차의 [완료] 사유 수집을 초기화합니다 (이전 회차 사유가 코드 4 상태줄에 오표시되는
-  # 것 방지 - Codex 조건)
+  # 것 방지 - 리뷰 조건)
   $script:lastWorkerDoneReason = ''
   # 프로세스 생성 실패 시 UI 잠금·절전 방지가 복원되지 않던 문제 방어 (2026-08-01 전수 점검:
   # 종료 타이머 조건이 running && worker 라 worker 가 null 이면 자동 복구 경로가 없었음)
@@ -7523,7 +7523,7 @@ function Stop-AllRun {
   if ($workerToDispose) {
     # Kill 실패/미종료 시 재시도 + 잔존 경고 (2026-08-01 전수 점검 + 3차 리뷰: 첫 대기가
     # 무기한 WaitForExit() 라 종료 신호가 안 오면 GUI 전체가 멈추고 재시도에도 못 갔음 -
-    # 타임아웃 대기로 바꾸고, 종료가 '확인된 경우에만' workerWasKilled 를 세움. Codex 조건)
+    # 타임아웃 대기로 바꾸고, 종료가 '확인된 경우에만' workerWasKilled 를 세움. 리뷰 조건)
     $workerWasKilled = $false
     $killTryFailed = $false
     try {
@@ -7604,7 +7604,7 @@ $timer.Add_Tick({
       if ($null -ne $lines) {
         for ($i = 0; $i -lt $lines.Count; $i++) {
           # 코드 4 상태줄용 실제 사유 수집 (범용 '공물 소진 등' 문구가 실제 이유와 달라
-          # 사용자가 오해한 실사례 - 2026-08-02, Codex 승인)
+          # 사용자가 오해한 실사례 - 2026-08-02, 리뷰 승인)
           if ($lines[$i] -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
           $displayLine = Convert-WorkerLogLineForGui -Line $lines[$i] -CustomActive $script:customActive
           if ($null -eq $displayLine) { continue }
@@ -7768,7 +7768,7 @@ $timer.Add_Tick({
           }
         }
         # 종료 직전 기록된 [완료] 사유를 놓치지 않게 잔여 로그를 한 번 더 수집합니다
-        # (타이머 tail 과 종료 사이의 경쟁 방지 - Codex 조건)
+        # (타이머 tail 과 종료 사이의 경쟁 방지 - 리뷰 조건)
         $finalLines = @()
         $finalLines += @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))
         $finalLines += @(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))
@@ -7786,7 +7786,7 @@ $timer.Add_Tick({
           if ($code4Reason.Length -gt 80) { $code4Reason = $code4Reason.Substring(0, 80) + '…' }
           $code4Reason = "조건 정지: $code4Reason"
         } elseif ($script:mainCategory -eq 'life') {
-          # 생활 폴백 - 숨겨진 전투 라디오(rbCatDeep 등)를 참조하면 엉뚱한 재화 문구 표시 (Codex)
+          # 생활 폴백 - 숨겨진 전투 라디오(rbCatDeep 등)를 참조하면 엉뚱한 재화 문구 표시 (리뷰)
           $code4Reason = '조건 충족으로 정지 - 채집 시간 초과/미지원 항목 등 (자세한 내용은 로그 참고)'
         } elseif ($rbCatDeep.Checked) {
           $code4Reason = '조건 충족으로 정지 - 마족공물 소진 등 (자세한 내용은 로그 참고)'
@@ -7843,7 +7843,7 @@ function Invoke-StartAutomation {
   # [시작]의 실제 본문. 승인 게이트(아래 btnStart 핸들러)를 통과한 뒤에만 호출됩니다.
   # 함수로 분리한 이유: '새 자동화 시작 시 승인 검사' 스펙 - 클릭 시 비동기 조회를 먼저
   # 돌리고, 조회 완료 콜백(Complete-ApprovalCheck)이 승인 확인 후 이 함수를 호출합니다.
-    # 생활 대분류 재검사 (Codex 조건 D): 승인 조회가 비동기라 '전투에서 시작 → 조회 중
+    # 생활 대분류 재검사 (리뷰 조건 D): 승인 조회가 비동기라 '전투에서 시작 → 조회 중
     # 생활로 전환 → 콜백이 여기 직접 호출'로 버튼 게이트가 우회될 수 있음 - 서두에서 차단
     if (Test-LifeStartBlocked) { return }
     # 생활 대분류 시작: 전투 하위 라디오(던전/커스텀 체크 등)는 복귀 대비로 Checked 가
@@ -8027,7 +8027,7 @@ function Invoke-StartAutomation {
         }
       }
       # 랜덤 진행: 이번 바퀴 순열을 시작 전에 확보합니다 (아래 마커 복구 검사의 resumeContext 가
-      # 확정된 순열로 항목을 해석해야 하므로 반드시 이 지점 - Codex 삽입 지점 합의)
+      # 확정된 순열로 항목을 해석해야 하므로 반드시 이 지점 - 리뷰 삽입 지점 합의)
       if (-not (Confirm-CustomShuffleReady)) {
         Add-GuiLog '[오류] 랜덤 진행 순서를 준비하지 못해 시작하지 않습니다.'
         $script:customActive = $false
@@ -8214,7 +8214,7 @@ $form.Add_FormClosing({
       if ($closingWorker) {
         # Stop-AllRun 과 같은 방어 (2026-08-01 3차 리뷰: 무기한 WaitForExit() 는 종료 신호가
         # 안 오면 폼 종료 전체가 멈추고 재시도에도 못 감 - 타임아웃 대기 + 확인된 경우에만
-        # workerWasKilled. Codex 조건)
+        # workerWasKilled. 리뷰 조건)
         $closingWorkerWasKilled = $false
         $closingKillFailed = $false
         try {
@@ -8254,7 +8254,7 @@ $form.Add_FormClosing({
 # ----- 카테고리 전환: 상세 설정 패널 교체 + 그룹 높이/아래 요소 위치 재계산 -----
 $updateCategoryPanels = {
   # 대분류(전투/생활) 게이트 (v2.0.0): 생활에서는 전투 카테고리 플래그를 전부 끕니다.
-  # 전투 라디오의 Checked 는 건드리지 않아 전투 복귀 시 상태가 그대로 보존됩니다 (Codex 조건 B).
+  # 전투 라디오의 Checked 는 건드리지 않아 전투 복귀 시 상태가 그대로 보존됩니다 (리뷰 조건 B).
   $isLife = ($script:mainCategory -eq 'life')
   $isLifeGather = $isLife -and $rbLifeGather.Checked
   $isLifeProcess = $isLife -and (-not $rbLifeGather.Checked)
@@ -8299,7 +8299,7 @@ $updateCategoryPanels = {
   $rbCatHunting.Text = $(if ($isCustom) { '사냥터(미지원)' } else { '사냥터' })
   $rbCatHunting.Enabled = -not $isCustom
   # ----- 생활 대분류 (v2.0.0): 콘텐츠 선택 줄 교대 + 생활 상세/설정 표시 전환 -----
-  # 채집/가공·대분류 전환 시 진행 중 슬라이드를 즉시 정리 (오버레이 잔존 방지 - Codex 조건.
+  # 채집/가공·대분류 전환 시 진행 중 슬라이드를 즉시 정리 (오버레이 잔존 방지 - 리뷰 조건.
   # UI 갱신은 아래 흐름이 이어서 하므로 SkipUiRefresh)
   if ($script:lifeSlideActive) { Stop-LifeSlideNow -SkipUiRefresh }
   $pnlCategory.Visible = -not $isLife
@@ -8483,7 +8483,7 @@ $updateCategoryPanels = {
       $grpContentDetail.Height = $pnlLcrRepeat.Top + 36
     } else {
       # 생활 상세: 채집(슬라이더 2줄 + 소진 2줄)·가공(안내) 모두 268 고정
-      # (채집↔가공 전환 시 탭/폼 흔들림 방지 - Codex 조건. 탭 이하 배치는 아래 공통 계산이 처리)
+      # (채집↔가공 전환 시 탭/폼 흔들림 방지 - 리뷰 조건. 탭 이하 배치는 아래 공통 계산이 처리)
       $grpContentDetail.Height = 268
     }
   } elseif ($isDungeon) {
@@ -8549,17 +8549,17 @@ $updateCategoryPanels = {
   # ----- 탭 토글 줄 이하 배치 (2026-08-04 시안 확정: 순수 계산 Get-TabToggleLayout + 여기서 적용) -----
   # 직전 레이아웃이 '로그 열림'이었을 때만 현재 로그 높이를 뷰포트 기억값으로 흡수합니다
   # (사용자 세로 리사이즈 보존 + open→closed 전환의 기억 갱신을 한 줄로. 닫힘 상태의 낡은
-  # 높이를 흡수하지 않는 것이 핵심 - Codex 3상태 전이 계약)
+  # 높이를 흡수하지 않는 것이 핵심 - 리뷰 3상태 전이 계약)
   if ($script:logLayoutOpen -eq $true) { $script:logViewHeight = [Math]::Max(100, [int]$txtLog.Height) }
   $tabLayout = Get-TabToggleLayout -DetailBottom ([int]$grpContentDetail.Bottom) `
     -SettingsOpen ([bool]$chkTabSettings.Checked) -LogOpen ([bool]$chkTabLog.Checked) `
     -LogViewHeight $script:logViewHeight -SettingsHeight ([int]$grpSettings.Height) `
     -FooterGap $script:footerGap -NonClientHeight ([int]($form.Height - $form.ClientSize.Height)) `
     -WorkAreaHeight ([int][System.Windows.Forms.Screen]::FromControl($form).WorkingArea.Height)
-  # 접힘으로 높이를 잠글 때 최대화 상태면 먼저 정상 창으로 (Min=Max 잠금과 충돌 방지 - Codex 조건)
+  # 접힘으로 높이를 잠글 때 최대화 상태면 먼저 정상 창으로 (Min=Max 잠금과 충돌 방지 - 리뷰 조건)
   if ($tabLayout.LockHeight -and $form.WindowState -ne 'Normal') { $form.WindowState = 'Normal' }
   $form.SuspendLayout()
-  # 크기 제약은 Max → Min 순서로 전부 해제한 뒤 새 크기를 적용 (이전 잠금이 방해하지 않게 - Codex 조건)
+  # 크기 제약은 Max → Min 순서로 전부 해제한 뒤 새 크기를 적용 (이전 잠금이 방해하지 않게 - 리뷰 조건)
   $form.MaximumSize = [System.Drawing.Size]::Empty
   $form.MinimumSize = [System.Drawing.Size]::Empty
   $chkTabSettings.Location = New-Object System.Drawing.Point(15, $tabLayout.TabRowTop)
@@ -8589,7 +8589,7 @@ $updateCategoryPanels = {
   $btnClearLog.Visible = ($tabLayout.LogTop -ge 0)
   $form.ResumeLayout($true)
   # 새 크기 확정 후 제약 재설정: 접힘 = 높이만 잠금(가로는 계속 조절 가능), 열림 = 동적 최소
-  # (로그 100 + 하단 줄이 겹치지 않는 하한 - 고정 700 최소는 커스텀 상세에서 겹침 유발. Codex 조건)
+  # (로그 100 + 하단 줄이 겹치지 않는 하한 - 고정 700 최소는 커스텀 상세에서 겹침 유발. 리뷰 조건)
   if ($tabLayout.LockHeight) {
     $form.MinimumSize = New-Object System.Drawing.Size(560, $form.Height)
     # 가로 최대는 큰 값으로 - 최상위 Form 의 MaximumSize 는 '0 = 무제한' 규칙이 적용되지
@@ -8602,7 +8602,7 @@ $updateCategoryPanels = {
     $form.MaximumSize = [System.Drawing.Size]::Empty
     $form.MaximizeBox = $true
   }
-  # 펼침으로 화면 아래를 넘으면 창을 위로 보정 (현재 모니터의 작업 영역 기준 - Codex 조건)
+  # 펼침으로 화면 아래를 넘으면 창을 위로 보정 (현재 모니터의 작업 영역 기준 - 리뷰 조건)
   $tabWorkArea = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
   if ($form.Bottom -gt $tabWorkArea.Bottom) {
     $form.Top = [Math]::Max($tabWorkArea.Top, $tabWorkArea.Bottom - $form.Height)
@@ -8638,7 +8638,7 @@ $script:f10WasDown = $false
 $hotkeyTimer.Add_Tick({
     $f9Down = ([Win32.HotkeyPoll]::GetAsyncKeyState(0x78) -band 0x8000) -ne 0   # F9
     $f10Down = ([Win32.HotkeyPoll]::GetAsyncKeyState(0x79) -band 0x8000) -ne 0  # F10
-    # 에지 판정을 먼저 래치하고 나서 동작 실행 (v2.0.0 Codex 지적: PerformClick 이 모달
+    # 에지 판정을 먼저 래치하고 나서 동작 실행 (v2.0.0 리뷰 지적: PerformClick 이 모달
     # 팝업(생활 시작 차단 등)을 띄우면 그 메시지 루프에서 이 Tick 이 재진입하는데,
     # 래치가 동작 뒤에 있으면 f9WasDown 이 아직 false 라 팝업이 여러 겹 뜸)
     $f9Pressed = $f9Down -and -not $script:f9WasDown
@@ -8667,7 +8667,7 @@ $script:uiReady = $true
 Add-GuiLog '컨트롤 패널이 준비됐습니다. [시작]을 누르면 반복을 시작합니다.'
 # 폼 생성 전(구버전 정리)에 모아 둔 안내를 로그로 출력합니다
 foreach ($cleanupLine in @($script:cleanupLogLines)) { Add-GuiLog $cleanupLine }
-# 생활 스킬 아이콘 디코드 실패 경고 (실패해도 글자 카드로 동작 - Codex 조건: 조용한 생략 금지)
+# 생활 스킬 아이콘 디코드 실패 경고 (실패해도 글자 카드로 동작 - 리뷰 조건: 조용한 생략 금지)
 if (@($script:lifeSkillIconLoadFailures).Count -gt 0) {
   Add-GuiLog "[경고] 생활 스킬 아이콘 $((@($script:lifeSkillIconLoadFailures) -join ', ')) 을 불러오지 못했습니다 - 글자 카드로 표시합니다."
 }
@@ -8715,7 +8715,7 @@ $hotkeyTimer.Start()
 # 색 철학: 따뜻한 크림 배경 + 꿀색 강조 + 갈색 글자. 로그만 콘솔풍으로 어둡게.
 # 실행 중 색을 바꾸는 곳은 상태 라벨뿐이며(초록/빨강/파랑/주황) 밝은 배경에서 모두 잘 보입니다.
 # ($script:theme* 색 변수 정의는 폼 생성 앞으로 이동 - 탭 토글 생성/초기 배지가 팔레트를
-#  먼저 쓰기 때문. 2026-08-04 Codex 지적)
+#  먼저 쓰기 때문. 2026-08-04 리뷰 지적)
 
 function Apply-HoneyTheme {
   param([System.Windows.Forms.Control]$Root)
@@ -8756,7 +8756,7 @@ $btnClearHelp.ForeColor = $script:themeHoneyInk
 $lblStatus.ForeColor = $script:themeTitle
 $lnkUpdate.LinkColor = $script:themeTitle          # 새 버전 링크도 꿀 갈색으로
 # 대분류 버튼·생활 슬라이더 카드의 상태 스타일 재적용 (Apply-HoneyTheme 가 모든 버튼을
-# 일반 스타일로 덮으므로 테마 '후'에 반드시 다시 그림 - Codex 조건 E)
+# 일반 스타일로 덮으므로 테마 '후'에 반드시 다시 그림 - 리뷰 조건 E)
 Update-MainCategoryVisual
 Update-LifeSliders
 
@@ -8843,10 +8843,10 @@ try {
     try { $script:approvalPs.Dispose() } catch { }
   }
   # 진행 중 슬라이드 정리 (스트립 Bitmap 등 - PictureBox.Dispose 는 Image 를 해제하지 않음.
-  # 폼 종료 경로라 UI 복원 생략 - Codex 조건)
+  # 폼 종료 경로라 UI 복원 생략 - 리뷰 조건)
   try { Stop-LifeSlideNow -SkipUiRefresh } catch { }
   try { $form.Dispose() } catch { }
-  # 생활 스킬 아이콘 Bitmap 해제 - Button.Dispose 는 할당된 Image 를 해제하지 않음 (Codex 실험 확인)
+  # 생활 스킬 아이콘 Bitmap 해제 - Button.Dispose 는 할당된 Image 를 해제하지 않음 (리뷰 실험 확인)
   foreach ($lifeIconBmp in @($script:lifeSkillIcons.Values)) {
     try { $lifeIconBmp.Dispose() } catch { }
   }
