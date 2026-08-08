@@ -119,7 +119,7 @@ try {
   Assert-Case '구조이전: 문자열 키 불리언은 최신 기본값 유지' $migrationResult.afterEntry.keys[0].enabled $false
   Assert-Case '구조이전: 성공 후 이전 오류 초기화' ($null -eq $script:configMigrationError) $true
 
-  # 5-1) schema 4 → 5 (v2.0.0 생활 대분류 신설 - Codex 검증 조건): mainCategory/life 가 없는
+  # 5-1) schema 4 → 5 (v2.0.0 생활 대분류 신설 - 리뷰 검증 조건): mainCategory/life 가 없는
   #      구 config 는 기본값 보충, 이미 생활을 쓰던 config 는 값 보존, contentCategory 불변
   $defaultConfigV5 = [pscustomobject]@{
     configSchemaVersion = 5

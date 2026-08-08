@@ -129,7 +129,7 @@ try {
   }
 
   # ── ② 스킬창: daily 시그니처 + '사과나무' 행 탐색 - 워커 탐색 스케일(s4/s5) '각각 단독'
-  #    으로 성공해야 함 (2026-08-06 속도 개선에서 s3 제거 - 합산 검증은 s3 의존을 숨김, Codex)
+  #    으로 성공해야 함 (2026-08-06 속도 개선에서 s3 제거 - 합산 검증은 s3 의존을 숨김, 리뷰)
   $skillBmp = $bitmaps['2_생활스킬창_스킬그리드_대상목록']
   foreach ($listScale in @(4, 5)) {
     $rows = @(Get-RegionRows -Source $skillBmp -Region $rgLifeTargetList -Scale $listScale)

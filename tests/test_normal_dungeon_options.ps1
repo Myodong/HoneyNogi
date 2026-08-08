@@ -50,7 +50,7 @@ Check-Pattern '권장 창 모드 버튼 폭 108' $gui `
   '\$btnRecommendedWindow\.Size\s*=\s*New-Object System\.Drawing\.Size\(108, 30\)'
 Check-Pattern '적용된 설정 버튼 폭 108' $gui `
   '\$btnAlwaysOn\.Size\s*=\s*New-Object System\.Drawing\.Size\(108, 30\)'
-# 2026-08-04 폭 560 다이어트: 진행 초기화는 80 (합계 라벨과 겹침 방지 - Codex 좌표 재배분),
+# 2026-08-04 폭 560 다이어트: 진행 초기화는 80 (합계 라벨과 겹침 방지 - 리뷰 좌표 재배분),
 # 리스트 조작 버튼은 94 유지
 Check-Pattern '진행 초기화 버튼 폭 80(폭 560 재배분)' $gui `
   '\$btnCrReset\.Size\s*=\s*New-Object System\.Drawing\.Size\(80, 26\)'

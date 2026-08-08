@@ -263,7 +263,7 @@ Assert-Case '토글 시뮬: 캡처 실패 5회 미소모 → 클릭 후 재확�
 # 마지막(6회째) 회전 클릭 → 1회전 연장으로 재확인 보장
 $simCase2 = Simulate-ToggleLoop -Frames @('NONE','NONE','NONE','NONE','NONE','SEL','CHA') -WantSelected $false
 Assert-Case '토글 시뮬: 6회째 첫 클릭 → 연장 재확인 성공' ($simCase2.Ok -and $simCase2.Extended -and $simCase2.Rounds -eq 7) $true
-# 연장 회전에서도 반대 상태면 성공 처리 없이 실패 (게이트 유지 - Codex 조건)
+# 연장 회전에서도 반대 상태면 성공 처리 없이 실패 (게이트 유지 - 리뷰 조건)
 $simCase3 = Simulate-ToggleLoop -Frames @('NONE','NONE','NONE','NONE','NONE','SEL','SEL') -WantSelected $false
 Assert-Case '토글 시뮬: 연장 재확인도 반대 상태면 실패 반환' (-not $simCase3.Ok -and $simCase3.Extended) $true
 # 연장은 1회뿐 (무한 연장 금지)
@@ -277,9 +277,9 @@ Assert-Case '배선(워커): 마지막 회전 클릭 시 1회전 연장' `
 # 2026-07-31 다른 PC 실기(창 1273x718): 카드 버튼 '선택됨'이 스케일 5에서 '서대되'로 깨져
 # 판별 실패 → 안전 정지. 같은 화면을 스케일 3으로 읽으면 정확 판독(오프라인 재현) → 다중
 # 스케일 재시도. 스케일 우선 순회(각 배율에서 주→보조)라 기존 s5 성공 경로는 1회째 그대로
-# (보관 캡처 21장 전수 1회째 성공 실측 - Codex 조건)
+# (보관 캡처 21장 전수 1회째 성공 실측 - 리뷰 조건)
 # 다중 스케일은 첫 회전과 '클릭 직후 첫 재확인'에서만 - 그 외 회전은 s5 만 (2026-07-31 점검:
-# 판별 완전 실패 시 OCR 이 최대 36회로 불어남. 판독 구제 효과는 두 지점에서 그대로 유지 - Codex 조건)
+# 판별 완전 실패 시 OCR 이 최대 36회로 불어남. 판독 구제 효과는 두 지점에서 그대로 유지 - 리뷰 조건)
 Assert-Case '배선(워커): 카드 버튼 판독 다중 스케일(5,3,4) 스케일 우선 순회' `
   (($workerSource -match 'foreach \(\$cardScale in \$cardScales\)[\s\S]{0,200}?foreach \(\$cardRegion in \$cardRegions\)') -and
    ($workerSource -match '\$cardRegions \+= , \$Region')) $true
@@ -311,12 +311,12 @@ Assert-Case '배선(워커): 미사용 역방향 해제 = 상태 기반 1회 + �
    ($workerSource -notmatch 'offClicks')) $true
 # 2026-07-29 00:58 실기: 카드를 끈 직후 소모량 표시가 갱신되지 않고 남는 잔상 실측(정지 직후
 # 캡처는 버튼 깨끗+카드 도전). 카드 '도전' 확정 판독($offCardConfirmed)이 1차 증거로 이기고
-# 표시 잔존은 경고 진행, 카드 미확인일 때만 정지 유지 (던전+사냥터 2곳, Codex 승인)
+# 표시 잔존은 경고 진행, 카드 미확인일 때만 정지 유지 (던전+사냥터 2곳, 리뷰 승인)
 Assert-Case '배선(워커): 역방향 카드 확인 우선 계약(잔상 허용) 2곳' `
   (([regex]::Matches($workerSource, '\$offCardConfirmed = \[bool\]\(Set-DgToggleCard').Count -eq 2) -and
    ([regex]::Matches($workerSource, 'elseif \(\$offCardConfirmed\)').Count -eq 2)) $true
 # 2026-07-28 23:56 실기: 옵션 확정은 선확인 5회 + 클릭 후 재클릭 없는 수동 확인(2초x3) +
-# 최종 재클릭 1회 계약 (재클릭마다 연출이 다시 시작되는 자기 방해 방지 - Codex 계약)
+# 최종 재클릭 1회 계약 (재클릭마다 연출이 다시 시작되는 자기 방해 방지 - 리뷰 계약)
 Assert-Case '배선(워커): 옵션 확정 수동 확인 계약(선확인 5회/수동 3회/최종 재클릭 1회)' `
   (($workerSource -match '\$preTry -le 5') -and ($workerSource -match '\$passiveTry -le 3') -and
    ($workerSource -match '\$finalTry -le 3')) $true

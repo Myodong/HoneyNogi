@@ -107,7 +107,7 @@ Assert-Case '오버레이: 리스트 분기는 전부 명시 (어비스 폴백 �
    ($guiSource.Contains('} elseif ($applyList -eq $lvAcrList) {')) -and
    (-not ($guiSource -match '\} else \{\s*\r?\n\s*\$cellItems = @\(Get-AbyssCustomItemsFromList\)')) -and
    (-not ($guiSource -match '\} else \{\s*\r?\n\s*Invoke-AcrCellEdit'))) $true
-Assert-Case '오버레이: 어비스 이벤트 연결은 리스트 생성 뒤 (시작 크래시 방지 - Codex 지적)' `
+Assert-Case '오버레이: 어비스 이벤트 연결은 리스트 생성 뒤 (시작 크래시 방지 - 리뷰 지적)' `
   ($guiSource.IndexOf('$lvAcrList = New-Object') -lt $guiSource.IndexOf('$lvAcrList.Add_MouseUp($cellEditMouseUp)')) $true
 Assert-Case '오버레이: 예약 콜백은 세션을 클로저로 캡처' `
   ([regex]::Matches($guiSource, 'GetNewClosure').Count -ge 2) $true
@@ -118,7 +118,7 @@ Assert-Case '오버레이: 커밋은 SelectionChangeCommitted + BeginInvoke 예�
 Assert-Case '오버레이: DropDownClosed 는 숨기기만' `
   ($guiSource -match "Add_DropDownClosed[\s\S]{0,300}Hide-CellEditCombo") $true
 # 2026-08-04 잠금 방식 변경: 그룹 통째 잠금 → 자식 개별 잠금 (커스텀 리스트는 실행 중에도
-# 스크롤 허용 - 사용자 요청). 스냅샷 멱등 + 복원 + 리스트 편집 가드가 새 계약 (Codex 합의)
+# 스크롤 허용 - 사용자 요청). 스냅샷 멱등 + 복원 + 리스트 편집 가드가 새 계약 (설계 합의)
 Assert-Case '오버레이: 실행 시작 시 편집 취소 (스냅샷 잠금 뒤)' `
   ($guiSource -match "\`$IsRunning -and \`$null -eq \`$script:contentDetailEnabledSnapshot[\s\S]{0,1500}Hide-CellEditCombo") $true
 Assert-Case '잠금: 커스텀 리스트 4개는 스냅샷 제외(스크롤 허용)' `

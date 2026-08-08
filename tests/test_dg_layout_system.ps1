@@ -82,7 +82,7 @@ $selTitleCases = @(
   @{ N = '룬다 오독(눛나) 던전 조각'; T = '눛나던전';     E = $true }
   @{ N = '옵션 화면은 선택 아님'; T = '1층3구역';         E = $false }
   @{ N = '오드 포함 옵션도 선택 아님'; T = '피오드1층1구역'; E = $false }
-  @{ N = '구역 깨진 옵션도 층으로 제외 (Codex 지적)'; T = '페카고분1층3구멱'; E = $false }
+  @{ N = '구역 깨진 옵션도 층으로 제외 (리뷰 지적)'; T = '페카고분1층3구멱'; E = $false }
   @{ N = '광구 옵션 구역 깨짐도 제외'; T = '바리1광구2층3구멱'; E = $false }
   @{ N = '필드 오독';             T = '.크협크집';        E = $false }
   @{ N = '빈 제목';               T = '';                 E = $false }
@@ -182,7 +182,7 @@ Assert-Case '알약: 2단계 던전에서 매우어려움 없음' `
   ($null -eq (Select-DgDifficultyWord -Words $pillTwoTier -Key '매우어려움')) $true
 $w = Select-DgDifficultyWord -Words $pillSel3 -Key '어려움'
 Assert-Case '알약: 선택 화면 3단계에서 어려움 = 단독 알약' "$($w.X)" '140'
-# 기준 토큰(앵커) 규칙: '일반'/'매우'가 하나도 안 읽히면 '어려움' 단독 채택 금지 (Codex 2차 리뷰)
+# 기준 토큰(앵커) 규칙: '일반'/'매우'가 하나도 안 읽히면 '어려움' 단독 채택 금지 (리뷰 2차 리뷰)
 Assert-Case '알약: 일반+뒷단어만 읽힘 → 앵커 범위 밖이라 채택 금지' `
   ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '일반'; X = 652; Y = 120 }, @{ Text = '어려움'; X = 841; Y = 120 }) -Key '어려움')) $true
 Assert-Case '알약: 어려움 한 단어만 읽힘 → 앵커 없어 채택 금지' `
@@ -217,7 +217,7 @@ Assert-Case '알약: 이컪움도 표준 자리 밖이면 채택 금지' `
   ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이컪움'; X = 841; Y = 120 }) -Key '어려움' -HardX 660)) $true
 # 다중 스케일 배선: Find-DgDifficultyPoint 가 4→3→5 순서 + '어려움' 한정 s2 최종 폴백
 # (2026-08-03 08:50 실사고: 1908 창 실효 배율 저하로 s4/s3/s5 전멸 - s2만 정상 판독.
-#  s2는 위치 게이트가 있는 '어려움' 키에만 추가 - Codex 보수 조건)
+#  s2는 위치 게이트가 있는 '어려움' 키에만 추가 - 보수 조건)
 $workerSource = [IO.File]::ReadAllText($workerPath)
 Assert-Case '배선: 알약 탐색 다중 스케일(4,3,5) 사다리' `
   ($workerSource -match '\$pillScales = @\(4, 3, 5\)') $true

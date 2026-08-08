@@ -21,11 +21,11 @@ Assert-Case '계약: 닫기 탐색이 존재' ($popupSearchIndex -ge 0) $true
 Assert-Case '계약: 키 입력이 존재' ($keyPressIndex -ge 0) $true
 Assert-Case '계약: 닫기 탐색이 키 입력보다 먼저' ($popupSearchIndex -lt $keyPressIndex) $true
 
-# 확인 최대 4회 = 닫기 최대 3회 + 마지막 재확인 (무팝업이면 OCR 1회 - Codex 합의 계약)
+# 확인 최대 4회 = 닫기 최대 3회 + 마지막 재확인 (무팝업이면 OCR 1회 - 설계 합의 계약)
 Assert-Case '계약: 확인 루프 상한 4회' ($functionText -match '\$popupTry -le 4') $true
 Assert-Case '계약: 4회째는 클릭 없이 잔존 판정만' ($functionText -match '\$popupTry -ge 4[\s\S]{0,80}break') $true
 
-# 캡처 실패 중에는 사전 처리를 건너뛰고 키 입력 (실패를 팝업 잔존으로 오인 금지 - Codex 지적)
+# 캡처 실패 중에는 사전 처리를 건너뛰고 키 입력 (실패를 팝업 잔존으로 오인 금지 - 리뷰 지적)
 Assert-Case '계약: 캡처 실패 가드' ($functionText -match 'if \(-not \$script:screenCaptureFailing\)') $true
 
 # 키 입력 루프는 1개 그대로 (재입력 금지 - B 이중 입력은 음식 중복 소모 위험)
@@ -51,7 +51,7 @@ Assert-Case '협동: 깨지는 제목 조각은 감지에 미사용' `
 
 # 2026-07-31 점검: 협동 미션은 몬스터 처치 누적으로 완료되므로 전투/클리어 대기 중에 뜰
 # 확률이 가장 높은데, 클리어 대기 루프는 입장용 팝업 스윕을 쓰지 않아 사각지대였음
-# → 입장 대기(스윕)와 클리어 대기 루프가 같은 소함수를 공용해야 함 (Codex 조건)
+# → 입장 대기(스윕)와 클리어 대기 루프가 같은 소함수를 공용해야 함 (리뷰 조건)
 $workerAll = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
 Assert-Case '협동: 스윕이 공용 소함수를 호출' `
   ([bool]([regex]::Match($workerAll, 'function Invoke-PurchasePopupSweep[\s\S]*?\r?\n\}').Value -match

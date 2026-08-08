@@ -6,7 +6,7 @@
 trap {
   try {
     # 메인 $logDir 해석(아래 '로그 폴더 통일' 주석) 전에 실행되는 trap 이라 같은 규칙을
-    # 독립적으로 씁니다 - 어긋나면 초기화 오류가 옛 폴더에 남아 GUI 폴링이 못 봅니다 (Codex)
+    # 독립적으로 씁니다 - 어긋나면 초기화 오류가 옛 폴더에 남아 GUI 폴링이 못 봅니다 (리뷰)
     $bootLogBase = [string][Environment]::GetFolderPath('LocalApplicationData')
     $bootLogDir = $(if ([string]::IsNullOrWhiteSpace($bootLogBase)) { Join-Path $PSScriptRoot 'Log' }
       else { Join-Path $bootLogBase 'HoneyNogi\Log' })
@@ -199,7 +199,7 @@ function Format-CustomItemLabel {
 
   # 로그용 항목 표기: '어려움 1-3 (은동전·더블 루팅)' / '일반 2-1 (은동전)' / '일반 2-1'.
   # 회차 시작 로그와 조건부 정지(코드 4) 로그들이 공용으로 씁니다.
-  # 심층 모드는 재화 표기만 마족공물로 바꿉니다 (더블 루팅 조합은 심층에 없음 - Codex 지적)
+  # 심층 모드는 재화 표기만 마족공물로 바꿉니다 (더블 루팅 조합은 심층에 없음 - 리뷰 지적)
   if (-not $Item) { return '(항목 없음)' }
   $label = "$($Item.Difficulty) $($Item.Stage)"
   if ($Item.Coin -and $Item.Double) { return "$label (은동전·더블 루팅)" }
@@ -477,10 +477,10 @@ $timeoutAbyssMenu   = Get-ConfigInteger $config @('timeoutsSeconds', 'abyssMenu'
 $timeoutAbyssSelect = Get-ConfigInteger $config @('timeoutsSeconds', 'abyssSelectionScreen') 15 1 600
 $contentCategory = [string](Get-ConfigValue $config @('contentCategory') 'abyss')
 # 심층던전 모드: 던전과 화면 구조·좌표가 동일해 던전 사이클을 공유하고, 차이(재화·라벨·
-# 난이도·제목 조각)만 데이터로 치환합니다 (2026-07-27 Codex 합의 - 아래 심층 데이터 구역 참고)
+# 난이도·제목 조각)만 데이터로 치환합니다 (2026-07-27 설계 합의 - 아래 심층 데이터 구역 참고)
 $deepMode = ($contentCategory -eq 'deepdungeon')
 # 대분류(전투/생활) - v2.0.0. 'life' 면 전투 콘텐츠 대신 생활(채집) 사이클로 분기합니다
-# (contentCategory 는 전투 하위 선택이라 그대로 보존 - Codex 합의)
+# (contentCategory 는 전투 하위 선택이라 그대로 보존 - 설계 합의)
 $mainCategory = [string](Get-ConfigValue $config @('mainCategory') 'battle')
 $lifeContent = [string](Get-ConfigValue $config @('life', 'content') 'gather')
 $lifeSkillId = [string](Get-ConfigValue $config @('life', 'skill') 'daily')
@@ -727,7 +727,7 @@ $script:customOwnerJson = ''
 if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
   if ($contentCategory -eq 'dungeon' -or $deepMode) {
     # 심층 커스텀은 던전 6조각 토큰을 그대로 재사용합니다 (난이도 '어려움' 고정,
-    # Coin=마족공물 소탕, Double=항상 false - 아래 심층 강제 규칙 참고. Codex 합의)
+    # Coin=마족공물 소탕, Double=항상 false - 아래 심층 강제 규칙 참고. 설계 합의)
     $script:customItem = ConvertFrom-CustomItemSpec -Spec ([string]$env:HONEYNOGI_CUSTOM_ITEM)
     if ($null -eq $script:customItem) {
       $script:customSpecInvalid = $true
@@ -751,7 +751,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
       $ndMatching     = '우연한 만남'   # 1차 릴리스 제한: 매칭 설정 무관 강제
       if ($deepMode) {
         # 심층 강제 규칙: 난이도 어려움 고정(주간 매우 어려움은 일반 반복 전용 - 리스트 제외),
-        # 더블 루팅 없음. 잘못된 토큰 값이 흘러 들어와도 여기서 정규화합니다 (Codex 합의).
+        # 더블 루팅 없음. 잘못된 토큰 값이 흘러 들어와도 여기서 정규화합니다 (설계 합의).
         $ndDifficulty = '어려움'
         $ndDoubleLoot = $false
         $ndLootFallback = $false
@@ -808,14 +808,14 @@ $dgLayoutTable = @{
   '키아던전'  = @('CR', 'A')
 }
 # 난이도 2단계(일반/어려움) 던전 - 2026-07-24 실측: 10던전 중 룬다·피오드만 '매우 어려움' 없음.
-# '매우 어려움' 요청 + 2단계 던전이면 즉시 중단합니다 (없는 난이도로 오입장 방지 - Codex 리뷰 반영).
+# '매우 어려움' 요청 + 2단계 던전이면 즉시 중단합니다 (없는 난이도로 오입장 방지 - 교차 리뷰 반영).
 $dgTwoTierDungeons = @('룬다', '피오드')
 # 제목 OCR 조각 → 던전 ID (오독 이형 실측 포함: 룬다→로다, 피오드→피오듸, 페론→페로).
-# 바리 광구는 숫자까지 명확해야 채택 - 숫자 소실 시 ID 불명으로 처리 (Codex 교차 합의).
+# 바리 광구는 숫자까지 명확해야 채택 - 숫자 소실 시 ID 불명으로 처리 (리뷰 교차 합의).
 $dgNamePatterns = @(
   # 오독 이형은 전부 2026-07-24~25 실기 검증 실측입니다 (첫 글자/둘째 글자가 자주 깨짐).
   # '오드'는 약한 조각이지만 다른 던전명과 충돌하지 않고, '바리오드'류는 다중 매칭 가드가
-  # null 처리합니다 (Codex 합의).
+  # null 처리합니다 (설계 합의).
   @{ Id = '룬다';     Any = @('룬다', '로다', '른다', '분다', '닡다', '눛나') }
   @{ Id = '피오드';   Any = @('피오', '깨오', '오드') }
   @{ Id = '페카고분'; Any = @('페카', '패가') }
@@ -849,7 +849,7 @@ $rgNdStageMap = @(40, 230, 520, 470)   # 스테이지 지도 라벨 판독 영�
 # ===== 심층던전 모드 데이터 (2026-07-27 확정 실측: 9던전 43장, 이슈 문서 참고) =====
 # 심층은 던전과 좌표 그리드가 픽셀 단위로 동일합니다 (선택/옵션 지도, 포커스 29px 포함).
 # 신규 배치는 키아의 L형 2종뿐이고, 내부 스테이지 표현은 '1-1'을 유지하며 'D' 접두는
-# 화면 라벨 계층에서만 변환합니다 (Codex 합의 - 제목/층 파싱 함수 전체 무변경 재사용).
+# 화면 라벨 계층에서만 변환합니다 (설계 합의 - 제목/층 파싱 함수 전체 무변경 재사용).
 $dgSelStagePoints['L1'] = @{ '1-1' = @(266, 426); '1-2' = @(266, 338); '1-3' = @(354, 338)
                              '2-1' = @(266, 668); '2-2' = @(354, 668); '2-3' = @(354, 581) }   # 2층 키는 L2 값 (키아 전용 - 방어용)
 $dgSelStagePoints['L2'] = @{ '1-1' = @(266, 426); '1-2' = @(266, 338); '1-3' = @(354, 338)     # 1층 키는 L1 값 (방어용)
@@ -924,7 +924,7 @@ function Get-DgMapLabelText {
   # 지도 라벨 OCR 원문 → 내부 스테이지 표기('1-1')로 정규화합니다.
   # 던전 모드는 원문 그대로(trim만), 심층 모드는 'D' 접두 제거 + 실측 오독 3종만 관용:
   # 'DI-n'→'D1-n'(1이 대문자 I), 전체 패턴 일치 시 '0'→'D'('02-3' 실측), 최종 화이트리스트
-  # D[12]-[123] 통과분만 인정 (전역 치환 금지 - Codex 합의).
+  # D[12]-[123] 통과분만 인정 (전역 치환 금지 - 설계 합의).
   $label = ([string]$Text).Trim()
   if (-not $deepMode) { return $label }
   if ($label -cmatch '^DI-([123])$') { $label = 'D1-' + $Matches[1] }
@@ -969,7 +969,7 @@ function Test-DgSelectionTitle {
   if ($normalized.Length -eq 0) { return $false }
   # 옵션 화면 제외: '구역'뿐 아니라 '층'도 선제외합니다 - 선택 화면 제목에는 '층'이 없고,
   # '구역'이 '구멱' 등으로 깨진 옵션 제목('페카고분1층3구멱')이 선택 화면으로 오판되는 것 방지
-  # (Codex 리뷰 반영).
+  # (교차 리뷰 반영).
   if ($normalized.Contains('구역') -or $normalized.Contains('층')) { return $false }
   if ($normalized.Contains('던전') -or $normalized.Contains('오드') -or
       $normalized.Contains('고분') -or $normalized.Contains('광구')) { return $true }
@@ -994,7 +994,7 @@ function Test-ImeOverlayText {
   # 스페이스를 누르세요") 판별식. 팝업이 게임 창 우하단(진입/입장 버튼 자리)을 덮으면
   # 버튼 OCR이 이 문구로 대체돼 클릭 게이트가 막히고, 클릭도 팝업에 먹힙니다
   # (2026-07-29 00:20 실기 + 보관 캡처 2장 재발 실증). 단일 조각은 오탐 위험이 있어
-  # 두 조각 복합 조건으로만 판정합니다 (Codex 계약). 실측 OCR 원문:
+  # 두 조각 복합 조건으로만 판정합니다 (리뷰 계약). 실측 OCR 원문:
   # 'SpaceMicrosoft입력기심층1층입력방법을전환하러면Windows기+스페이스' ('하려면/키' 깨짐 포함)
   $normalized = ([string]$Text) -replace '\s', ''
   if ($normalized.Length -eq 0) { return $false }
@@ -1048,7 +1048,7 @@ function Get-DgSelStagePoint {
   param([string]$LayoutType, [string]$Stage, [int]$FocusFloor)
 
   # 선택 화면 구역 라벨의 기대 좌표: 유형 템플릿 + 포커스 밀림(2층 포커스면 -29).
-  # focusDy는 항상 기준(1층 포커스) 좌표에서 직접 계산합니다 - 누적 적용 금지 (Codex 합의).
+  # focusDy는 항상 기준(1층 포커스) 좌표에서 직접 계산합니다 - 누적 적용 금지 (설계 합의).
   if ([string]::IsNullOrEmpty($LayoutType) -or -not $dgSelStagePoints.ContainsKey($LayoutType)) { return $null }
   $table = $dgSelStagePoints[$LayoutType]
   if (-not $table.ContainsKey([string]$Stage)) { return $null }
@@ -1061,7 +1061,7 @@ function Get-DgSelStagePoint {
 function Select-DgDifficultyWord {
   param($Words, [string]$Key, [int]$HardX = -1)
 
-  # 던전 난이도 알약의 클릭 단어를 고르는 순수 판정 (진리표 테스트 대상 - Codex 리뷰 반영):
+  # 던전 난이도 알약의 클릭 단어를 고르는 순수 판정 (진리표 테스트 대상 - 교차 리뷰 반영):
   #  - '매우어려움' → '매우' 단어를 채택 (OCR이 '매우'+'어려움' 두 단어로 읽음. '매우' 단어도
   #    알약 안이라 클릭 유효 - 사냥터에서 실전 검증된 방식)
   #  - '어려움' → 왼쪽 70px 안 같은 줄에 '매우' 단어가 있는 '어려움'은 건너뜀
@@ -1083,7 +1083,7 @@ function Select-DgDifficultyWord {
     # '어려움'의 실측 깨짐 이형 허용 (2026-07-29 키아/페카 심층 실기 - 금색 선택 강조가 걸린
     # 알약의 깨짐이 스케일마다 다름: '이려움'(s3, 키아 옵션) / '이컪움'(s4, 페카·키아·알비
     # 선택) / '이컪울'(s5, 같은 화면). 전부 오류 캡처 오프라인 재현 실측. 이형도 아래 짝
-    # 제외·앵커/HardX 검증을 똑같이 통과해야 채택되므로 오채택 불가 - Codex 승인)
+    # 제외·앵커/HardX 검증을 똑같이 통과해야 채택되므로 오채택 불가 - 리뷰 승인)
     $textMatches = ([string]$word.Text -eq $Key) -or
                    ($Key -eq '어려움' -and (@('이려움', '이컪움', '이컪울') -contains [string]$word.Text))
     if (-not $textMatches) { continue }
@@ -1163,7 +1163,7 @@ function Test-DgTabProbeMatchesMode {
 
   # 탭 전환 확인 (순수 - 진리표 대상): 선택 화면 진입 버튼 문구가 목표 탭과 일치하는지.
   # 빈/불완전 판독이 '심층 없음 = 던전 탭 성공'으로 오인되지 않게 '진입' 존재를 함께
-  # 요구합니다 (Codex 지적). '심층' 오독 '심충' 관용 포함.
+  # 요구합니다 (리뷰 지적). '심층' 오독 '심충' 관용 포함.
   $normalized = ([string]$ProbeText) -replace '\s', ''
   if (-not $normalized.Contains('진입')) { return $false }
   $deepSeen = [bool]($normalized -match '심[층충]')
@@ -1179,7 +1179,7 @@ function Find-DgDifficultyPoint {
   # 다중 스케일 재시도 (2026-07-29 실측): 금색 선택 강조가 걸린 알약은 스케일에 따라
   # 깨짐이 달라(선택 화면은 s3 정상/s4·s5 깨짐, 키아 옵션은 s4 빈 판독/s5 정상) 단일
   # 스케일로는 전멸할 수 있음. 실측 전 케이스에서 최소 한 스케일은 정상 판독 - 첫 성공
-  # 채택, 성공 시 조기 종료라 기존 성공 경로 비용 불변 (Get-DgTributeCost 전례, Codex 승인).
+  # 채택, 성공 시 조기 종료라 기존 성공 경로 비용 불변 (Get-DgTributeCost 전례, 리뷰 승인).
   #
   # s2 최종 폴백 (2026-08-03 08:50 실사고): 1908x1076 창은 캡처 확대가 '기준 크기x배율'
   # 고정이라 실효 배율이 배율/1.5 로 떨어짐 - 옵션 '어려움' 알약이 s4/s3/s5(실효 2.67/2.0/
@@ -1187,7 +1187,7 @@ function Find-DgDifficultyPoint {
   # 재현: s2(실효 1.33, 거의 원본)만 3장 모두 '어려움'(660,121) 정상 판독 + 채택 통과.
   # s6~s8(실효 4.0~5.3)도 전부 깨짐 실측 - 고배율 확장은 답이 아님. '어려움' 키 한정인
   # 이유: 앵커/HardX 위치 게이트가 어려움에만 있어 s2 오독이 있어도 오채택 불가지만,
-  # 일반/매우어려움은 텍스트 게이트뿐이라 판정면을 늘리지 않음 (Codex 보수 조건. 매우
+  # 일반/매우어려움은 텍스트 게이트뿐이라 판정면을 늘리지 않음 (보수 조건. 매우
   # 어려움의 1908 실측이 모이면 확장 검토 - 백로그).
   $key = ([string]$Label) -replace '\s', ''
   $pillScales = @(4, 3, 5)
@@ -1293,7 +1293,7 @@ function Get-DgOptLayoutTypeByPixels {
 
   # 미등록 던전의 옵션 화면 배치를 카드 픽셀로 판별합니다. 가로형 상/하 행은 88px 떨어져
   # 분리가 명확합니다. 세로형(C)은 위/아래 카드의 의미 순서(CR/CN)를 픽셀로 알 수 없어
-  # 'C'만 반환하며, 호출부는 라벨 판독 없이는 진행하지 않습니다 (Codex 합의).
+  # 'C'만 반환하며, 호출부는 라벨 판독 없이는 진행하지 않습니다 (설계 합의).
   # 주의: 가로형에서 세로 열 지점(874)은 옆 카드와 표본이 겹칠 수 있어 행 판정을 우선합니다.
   $rowBottom = (Test-DgCardPixelAt -Game $Game -ReferenceX 830 -ReferenceY 326) -and
                (Test-DgCardPixelAt -Game $Game -ReferenceX 918 -ReferenceY 326)
@@ -1340,7 +1340,7 @@ function Get-DgOptStageCardPoint {
         if ($deepMode -and $refPoint) {
           # 심층 카드 적갈색이라 픽셀 확인 항상 실패 - 정확 일치 라벨(D1-1/DI-1/01-1 한정
           # 후보)은 신뢰하고, 카드 전환 후 제목 확인(호출부 2차 검증)에 맡긴다
-          # (선택 화면 라벨 경로와 동일 계약 - 2026-07-30 Codex 승인)
+          # (선택 화면 라벨 경로와 동일 계약 - 2026-07-30 리뷰 승인)
           return @{ Screen = $cardPoint }
         }
       }
@@ -1362,7 +1362,7 @@ function Get-DgOptStageCardPoint {
     } elseif ($probedType -eq 'C') {
       # 세로형의 순서 모호성(CR/CN)은 소카드 1/2에만 있습니다. 대카드(구역 3)는 두 순서에서
       # 위치가 같아(979,295~298 - 중간값 297) 미등록이어도 진행합니다. 카드 픽셀 확인 실패나
-      # 소카드 목표는 기존대로 정지합니다 (2026-07-25 페론 고분 실기 과잉 정지 - Codex 합의).
+      # 소카드 목표는 기존대로 정지합니다 (2026-07-25 페론 고분 실기 과잉 정지 - 설계 합의).
       if ($stageParts.Count -eq 2 -and [string]$stageParts[1] -eq '3' -and
           (Test-DgCardPixelAt -Game $Game -ReferenceX 979 -ReferenceY 297)) {
         Write-RunLog '[던전] 미등록 던전 세로형 - 대카드(구역 3)는 순서 무관 위치라 진행합니다'
@@ -1392,7 +1392,7 @@ function Resolve-DgObservedStage {
   # 제목 숫자가 깨졌을 때('피오듸층3구역' 실사고 - 던전 이름 끝 글자와 층 숫자가 합쳐짐)의
   # 보조 판정 순수부 (진리표 테스트 대상): 층 = 지도 라벨 앞 숫자가 단일 층이고 표가
   # 2개 이상일 때만, 구역 = 제목 꼬리 '(\d)구역'. 두 신호가 모두 명확할 때만 'N-M' 반환
-  # (Codex 합의: 라벨 1개 단독 확정 금지 + 요청 값과 전부 일치 시에만 성공 처리).
+  # (설계 합의: 라벨 1개 단독 확정 금지 + 요청 값과 전부 일치 시에만 성공 처리).
   $floorVotes = @{}
   foreach ($text in $MapTexts) {
     if ([string]$text -match '^([12])-[123]$') {
@@ -1448,7 +1448,7 @@ function Set-DgOptionStage {
       $unclearReads++
       # 제목이 '연속' 3회 불명확할 때 보조 판정을 시도합니다. 판정이 '나온' 경우에만 화면
       # 상태별 1회 잠금(mismatch/클릭이 나오면 카운터·플래그 리셋 - 전환 중 화면 오확정 방지,
-      # Codex 리뷰 반영), 불명(null)이면 잠그지 않고 다음 회차에 재시도합니다.
+      # 교차 리뷰 반영), 불명(null)이면 잠그지 않고 다음 회차에 재시도합니다.
       # 보조 판정이 '현재 = 목표'면 성공, '같은 층 다른 구역'이면 mismatch로 승격해 카드를
       # 클릭하고, '다른 층'이면 이 화면에서 전환 불가라 안전 실패합니다.
       $observedPromoted = $false
@@ -2203,7 +2203,7 @@ function Click-ScreenPoint {
   # 이동합니다. 확인에 실패하면 클릭하지 않습니다 (2026-08-02 22:02 실사고: 사용자 마우스
   # 간섭으로 커서가 목표를 벗어난 채 클릭이 강행돼 재화줄을 오클릭 → '보유한 재화' 전체
   # 화면이 열려 클리어 대기가 가려짐. 이 프로젝트는 상태 기반 재확인 구조라 건너뛴 클릭은
-  # 다음 감지에서 자연 재시도됨 - Codex 승인: 커서 미확인 시 클릭 금지, 좌표 폴백 금지).
+  # 다음 감지에서 자연 재시도됨 - 리뷰 승인: 커서 미확인 시 클릭 금지, 좌표 폴백 금지).
   $cursorReady = $false
   for ($cursorTry = 1; $cursorTry -le 2; $cursorTry++) {
     [HoneyNogiInput]::SetCursorPos($X, $Y) | Out-Null
@@ -2754,7 +2754,7 @@ function Get-GameRegionOcrWords {
 function Get-DgLastRunExitStep {
   param([bool]$HudVisible, [string]$QuestText, [string]$CenterText, [bool]$RetryVisible)
 
-  # 마지막 판 '나가기' 확인 루프의 한 판독분 판정 (순수 - 진리표 테스트 대상, Codex 리뷰 반영):
+  # 마지막 판 '나가기' 확인 루프의 한 판독분 판정 (순수 - 진리표 테스트 대상, 교차 리뷰 반영):
   #  'popup-exit'     = '던전 탐험을 계속하시겠습니까?' 팝업 - '탐험'+'계속하' 두 신호를 모두
   #                     요구 (Space=나가기 입력이라 느슨한 단일 조각 매칭 금지)
   #  'reclick'        = 결과 화면(다시 하기 버튼)이 그대로 - 나가기 재클릭
@@ -2774,7 +2774,7 @@ function Get-DgSelectionFocusFloor {
   # 선택 화면의 포커스(선택된) 층을 판별합니다. 근거: 하단 진입 버튼 'N층 M구역 진입'의
   # 층 숫자 = 포커스 패널 (2026-07-24 40장 실측 20/20 일치 - 게임이 패널 포커스 시 그 층
   # 구역을 자동 선택). 버튼 글자가 커서 신뢰도가 가장 높습니다. 애니메이션 중 이전 값이
-  # 잠깐 남을 수 있어 2회 연속 같은 값일 때만 채택합니다 (Codex 합의 - 안정 프레임 확인).
+  # 잠깐 남을 수 있어 2회 연속 같은 값일 때만 채택합니다 (설계 합의 - 안정 프레임 확인).
   # 반환: 1 | 2 | 0(판별 실패)
   $lastFloor = ''
   for ($readNo = 1; $readNo -le 3; $readNo++) {
@@ -2819,7 +2819,7 @@ function Get-NdStageClickPoint {
         # 배경 R16~45 - 색 분리 불가로 심층 전용 색 판별식은 기각). 화이트리스트(D[12]-[123])
         # 통과 라벨은 신뢰하고 클릭 후 진입 버튼 검증(2차 방어선)에 맡긴다
         # (2026-07-30 00:36 1908 타 PC 실기: 제목 오독 → ID 불명 → 라벨은 정상인데 픽셀
-        # 확인 전멸로 안전 정지 - Codex 승인).
+        # 확인 전멸로 안전 정지 - 리뷰 승인).
         return @{ Point = @([int]$mapWord.X, [int]$mapWord.Y); Source = '라벨(픽셀 미확인)' }
       }
     }
@@ -2874,7 +2874,7 @@ function Get-NdStageClickPoint {
   if ($focusFloor -lt 1) { return $null }
   # 유형 후보 순서 시도: 카드가 실제로 있는 지점만 채택. 오선택은 진입 버튼 검증이 잡고,
   # 호출부가 오선택된 후보 유형을 ExcludeTypes로 넘겨 같은 후보를 반복 클릭하지 않습니다
-  # (Codex 리뷰 반영 - Attempt 회전만으로는 같은 통과 후보가 반복 반환되는 문제 수정).
+  # (교차 리뷰 반영 - Attempt 회전만으로는 같은 통과 후보가 반복 반환되는 문제 수정).
   # CR/CN은 같은 자리의 라벨 반전이라 제외 순환이 두 순서를 모두 시도하게 됩니다.
   foreach ($candidateType in @('A', 'B', 'CR', 'CN')) {
     if ($ExcludeTypes -contains $candidateType) { continue }
@@ -3047,7 +3047,7 @@ function Wait-ForScreen {
   do {
     # Condition 은 실행하되 캡처 실패 중에는 성공으로 인정하지 않습니다 (2026-08-01 전수
     # 점검: `-not (Test-...)` 형태 Condition 이 캡처 실패의 빈 판독을 성공으로 뒤집어 즉시
-    # 반환할 수 있었음. 실행 자체는 유지해야 캡처 성공 등록이 복구를 진행시킴 - Codex 조건.
+    # 반환할 수 있었음. 실행 자체는 유지해야 캡처 성공 등록이 복구를 진행시킴 - 리뷰 조건.
     # Invoke-ClickUntil 의 기존 게이트와 같은 계약)
     if ((& $Condition) -and -not $script:screenCaptureFailing) {
       return
@@ -3101,11 +3101,11 @@ function Wait-ForDungeonClearScreen {
     # 마감/전투 연장 판정 (본문 최상단 - 2026-08-01 전수 점검: 기존 do-while 은 이 판정이
     # 루프 바닥에 있어 팝업/부활/협동 처리의 continue 가 판정을 건너뛰었고, 마감 직전에
     # 팝업을 닫으면 전투가 진행 중이어도 연장 없이 시간 초과로 죽을 수 있었음. 최상단으로
-    # 옮기면 continue 가 어디서 나와도 매 바퀴 반드시 거침 - Codex 승인).
+    # 옮기면 continue 가 어디서 나와도 매 바퀴 반드시 거침 - 리뷰 승인).
     if ((Get-Date) -ge $deadline) {
       if ($script:screenCaptureFailing) {
         # 캡처 실패 중에는 연장 판독이 불가 - throw 하지 않고 아래 캡처 실패 처리(시간 동결)에
-        # 맡깁니다 (Codex 조건: 실패 중 마감 도달을 오류로 확정하지 않음)
+        # 맡깁니다 (리뷰 조건: 실패 중 마감 도달을 오류로 확정하지 않음)
       } elseif ((Get-Date) -lt $extendLimit -and (Test-InDungeonQuest -Game $Game)) {
         if (-not $extendLogged) {
           Write-RunLog "$($script:contentTag) 클리어 대기 한도(${TimeoutSeconds}초)를 넘겼지만 전투가 아직 진행 중 - 끝날 때까지 연장 대기합니다"
@@ -3114,16 +3114,16 @@ function Wait-ForDungeonClearScreen {
         $deadline = (Get-Date).AddSeconds(60)
       } elseif ($script:screenCaptureFailing) {
         # 연장 판독(Test-InDungeonQuest) 도중 캡처 실패가 새로 시작된 경우 - 판독 불가를
-        # 오류로 확정하지 않고 아래 캡처 실패 처리(시간 동결)에 맡깁니다 (Codex 리뷰 지적)
+        # 오류로 확정하지 않고 아래 캡처 실패 처리(시간 동결)에 맡깁니다 (교차 리뷰 지적)
       } elseif ((Test-DungeonClearPrompt -Game $Game) -or
           ($FindResultButton -and (& $FindResultButton) -and -not (Test-HomeEndEscHud -Game $Game)) -or
           ((-not $DungeonMode) -and (Test-ExitButton -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game)) -or
           ((-not $DungeonMode) -and (Test-AbyssSelectionScreen -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game))) {
         # 마감 도달 순간 이미 성공 화면(클리어/결과/보상/선택)이면 오류가 아니라 이번 바퀴의
         # 정상 판정에 맡깁니다 (3차 점검: 마감 직전 전환을 놓치고 throw 하던 회귀. 결과/보상
-        # 판정의 HUD 부재 조건은 본문과 동일 - Codex 조건. 탐침만 하고 처리·로그는 본문이 담당)
+        # 판정의 HUD 부재 조건은 본문과 동일 - 리뷰 조건. 탐침만 하고 처리·로그는 본문이 담당)
       } elseif ($script:screenCaptureFailing) {
-        # 위 최종 탐침 도중 캡처 실패가 새로 시작된 경우도 동결 처리에 맡깁니다 (Codex 조건)
+        # 위 최종 탐침 도중 캡처 실패가 새로 시작된 경우도 동결 처리에 맡깁니다 (리뷰 조건)
       } else {
         throw '던전 클리어 화면 감지 대기 시간이 초과됐습니다.'
       }
@@ -3137,7 +3137,7 @@ function Wait-ForDungeonClearScreen {
     }
 
     # 네트워크 불안정 팝업 - 결과 화면 감지보다 먼저 처리합니다 ('다시 시도하기'가
-    # Find-DgRetryButtonPoint 의 '다시/다셔/하기' 어휘와 겹쳐 오인 여지 - Codex 조건.
+    # Find-DgRetryButtonPoint 의 '다시/다셔/하기' 어휘와 겹쳐 오인 여지 - 리뷰 조건.
     # 2026-08-01 KJM 실사고: 이 대기 중에 떠서 600초를 통째로 소진했음)
     if (($pollCounter % 2) -eq 0 -and (Close-NetworkUnstablePopup -Game $Game -LogPrefix "$($script:contentTag) ")) { continue }
 
@@ -3182,7 +3182,7 @@ function Wait-ForDungeonClearScreen {
         Click-ScreenPoint -X $popupClosePoint.X -Y $popupClosePoint.Y
         # '가루 부족' 해석은 R키 가루 부활 직후에만 (2026-08-01 전수 점검: 여신상/전멸 부활은
         # 가루를 안 쓰므로 그 직후의 임의 구매 팝업(물약 부족 등)을 재료 부족으로 오인해
-        # 여신상 전환이 영구 고정되던 문제 - Codex 승인. 완료 로그용 pending 은 종류 무관 유지)
+        # 여신상 전환이 영구 고정되던 문제 - 리뷰 승인. 완료 로그용 pending 은 종류 무관 유지)
         if ($reviveConfirmPending -and $revivePendingKind -eq '가루 부활') {
           $useStatueRevive = $true
           $reviveConfirmPending = $false
@@ -3202,7 +3202,7 @@ function Wait-ForDungeonClearScreen {
       # 오클릭으로 열린 '보유한 재화' 전체 화면도 같은 주기로 정리 (2026-08-02 실사고)
       if (Close-CurrencyOverviewScreen -Game $Game) { continue }
       # 월요일 06:00 주간 리셋 블로커 2종 - 리셋은 게임 상태와 무관하게 발생하므로 클리어
-      # 대기 중에도 걸릴 수 있음 (2026-08-03 06:02 실사고의 배선 확장 - Codex 권고)
+      # 대기 중에도 걸릴 수 있음 (2026-08-03 06:02 실사고의 배선 확장 - 리뷰 권고)
       if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
       if (Close-CoopMissionBoardScreen -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
     }
@@ -3214,7 +3214,7 @@ function Wait-ForDungeonClearScreen {
     #  - 남은 횟수가 없으면 '여신상에서 부활' 클릭 (여신상에서 살아나 전투를 이어감)
     if ($reviveEnabled) {
       $death = Get-DeathScreenInfo -Game $Game
-      if (-not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (Codex 조건)
+      if (-not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (리뷰 조건)
       if ($death.Wiped) {
         if ($reviveCount -ge $reviveMaxPerCycle) {
           # 전멸 재도전도 자동 복구 시도이므로 기존 부활 상한을 공유합니다 (무한 재도전 루프 방지)
@@ -3236,7 +3236,7 @@ function Wait-ForDungeonClearScreen {
           } else {
             $wipeButtonMisses++
             if ($wipeButtonMisses -ge 3) {
-              # 예비 좌표는 클릭 직전 전멸 상태를 한 번 더 확인한 뒤에만 사용합니다 (Codex 조건 -
+              # 예비 좌표는 클릭 직전 전멸 상태를 한 번 더 확인한 뒤에만 사용합니다 (리뷰 조건 -
               # 그 사이 화면이 바뀌었으면 고정 좌표 클릭이 다른 버튼을 누를 수 있음)
               $wipeButtonMisses = 0
               $wipeRecheck = Get-DeathScreenInfo -Game $Game
@@ -3442,7 +3442,7 @@ function Get-AssistStateFromColors {
   #  - 켜짐(초록=일반 어시): L/M (13,179,118) - G채널 우세
   #    (켜지면 흰 점이 오른쪽으로 이동 - R점은 점 위치 가변이라 켜짐 판정에서 제외)
   # 꺼짐은 3점 전부 일치(보수적 - H 입력 조건), 켜짐은 L/M 이 '같은 색 계열'일 때만
-  # (혼합색 오탐 방지 - Codex 합의). 그 외 unknown = 다른 화면/전투 버튼 - 아무것도 안 누름.
+  # (혼합색 오탐 방지 - 설계 합의). 그 외 unknown = 다른 화면/전투 버튼 - 아무것도 안 누름.
   $leftWhite = ($Left.R -gt 200 -and $Left.G -gt 200 -and $Left.B -gt 200)
   $midGrey = ($Mid.R -ge 50 -and $Mid.R -le 140 -and $Mid.G -ge 50 -and $Mid.G -le 140 -and $Mid.B -ge 50 -and $Mid.B -le 140)
   $rightGrey = ($Right.R -ge 50 -and $Right.R -le 140 -and $Right.G -ge 50 -and $Right.G -le 140 -and $Right.B -ge 50 -and $Right.B -le 140)
@@ -3479,7 +3479,7 @@ function Get-DeathInfoFromText {
   # 재도전하시겠습니까?' 화면 - 2026-07-28 실기 오류 캡처 실측 판독은
   # '전별하였습LI다 … 재도전하시겠습니)가?' ('전멸'→'전별' 깨짐, '캠프파이어' 전파괴).
   # 조각은 '전멸하/전별하/재도전하'만 인정 - '재도전' 단독은 클리어 점수표의 '재도전 보너스'
-  # 실측 판독('처치완벽한전주권장전투력재도전보너스…')과 겹쳐 오탐이라 제외 (Codex 합의.
+  # 실측 판독('처치완벽한전주권장전투력재도전보너스…')과 겹쳐 오탐이라 제외 (설계 합의.
   # 전멸 화면 실측은 '재도전하시겠…'라 '재도전하'로 잡힘). 실제 클릭은 호출부가 우하단에서
   # '여신' 버튼을 실제로 찾은 뒤에만 수행하는 이중 확인 구조입니다.
   # 반환: @{ Dead; Remaining(파싱 실패 시 $null); Wiped }
@@ -3775,7 +3775,7 @@ function Invoke-EventSkipOrConfirm {
   # 클릭했으면 $true, 두 버튼 모두 없으면 $false 를 반환합니다.
   # (스텔라 픽/알 수 없는 화면 폴백은 시도 횟수 상태와 묶여 있어 여기에 포함하지 않습니다)
   # 협동 미션 전체 창은 범용 '지원'/'확인' 탐색보다 먼저 전용 제목으로 판정합니다 (이 창에
-  # 그 단어들이 없다는 실측이 없으므로 특정 화면 확인 → 전용 X 순서 - Codex 조건, 06:02 실사고)
+  # 그 단어들이 없다는 실측이 없으므로 특정 화면 확인 → 전용 X 순서 - 리뷰 조건, 06:02 실사고)
   if (Close-CoopMissionBoardScreen -Game $Game -LogPrefix $LogPrefix) { return $true }
   # 네트워크 불안정 팝업도 같은 이유로 선두 - 알 수 없는 화면 루프의 정식 출구 (08-01 KJM 실사고:
   # 중앙/X 후보 20클릭이 전부 빗나갔음)
@@ -3826,7 +3826,7 @@ function Close-WeeklyCoopResetPopup {
   # 두 창 크기(1272/1908) 모두 또렷 - '협동'+'참여' 조합으로 감지하고 '닫기'를 클릭합니다.
   # 2026-08-03 06:02 실사고로 소함수 추출: 이 팝업이 '다시 하기 → 옵션 복귀 대기'를 40초
   # 막아 무인 정지 - 이벤트 스킵 외에 복귀 대기 루프들(던전/사냥터)도 공용해야 함.
-  # 예비 좌표 클릭은 '협동'+'참여' 동시 확정이 전제 (이 분기 자체가 그 게이트 - Codex 조건).
+  # 예비 좌표 클릭은 '협동'+'참여' 동시 확정이 전제 (이 분기 자체가 그 게이트 - 리뷰 조건).
   if ($script:screenCaptureFailing) { return $false }
   $weeklyText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
     -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
@@ -3989,7 +3989,7 @@ function Get-DgCoinBalance {
     # 재화줄을 넓게 읽으면 공물 아이콘이 '뗳'으로 오독되며 값과 한 단어로 붙어 나옴
     # ('뗳0'/'뗳1'/'뗳3' - 캡처 6장 스윕 전수 일관). 단어 중심 x가 공물 자리(1080~1110)인
     # 단어의 끝 숫자를 채택하면 정답률 100%, 이웃(은동전 x≈1038·하트토큰 잡음 x≈1122)은
-    # x 범위 밖이라 자연 배제 (Codex 승인). 전 스케일 실패 시 아래 기존 방식으로 폴백.
+    # x 범위 밖이라 자연 배제 (리뷰 승인). 전 스케일 실패 시 아래 기존 방식으로 폴백.
     foreach ($balScale in @(4, 5, 3)) {
       $balWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX 960 -ReferenceY 45 `
           -RegionWidth 175 -RegionHeight 44 -Scale $balScale -Engine $ocrKoreanEngine)
@@ -4028,7 +4028,7 @@ function Get-DgTributeCost {
   # 아이콘+'입장하기' 텍스트까지 함께 읽고 숫자 그룹만 뽑습니다. 10/20 중 하나가
   # 잡히면 우선 그 값을, 아니면 마지막 숫자 그룹을 돌려줍니다. 실패 시 $null.
   # 숫자가 한 번에 안 잡히는 경우가 있어 스케일/엔진을 바꿔가며 재시도합니다.
-  # (01:45 실기로 커서 호버 이론이 반증되어 판독 전 커서 파킹은 제거 - Codex 지시.
+  # (01:45 실기로 커서 호버 이론이 반증되어 판독 전 커서 파킹은 제거 - 리뷰 지시.
   #  카드를 끈 직후의 '1' 지속은 게임 자체의 표시 지연이며, 호출부가 '방금 전환 확인' 시
   #  검증을 생략하는 것으로 대응)
   # IME 팝업이 입장 버튼(소모량 표시 자리)을 덮으면 팝업 글자의 오독 숫자('전환하己1면'의
@@ -4156,7 +4156,7 @@ function Close-CurrencyOverviewScreen {
   # '보유한 재화' 전체 화면을 감지해 우상단 X 로 닫습니다. 닫았으면 $true.
   # (2026-08-02 22:02 실사고: 커서 간섭 오클릭이 재화줄을 눌러 이 화면이 열렸고 클리어
   #  대기가 가려짐 - 라이브 캡처 실측: 좌상단 제목 '보유한 재화', 우상단 X ≈ (1228,67)).
-  # 제목을 좁은 ROI 에서 엄격히 확인한 경우에만 닫습니다 (Codex 조건 - 오탐 클릭 금지).
+  # 제목을 좁은 ROI 에서 엄격히 확인한 경우에만 닫습니다 (리뷰 조건 - 오탐 클릭 금지).
   # 클릭은 커서 확인 게이트(Click-ScreenPoint)가 지키므로 간섭 중엔 다음 폴링에서 재시도.
   if ($script:screenCaptureFailing) { return $false }
   # '보유한'은 s3 에서 '모유한'으로 깨짐(실측) → '유한'+'재화' 조각 조합으로 판정
@@ -4177,7 +4177,7 @@ function Test-CoopMissionBoardTitle {
   # 친구 창 '협동 미션' 전체 화면의 좌상단 제목 판정 (순수 - 진리표 테스트 대상):
   # '협동' AND ('미션' OR '미선'). '미선' = 1810x1020 창 s3 실측 깨짐 (2026-08-03 KJM PC
   # 오류 캡처 - '협동'(194,64)+'미선'(250,62)). '미.' 같은 광범위 완화는 금지 - 실측된
-  # 이형만 정확히 허용합니다 (Codex 조건). '협동' 조각은 두 배율 음성 스윕에서 0건이라
+  # 이형만 정확히 허용합니다 (리뷰 조건). '협동' 조각은 두 배율 음성 스윕에서 0건이라
   # 이형 추가로 오탐면이 늘지 않음.
   $t = ([string]$TitleText) -replace '\s', ''
   return [bool]($t.Contains('협동') -and ($t.Contains('미션') -or $t.Contains('미선')))
@@ -4188,7 +4188,7 @@ function Test-CoopMissionBoardVisible {
 
   # 협동 미션 전체 창의 제목 ROI(120,45,220,50)를 s3→s4 사다리로 판독합니다.
   # 판정(Test-CoopMissionBoardTitle)이 참일 때만 조기 종료 - 빈/깨진 판독은 다음 배율로
-  # 넘어갑니다 (Codex 조건: 'OCR 비어 있지 않음'이 아니라 '판정 참'이 종료 조건).
+  # 넘어갑니다 (리뷰 조건: 'OCR 비어 있지 않음'이 아니라 '판정 참'이 종료 조건).
   # 실측: 1272 창 = s3 즉시('협동'+'미션') / 1810 창 = s3 '미선' 이형 채택, s4 정상 판독.
   # 단일 배율 함정(카드/알약/협동 확인 버튼 실사고 반복) 방지를 위한 이중 배율입니다.
   foreach ($boardScale in @(3, 4)) {
@@ -4216,7 +4216,7 @@ function Close-CoopMissionBoardScreen {
   if ($script:screenCaptureFailing) { return $false }
   if (-not (Test-CoopMissionBoardVisible -Game $Game)) { return $false }
   Focus-Game -Game $Game
-  # 전면화 사이 화면이 바뀔 수 있어 재확인 후에만 X 클릭 (스테일 클릭 방지 - Codex 조건.
+  # 전면화 사이 화면이 바뀔 수 있어 재확인 후에만 X 클릭 (스테일 클릭 방지 - 리뷰 조건.
   # 주 1회 리셋에만 도달하는 분기라 추가 OCR 비용은 사실상 없음)
   if (-not (Test-CoopMissionBoardVisible -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX 1228 -ReferenceY 67
@@ -4255,11 +4255,11 @@ function Close-NetworkUnstablePopup {
   #  소진 + 재시작 워커의 알 수 없는 화면 클릭 20회 전부 빗나감 → 3연속 정지.)
   # 감지: 제목 ROI(420,355,440,70) s3 '네트워크'+'불안정' 엄격 확인 (실측: '네트워크'
   #  (532,389) '불안정합니다'(718,389), s4 '불안정합LI다'도 조각 생존. '연결' 완화는
-  #  다른 연결 오류 팝업 오포섭 위험으로 기각 - Codex 조건).
+  #  다른 연결 오류 팝업 오포섭 위험으로 기각 - 리뷰 조건).
   # 버튼: rgClearExit 를 s3→s4 로 읽어 Select-NetworkRetryWord 로 선택, 전 배율 실패 시
   #  실측 예비 좌표(743,620 = 버튼 중심). 클릭 직전 제목 재확인(전면화 사이 팝업이 사라지면
-  #  예비 좌표가 밑 화면을 누르는 사고 방지 - Codex 조건). 단어 좌표는 기준 좌표이므로
-  #  반드시 Click-GamePoint 로 클릭 (Click-ScreenPoint 직결 금지 - Codex 지적).
+  #  예비 좌표가 밑 화면을 누르는 사고 방지 - 리뷰 조건). 단어 좌표는 기준 좌표이므로
+  #  반드시 Click-GamePoint 로 클릭 (Click-ScreenPoint 직결 금지 - 리뷰 지적).
   # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키 대신 상태 확정 클릭.
   # 재접속 실패로 팝업이 다시 떠도 다음 폴링이 같은 게이트로 재클릭(자연 재시도),
   # 네트워크가 진짜 죽어 있으면 기존 대기 한도가 오류로 정지 (최후 방어 현행 유지).
@@ -4312,7 +4312,7 @@ function Close-CoopMissionScreen {
   }
   # '확인' 버튼 탐색: 다중 스케일 3→4→5 (2026-08-01 실사고 - 기본 s3 은 이 버튼을
   # '>poce'/'할인'으로 깨뜨려 두 밤 연속 라이브 미감지. s4 는 오류 캡처 2장 모두 정상 판독.
-  # 카드 버튼 '서대되'와 같은 단일 배율 결함 - Codex 승인)
+  # 카드 버튼 '서대되'와 같은 단일 배율 결함 - 리뷰 승인)
   $coopConfirmPoint = $null
   foreach ($coopBtnScale in @(3, 4, 5)) {
     $coopConfirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
@@ -4328,7 +4328,7 @@ function Close-CoopMissionScreen {
   }
   # 전 배율 실패 폴백: 실측 고정 좌표 (2026-07-30 실측 확인 버튼 중심 636,654).
   # 부제로 화면이 확정된 상태지만, 클릭 직전 부제를 한 번 더 재확인해 그 사이 화면 전환을
-  # 배제합니다 (상태 기반 클릭 원칙 - Codex 조건: 재확인 성공 시에만 폴백 실행)
+  # 배제합니다 (상태 기반 클릭 원칙 - 리뷰 조건: 재확인 성공 시에만 폴백 실행)
   $coopRecheck = (Get-GameRegionOcrText -Game $Game -ReferenceX 360 -ReferenceY 285 `
       -RegionWidth 560 -RegionHeight 35 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if ((($coopRecheck.Contains('우편으로') -and $coopRecheck.Contains('전송')) -or $coopRecheck.Contains('캐릭터가위치한'))) {
@@ -4350,7 +4350,7 @@ function Invoke-PurchasePopupSweep {
   # 입력에는 같은 처리가 있었지만 입장 대기 루프들에는 없었음). 캡처 실패 중에는 무동작.
   # 주의: Wait-ForScreen 의 Condition 안에서 쓸 때는 반환값이 파이프라인에 새어 나가
   # 대기 성공으로 오판되지 않게 `if (Invoke-PurchasePopupSweep ...) { return $false }`
-  # 계약으로 소비해야 합니다 (Codex 지적 - PS 5.1 스크립트블록 출력 오염).
+  # 계약으로 소비해야 합니다 (리뷰 지적 - PS 5.1 스크립트블록 출력 오염).
   if ($script:screenCaptureFailing) { return $false }
   $sweepPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
     -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
@@ -4397,8 +4397,8 @@ function Invoke-AfterEntryKeys {
   # 키 입력 전 구매 제안 팝업 사전 처리 (2026-07-28 실기: 물약 부족 상태로 입장하면 구매
   # 팝업이 이미 떠 있어 B(음식) 키가 팝업에 먹혀 음식을 못 먹음 - 02:56 로그 실측. 클리어
   # 대기 루프의 팝업 감시는 키 입력 '이후'라 못 막았음). 확인 최대 4회 = 닫기 최대 3회 +
-  # 마지막 재확인 - 무팝업이면 OCR 1회만 추가 (Codex 합의 계약). 캡처 실패 중이면 사전
-  # 처리를 건너뛰고 바로 키 입력 (실패를 '팝업 잔존'으로 오인 금지 - Codex 지적).
+  # 마지막 재확인 - 무팝업이면 OCR 1회만 추가 (설계 합의 계약). 캡처 실패 중이면 사전
+  # 처리를 건너뛰고 바로 키 입력 (실패를 '팝업 잔존'으로 오인 금지 - 리뷰 지적).
   # 키 입력 후 재입력은 하지 않음 - 팝업이 키보다 늦게 떴다면 키는 이미 전달된 것이고,
   # B 재입력은 음식 중복 소모 위험 (상태 확인 없는 재입력 금지 정책).
   if (-not $script:screenCaptureFailing) {
@@ -4475,7 +4475,7 @@ function Wait-ForResultScreen {
       continue
     }
     # 네트워크 불안정 팝업 - 반복 버튼 탐색('다시/다셔/하기')과 어휘가 겹치므로 그보다 먼저
-    # 처리합니다 (Codex 조건 - 클리어 대기와 같은 계약)
+    # 처리합니다 (리뷰 조건 - 클리어 대기와 같은 계약)
     if (Close-NetworkUnstablePopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
 
     $retryPoint = & $FindRetryButton
@@ -4498,7 +4498,7 @@ function Wait-ForResultScreen {
     # 오클릭으로 열린 '보유한 재화' 전체 화면 정리 (2026-08-02 실사고 - 결과 대기도 가려짐)
     if (Close-CurrencyOverviewScreen -Game $Game) { continue }
     # 월요일 06:00 주간 리셋 블로커 2종 - 클리어 직후~결과 화면 사이(최대 90초)에 리셋이
-    # 걸리면 결과 대기도 같은 방식으로 가려짐 (2026-08-03 06:02 실사고의 배선 확장 - Codex 권고)
+    # 걸리면 결과 대기도 같은 방식으로 가려짐 (2026-08-03 06:02 실사고의 배선 확장 - 리뷰 권고)
     if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
     if (Close-CoopMissionBoardScreen -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
     Start-Sleep -Seconds 2
@@ -4507,7 +4507,7 @@ function Wait-ForResultScreen {
     # 타임아웃 시점에 클리어 화면이 '여전히' 보이면 = 수십 회 터치가 전부 무시된 것 - 게임
     # 클라이언트 무응답(로딩 멈춤) 가능성이 높아 원인을 알 수 있는 문구로 바꿉니다
     # (2026-08-02 타 PC 제보: 프리즈 상태에서 50+회 클릭 불변 → 기존 문구로는 원인 불명.
-    # Codex 조건: 이 시점에 새로 재판정해 유지 확인된 경우만 교체, 아니면 기존 문구 폴백)
+    # 리뷰 조건: 이 시점에 새로 재판정해 유지 확인된 경우만 교체, 아니면 기존 문구 폴백)
     if ((-not $script:screenCaptureFailing) -and (Test-DungeonClearPrompt -Game $Game)) {
       throw '클리어 화면이 터치에 반응하지 않습니다 - 게임이 응답 없음(로딩 멈춤) 상태로 보입니다. 게임을 재시작한 뒤 다시 시작해 주세요.'
     }
@@ -4586,7 +4586,7 @@ function Test-DifficultySelectedAt {
   $refY = [int][Math]::Round(($ScreenPoint.Y - $rect.Top) * $referenceHeight / $height)
   $hits = 0
   $probeRows = @()
-  # dy 그물 확대 (2026-07-29 21:28 계측으로 원인 확정 - Codex 승인): OCR 단어 박스의 Y 중심이
+  # dy 그물 확대 (2026-07-29 21:28 계측으로 원인 확정 - 리뷰 승인): OCR 단어 박스의 Y 중심이
   # 판독(스케일/깨짐)마다 최대 ~11px 출렁여, 기존 ±14~18 좁은 창이 금 테두리를 통째로 비껴가는
   # 간헐 실패가 5회 재발 (기준(660,114) 2/18 실측 - 알약 중심 103 대비 11px 아래로 잡힘).
   # 선택 알약은 글자도 금색이라 dy 0 근처도 유효 신호 - 촘촘한 그물로 Y 출렁임을 흡수한다.
@@ -4608,7 +4608,7 @@ function Test-DifficultySelectedAt {
     $probeRows += ('{0}:{1}/{2}' -f $dy, $rowMaxBright, $rowMaxSat)
   }
   # 판정 실패의 실측 계측 (2026-07-29 - 5회 재발한 '캡처는 정상인데 런타임만 실패' 원인
-  # 추적용): 실패 순간 실제로 읽힌 픽셀 요약을 남겨 다음 재발 때 원인을 확정한다 (Codex 승인).
+  # 추적용): 실패 순간 실제로 읽힌 픽셀 요약을 남겨 다음 재발 때 원인을 확정한다 (리뷰 승인).
   # 형식: 히트수/18 + dy행별 '최대밝기/최대채도' (기준점 포함)
   $script:lastPillProbe = ('기준({0},{1}) {2}/18 [{3}]' -f $refX, $refY, $hits, ($probeRows -join ' '))
   return ($hits -ge 3)
@@ -4691,7 +4691,7 @@ function Set-DgOptionDifficulty {
     }
     if ($preTry -lt 5) { Start-Sleep -Milliseconds 1000 }
   }
-  # 클릭 1회 → 재클릭 없이 2초 간격 수동 확인 (Codex 계약 - 확인 실패마다 재클릭하면
+  # 클릭 1회 → 재클릭 없이 2초 간격 수동 확인 (리뷰 계약 - 확인 실패마다 재클릭하면
   # 눌림/전환 연출이 다시 시작돼 확인이 영원히 연출 구간에 걸리는 자기 방해 루프.
   # 23:56 실기: 오류 3초 뒤 캡처는 판정 완벽 통과 = 기다리기만 하면 되는 상태였음)
   Focus-Game -Game $Game
@@ -4790,7 +4790,7 @@ function Set-DgToggleCard {
   # 두 상태를 다 읽지 못합니다. 주 영역에서 판별이 안 되면 보조 영역(AltRegion)을 읽습니다.
   $lastText = ''
   $clicked = $false
-  # 이번 호출에서 실제 클릭이 있었는지를 호출부에 알립니다 (매 호출 초기화 - Codex 계약).
+  # 이번 호출에서 실제 클릭이 있었는지를 호출부에 알립니다 (매 호출 초기화 - 리뷰 계약).
   # '방금 우리가 클릭해서 전환을 확인한' 경우 소모량 교차 검증을 생략하는 판단에 쓰입니다.
   $script:dgToggleClicked = $false
   # 판독 영역 목록 (주 → 보조). PS 5.1 배열 풀림 방지로 쉼표 연산자를 씁니다.
@@ -4803,7 +4803,7 @@ function Set-DgToggleCard {
     # 캡처 실패 중에는 시도를 소모하지 않고 복구를 기다립니다 (2026-08-02 06:03 실사고:
     # 아침 6시 리셋 + RDP 본체 전환 5초가 6회 중 5회를 태워, 복구 직후 마지막 회전에서
     # 클릭만 하고 재확인 없이 종료 → 커스텀 게이트 정지. 입장 재시도 루프와 같은 계약 -
-    # 복구 탐침이 캡처 성공을 등록해 플래그를 갱신합니다. Codex 조건: setTry 절대 미소모)
+    # 복구 탐침이 캡처 성공을 등록해 플래그를 갱신합니다. 리뷰 조건: setTry 절대 미소모)
     while ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 2
@@ -4815,12 +4815,12 @@ function Set-DgToggleCard {
     # 07-29 난이도 알약과 같은 '단일 스케일 고정' 사고). 스케일 우선 순회(각 배율에서 주 →
     # 보조)라 기존 스케일 5 성공 경로는 첫 배율에서 그대로 끝납니다.
     #
-    # 다중 스케일은 **1~2회전과 클릭 직후 첫 재확인에서만** 씁니다 (Codex 조건 - 3차 점검에서
+    # 다중 스케일은 **1~2회전과 클릭 직후 첫 재확인에서만** 씁니다 (리뷰 조건 - 3차 점검에서
     # 1회전 한정의 회귀 확인: 첫 회전이 화면 전환 중이라 3배율 전부 실패하면 이후 s5 만 남아
     # s5 가 깨지는 창(어제 타 PC)에서 구제 불가. 2회전까지면 800ms 대기 후 안정 화면 재시도).
     # 그래도 실패하면 글자 판독이 안 되는 상태(회색 비활성 등)라 픽셀 폴백·재확인 생략이 담당.
     # 최악 비용: 1~2회전 3배율 12회 + 3~6회전 s5 8회 + 클릭 재확인이 s5 회전을 3배율로
-    # 대체하는 증가분 4회 = 24회 (전 회전 3배율이면 36회 - Codex 재산정).
+    # 대체하는 증가분 4회 = 24회 (전 회전 3배율이면 36회 - 리뷰 재산정).
     $cardScales = @(5)
     if ($setTry -le 2) { $cardScales = @(5, 3, 4) }
     elseif ($clicked -and -not $clickedRecheckDone) {
@@ -4889,7 +4889,7 @@ function Set-DgToggleCard {
     $script:dgToggleClicked = $true
     # 마지막 회전에서 클릭했다면 재확인용으로 1회전만 연장합니다 (2026-08-02 실사고 - 재확인
     # 없이 종료돼 게이트 정지. 연장 회전에서도 반대 상태로 읽히면 성공 처리 없이 기존
-    # 경고/$false 경로로 갑니다 - Codex 조건)
+    # 경고/$false 경로로 갑니다 - 리뷰 조건)
     if ($setTry -eq $setTryMax -and $setTryMax -eq 6 -and -not $clickedRecheckDone) { $setTryMax = 7 }
     Start-Sleep -Milliseconds 1100
   }
@@ -5004,7 +5004,7 @@ function Invoke-NormalDungeonCycle {
   $stageFloor = $stageParts[0]
   $stageArea = $stageParts[1]
   # '매우 어려움' 요청 여부: 없는 난이도로 오입장하는 사고를 막기 위해 모드와 무관하게
-  # 탐색·확정 실패를 치명 처리하는 데 씁니다 (Codex 리뷰 반영)
+  # 탐색·확정 실패를 치명 처리하는 데 씁니다 (교차 리뷰 반영)
   $ndVeryHardTarget = ((($ndDifficulty -replace '\s', '')) -eq '매우어려움')
 
   # 0. 현재 화면 판별: 좌상단 제목이 'N구역'을 포함하면 이미 진입 옵션 화면입니다.
@@ -5017,7 +5017,7 @@ function Invoke-NormalDungeonCycle {
   }
   # 시작 화면 판정 전 전체 화면 팝업 정리 (2026-08-01 실사고: 물약 부족 팝업+협동 미션 완료
   # 화면이 겹친 채 재시도 워커가 시작되자 제목/HUD 판독이 전부 가려져 "던전 화면이 아닙니다"
-  # 3연속 즉사 → 정지. 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - Codex 조건)
+  # 3연속 즉사 → 정지. 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
     Start-Sleep -Milliseconds 1200
@@ -5027,7 +5027,7 @@ function Invoke-NormalDungeonCycle {
 
   # 던전 ID 확정 (상태·기하 중심 좌표 체계의 상태 ID): 선택/옵션 제목 모두에 던전 이름이
   # 포함되므로 시작 시 1회 판별합니다. 불명이면 '미등록 확정'이 아니라 '모름'으로 두고,
-  # 이후 좌표는 라벨/기하 프로브로만 만들어집니다 (Codex 합의 - ID 불명 상태 분리).
+  # 이후 좌표는 라벨/기하 프로브로만 만들어집니다 (설계 합의 - ID 불명 상태 분리).
   $script:dgDungeonId = Get-DgDungeonIdFromTitle -TitleText $titleText
   if ($script:dgDungeonId) {
     Write-RunLog "[던전] 던전 판별: $($script:dgDungeonId) (제목: '$titleText')"
@@ -5097,7 +5097,7 @@ function Invoke-NormalDungeonCycle {
         Focus-Game -Game $Game
         Click-GamePoint -Game $Game -ReferenceX ([int]$tabPoint.X) -ReferenceY ([int]$tabPoint.Y)
         Start-Sleep -Milliseconds 1200
-        # 전환 확인: 빈 판독이 '심층 없음 = 던전 탭'으로 오인되지 않게 '진입' 존재까지 요구 (Codex)
+        # 전환 확인: 빈 판독이 '심층 없음 = 던전 탭'으로 오인되지 않게 '진입' 존재까지 요구 (리뷰)
         if (Test-DgTabProbeMatchesMode -ProbeText ([string](Get-DgStageEnterButtonText -Game $Game)) -DeepTab $deepMode) {
           $tabSwitched = $true
         }
@@ -5106,7 +5106,7 @@ function Invoke-NormalDungeonCycle {
         Write-RunLog "[완료] '$tabTargetLabel' 탭 자동 전환을 확인하지 못했습니다 - 던전 선택 화면에서 '$tabTargetLabel' 탭을 연 뒤 다시 시작해 주세요 (제목: '$titleText')"
         exit 4
       }
-      # 전환 후 제목 재판독 → 던전 ID 재산출 + 매우 어려움 2단계 던전 가드 재평가 (Codex 조건 -
+      # 전환 후 제목 재판독 → 던전 ID 재산출 + 매우 어려움 2단계 던전 가드 재평가 (리뷰 조건 -
       # 전환 전 판별이 이후 좌표·배치 판정을 오염시키지 않게)
       $titleText = & $readDgTitle
       $script:dgDungeonId = Get-DgDungeonIdFromTitle -TitleText $titleText
@@ -5120,7 +5120,7 @@ function Invoke-NormalDungeonCycle {
 
   # 주간 매우 어려움 (심층 전용): 단일 구역이며 주마다 위치가 바뀌므로 구역 설정을 쓰지 않고
   # 화면에 열려 있는 그 구역을 동적으로 채택합니다 (층·구역 전환/선택 클릭 전체 미사용 -
-  # 매우 어려움 카드는 색이 달라(빨강) 남색 카드 픽셀 검증 경로를 태울 수 없음. Codex 합의).
+  # 매우 어려움 카드는 색이 달라(빨강) 남색 카드 픽셀 검증 경로를 태울 수 없음. 설계 합의).
   if ($deepMode -and $ndVeryHardTarget) {
     # 판독 최대 3회 재시도 (2026-07-28 실기: 시작 직후 첫 OCR이 일시적으로 빈 값이면 1회
     # 판독만으로 코드 4 정지 - 매회 재판독으로 일시 공백을 흡수. 옵션 경로는 제목, 선택
@@ -5155,11 +5155,11 @@ function Invoke-NormalDungeonCycle {
   if ($script:customMode -and $script:customRecoveryOnly) {
     # 복귀/진입 버튼으로 이미 확정된 선택 화면 플래그를 신뢰합니다 (2026-08-01 3차 점검:
     # 탭 전환 복귀 후 제목 재판독이 일시 공백이면 제목만 보는 판정이 선택 화면을 놓쳐,
-    # 완료 마커가 있는 항목을 다시 입장할 수 있었음 - Codex 승인)
+    # 완료 마커가 있는 항목을 다시 입장할 수 있었음 - 리뷰 승인)
     $recoveryOnSelection = ($onSelectionScreen -or (Test-DgSelectionTitle -TitleText $titleText))
     # 마지막 판 복구: 마무리가 '나가기 → 필드'라서 옵션/선택 화면이 아니라 필드가 목표 화면입니다.
     # 필드 상태(HUD + 던전 목표 없음, 연속 2회)면 재입장 없이 복구 완료 처리하고, 나가기 팝업에서
-    # 끊긴 경우는 나가기(Space)를 이어서 처리합니다 (Codex 리뷰 반영 - 기존 로직은 필드를
+    # 끊긴 경우는 나가기(Space)를 이어서 처리합니다 (교차 리뷰 반영 - 기존 로직은 필드를
     # '던전 화면 아님' 오류로 처리해 마지막 판 복구가 항상 실패).
     if ($script:dgLastRun -and -not $onOptionsScreen -and -not $recoveryOnSelection) {
       $recoveryFieldStreak = 0
@@ -5190,7 +5190,7 @@ function Invoke-NormalDungeonCycle {
           $recoveryPopupHandled = $true
         } elseif ($recoveryPopupHandled) {
           # 팝업 처리 직후의 전환(로딩/페이드)은 'wait'로 읽힙니다 - 끊지 않고 필드 확인을
-          # 계속합니다 (Codex 조건: 팝업 처리 후 즉시 break 금지)
+          # 계속합니다 (리뷰 조건: 팝업 처리 후 즉시 break 금지)
           $recoveryFieldStreak = 0
         } else {
           # 팝업 처리 전의 미지 상태는 기존 복구 흐름(결과 화면 복구 등)에 맡깁니다
@@ -5415,7 +5415,7 @@ function Invoke-NormalDungeonCycle {
   #    커스텀 반복에서는 '경고 후 진행'을 격상합니다: 오난이도 판이 항목 완료로 계상되면
   #    난이도별 첫 클리어 보상을 잃는 사고라, 탐색/검증을 재시도하고 끝내 확인이 안 되면
   #    진행하지 않고 조건부 정지(코드 4)합니다. '매우 어려움' 요청은 비커스텀에서도
-  #    실패 시 중단합니다 - 없는 난이도로 오입장하는 사고 방지 (Codex 리뷰 반영).
+  #    실패 시 중단합니다 - 없는 난이도로 오입장하는 사고 방지 (교차 리뷰 반영).
   if ($script:customMode) {
     $diffOk = $false
     for ($diffTry = 1; $diffTry -le 3; $diffTry++) {
@@ -5494,7 +5494,7 @@ function Invoke-NormalDungeonCycle {
           break
         }
         # 이미 선택도 아님: 틀린 좌표로 클릭하지 않고 안전 정지로 넘어갑니다.
-        # 이전 시도의 오선택 판정이 남아 옵션 복구로 새지 않도록 판정도 초기화합니다 (Codex 리뷰).
+        # 이전 시도의 오선택 판정이 남아 옵션 복구로 새지 않도록 판정도 초기화합니다 (교차 리뷰).
         $stagePlanMissing = $true
         $selectionResult = [pscustomobject]@{ Action = 'unclear'; CurrentFloor = ''; CurrentArea = ''; CurrentStage = '' }
         break
@@ -5534,7 +5534,7 @@ function Invoke-NormalDungeonCycle {
       }
       # 현재 구역이 명확히 읽혔으면 같은 좌표를 반복 클릭하지 않고 복구 경로로 즉시 전환합니다.
       # 단 미등록 던전의 배치 후보 클릭이 다른 구역을 잡은 경우는 선택 화면이 그대로이므로
-      # 그 후보 유형을 제외하고 다음 배치 후보를 계속 시도합니다 (Codex 리뷰 반영).
+      # 그 후보 유형을 제외하고 다음 배치 후보를 계속 시도합니다 (교차 리뷰 반영).
       if ($selectionResult.Action -eq 'same-floor' -or $selectionResult.Action -eq 'different-floor') {
         if ([string]$stagePlan.Source -like '미등록후보*') {
           $misselectType = ([string]$stagePlan.Source -split ':')[1]
@@ -5547,7 +5547,7 @@ function Invoke-NormalDungeonCycle {
     }
 
     # 미등록 배치 후보의 오선택은 옵션 복구를 태우지 않습니다 - 후보 자체가 추정이라
-    # 복구 루프 대신 다음 후보/안전 정지가 맞습니다 (Codex 리뷰 반영).
+    # 복구 루프 대신 다음 후보/안전 정지가 맞습니다 (교차 리뷰 반영).
     $planWasCandidate = ($stagePlan -and ([string]$stagePlan.Source -like '미등록후보*'))
 
     if ($stageSelected) {
@@ -5723,7 +5723,7 @@ function Invoke-NormalDungeonCycle {
     if ($null -eq $actualCost) {
       # 카드 설정도 미확인 + 소모량(2차 방어)도 판독 실패 = 설정 상태를 아무것도 보증할 수
       # 없는 상태입니다. 커스텀(항목별 명시 설정)은 반대 설정 완료 오계상을 막기 위해 정지
-      # (2026-08-01 전수 점검 - Codex 조건: 소탕/더블 루팅 어느 카드든 실패 + 소모량 null).
+      # (2026-08-01 전수 점검 - 리뷰 조건: 소탕/더블 루팅 어느 카드든 실패 + 소모량 null).
       # 일반 모드는 기존대로 경고 진행 (OCR 약한 환경 헛 정지 방지).
       if ($script:customMode -and (-not $coinToggleOk -or -not $lootToggleOk)) {
         Write-RunLog "[완료] 카드 설정을 확인하지 못했고 소모량 판독도 실패했습니다 (소탕 확인: $coinToggleOk, 더블 루팅 확인: $lootToggleOk) - 반대 설정 입장을 막기 위해 정지합니다"
@@ -5738,11 +5738,11 @@ function Invoke-NormalDungeonCycle {
       if (($coinToggleClicked -or $lootToggleClicked) -and $coinToggleOk -and $lootToggleOk) {
         # 방금 카드를 클릭해 전환을 글자로 확인한 직후의 유효값 불일치 = 소모량 표시 지연
         # 잔상 (2026-07-29 01:45 실측 13초+ 지연, 카드 확정 판독 > 소모량 잔상 증거 우선 계약.
-        # 소모량은 두 카드의 합산이라 어느 쪽 클릭이든 지연 영향 - Codex 조건. 3차 점검 반영)
+        # 소모량은 두 카드의 합산이라 어느 쪽 클릭이든 지연 영향 - 리뷰 조건. 3차 점검 반영)
         Write-RunLog "[던전] 방금 카드 전환을 확인해 소모량 불일치(예상 ${expectedCost}, 실제 ${actualCost})는 표시 지연으로 판단 - 정정 클릭 생략"
       } elseif ($coinToggleClicked -or $lootToggleClicked) {
         # 방금 클릭했는데 카드 확인은 실패 - 정정 클릭은 이중 토글 위험이라 금지하고 무클릭
-        # 재판독으로만 판정합니다 (Codex 조건: clicked && !toggleOk 는 재판독 또는 정지)
+        # 재판독으로만 판정합니다 (리뷰 조건: clicked && !toggleOk 는 재판독 또는 정지)
         Start-Sleep -Milliseconds 2500
         $lagRecheck = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
         if ($null -ne $lagRecheck -and $lagRecheck -eq $expectedCost) {
@@ -5781,7 +5781,7 @@ function Invoke-NormalDungeonCycle {
         Write-RunLog "[던전] 공물 소모량 ${oddRecheck}개 재확인 (첫 판독 ${actualCost}는 OCR 잡음으로 판단)"
       } elseif ($null -eq $oddRecheck) {
         # 카드 미확인 + 첫 판독 잡음 + 재판독 실패 = 보증 없는 상태 - 커스텀은 정지
-        # (2026-08-01 3차 점검: 이 경로가 null 게이트를 우회해 검증 없이 입장했음 - Codex 승인)
+        # (2026-08-01 3차 점검: 이 경로가 null 게이트를 우회해 검증 없이 입장했음 - 리뷰 승인)
         if ($script:customMode -and (-not $coinToggleOk -or -not $lootToggleOk)) {
           Write-RunLog "[완료] 카드 설정을 확인하지 못했고 소모량 재판독도 실패했습니다 (첫 판독 '${actualCost}') - 반대 설정 입장을 막기 위해 정지합니다"
           exit 4
@@ -5803,7 +5803,7 @@ function Invoke-NormalDungeonCycle {
     # 단, 방금 우리가 카드를 클릭해 '도전' 전환을 카드 글자로 확인한 경우는 검증을 생략합니다
     # (2026-07-29 01:45 확정 실측: 게임이 카드를 끈 뒤에도 소모량 표시를 13초+ 남겨두는
     # 표시 지연이 정상이라 교차 검증의 정보가치가 없고, 경고 소음+헛대기만 남음. 전환 확인은
-    # 카드 자체의 글자 재판독으로 이미 완료 - 클릭 대상 오인 불가. Codex 승인).
+    # 카드 자체의 글자 재판독으로 이미 완료 - 클릭 대상 오인 불가. 리뷰 승인).
     if ($coinToggleClicked -and $coinToggleOk) {
       Write-RunLog "[던전] 방금 $dgCurrencyName(소탕) 카드를 도전(미사용)으로 전환 확인 - 소모량 표시 검증 생략 (전환 직후 표시 지연 정상)"
     } else {
@@ -5811,7 +5811,7 @@ function Invoke-NormalDungeonCycle {
     $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
     # 커스텀 미사용 항목 게이트: 카드 미확인($coinToggleOk=false) + 신뢰할 소모량 증거 없음
     # (null 또는 유효 밖 잡음 값)이면 설정 상태를 아무것도 보증할 수 없어 정지합니다
-    # (2026-08-01 Codex 리뷰 - 사용 경로와 대칭. null 은 '소모량 없음(미사용 정상)'과 '일반
+    # (2026-08-01 교차 리뷰 - 사용 경로와 대칭. null 은 '소모량 없음(미사용 정상)'과 '일반
     # OCR 실패'가 구분되지 않고, 유효 밖 숫자도 증거가 아님. 유효값(10/20)이 보이면 카드가
     # 켜진 증거라 아래 해제 루프가 처리. IME 팝업 가림도 동일하게 이 게이트에 걸림)
     if ($script:customMode -and -not $coinToggleOk -and
@@ -5831,7 +5831,7 @@ function Invoke-NormalDungeonCycle {
       # 버튼의 소모량 표시 갱신이 몇 초 늦는 경우, 기존의 offCost 기반 raw 클릭(최대 2회)이
       # 해제된 카드를 도로 켜는 토글 자기 방해가 됨. Set-DgToggleCard 를 **1회만** 호출해
       # 카드가 실제 '선택됨'일 때만 클릭하게 하고(이미 도전이면 무클릭), 그 후에는 클릭 없이
-      # 2초 간격 수동 재판독으로 버튼 갱신을 기다립니다 (Codex 계약 - 헬퍼 내부에 자체 재클릭
+      # 2초 간격 수동 재판독으로 버튼 갱신을 기다립니다 (리뷰 계약 - 헬퍼 내부에 자체 재클릭
       # 로직이 있어 루프 반복 호출 금지).
       $offCleared = $false
       $imeOffWaitTotal = 0
@@ -5861,7 +5861,7 @@ function Invoke-NormalDungeonCycle {
         # 카드 '도전' 확정 판독 = 1차 증거 (2026-07-29 00:58 실측: 카드를 끈 직후 입장 버튼의
         # 소모량 표시가 갱신되지 않고 남는 잔상 - 수동 10초 대기로도 안 사라지고, 정지 직후
         # 캡처는 버튼 깨끗+카드 도전. 카드 클릭이 없던 항목은 무사 통과 = 잔상과 정합).
-        # 카드 확인이 이기고 소모량 표시는 경고만 남기고 진행합니다 (Codex 승인 -
+        # 카드 확인이 이기고 소모량 표시는 경고만 남기고 진행합니다 (리뷰 승인 -
         # 카드 미확인 시에만 아래 정지가 유지되어 07-19 원사고(카드 판별 불가+표시 10)도 커버).
         Write-RunLog "[경고] 소탕 카드는 '도전(미사용)'으로 확인됐지만 소모량 표시가 남아 있습니다 (판독: '$offCost') - 표시 잔상으로 판단하고 미사용으로 진행합니다"
       } elseif ($null -ne $offCost -and ($dgValidCosts -contains $offCost)) {
@@ -5923,7 +5923,7 @@ function Invoke-NormalDungeonCycle {
       # IME 팝업 '사전' 확인 (2026-08-01 전수 점검: 기존에는 팝업을 감지한 뒤에도 다음 반복이
       # 확인 없이 다시 클릭해, 가려진 좌표를 최대 40초 동안 반복 클릭했음 - 클릭 전에 확인해
       # 재클릭 정책(원래 버튼이 보일 때만 클릭)을 지킵니다. 대기 한도(40초)·시도 미계상은
-      # 아래 사후 확인과 공유 - Codex 승인)
+      # 아래 사후 확인과 공유 - 리뷰 승인)
       if (-not $script:screenCaptureFailing -and (Test-DgImePopupVisible -Game $Game)) {
         if ($imePopupWaitTotal -eq 0) {
           Write-RunLog '[안내] 입력기 팝업이 입장하기 버튼을 가리고 있습니다 - 사라질 때까지 대기'
@@ -5959,7 +5959,7 @@ function Invoke-NormalDungeonCycle {
       # 여전히 옵션 화면인데 IME 팝업이 입장하기 버튼을 덮고 있으면, 클릭이 게임에 닿지
       # 않은 것이므로 이 시도를 세지 않고 팝업 소멸을 기다립니다. 팝업 중에는 아래 재화
       # 부족 폴백도 평가하지 않습니다 - 팝업에 먹힌 클릭을 부족으로 오판해 소탕을 풀어버리는
-      # 사고 방지 (2026-07-29 00:20 실기 + Codex 계약: 명시적 부족 증거 없이는 해제 금지).
+      # 사고 방지 (2026-07-29 00:20 실기 + 리뷰 계약: 명시적 부족 증거 없이는 해제 금지).
       if (-not $script:screenCaptureFailing -and (Test-DgImePopupVisible -Game $Game)) {
         if ($imePopupWaitTotal -eq 0) {
           Write-RunLog '[안내] 입력기 팝업이 입장하기 버튼을 가리고 있습니다 - 사라질 때까지 대기'
@@ -6004,7 +6004,7 @@ function Invoke-NormalDungeonCycle {
         # 클릭이 팝업 등에 먹혀 화면이 안 넘어간 것을 재화 부족으로 오판해, 잔량이 충분한데
         # 소탕/더블 루팅을 풀고 입장한 실사고(07-28 23:49, 공물 2개 보유)가 있었습니다.
         # 해제는 잔량이 실제로 읽힌 명시적 부족 증거가 있을 때만 하고, 못 읽으면 재시도 후
-        # 아래의 안전 정지(오류)로 마칩니다 (Codex 계약).
+        # 아래의 안전 정지(오류)로 마칩니다 (리뷰 계약).
       }
     }
     if (-not $entered) {
@@ -6022,7 +6022,7 @@ function Invoke-NormalDungeonCycle {
         # 고립 숫자는 OCR이 자주 실패 - 2026-07-30 01:42 타 PC / 07-29 20:02 두 환경 실측).
         # 임의 해제 없이(부족 추정 해제 금지 계약 유지) 오류 대신 조건부 정상 정지로 안내한다
         # (이 지점은 클릭 5회 재시도+IME 팝업 대기+확인 팝업 처리를 지난 뒤라 일시 원인은
-        # 소진된 상태 - Codex 승인).
+        # 소진된 상태 - 리뷰 승인).
         Write-RunLog "[완료] 입장이 진행되지 않습니다 - ${dgCurrencyName} 부족으로 보입니다 (잔량 판독 불가). 잔량을 확인해 충전하거나 소탕을 끄고 다시 시작해 주세요."
         exit 4
       }
@@ -6035,7 +6035,7 @@ function Invoke-NormalDungeonCycle {
     $toggleState = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
     # unknown 은 재판독으로 해소를 시도하고, 끝내 확인이 안 되면 정지합니다 (2026-08-01 전수
     # 점검: 기존 '꺼짐으로 보고 진행'은 토글이 실제로 켜져 있으면 그 자리의 넓은 입장하기
-    # 버튼을 눌러 혼자 오입장 - 파티찾기는 정확한 꺼짐 확인이 안전 전제라 fail-closed. Codex 승인)
+    # 버튼을 눌러 혼자 오입장 - 파티찾기는 정확한 꺼짐 확인이 안전 전제라 fail-closed. 리뷰 승인)
     for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleState -eq 'unknown'; $toggleProbe++) {
       Start-Sleep -Milliseconds 900
       $toggleState = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
@@ -6059,7 +6059,7 @@ function Invoke-NormalDungeonCycle {
       }
       if ($toggleAfterOff -ne 'off') {
         # 클릭 후 재확인이 unknown = 판별 불가 - 최초 unknown 과 같은 조건부 정지(코드 4)로
-        # 통일합니다 (Codex 리뷰 지적: throw(코드 1)면 오류 재시도를 소모하는 비대칭)
+        # 통일합니다 (교차 리뷰 지적: throw(코드 1)면 오류 재시도를 소모하는 비대칭)
         Write-RunLog "[완료] '우연한 만남' 토글을 끈 뒤 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
         exit 4
       }
@@ -6140,7 +6140,7 @@ function Invoke-NormalDungeonCycle {
   #       불가' 문제(계약 v4에서 폐기된 이유)는 마지막 판에는 해당하지 않습니다.
   #       시간 지정/무한/안전 중지는 마지막 판을 사전에 알 수 없어 기존 그대로이며,
   #       수동 정리 모드(코드 10 - 같은 항목을 새로 시작)는 제외합니다.
-  #       은동전 잔량 검사(14-1)보다 앞: 마지막 판에는 '다음 판' 잔량 판단이 무의미 (Codex 합의).
+  #       은동전 잔량 검사(14-1)보다 앞: 마지막 판에는 '다음 판' 잔량 판단이 무의미 (설계 합의).
   if ($script:dgLastRun -and -not $script:customCleanupOnly) {
     # '나가기' 글자 탐색 우선 (2버튼/3버튼 배치 모두 커버하는 영역), 실패 시 실측 예비 좌표
     Focus-Game -Game $Game
@@ -6163,7 +6163,7 @@ function Invoke-NormalDungeonCycle {
         continue
       }
       # 판독 도중 캡처 실패는 누적 래치로 잡습니다 - 뒤 판독이 성공하면 전역 플래그가
-      # 지워져 중간 실패를 놓칠 수 있음 (Codex 조건: 실패 누적)
+      # 지워져 중간 실패를 놓칠 수 있음 (리뷰 조건: 실패 누적)
       $probeFailed = $false
       $probeHud = Test-HomeEndEscHud -Game $Game
       if ($script:screenCaptureFailing) { $probeFailed = $true }
@@ -6179,7 +6179,7 @@ function Invoke-NormalDungeonCycle {
       $exitStep = Get-DgLastRunExitStep -HudVisible $probeHud -QuestText $probeQuest `
         -CenterText $probeCenter -RetryVisible $probeRetry
       if ($exitStep -eq 'field-evidence') {
-        # 단발 OCR 오판 방지: 연속 2회 확인될 때만 필드로 확정 (Codex 조건)
+        # 단발 OCR 오판 방지: 연속 2회 확인될 때만 필드로 확정 (리뷰 조건)
         $fieldStreak++
         if ($fieldStreak -ge 2) {
           $fieldReached = $true
@@ -6214,7 +6214,7 @@ function Invoke-NormalDungeonCycle {
       Write-RunLog '[던전] 필드 복귀 확인 - 회차 완료'
     } else {
       # 판은 클리어 확정 상태(완료 마커 기록됨) - 코드 1로 던지면 GUI 오류 재시작이 완료된
-      # 마지막 판을 재실행할 위험이 있어, 진단만 남기고 정상 종료합니다 (Codex 합의)
+      # 마지막 판을 재실행할 위험이 있어, 진단만 남기고 정상 종료합니다 (설계 합의)
       Write-DgStageDiagnostics -Game $Game -Context '마지막 판 나가기 후 필드 미확인' -MapKind 'selection'
       Write-RunLog '[경고] 나가기 후 필드 복귀를 확인하지 못했습니다 - 판은 완료 상태라 그대로 마칩니다'
     }
@@ -6303,7 +6303,7 @@ function Invoke-NormalDungeonCycle {
             continue
           }
           # 아침 6시 리셋 블로커 처리 ('다시 하기' 복귀 대기와 같은 계약 - 이 대기도 40초라
-          # 리셋 팝업/협동 창에 가려지면 동일하게 시간 초과 (2026-08-03 Codex 배선 확장.
+          # 리셋 팝업/협동 창에 가려지면 동일하게 시간 초과 (2026-08-03 리뷰 배선 확장.
           # 협동 미션 전체 창은 스윕 안에서 함께 처리됨)
           if (Invoke-PurchasePopupSweep -Game $Game) { continue }
           if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[던전] ') { continue }
@@ -6371,7 +6371,7 @@ function Invoke-NormalDungeonCycle {
     }
     # 아침 6시 리셋 블로커 처리 (2026-08-03 06:02 실사고: 월요일 주간 협동 리셋 팝업이 이
     # 대기를 40초 막아 무인 정지 → 3연속 오류. '계속하' 처리 뒤 순서 - Space 위험 팝업 우선.
-    # 닫은 경우 continue 로 재캡처해 같은 프레임으로 다음 판정을 하지 않음 - Codex 조건)
+    # 닫은 경우 continue 로 재캡처해 같은 프레임으로 다음 판정을 하지 않음 - 리뷰 조건)
     if (Invoke-PurchasePopupSweep -Game $Game) { continue }
     if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[던전] ') { continue }
     if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
@@ -6639,17 +6639,17 @@ function Invoke-HuntingGroundCycle {
       }
       # 재시도 실패만으로 더블 루팅을 끄던 '부족 추정' 예비는 제거했습니다 (2026-07-29).
       # 클릭이 팝업 등에 먹힌 것을 부족으로 오판하는 사고 방지 - 잔량이 실제로 읽힌 명시적
-      # 부족 증거가 있을 때만 대응하고, 못 읽으면 안전 정지합니다 (Codex 계약).
+      # 부족 증거가 있을 때만 대응하고, 못 읽으면 안전 정지합니다 (리뷰 계약).
       # '소탕만 계속'(continueSweepOnly) 존중 - 던전 재시도 경로와 동일 (2026-08-01 전수 점검:
       # 최초 판독·결과 화면 경로만 이 옵션을 존중하고 여기는 20개 기준으로 정지했음. 잔량이
-      # 실제로 10~19개로 읽히면 더블 루팅만 끄고 다음 반복에서 재입장 - Codex 조건).
+      # 실제로 10~19개로 읽히면 더블 루팅만 끄고 다음 반복에서 재입장 - 리뷰 조건).
       if ($enterTry -ge 2 -and $htUseCoin -and $effectiveCoin -and $effectiveLoot -and $htLootFallback -and
           -not $lootFallbackDone -and -not $script:screenCaptureFailing) {
         $retryBalance = Get-DgCoinBalance -Game $Game
         if ($null -ne $retryBalance -and $retryBalance -ge 10 -and $retryBalance -lt 20) {
           Write-RunLog "[사냥터] 은동전 잔량 ${retryBalance}개 - 더블 루팅을 끄고 소탕만 계속합니다 (소탕만 계속 설정)"
           # 해제가 확인된 경우에만 내부 상태를 내립니다 (미확인이면 실제 카드가 켜진 채일 수
-          # 있어 이후 필요량 판정이 어긋남 - Codex 리뷰 지적). 폴백 처리 바퀴는 시도로 세지
+          # 있어 이후 필요량 판정이 어긋남 - 교차 리뷰 지적). 폴백 처리 바퀴는 시도로 세지
           # 않아 마지막 회전에서 발견돼도 재입장이 보장됩니다.
           if ([bool](Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $false -Label '더블 루팅')) {
             $effectiveLoot = $false
@@ -6899,7 +6899,7 @@ function Return-ToAbyssSelection {
     [System.Diagnostics.Process]$Game,
     # 복귀 도중 안전 중지 예약을 소비할 때 쓸 종료 코드 (2026-08-01 전수 점검: 준비 실행
     # (코드 10이어야 함)이 이 함수의 안전 중지 분기에서 무조건 exit 0 으로 끝나 던전을 돌지
-    # 않은 실행이 완료 회차로 계상됐음 - 호출부가 자기 문맥의 코드를 전달. Codex 승인)
+    # 않은 실행이 완료 회차로 계상됐음 - 호출부가 자기 문맥의 코드를 전달. 리뷰 승인)
     [int]$SafeStopExitCode = 0
   )
 
@@ -6928,7 +6928,7 @@ function Return-ToAbyssSelection {
     if (Test-AbyssSelectionScreen -Game $Game) {
       # 선택 화면 도달 직전의 안전 중지 예약도 여기서 소비합니다 (2026-08-01 3차 점검:
       # 이 return 이 아래 HUD 분기의 안전 중지 확인보다 먼저라, 도달 직전 예약이 소비되지
-      # 않은 채 다음 실행으로 새어 헛 조기 종료를 만들 수 있었음 - Codex 승인)
+      # 않은 채 다음 실행으로 새어 헛 조기 종료를 만들 수 있었음 - 리뷰 승인)
       if (Test-Path -LiteralPath $safeStopFlagPath) {
         Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
         if ($SafeStopExitCode -eq 10) {
@@ -7115,7 +7115,7 @@ function Press-KeyOnce {
 }
 
 # ============================================================
-#  '생활(채집)' 대분류 (v2.0.0 - 2026-08-05 사용자 시연 251프레임 실측 + Codex 설계 합의.
+#  '생활(채집)' 대분류 (v2.0.0 - 2026-08-05 사용자 시연 251프레임 실측 + 설계 합의.
 #  흐름: C(내 정보) → 생활 스킬 → 스킬 셀 → 대상 행 → '가까운 위치 찾기' → 게임이 자동
 #  이동(전투 포함)·자동 반복 채집 → 퀘스트 소멸 = 1사이클. 판정은 퀘스트 존재 기반 -
 #  카운트 파싱은 로그용 보조 (사용자 합의 단순화). 실측 근거: 던전이미지\생활\흐름캡처\ 9장)
@@ -7137,7 +7137,7 @@ $lifeSkillMenuTable = @{
   mining = @{ Name = '광석 캐기'; Cell = @(496, 205); Sig = @('광맥', '석탄', '얼음')
               Order = @('광맥', '철 광맥', '얼음', '석탄 광맥', '동 광맥', '백동 광맥', '은 광맥', '운철 광맥', '백금 광맥') }
   # 약초 Sig 에서 '버섯'을 뺐습니다 - 호미질에 '개암 버섯'이 생겨 더는 고유 조각이 아닙니다
-  # (약초를 누르려다 호미질이 열려도 '버섯'만 보고 맞다고 확정할 위험 - Codex 지적 2026-08-07)
+  # (약초를 누르려다 호미질이 열려도 '버섯'만 보고 맞다고 확정할 위험 - 리뷰 지적 2026-08-07)
   herb   = @{ Name = '약초 채집'; Cell = @(625, 205); Sig = @('허브', '블러디', '화살꽃')
               Order = @('허브', '블러디 허브', '화살꽃', '마나 허브', '새록 버섯', '튼튼 버섯', '끈기 풀', '쑥쑥 버섯', '숨숨꽃', '깔끔 버섯', '생채기꽃', '증폭 버섯', '진정초', '끈적 풀', '솔솔 버섯', '산뜻 버섯') }
   # 2026-08-07 실측 추가: 스킬 창은 열 때마다 8열 전체 그리드라 5~6번째 셀도 바로 클릭됩니다
@@ -7186,7 +7186,7 @@ $lifeTargetVariants = @{
 # ── 상세 팝업 '제목 전용' 이형 (2026-08-08 8종 전 대상 팝업 전수 실측) ──
 # 위 공용 표와 **분리**합니다. 공용 표는 목록 행 선택과 퀘스트 소유 판정에도 쓰이는데,
 # 퀘스트 쪽은 정확 일치가 아니라 Contains 비교라 깨짐 문자열이 섞이면 엉뚱한 행을 클릭하거나
-# 남의 퀘스트를 자기 것으로 볼 수 있습니다 (Codex 지적). 이 표는 **클릭 직전 제목 재확인**
+# 남의 퀘스트를 자기 것으로 볼 수 있습니다 (리뷰 지적). 이 표는 **클릭 직전 제목 재확인**
 # 에서만 쓰이고, 그 판정은 틀려도 '차단하지 않음'으로만 흐르므로 위험이 한 방향입니다.
 # 아래 이름들은 상세·링크 영역, s3·s4 어느 조합으로도 정상 판독이 안 됩니다 (전수 재측정으로
 # 확인 - 배율/영역 문제가 아니라 OCR 이 못 읽는 글자꼴).
@@ -7309,7 +7309,7 @@ function Get-LifeQuestOwner {
   $haystacks = @(Get-LifeRepairedTexts -Text $QuestText)
   if (-not $haystacks[0]) { return '' }
   # 길이 내림차순 + 이름 오름차순(2차 키) - 같은 길이 대상이 여럿이라 PS 5.1 Sort-Object 의
-  # 동률 순서가 불확정이면 결과가 흔들립니다 (Codex 지적)
+  # 동률 순서가 불확정이면 결과가 흔들립니다 (리뷰 지적)
   foreach ($candidate in (@($Order) | Sort-Object { -(Get-LifeNormalizedName $_).Length }, { Get-LifeNormalizedName $_ })) {
     $candidateNorm = Get-LifeNormalizedName $candidate
     if (-not $candidateNorm) { continue }
@@ -7339,7 +7339,7 @@ function Test-LifeNameMatches {
   #  '곤충'→'곤춤'  실측 1회 (황폐한곤춤부리 - 같은 행에 두 깨짐이 겹침)
   # 일부 대상만 이형 등록하면 같은 계열 다른 대상이 빠지므로 규칙으로 처리합니다.
   # 한 행에 두 개 이상 겹칠 수 있어(황폐한곤춤부리 = 곤춤 + 부리) **개별 치환뿐 아니라
-  # 전부 적용한 사본까지** 비교합니다 (Codex 지적 - '부리'만 고치면 '곤춤'이 남아 실패).
+  # 전부 적용한 사본까지** 비교합니다 (리뷰 지적 - '부리'만 고치면 '곤춤'이 남아 실패).
   # 현재 대상 목록에 정당한 '나부'/'부리'/'곤춤'이 든 이름이 없어 오탐 없음 - 새 대상 추가 시 재확인
   $repairCandidates = @()
   $allRepaired = $rowNorm
@@ -7490,7 +7490,7 @@ function Get-LifeTitleVerdict {
   # 제목 문자열만으로 내리는 '고신뢰' 판정 (순수 - 진리표 대상).
   # 반환: 'mine' / 'other' / 'unknown'
   # 클릭 직전 재확인 전용입니다. Get-LifeDetailVerdict 의 규칙(꼬리 2자 trim, 본문 구제,
-  # 가독성 휴리스틱)을 그대로 쓰면 **정상 팝업을 다른 대상으로 오판**합니다 (Codex 재현:
+  # 가독성 휴리스틱)을 그대로 쓰면 **정상 팝업을 다른 대상으로 오판**합니다 (리뷰 재현:
   # '거미줄XX' 가 2자 깎여 '거미줄' 이 되어 목표 '거미줄 뭉치' 를 차단). 여기서는 깎지 않고
   # 정확 일치(이형·공통 치환 포함)만 봅니다.
   # 그리고 읽힌 다른 이름이 **목표 이름의 일부**면 'unknown' 으로 둡니다 - 복합 이름의 앞
@@ -7514,7 +7514,7 @@ function Get-LifeTitleVerdict {
 function Select-LifeFindNearestWord {
   # '가까운 위치 찾기' 링크 클릭 지점 선택 (순수 - 진리표 대상).
   # 행 단위로 묶어 결합 문구에 '위치찾기'가 있는 행만 링크로 인정하고, 그런 행이 정확히
-  # 1개일 때 그 행의 가로 중앙을 돌려줍니다 (설명 본문 오클릭 방지 - Codex 조건).
+  # 1개일 때 그 행의 가로 중앙을 돌려줍니다 (설명 본문 오클릭 방지 - 리뷰 조건).
   # '가까운' 단어 자체를 요구하면 실기 깨짐('가7)}운' - 2026-08-06 라운드 5 실측)에서
   # 링크를 못 찾습니다. 안정 조각은 '위치찾기' 쪽입니다.
   param($Words)
@@ -7584,7 +7584,7 @@ function Get-LifeDetailVerdict {
   #    (실측 깨짐으로 '채' 가 사라져 제목이 정확히 '거미줄뭉치' 로 읽힐 때 - 2026-08-07 감사).
   #    깎지 않은 일치가 깎은 일치보다 강한 증거이므로 순서를 앞에 둡니다.
   if (Test-LifeNameMatches -RowText $detailTitle -TargetName $TargetName) { return 'match' }
-  # ① 오클릭 확정을 '가장 먼저' 검사합니다 (Codex 블로커): 제목 그대로가 같은 목록의 다른
+  # ① 오클릭 확정을 '가장 먼저' 검사합니다 (리뷰 블로커): 제목 그대로가 같은 목록의 다른
   #    대상과 정확히 일치하면 오클릭. 목표 검사를 먼저 하면 접두 축소(trim)가 '거미줄 뭉치'
   #    팝업을 '거미줄' 목표로 오인합니다. 여기서는 trim 없이 원문만 비교합니다.
   # 긴 이름부터 검사해야 '거미줄 뭉치' 팝업이 '거미줄'로 축소 해석되지 않습니다.
@@ -7605,7 +7605,7 @@ function Get-LifeDetailVerdict {
   }
   # ③ 본문 구제 (실측: 젖소 '…특징인젖소'). 라벨 '집물' 두 글자는 반드시 제외하고, 2자
   #    이상 이름만 허용합니다 - '물' 같은 1글자는 라벨 자체에 들어 있어 전 팝업이 일치해
-  #    다른 대상을 통과시켰습니다 (Codex 블로커 반례).
+  #    다른 대상을 통과시켰습니다 (리뷰 블로커 반례).
   #    이름 전체가 없으면 '고유 수식어'(첫 낱말, 2자 이상)로도 확인합니다 - 실측: 백동 광맥
   #    본문은 '백동이 섞인…백동 광석'이라 '백동광맥'은 없지만 '백동'은 확실 (라운드 5)
   $targetNorm = Get-LifeNormalizedName $TargetName
@@ -7616,7 +7616,7 @@ function Get-LifeDetailVerdict {
     # 목표 이름을 통째로 품는 경우도 많습니다(뾰족 나무 ⊃ 나무 / 철 광맥 ⊃ 광맥 /
     # 설원 빛 무리 ⊃ 빛 무리 / 거미줄 뭉치 ⊃ 거미줄). 그런 목표는 본문 포함이 아무것도
     # 증명하지 못하는데도 match 를 돌려줘, 제목이 깨진 순간 오클릭을 전혀 못 잡았습니다.
-    # (2026-08-06 Codex 블로커였던 1글자 '물' 문제가 2글자 기저 명사로 살아남은 것)
+    # (2026-08-06 리뷰 블로커였던 1글자 '물' 문제가 2글자 기저 명사로 살아남은 것)
     if ((-not (Test-LifeBodyNameAmbiguous -Name $TargetName -Order $Order -SkillName $SkillName)) -and
       $detailBody.Contains($targetNorm)) {
       return 'match'
@@ -7651,14 +7651,14 @@ function Get-LifeRequiredLevel {
   # 못 찾거나 값이 비상식적이면 0 을 돌려 호출부가 안내를 생략하게 합니다.
   # 탐색 범위는 라벨('채집물'의 안정 조각 '집물') **뒤쪽으로 제한**합니다 - 팝업 구조가
   # '이름 → 채집물 → 스킬명 레벨 N 이상 → 설명' 이라 요구치는 반드시 라벨 뒤에 옵니다.
-  # 라벨이 없으면 상세 팝업이 아니거나 판독이 깨진 것이므로 안내하지 않습니다 (Codex 지적).
+  # 라벨이 없으면 상세 팝업이 아니거나 판독이 깨진 것이므로 안내하지 않습니다 (리뷰 지적).
   param([string]$DetailText)
   $normalized = ([string]$DetailText) -replace '\s', ''
   $labelIndex = $normalized.IndexOf('집물')
   if ($labelIndex -lt 0) { return 0 }
   $afterLabel = $normalized.Substring([Math]::Min($labelIndex + 2, $normalized.Length))
   # (?!\d) 로 숫자 뒤가 더 이어지면 매칭하지 않습니다 - 없으면 '레벨1000'이 앞 세 자리만
-  # 잘려 100 으로 읽힙니다 (Codex 지적: 상한 검사만으로는 못 막는 접두부 절단)
+  # 잘려 100 으로 읽힙니다 (리뷰 지적: 상한 검사만으로는 못 막는 접두부 절단)
   $levelMatches = [regex]::Matches($afterLabel, '레벨(\d{1,3})(?!\d)')
   if ($levelMatches.Count -eq 0) { return 0 }
   # 서로 다른 값이 둘 이상 잡히면 어느 쪽이 요구치인지 확신할 수 없어 안내를 생략합니다
@@ -7675,17 +7675,17 @@ function Test-CaptureRecovered {
   # 2026-08-07 실사고(호미질 개암 버섯): 채집 3/10 진행 중 RDP 창이 최소화돼 캡처가 실패하자
   # 생활 분기의 모든 대기 지점이 '캡처 실패 중이면 판독을 건너뛰고 continue' 하는 바람에
   # **아무도 캡처를 시도하지 않아** 화면이 돌아와도 감지하지 못하고 한도까지 기다렸습니다
-  # ($script:screenCaptureFailing 은 캡처가 성공해야만 해제됨 - Codex 지적).
+  # ($script:screenCaptureFailing 은 캡처가 성공해야만 해제됨 - 리뷰 지적).
   # 던전 분기는 같은 자리에서 OCR 판독을 복구 탐침으로 쓰는데, 여기서는 글자가 필요 없으므로
   # 작은 영역을 뜨기만 합니다 (성공하면 Get-GameRegionCapture 안에서 플래그가 풀림).
   param([System.Diagnostics.Process]$Game)
   # 반환값은 Bitmap 이 아니라 Bitmap 속성을 가진 래퍼입니다 - 래퍼에 Dispose 를 부르면
-  # 'Dispose 메서드 없음' 예외가 납니다 (Codex 지적 - 복구되는 순간에만 터지는 경로라
+  # 'Dispose 메서드 없음' 예외가 납니다 (리뷰 지적 - 복구되는 순간에만 터지는 경로라
   # 실기에서 늦게 드러났을 사고)
   $probeCapture = Get-GameRegionCapture -Game $Game -ReferenceX 0 -ReferenceY 0 `
     -RegionWidth 40 -RegionHeight 40 -Scale 1
   # 캡처가 $null 이면 실패입니다. GetWindowRect 실패 경로는 플래그를 세우지 않고 $null 만
-  # 돌려주므로, 플래그만 보면 '정상'으로 통과합니다 (Codex 지적 - 클릭 직전 게이트가 뚫림)
+  # 돌려주므로, 플래그만 보면 '정상'으로 통과합니다 (리뷰 지적 - 클릭 직전 게이트가 뚫림)
   if (-not $probeCapture) { return $false }
   $probeCapture.Bitmap.Dispose()
   return (-not $script:screenCaptureFailing)
@@ -7709,7 +7709,7 @@ function Wait-LifeCaptureAlive {
     [void](Test-CaptureRecovered -Game $Game)
   }
   # 대기 중에 한도를 넘겼을 수 있습니다 - 여기서 $true 를 돌려주면 호출부가 곧바로 드래그를
-  # 보냅니다 (한도 초과 후 입력 금지 계약 위반 - Codex 지적)
+  # 보냅니다 (한도 초과 후 입력 금지 계약 위반 - 리뷰 지적)
   if ((Get-Date) -gt $Deadline) {
     Write-RunLog "[생활] 화면은 복구됐지만 사이클 한도를 넘겼습니다 - ${Context} 중단"
     return $false
@@ -7927,7 +7927,7 @@ function Invoke-LifeListScroll {
     return $false
   }
   # 버튼을 누른 뒤에는 무슨 일이 있어도 떼야 합니다 (예외/중단으로 눌린 채 남으면 이후 모든
-  # 입력이 드래그로 처리됨 - Codex 조건). 이동 성공 여부는 마지막 커서 위치로 확인합니다.
+  # 입력이 드래그로 처리됨 - 리뷰 조건). 이동 성공 여부는 마지막 커서 위치로 확인합니다.
   $dragMoved = $false
   [HoneyNogiInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)   # 왼쪽 버튼 누름
   try {
@@ -7976,7 +7976,7 @@ function Test-LifeQuestFragments {
 }
 
 function Get-LifeQuestState {
-  # 채집 퀘스트 상태 (Codex 합의 4상태 축약): 'present' / 'absent' / 'unknown'.
+  # 채집 퀘스트 상태 (설계 합의 4상태 축약): 'present' / 'absent' / 'unknown'.
   # 판독은 좁은 영역(첫 줄) → 없으면 넓은 영역(우측 퀘스트 목록 전체) 순서로 두 번 봅니다 -
   # 획득 알림/경험치 배지가 첫 줄을 덮거나 퀘스트가 아래로 밀리면 좁은 영역만으로는
   # '없음'이 되어 채집 중에 완료로 오판합니다 (2026-08-07 실사고).
@@ -8021,7 +8021,7 @@ function Get-LifeQuestCountText {
 }
 
 function Press-LifeMenuKey {
-  # C 키 strict 입력 (Codex 조건 + 사용자 합의): 전면화 → 전면 '확인' 후에만 입력.
+  # C 키 strict 입력 (리뷰 조건 + 사용자 합의): 전면화 → 전면 '확인' 후에만 입력.
   # 기존 Press-KeyOnce 는 전역 입력이라 게임이 전면이 아니면 엉뚱한 곳에 들어감 - 확인 필수
   param([System.Diagnostics.Process]$Game)
   foreach ($focusTry in 1..3) {
@@ -8199,7 +8199,7 @@ function Close-LifeBlockingDialog {
   param([System.Diagnostics.Process]$Game)
   if ($script:screenCaptureFailing) { return 'none' }
   # 판정은 팝업 본문이 있는 '중앙 한 영역'만 씁니다 - 서로 다른 위치의 낱말을 이어붙이면
-  # 정상 화면의 '실패'/'연결' 같은 단어가 조합돼 오판합니다 (Codex 조건)
+  # 정상 화면의 '실패'/'연결' 같은 단어가 조합돼 오판합니다 (리뷰 조건)
   $dialogText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
       -RegionWidth 520 -RegionHeight 200 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if (-not $dialogText) { return 'none' }
@@ -8223,7 +8223,7 @@ function Close-LifeBlockingDialog {
   }
   # 닫기 버튼은 팝업 종류에 따라 다릅니다 (실측: 준비물 부족 = '취소' y623 / 오류 팝업 =
   # '확인' y618). **하단 버튼 밴드에서만** 찾고, 못 찾으면 클릭하지 않습니다 - 본문에 있는
-  # '확인' 같은 낱말이나 고정 좌표를 누르면 엉뚱한 조작이 됩니다 (Codex 조건)
+  # '확인' 같은 낱말이나 고정 좌표를 누르면 엉뚱한 조작이 됩니다 (리뷰 조건)
   $buttonBand = @(400, 560, 480, 120)
   $closePoint = $null
   foreach ($buttonText in @('취소', '확인')) {
@@ -8246,7 +8246,7 @@ function Close-LifeBlockingDialog {
     Write-RunLog "[생활] 준비물 부족 팝업 감지 - 닫았습니다$(Format-LifeMissingItemNotice -ItemText ([string]$script:lifeMissingItemText))"
     return 'material'
   }
-  # 오류 팝업은 '실제로 사라졌는지' 확인한 뒤에만 처리됐다고 봅니다 (Codex 조건).
+  # 오류 팝업은 '실제로 사라졌는지' 확인한 뒤에만 처리됐다고 봅니다 (리뷰 조건).
   # 안 닫혔으면 남은 예비 버튼 위치로 한 번 더 시도합니다 (확인/취소 위치가 팝업마다 다름)
   $afterText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
       -RegionWidth 520 -RegionHeight 200 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
@@ -8312,7 +8312,7 @@ function Write-LifeDiagnostics {
 }
 
 function Close-LifeOpenWindows {
-  # 시작 상태 복구 (멱등 - Codex 조건): 상세 팝업이 열려 있으면 확인으로, 내 정보/생활
+  # 시작 상태 복구 (멱등 - 리뷰 조건): 상세 팝업이 열려 있으면 확인으로, 내 정보/생활
   # 스킬 창이 열려 있으면(X 픽셀 판별 + 내정보 OCR 보조) X 로 닫습니다. 뭘 닫았으면 $true.
   # X 클릭 후 실제로 닫혔는지 재확인하고 안 닫혔으면 1회 재클릭합니다 (1차 실기 22:45:25
   # 재현: X 닫기 미확인 상태로 넘어가 다음 C 토글이 남은 창을 닫으며 재시도 1회 소실)
@@ -8347,7 +8347,7 @@ function Invoke-LifeMenuSequence {
   # 메뉴 사이클 1회: C → 내 정보 확인 → 생활 스킬 → 스킬 셀 → 대상 행 → 상세 확인 →
   # 가까운 위치 찾기. 성공 $true / 실패 $false (호출부가 재시도).
   # Deadline = 사이클 하드 상한: 이 함수 한 번에 탐색 12회·OCR 수십 회가 들어 있어 내부
-  # 검사 없이는 한도를 넘긴 뒤에도 클릭이 이어짐 (Codex 지적 - 특히 초과 후 '가까운 위치
+  # 검사 없이는 한도를 넘긴 뒤에도 클릭이 이어짐 (리뷰 지적 - 특히 초과 후 '가까운 위치
   # 찾기' 입력 금지). 주요 입력 전마다 검사하고 초과 시 $false (호출부 말미 검사가 exit 4)
   param([System.Diagnostics.Process]$Game, $SkillEntry, [string]$TargetName, [datetime]$Deadline)
   if ((Get-Date) -gt $Deadline) { return $false }
@@ -8355,7 +8355,7 @@ function Invoke-LifeMenuSequence {
   if (-not (Confirm-LifeGameFront -Game $Game)) { Start-Sleep -Seconds 3; return $false }
   # 1) 내 정보 열기 (이미 열려 있으면 C 생략 - 토글 사고 방지).
   # 판독 '도중' 캡처가 끊기면 false 가 '안 열림'으로 오인돼 열린 창에 C 토글이 들어갈 수
-  # 있으므로, 판독 후 캡처 플래그를 재확인해 무효 처리합니다 (Codex 경계 재현)
+  # 있으므로, 판독 후 캡처 플래그를 재확인해 무효 처리합니다 (리뷰 경계 재현)
   if ($script:screenCaptureFailing) { return $false }
   $infoAlreadyOpen = Test-LifeInfoScreen -Game $Game
   if ($script:screenCaptureFailing) { return $false }
@@ -8393,7 +8393,7 @@ function Invoke-LifeMenuSequence {
   }
   Write-RunLog '[생활] 내 정보 화면 확인'
   # 2) 좌측 '생활 스킬' 메뉴 클릭 → 화면 전환 확인 (스킬 창은 좌측 메뉴가 없는 레이아웃이라
-  #    '생활력' 신호 소멸 = 전환 증거. 전환 확인 전에는 다음 클릭 금지 - 클릭 정책/Codex 조건)
+  #    '생활력' 신호 소멸 = 전환 증거. 전환 확인 전에는 다음 클릭 금지 - 클릭 정책/리뷰 조건)
   if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
   Focus-Game -Game $Game
   Click-GamePoint -Game $Game -ReferenceX $ptLifeSkillMenu[0] -ReferenceY $ptLifeSkillMenu[1]
@@ -8402,7 +8402,7 @@ function Invoke-LifeMenuSequence {
     Start-Sleep -Milliseconds 900
     if ($script:screenCaptureFailing) { continue }
     $infoStillVisible = Test-LifeInfoScreen -Game $Game
-    # 판독 도중 캡처가 끊기면 false 를 '전환됨'으로 인정하면 안 됩니다 (Codex 경계 재현 -
+    # 판독 도중 캡처가 끊기면 false 를 '전환됨'으로 인정하면 안 됩니다 (리뷰 경계 재현 -
     # 캡처 실패 중 다음 셀 클릭이 이어지는 사고). 이번 확인은 무효로 하고 다음 회차로.
     if ($script:screenCaptureFailing) { continue }
     if (-not $infoStillVisible) { $menuMoved = $true; break }
@@ -8479,7 +8479,7 @@ function Invoke-LifeMenuSequence {
       Write-RunLog "[생활] 목록이 이미 최상단입니다 - 정렬 생략 (판독: $topRowsKey)"
     } else {
       # 판독에 성공한 회차만 예산(12회)을 소모합니다 - 캡처 플래핑으로 회차가 깎이면
-      # 화면이 멀쩡할 때도 정렬을 다 못 하고 넘어갑니다 (2026-08-07 Codex 지적)
+      # 화면이 멀쩡할 때도 정렬을 다 못 하고 넘어갑니다 (2026-08-07 리뷰 지적)
       $topTries = 0
       while ($topTries -lt 12) {
         # 최상단 정렬도 사이클 한도 안에서만 (드래그 1회 약 2초 - 12회면 한도를 넘길 수 있음)
@@ -8525,7 +8525,7 @@ function Invoke-LifeMenuSequence {
       }
       # 아래로 스크롤하기 전에 목록이 계속 보인다는 증거를 요구합니다 - 행이 하나도 안 읽히면
       # 목록 소멸/화면 전환/OCR 전멸을 구분할 수 없으므로 휠을 멈추고 미발견 처리로 넘깁니다
-      # (Codex 조건: 추가 입력은 원래 화면이 유지될 때만)
+      # (리뷰 조건: 추가 입력은 원래 화면이 유지될 때만)
       $visibleRows = @($scanResult.Rows)
       if ($visibleRows.Count -eq 0 -and $script:screenCaptureFailing) {
         # 판독 도중 화면이 멈췄으면 목록 소멸의 증거가 아닙니다 - 예산을 쓰지 않고 다시 시도
@@ -8537,7 +8537,7 @@ function Invoke-LifeMenuSequence {
         break
       }
       # 끝 판정은 '스크롤을 실제로 보냈는데도' 행 구성이 그대로일 때만 - 전면화/커서 확인
-      # 실패로 건너뛴 회차의 동일 화면을 끝으로 오인하면 일시 문제가 미발견 정지가 됨 (Codex)
+      # 실패로 건너뛴 회차의 동일 화면을 끝으로 오인하면 일시 문제가 미발견 정지가 됨 (리뷰)
       $rowsKey = (($visibleRows | ForEach-Object { [string]$_.Text }) -join '|')
       if ($lastScrollSent -and ($rowsKey -eq $previousRowsKey)) {
         Write-RunLog '[생활] 목록 끝까지 탐색했지만 대상을 찾지 못했습니다'
@@ -8545,7 +8545,7 @@ function Invoke-LifeMenuSequence {
       }
       $previousRowsKey = $rowsKey
       if ($scrollStep -eq 11) { break }   # 마지막 회차는 재탐색이 없으므로 스크롤도 보내지 않음
-      # 판독(OCR)에 시간이 든 뒤이므로 실제 입력 직전에 한도를 다시 확인합니다 (Codex 조건)
+      # 판독(OCR)에 시간이 든 뒤이므로 실제 입력 직전에 한도를 다시 확인합니다 (리뷰 조건)
       if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 대상 탐색 중단'; return $false }
       $lastScrollSent = [bool](Invoke-LifeListScroll -Game $Game -Steps -1)
     }
@@ -8567,7 +8567,7 @@ function Invoke-LifeMenuSequence {
   if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
   # 클릭 직전에는 **새로 한 번 떠 봐야** 합니다. $script:screenCaptureFailing 은 '마지막 캡처
   # 결과'라, 행을 읽은 직후 화면이 멈추면 플래그는 여전히 정상으로 남아 있어 그대로 클릭이
-  # 나갑니다 (Codex 지적 - 대기 함수는 플래그가 false 면 즉시 통과).
+  # 나갑니다 (리뷰 지적 - 대기 함수는 플래그가 false 면 즉시 통과).
   # 멈춰 있으면 기다렸다 누르지 않고 되돌아갑니다 - 복구 뒤 목록이 그대로라는 보장이 없어
   # 행 Y 를 다시 읽는 편이 안전합니다 (호출부가 캡처 복구를 기다린 뒤 재시도).
   if (-not (Test-CaptureRecovered -Game $Game)) {
@@ -8578,14 +8578,14 @@ function Invoke-LifeMenuSequence {
   Click-GamePoint -Game $Game -ReferenceX $ptLifeListCenter[0] -ReferenceY $targetRowY
   Start-Sleep -Milliseconds 1200
   # 5) 상세 팝업 검증: 라벨('집물' 조각 - 실기 깨짐 대응) + 제목이 설정 대상과 일치해야 함
-  #    ('채집물'은 모든 대상 공통 문구라 단독으로는 오클릭을 못 잡음 - Codex 지적.
+  #    ('채집물'은 모든 대상 공통 문구라 단독으로는 오클릭을 못 잡음 - 리뷰 지적.
   #    판정식은 Get-LifeDetailVerdict 순수 함수 - 실측 깨짐 '자|집물' 진리표 포함)
   $detailOk = $false
   foreach ($detailTry in 1..2) {
     # 판독은 s3 → s4 사다리: 같은 팝업이라도 스케일에 따라 깨짐이 달라(23:51 실기 - s3
     # '흰'→'혼!') 한 스케일의 깨짐으로 자기 팝업을 다른 대상으로 확정하지 않기 위함.
     # verdict 는 스케일별로 누적해 '두 스케일 모두 wrong'일 때만 오클릭 확정합니다
-    # (마지막 스케일 판정만 남기면 스케일 순서에 따라 결과가 달라짐 - Codex 지적)
+    # (마지막 스케일 판정만 남기면 스케일 순서에 따라 결과가 달라짐 - 리뷰 지적)
     $detailMatched = $false
     $detailWrongCount = 0
     $detailUnreadableCount = 0
@@ -8609,7 +8609,7 @@ function Invoke-LifeMenuSequence {
       # 제목이 깨져 판단 불가. 행을 '이름 정확 판독'으로 찾은 경우에만 자기 팝업으로 보고
       # 진행합니다 (전수 배치 01:04 실측: 우물 '丁亞'/젖소 'C0자' 로 3회 소진하던 사고).
       # 격자 추론(order)으로 찍은 행은 이름 근거가 없어 여기서 통과시키면 안 됩니다 -
-      # 추론이 빗나갔을 때 다른 대상을 채집하게 됨 (Codex 블로커)
+      # 추론이 빗나갔을 때 다른 대상을 채집하게 됨 (리뷰 블로커)
       if ($targetRowSource -eq 'order') {
         # 앵커 2개짜리 약한 추론은 이름 근거가 없어 통과시키지 않습니다 (다른 대상 채집 방지)
         Write-RunLog "[생활] 추정 행의 상세 제목을 확인하지 못했습니다 (판독 '$detailText') - 재시도"
@@ -8646,7 +8646,7 @@ function Invoke-LifeMenuSequence {
     return $false
   }
   # 상세가 '이 대상의 팝업'으로 확정된 뒤에만 요구 레벨을 남깁니다 - 확정 전에 남기면 오클릭한
-  # 다른 대상의 요구치가 그대로 실패 안내에 실립니다 (Codex 지적). 대상 이름을 함께 묶어
+  # 다른 대상의 요구치가 그대로 실패 안내에 실립니다 (리뷰 지적). 대상 이름을 함께 묶어
   # 두고 안내 시점에 다시 대조합니다 - 재시도 중 대상이 바뀌는 경로는 없지만, 값이 어느
   # 대상 것인지 근거 없이 쓰지 않기 위한 계약입니다.
   $script:lifeLastDetail = @{
@@ -8655,11 +8655,11 @@ function Invoke-LifeMenuSequence {
   }
   # 6) 가까운 위치 찾기 - 링크 y 는 설명 길이에 따라 대상별로 달라(00:53 '둥지' 실사고:
   #    사과나무 실측 고정 좌표가 빗나가 퀘스트 미생성 3회 소진) 글자 탐색으로만 클릭합니다.
-  #    고정 좌표 폴백은 원 사고 재도입이라 금지 - 못 찾으면 진단 후 재시도 (Codex 블로커).
+  #    고정 좌표 폴백은 원 사고 재도입이라 금지 - 못 찾으면 진단 후 재시도 (리뷰 블로커).
   #    순서: Focus → 판독 → 단일 후보 검증 → deadline 재검사 → 기준 좌표 클릭
   #    (Click-GamePoint 가 클릭 시점 창 rect 로 환산 - 캡처 후 창 이동에도 안전)
   if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
-  # 링크 클릭은 사이클을 실제로 시작시키는 입력이라 전면 확인을 한 번 더 (Codex 클릭 정책)
+  # 링크 클릭은 사이클을 실제로 시작시키는 입력이라 전면 확인을 한 번 더 (리뷰 클릭 정책)
   if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   $linkWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgLifeFindLink[0] -ReferenceY $rgLifeFindLink[1] `
       -RegionWidth $rgLifeFindLink[2] -RegionHeight $rgLifeFindLink[3] -Scale 3 -Engine $ocrKoreanEngine)
@@ -8689,7 +8689,7 @@ function Invoke-LifeMenuSequence {
     $deepRecheckDone = $true
     # **두 배율 합의**를 요구합니다 - 먼저 나온 판정으로 확정하면 s3 만으로 오차단하거나,
     # s3 이 mine 이라고 s4 의 other 를 안 보고 클릭합니다 (5단계의 '두 스케일 모두 wrong 일
-    # 때만 오클릭 확정' 규칙과 어긋남 - Codex 지적). 엇갈리면 unknown = 막지 않음.
+    # 때만 오클릭 확정' 규칙과 어긋남 - 리뷰 지적). 엇갈리면 unknown = 막지 않음.
     $recheckVerdicts = @()
     $recheckTitles = @()
     foreach ($recheckScale in @(3, 4)) {
@@ -8725,7 +8725,7 @@ function Invoke-LifeMenuSequence {
   }
   if ($deepRecheckDone) {
     # 깊은 재확인은 새 캡처를 여러 장 썼습니다. 여기서 링크 좌표만 갱신하면 '판정은 A 팝업,
-    # 클릭은 B 팝업' 이 될 수 있습니다 (Codex 지적). 그래서 **마지막 프레임에서 링크와 제목을
+    # 클릭은 B 팝업' 이 될 수 있습니다 (리뷰 지적). 그래서 **마지막 프레임에서 링크와 제목을
     # 함께 다시 얻고, 첫 프레임과 같은 팝업인지 확인**한 뒤에만 앞의 판정을 적용합니다.
     if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
     if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
@@ -8749,7 +8749,7 @@ function Invoke-LifeMenuSequence {
     Write-LifeDiagnostics -Game $Game -Context '클릭 직전 대상 불일치'
     return $false
   }
-  # 판독/전면화에 시간이 들 수 있어 실제 클릭 직전에 한도를 다시 확인합니다 (Codex 조건)
+  # 판독/전면화에 시간이 들 수 있어 실제 클릭 직전에 한도를 다시 확인합니다 (리뷰 조건)
   if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
   Write-RunLog "[생활] 대상 '$TargetName' 상세 확인 (제목 '$linkTitle') - '가까운 위치 찾기' 클릭 (링크 탐색 $([int]$linkWord.X),$([int]$linkWord.Y))"
   Click-GamePoint -Game $Game -ReferenceX ([int]$linkWord.X) -ReferenceY ([int]$linkWord.Y)
@@ -8783,14 +8783,14 @@ function Invoke-LifeGatherCycle {
   $script:lifeLastDetail = $null
   # 시작 상태 복구 (준비 단계): 열린 생활 창 정리 → 출석/이벤트 화면 정리 → 기존 퀘스트 확인.
   # (Clear-EventOverlay 는 생활 창을 '알 수 없는 화면'으로 오판할 수 있어 생활 창 정리를
-  #  먼저 합니다 - Codex 지적. 메인 흐름의 이벤트 정리도 이 이유로 생활 분기 뒤에 둠)
+  #  먼저 합니다 - 리뷰 지적. 메인 흐름의 이벤트 정리도 이 이유로 생활 분기 뒤에 둠)
   [void](Close-LifeOpenWindows -Game $Game)
   [void](Clear-EventOverlay -Game $Game)
-  # 사이클 한도(deadline)는 '준비 정리 완료 시점'부터 잽니다 (Codex 합의 계약 - 위 정리
+  # 사이클 한도(deadline)는 '준비 정리 완료 시점'부터 잽니다 (설계 합의 계약 - 위 정리
   # 함수들의 내부 캡처 실패 대기는 이 한도 밖. 이후의 모든 내부 대기는 이 한도가 상한).
   $cycleDeadline = (Get-Date).AddSeconds($lifeGatherWait)
   # 시작 시점에 서버 연결이 끊겨 있으면 무엇도 진행되지 않습니다 - 퀘스트 판정보다 먼저
-  # 확인합니다 (Codex 조건: 초기 present 면 메뉴 루프를 건너뛰어 감지를 놓침)
+  # 확인합니다 (리뷰 조건: 초기 present 면 메뉴 루프를 건너뛰어 감지를 놓침)
   if ((Close-LifeBlockingDialog -Game $Game) -eq 'disconnected') {
     Write-RunLog '[완료] 게임 서버 연결이 끊어졌습니다 - 재접속 후 다시 시작해 주세요 (조건부 정지)'
     exit 4
@@ -8836,7 +8836,7 @@ function Invoke-LifeGatherCycle {
       if ($popupHandled) {
         $initialPopupRounds++
         Start-Sleep -Seconds 2
-        continue      # 닫은 회차는 반드시 재캡처 - 같은 프레임으로 판정하면 오판 (Codex 계약)
+        continue      # 닫은 회차는 반드시 재캡처 - 같은 프레임으로 판정하면 오판 (리뷰 계약)
       }
     }
     $initialProbes++
@@ -8856,7 +8856,7 @@ function Invoke-LifeGatherCycle {
   }
   # present/absent 어느 쪽도 확정하지 못했으면 입력하지 않습니다 - 게임플레이 화면인지조차
   # 모르는 상태에서 메뉴를 열면 진행 중인 채집을 끊거나 엉뚱한 화면을 누릅니다
-  # (2026-08-07 Codex 지적 - 주석의 '확정될 때까지' 계약이 코드에는 없었음)
+  # (2026-08-07 리뷰 지적 - 주석의 '확정될 때까지' 계약이 코드에는 없었음)
   if ($initialState -eq 'unknown') {
     Write-RunLog '[완료] 게임플레이 화면을 확인하지 못했습니다 (로딩/다른 화면 지속) - 조건부 정지'
     Write-LifeDiagnostics -Game $Game -Context '시작 화면 확인 실패'
@@ -8876,7 +8876,7 @@ function Invoke-LifeGatherCycle {
     # 퀘스트를 현재 스킬의 짧은 대상으로 오인합니다 ('사과 나무' → '나무' - 2026-08-07 감사).
     # 단, **그 판독이 채집 퀘스트 줄일 때만** 이름을 찾습니다 - present 는 넓은 영역으로도
     # 잡히므로, 좁은 영역에 '주간 목표 뾰족 나무' 같은 다른 줄이 들어와 있으면 그 이름을
-    # 소유자로 집어 남의 퀘스트로 오판합니다 (Codex 지적). 아니면 미확정 → 아래 기본값.
+    # 소유자로 집어 남의 퀘스트로 오판합니다 (리뷰 지적). 아니면 미확정 → 아래 기본값.
     $questOwner = ''
     if (Test-LifeQuestFragments -QuestText $initialQuestText) {
       $questOwner = Get-LifeQuestOwner -QuestText $initialQuestText -Order (Get-LifeAllTargetNames)
@@ -8971,7 +8971,7 @@ function Invoke-LifeGatherCycle {
         exit 4
       }
       while ($script:screenCaptureFailing) {
-        # 영구 캡처 실패도 사이클 한도를 넘기면 정지합니다 (deadline 계약 - Codex 지적)
+        # 영구 캡처 실패도 사이클 한도를 넘기면 정지합니다 (deadline 계약 - 리뷰 지적)
         if ((Get-Date) -gt $cycleDeadline) {
           Write-RunLog "[완료] 화면 캡처 실패가 지속돼 사이클 한도(${lifeGatherWait}초)를 넘겼습니다 - 조건부 정지"
           exit 4
@@ -8981,7 +8981,7 @@ function Invoke-LifeGatherCycle {
         [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 한도까지 여기 갇힘)
       }
       if (Invoke-LifeMenuSequence -Game $Game -SkillEntry $skillEntry -TargetName $lifeTargetName -Deadline $cycleDeadline) {
-        # 퀘스트 생성 확인: 약 12초(1.5초 x 8회 + OCR 시간) 안에 present 2회 (Codex 조건).
+        # 퀘스트 생성 확인: 약 12초(1.5초 x 8회 + OCR 시간) 안에 present 2회 (리뷰 조건).
         # 사이클 한도는 이 확인 루프에도 우선합니다 (하드 상한 계약)
         $presentCount = 0
         foreach ($confirmTry in 1..8) {
@@ -9047,7 +9047,7 @@ function Invoke-LifeGatherCycle {
       exit 4
     }
   }
-  # 퀘스트 존재 대기: 소멸(absent 3연속) = 사이클 완료. unknown 은 부재로 세지 않음 (Codex 조건)
+  # 퀘스트 존재 대기: 소멸(absent 3연속) = 사이클 완료. unknown 은 부재로 세지 않음 (리뷰 조건)
   #
   # 한도는 '총 시간'이 아니라 **'진행이 멈춘 시간'** 으로 잽니다 (2026-08-08 사용자 지적:
   # "잘 캐고 있는데 왜 잘리나"). 총 시간으로 재면 사용자가 대상별 소요를 미리 알아야 숫자를
@@ -9088,7 +9088,7 @@ function Invoke-LifeGatherCycle {
     }
     # 대기 중 팝업 방어 (처리한 회차는 판정을 건너뜀 - 같은 프레임 오판 방지).
     # 공지 게시판은 HUD 가 가장자리로 계속 보여 트래커가 가려지면 absent 오판 위험
-    # (Codex 지적) - 닫은 회차는 반드시 continue 로 재캡처합니다.
+    # (리뷰 지적) - 닫은 회차는 반드시 continue 로 재캡처합니다.
     if (Invoke-PurchasePopupSweep -Game $Game) { continue }
     if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { continue }
     if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
@@ -9101,7 +9101,7 @@ function Invoke-LifeGatherCycle {
     # 채집 대기 중 서버 연결이 끊기면 한도(기본 600초)를 통째로 낭비하므로 즉시 정지합니다
     # (2026-08-06 라운드 4 실측: 끊긴 채 3회차가 각 600초 소진 → '가방 가득'으로 오인).
     # 중앙 모달 뒤로 트래커가 보일 수 있어 퀘스트 상태와 무관하게 주기 확인합니다 - 다만
-    # 매 회차 OCR 은 비싸므로 5회차(약 15초)마다 (Codex 조건)
+    # 매 회차 OCR 은 비싸므로 5회차(약 15초)마다 (리뷰 조건)
     $waitPollCount++
     $questState = Get-LifeQuestState -Game $Game
     if ($questState -ne 'present' -or ($waitPollCount % 5) -eq 0) {
@@ -9304,7 +9304,7 @@ try {
   # 시작 화면 판정 전 전체 화면 팝업 정리 (2026-08-01 실사고: 물약 부족 팝업+협동 미션 완료
   # 화면이 겹친 채 재시도 워커가 시작되자 판독이 전부 가려져 3연속 즉사 → 정지. 아래
   # 출석/이벤트 처리(Clear-EventOverlay)는 구매 팝업을 모르므로 스윕을 먼저 돌립니다.
-  # 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - Codex 조건. 콘텐츠 공통)
+  # 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건. 콘텐츠 공통)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     if (-not (Invoke-PurchasePopupSweep -Game $game)) { break }
     Start-Sleep -Milliseconds 1200
@@ -9321,7 +9321,7 @@ try {
   # 대분류 '생활'이면 전투 콘텐츠 대신 채집 사이클로 진행합니다 (v2.0.0 - 내부에서 exit).
   # 위 공통 처리(창 보정/구매 팝업 스윕)는 공유하되, 아래 Clear-EventOverlay 는 생활
   # 창(내 정보/생활 스킬)을 '알 수 없는 화면'으로 오판할 수 있어 이 분기를 먼저 둡니다 -
-  # 출석/이벤트 정리는 사이클 내부에서 생활 창 정리 '후' 수행합니다 (Codex 지적).
+  # 출석/이벤트 정리는 사이클 내부에서 생활 창 정리 '후' 수행합니다 (리뷰 지적).
   # 아래 전투 시작 화면 판정(나가기/클리어/커스텀 보호)도 생활과 무관하므로 타지 않습니다.
   if ($mainCategory -eq 'life') {
     Invoke-LifeGatherCycle -Game $game
@@ -9426,7 +9426,7 @@ try {
   # 던전 안이면 이 분기를 건너뛰고 아래의 '던전 입장 상태' 재개 흐름을 그대로 탑니다.
   if ((Test-HomeEndEscHud -Game $game) -and -not (Test-InDungeonQuest -Game $game)) {
     Write-RunLog '[어비스] 시작: 필드 상태 감지 - ESC → 어비스로 선택 화면 이동'
-    # 복귀 도중 안전 중지는 복구 완료 이전이므로 recoveryOnly 여도 10 (Codex 리뷰 지적 -
+    # 복귀 도중 안전 중지는 복구 완료 이전이므로 recoveryOnly 여도 10 (교차 리뷰 지적 -
     # 0이면 선택 화면 복구 전에 완료 마커·진행 위치가 전진함. 복구 완료의 exit 0 은 아래 줄)
     Return-ToAbyssSelection -Game $game -SafeStopExitCode 10
     Write-RunLog '[완료] 어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)'
@@ -9674,7 +9674,7 @@ try {
         # 잘못 누르면 우연한 만남으로 입장돼 버립니다. 반드시 토글을 먼저 끕니다.
         $toggleState = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
         # unknown 재판독 + 확인 불가 시 정지 - 던전 파티찾기와 같은 fail-closed 계약
-        # (2026-08-01 전수 점검: '꺼짐으로 보고 진행'은 토글이 켜져 있으면 혼자 오입장. Codex 승인)
+        # (2026-08-01 전수 점검: '꺼짐으로 보고 진행'은 토글이 켜져 있으면 혼자 오입장. 리뷰 승인)
         for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleState -eq 'unknown'; $toggleProbe++) {
           Start-Sleep -Milliseconds 900
           $toggleState = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
@@ -9697,7 +9697,7 @@ try {
             throw "'우연한 만남' 토글을 끄지 못해 파티찾기를 진행할 수 없습니다 (토글이 켜진 상태에서는 파티 찾기 버튼이 없음)"
           }
           if ($toggleAfterOff -ne 'off') {
-            # 최초 unknown 과 같은 조건부 정지(코드 4)로 통일 (Codex 리뷰 지적 - 던전과 동일)
+            # 최초 unknown 과 같은 조건부 정지(코드 4)로 통일 (교차 리뷰 지적 - 던전과 동일)
             Write-RunLog "[완료] '우연한 만남' 토글을 끈 뒤 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
             exit 4
           }

@@ -81,7 +81,7 @@ Assert-Case '상세: 긴 이름 다른 대상은 접두로 오인 금지 (2자 �
 $herbOrder = @('허브', '블러디 허브', '화살꽃', '마나 허브', '새록 버섯')
 Assert-Case "상세: 깨진 제목 '호b살꽃' + 목록 대조 → match (이형 등록분)" `
   (Get-LifeDetailVerdict -DetailText '호b살꽃채집물약초채집레벨1이상화살것모양의노란꽃.' -TargetName '화살꽃' -Order $herbOrder) 'match'
-# Codex 블로커 반례: 라벨 '집물' 때문에 1글자 대상 '물'이 모든 팝업과 일치하던 사고
+# 리뷰 블로커 반례: 라벨 '집물' 때문에 1글자 대상 '물'이 모든 팝업과 일치하던 사고
 $dailyOrder = @('둥지', '거미줄', '물', '우물', '젖소', '사과 나무', '차나무', '거미줄 뭉치', '헤이즐넛', '얽힌 거미줄')
 Assert-Case "상세: 목표 '물' + 젖소 팝업 → wrong-target (본문 구제 오작동 방지)" `
   (Get-LifeDetailVerdict -DetailText '젖소채집물일상채집레벨1이상얼룩덜룩한무늬가특징인젖소.' -TargetName '물' -Order $dailyOrder) 'wrong-target'
@@ -166,7 +166,7 @@ Assert-Case '요구레벨: 같은 값 반복 → 그 값' `
 Assert-Case '요구레벨: 레벨1000 → 0 (접두부 절단 금지)' (Get-LifeRequiredLevel -DetailText '감자채집물호미질레벨1000이상') 0
 Assert-Case '요구레벨: 레벨0999 → 0 (접두부 절단 금지)' (Get-LifeRequiredLevel -DetailText '감자채집물호미질레벨0999이상') 0
 
-# ── ①b-3 캡처 복구 탐침 (2026-08-07 실사고의 근본 원인 - Codex 지적) ──
+# ── ①b-3 캡처 복구 탐침 (2026-08-07 실사고의 근본 원인 - 리뷰 지적) ──
 # Get-GameRegionCapture 는 Bitmap 이 아니라 'Bitmap 속성을 가진 래퍼'를 돌려줍니다.
 # 래퍼에 Dispose 를 부르면 복구되는 순간에만 예외가 터져 실기에서 늦게 드러납니다.
 $script:probeDisposed = $false
@@ -191,7 +191,7 @@ $probeVerdict = Test-CaptureRecovered -Game $null
 Assert-Case '탐침: 캡처 실패(null) → 미복구(False), 예외 없음' $probeVerdict 'False'
 Assert-Case '탐침: null 이면 Dispose 시도 안 함' $script:probeDisposed 'False'
 # GetWindowRect 실패 경로는 $null 만 돌려주고 플래그를 세우지 않습니다 - 플래그만 보면
-# '정상'으로 통과해 클릭 직전 게이트가 뚫립니다 (2026-08-07 Codex 지적)
+# '정상'으로 통과해 클릭 직전 게이트가 뚫립니다 (2026-08-07 리뷰 지적)
 $script:screenCaptureFailing = $false
 $probeVerdict = Test-CaptureRecovered -Game $null
 Assert-Case '탐침: 캡처 null + 플래그 정상 → False (창 좌표 실패 경로)' $probeVerdict 'False'
@@ -228,7 +228,7 @@ Assert-Case "클릭직전: 라벨이 제목으로 잡혀도 차단하지 않음 
 Assert-Case '클릭직전: 같은 행 오차 ±14px 까지 묶음' `
   (Get-LifeDetailTitleFromWords -Words @(@{ Text = '설원'; X = 460; Y = 190 }, @{ Text = '빛무리'; X = 520; Y = 203 }, @{ Text = '채집물'; X = 462; Y = 230 })) '설원빛무리'
 # 판정은 전용 함수로 - 상세 판정식의 '꼬리 2자 trim'을 그대로 쓰면 정상 팝업을 오차단합니다
-# (Codex 재현: '거미줄XX' → 2자 깎여 '거미줄' → 목표 '거미줄 뭉치' 차단)
+# (리뷰 재현: '거미줄XX' → 2자 깎여 '거미줄' → 목표 '거미줄 뭉치' 차단)
 Assert-Case '클릭직전: 다른 대상 제목 → other (클릭 차단)' `
   (Get-LifeTitleVerdict -Title '뾰족나무' -TargetName '굵은 나무' -Order $woodOrder) 'other'
 Assert-Case '클릭직전: 자기 대상 제목 → mine (통과)' `
@@ -311,7 +311,7 @@ Assert-Case '목표합의: 10 을 5회, 1 을 1회 → 10' (Get-LifeQuestGoalCon
 Assert-Case '목표합의: 동률이면 큰 값' (Get-LifeQuestGoalConsensus -GoalCounts @{ 10 = 2; 1 = 2 }) 10
 Assert-Case '목표합의: 비어 있으면 0' (Get-LifeQuestGoalConsensus -GoalCounts @{}) 0
 Assert-Case '목표합의: null 이면 0' (Get-LifeQuestGoalConsensus -GoalCounts $null) 0
-# ── ①c '가까운 위치 찾기' 링크 단어 선택 (본문 '가까운' 오클릭 방지 - Codex 조건) ──
+# ── ①c '가까운 위치 찾기' 링크 단어 선택 (본문 '가까운' 오클릭 방지 - 리뷰 조건) ──
 # 실측 배치: 링크 y 는 대상별로 다름 (둥지 ~350 / 사과나무 411) → 좌표 아닌 글자 탐색
 $linkRow = @(
   @{ Text = '가까운'; X = 490; Y = 350 },
@@ -432,7 +432,7 @@ $script:wordsByScale = @{ 4 = @(
 $rows = @(Get-LifeTargetRows -Game $null -Scale 4)
 Assert-Case '행 조합: Y 어긋난 두 단어도 행 내 X 순서로 결합 (실사고 재현)' ([string]$rows[0].Text) '뾰족나무'
 Assert-Case "이름: 실측 이형 흰껍질나부 (나무→나부 깨짐)" (Test-LifeNameMatches -RowText '흰껍질나부' -TargetName '흰 껍질 나무') 'True'
-# '나무→나부' 공통 규칙: 이형 미등록 대상도 판독 치환 사본으로 매칭 (Codex - 일부 등록의 빈틈)
+# '나무→나부' 공통 규칙: 이형 미등록 대상도 판독 치환 사본으로 매칭 (리뷰 - 일부 등록의 빈틈)
 Assert-Case "이름: 공통 규칙 뾰족나부 → 뾰족 나무" (Test-LifeNameMatches -RowText '뾰족나부' -TargetName '뾰족 나무') 'True'
 Assert-Case "이름: 공통 규칙 나부 → 나무" (Test-LifeNameMatches -RowText '나부' -TargetName '나무') 'True'
 Assert-Case "이름: 공통 규칙 오탐 방지 (차나부 ≠ 사과나무)" (Test-LifeNameMatches -RowText '차나부' -TargetName '사과나무') 'False'
@@ -622,7 +622,7 @@ $sim = Invoke-CycleSim 'menu-fail-level'
 Assert-Case '사이클: 링크까지 성공했는데 퀘스트 미생성 3회 → exit 4' ('{0}/m{1}/s{2}' -f $sim.Exit, $sim.Menu, $sim.State) '4/m3/s26'
 Assert-Case '사이클: 레벨 미달 추정 시 안내에 요구 레벨 포함' `
   ([bool](@($sim.Out | Where-Object { "$_" -match "곤충 채집 레벨 27 이상" }).Count -ge 1)) 'True'
-# 캡처 실패 복구 탐침 (2026-08-07 실사고의 근본 원인 - Codex 지적):
+# 캡처 실패 복구 탐침 (2026-08-07 실사고의 근본 원인 - 리뷰 지적):
 # 대기 지점들이 캡처를 아예 시도하지 않아 화면이 돌아와도 플래그가 안 풀렸습니다.
 # 탐침이 빠지면 아래는 exit 0 이 아니라 exit 4(한도 초과)가 됩니다.
 $sim = Invoke-CycleSim 'capture-recover'
@@ -733,7 +733,7 @@ foreach ($variantKey in $lifeTargetVariants.Keys) {
 # ── ⑦ 배선/설정 가드 (소스 텍스트 + config + GUI) ──
 $workerText = [IO.File]::ReadAllText($workerPath)
 Assert-Case '배선: 메인 흐름 life 분기 존재' ($workerText -match "if \(\`$mainCategory -eq 'life'\) \{\s*\r?\n\s*Invoke-LifeGatherCycle -Game \`$game") 'True'
-# 생활 분기는 Clear-EventOverlay(생활 창을 알 수 없는 화면으로 오판 가능)보다 앞이어야 함 - Codex 조건
+# 생활 분기는 Clear-EventOverlay(생활 창을 알 수 없는 화면으로 오판 가능)보다 앞이어야 함 - 리뷰 조건
 $lifeBranchIndex = $workerText.IndexOf('Invoke-LifeGatherCycle -Game $game')
 $eventOverlayIndex = $workerText.IndexOf('if (Clear-EventOverlay -Game $game)')
 Assert-Case '배선: 생활 분기가 메인 이벤트 정리보다 앞' (($lifeBranchIndex -ge 0) -and ($eventOverlayIndex -gt $lifeBranchIndex)) 'True'
@@ -765,9 +765,9 @@ Assert-Case '배선: 캡처 실패 대기 복구 탐침 5곳 (사이클 4 + Wait
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `
   ([regex]::Matches($workerText, 'Wait-LifeCaptureAlive -Game \$Game -Deadline \$Deadline').Count) '3'
 # 클릭 직전에는 플래그를 믿지 말고 새로 캡처해야 합니다 - 판독 후 화면이 멈추면 플래그는
-# 정상으로 남아 있어 안 보이는 곳을 누르게 됩니다 (2026-08-07 Codex 지적)
+# 정상으로 남아 있어 안 보이는 곳을 누르게 됩니다 (2026-08-07 리뷰 지적)
 # 깊은 재확인이 돌았으면 '마지막 프레임'에서 링크·제목을 다시 얻고 첫 프레임과 같은 팝업인지
-# 확인해야 합니다 - 좌표만 갱신하면 'A 팝업 판정으로 B 팝업 클릭' 이 됩니다 (Codex 지적)
+# 확인해야 합니다 - 좌표만 갱신하면 'A 팝업 판정으로 B 팝업 클릭' 이 됩니다 (리뷰 지적)
 Assert-Case '배선: 깊은 재확인 후 마지막 프레임에서 링크 재취득' `
   ([bool]($workerText -match 'if \(\$deepRecheckDone\) \{[\s\S]{0,900}Select-LifeFindNearestWord -Words \$linkWords')) 'True'
 Assert-Case '배선: 마지막 프레임이 첫 프레임과 같은 팝업인지 확인 (제목 + 링크 Y)' `
@@ -792,7 +792,7 @@ Assert-Case '배선: 상세 판독 s3→s4 사다리 (한 스케일 깨짐으로
 Assert-Case "배선: 시작 정리 팝업 검출도 '집물' 조각" ($workerText -match "if \(\`$detailText\.Contains\('집물'\)\)") 'True'
 Assert-Case "배선: '생활 스킬' 클릭 후 화면 전환 확인 게이트" ($workerText.Contains("'생활 스킬' 화면 전환을 확인하지 못했습니다")) 'True'
 Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,700}Test-GameForeground -Game \$Game') 'True'
-# 2차 리뷰 반영 계약 (Codex): deadline 하드 상한 + 캡처 실패 판독 무효 + 휠 증거
+# 2차 리뷰 반영 계약 (리뷰): deadline 하드 상한 + 캡처 실패 판독 무효 + 휠 증거
 Assert-Case '배선: deadline 은 준비 정리(이벤트 스킵) 뒤에 생성' ($workerText -match '\[void\]\(Clear-EventOverlay -Game \$Game\)[\s\S]{0,500}\$cycleDeadline = \(Get-Date\)\.AddSeconds') 'True'
 Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*if \(\(Get-Date\) -gt \$cycleDeadline\) \{ break \}') 'True'
 Assert-Case '배선: C 입력 전 판독 후 캡처 플래그 재확인' ($workerText -match '\$infoAlreadyOpen = Test-LifeInfoScreen -Game \$Game\s*\r?\n\s*if \(\$script:screenCaptureFailing\) \{ return \$false \}') 'True'
@@ -823,7 +823,7 @@ Assert-Case '배선: 서버 연결 끊김 감지 → 메뉴/대기 양쪽에서 
    ($workerText -match "게임 서버 연결이 끊어졌습니다 - 재접속 후 다시 시작")) 'True'
 Assert-Case '배선: 대기 루프는 퀘스트 미표시 또는 5회차마다 모달 확인 (모달 뒤 트래커 대비)' `
   ($workerText -match "if \(\`$questState -ne 'present' -or \(\`$waitPollCount % 5\) -eq 0\)") 'True'
-# Codex 4차 리뷰 반영 계약
+# 리뷰 4차 리뷰 반영 계약
 Assert-Case '배선: 초기 퀘스트 판정 전에 연결 끊김 확인' `
   ($workerText -match "if \(\(Close-LifeBlockingDialog -Game \`$Game\) -eq 'disconnected'\)[\s\S]{0,900}\`$initialState = 'unknown'") 'True'
 Assert-Case '배선: 퀘스트 생성 실패 직후에도 disconnected 처리' `
@@ -849,13 +849,13 @@ Assert-Case '배선: 첫 항목이 보이면 정렬 생략 + 도달 시 조기 �
 Assert-Case '배선: 탐색은 목록 끝 도달 판정 + 안전 상한 12회 (고정 회수 아님)' `
   (($workerText -match 'while \(\$scrollStep -lt 11\)') -and
    ($workerText -match 'if \(\$lastScrollSent -and \(\$rowsKey -eq \$previousRowsKey\)\)')) 'True'
-# 2차 Codex 리뷰 반영 계약
+# 2차 교차 리뷰 반영 계약
 Assert-Case '배선: 스크롤 수행 여부 반환 + 끝 판정에 반영' `
   (($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,4500}return \$true') -and
    ($workerText -match '\$lastScrollSent = \[bool\]\(Invoke-LifeListScroll -Game \$Game -Steps -1\)')) 'True'
 Assert-Case '배선: 탐색 마지막 회차 휠 생략' ($workerText -match 'if \(\$scrollStep -eq 11\) \{ break \}') 'True'
 Assert-Case '배선: 상세 wrong 확정은 두 스케일 합의 (wrongCount 2)' ($workerText -match 'if \(\$detailWrongCount -ge 2\)') 'True'
-# 메뉴 시퀀스 내부 deadline (3차 Codex 리뷰: 한도 초과 후 클릭 진행 금지 - 특히 찾기 입력)
+# 메뉴 시퀀스 내부 deadline (3차 교차 리뷰: 한도 초과 후 클릭 진행 금지 - 특히 찾기 입력)
 Assert-Case '배선: 메뉴 시퀀스가 Deadline 을 받아 내부 검사 4곳+' `
   (($workerText -match 'Invoke-LifeMenuSequence -Game \$Game -SkillEntry \$skillEntry -TargetName \$lifeTargetName -Deadline \$cycleDeadline') -and
    (([regex]::Matches($workerText, '\(Get-Date\) -gt \$Deadline')).Count -ge 4)) 'True'
@@ -961,7 +961,7 @@ Assert-Case 'GUI: 던전/심층 시작 안내에 생활 게이트 2곳' `
 Assert-Case 'GUI: 혼합 잠금 안내는 생활에서 억제 2곳(잠금/해제)' `
   ([regex]::Matches($guiText, "if \(\`$script:mainCategory -ne 'life'\) \{\s*\r?\n\s*Add-GuiLog").Count) '2'
 Assert-Case 'GUI: 생활 시작 전용 안내 존재' ($guiText.Contains('[안내] 채집 자동화: 캐릭터가 필드에 있으면')) 'True'
-# 시간 지정/사유 폴백의 전투 설정 누출 방지 (2차 Codex 리뷰)
+# 시간 지정/사유 폴백의 전투 설정 누출 방지 (2차 교차 리뷰)
 Assert-Case 'GUI: 시간 지정 예상치가 대분류별 (생활=채집 대기)' `
   (($guiText -match "if \(\`$script:mainCategory -eq 'life'\) \{ return \[int\]\`$numGatherWait\.Value \}") -and
    ($guiText -match '\(Get-Date\)\.AddSeconds\(\(Get-CycleWaitSecondsForEstimate\)\)')) 'True'

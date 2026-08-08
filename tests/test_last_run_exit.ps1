@@ -36,7 +36,7 @@ foreach ($case in $lastRunCases) {
     (Test-CustomLastRun -ListRepeat $case.R -ListRepeatCount $case.C -Lap $case.L -Index $case.I -Total $case.T) $case.E
 }
 
-# ── 나가기 확인 루프의 한 판독분 판정 (Codex 2차 리뷰 반영 - 단발 OCR 오판 방지) ──
+# ── 나가기 확인 루프의 한 판독분 판정 (리뷰 2차 리뷰 반영 - 단발 OCR 오판 방지) ──
 $exitStepCases = @(
   @{ N = '나가기 팝업 (탐험+계속하)'; H = $false; Q = ''; C = '던전탐험을 계속하시겠습니까?'; R = $false; E = 'popup-exit' }
   @{ N = '팝업이 결과 화면 판독보다 우선'; H = $true; Q = ''; C = '던전탐험을계속하시겠습니까'; R = $true; E = 'popup-exit' }
