@@ -5,7 +5,11 @@
 # (메인 흐름의 예외는 아래쪽 try/catch가 먼저 잡아 진단까지 남기므로 이 trap에 오지 않습니다)
 trap {
   try {
-    $bootLogDir = Join-Path $PSScriptRoot 'Log'
+    # 메인 $logDir 해석(아래 '로그 폴더 통일' 주석) 전에 실행되는 trap 이라 같은 규칙을
+    # 독립적으로 씁니다 - 어긋나면 초기화 오류가 옛 폴더에 남아 GUI 폴링이 못 봅니다 (Codex)
+    $bootLogBase = [string][Environment]::GetFolderPath('LocalApplicationData')
+    $bootLogDir = $(if ([string]::IsNullOrWhiteSpace($bootLogBase)) { Join-Path $PSScriptRoot 'Log' }
+      else { Join-Path $bootLogBase 'HoneyNogi\Log' })
     if (-not (Test-Path -LiteralPath $bootLogDir)) {
       New-Item -ItemType Directory -Path $bootLogDir -Force | Out-Null
     }
@@ -439,7 +443,7 @@ if (Test-Path -LiteralPath $configPath) {
 #    아래 버전과 config.json 의 coordsVersion 을 반드시 함께 +1 하세요.
 #    (안 올리면 옛 config 의 좌표가 게이트를 통과해 이번 사고가 재발합니다.
 #     두 값이 어긋나면 빌드 스크립트가 실패하도록 검사합니다)
-$coordsVersionCurrent = 6
+$coordsVersionCurrent = 7
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -475,6 +479,39 @@ $contentCategory = [string](Get-ConfigValue $config @('contentCategory') 'abyss'
 # 심층던전 모드: 던전과 화면 구조·좌표가 동일해 던전 사이클을 공유하고, 차이(재화·라벨·
 # 난이도·제목 조각)만 데이터로 치환합니다 (2026-07-27 Codex 합의 - 아래 심층 데이터 구역 참고)
 $deepMode = ($contentCategory -eq 'deepdungeon')
+# 대분류(전투/생활) - v2.0.0. 'life' 면 전투 콘텐츠 대신 생활(채집) 사이클로 분기합니다
+# (contentCategory 는 전투 하위 선택이라 그대로 보존 - Codex 합의)
+$mainCategory = [string](Get-ConfigValue $config @('mainCategory') 'battle')
+$lifeContent = [string](Get-ConfigValue $config @('life', 'content') 'gather')
+$lifeSkillId = [string](Get-ConfigValue $config @('life', 'skill') 'daily')
+$lifeTargetName = [string](Get-ConfigValue $config @('life', 'target') '둥지')
+# 생활 커스텀 반복 (2026-08-08): GUI 가 회차마다 이번에 돌 항목 하나만 환경변수로 넘깁니다
+# (config 는 불변 - 던전/어비스/심층과 같은 방식). 토큰 형식 'L|<스킬Id>|<대상>|<횟수>'.
+# 여기서 슬라이더 선택(config life.skill/target)을 덮어써 이후 채집 흐름 전체가 이 항목으로
+# 동작합니다. 횟수는 GUI 가 진행 기록으로 세므로 워커는 사이클 1회만 수행합니다.
+$script:lifeCustomMode = $false
+$script:lifeCustomSpecInvalid = $false
+if ($mainCategory -eq 'life' -and -not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
+  $lifeCustomParts = ([string]$env:HONEYNOGI_CUSTOM_ITEM) -split '\|'
+  if ($lifeCustomParts.Count -ge 3 -and [string]$lifeCustomParts[0] -eq 'L' -and
+      -not [string]::IsNullOrWhiteSpace($lifeCustomParts[1]) -and
+      -not [string]::IsNullOrWhiteSpace($lifeCustomParts[2])) {
+    $lifeSkillId = [string]$lifeCustomParts[1]
+    $lifeTargetName = [string]$lifeCustomParts[2]
+    $lifeContent = 'gather'   # 커스텀 리스트는 채집 전용 (가공은 리스트 자체가 없음)
+    $script:lifeCustomMode = $true
+  } else {
+    # 형식이 어긋나면 조용히 config 값으로 진행하지 않습니다 - 엉뚱한 대상을 캐면
+    # 남의 채집을 망칠 수 있어 로그 경로 준비 후 명확한 오류로 끝냅니다
+    $script:lifeCustomSpecInvalid = $true
+  }
+}
+# '채집 대기' = 총 시간이 아니라 **진행이 멈춘 채로 견디는 시간** (2026-08-08 설계 변경).
+# 수량이 오르는 동안은 오래 걸려도 자르지 않습니다 - 자세한 근거는 대기 루프 주석 참고.
+$lifeGatherWait = Get-ConfigInteger $config @('life', 'gatherWaitSeconds') 600 60 3600
+# 절대 상한(하드 백스톱). 무인 운용에서 영원히 매달리지 않기 위한 안전장치일 뿐이라 넉넉히
+# 잡습니다 - 실측 최장 사이클이 521초였으므로 정상 채집은 절대 여기 닿지 않습니다.
+$lifeGatherHardCapSeconds = 3600
 
 $ptAbyssCard   = @(Get-ConfigValue $config @('clickPoints', 'abyssCard') @(956, 157))
 
@@ -549,7 +586,16 @@ $rgClearExit   = @(Get-ConfigValue $config @('ocrRegions', 'clearAndExitText') @
 $rgClearScore  = @(185, 300, 230, 165)
 $rgEnterButton = @(Get-ConfigValue $config @('ocrRegions', 'enterButton') @(880, 630, 200, 48))
 $rgHomeEndEsc  = @(Get-ConfigValue $config @('ocrRegions', 'homeEndEsc') @(875, 60, 265, 55))
-$rgAbyssMenu   = @(Get-ConfigValue $config @('ocrRegions', 'abyssMenu') @(850, 330, 350, 85))   # 2026-07-16 UI 개편: '필드 보스/어비스/망령의 탑/레이드' 줄 (OCR 실측)
+# ESC 메뉴의 **타일 그리드 전체**를 봅니다 (2026-08-08 coordsVersion 7).
+# 예전에는 '필드 보스/어비스/망령의 탑/레이드' 한 줄만 보는 좁은 영역(850,330,350,85)이라,
+# 상단에 광고 배너('NEXON ESSENTIAL', y33~175)가 생겨 그리드가 아래로 밀리자 그 영역이
+# '캐릭터/가방/크래프팅/연금술' 줄을 읽었습니다 - 어비스 줄을 통째로 놓친 것.
+# 배너 높이는 광고마다 다를 수 있으므로 줄이 아니라 그리드 전체를 보고 글자로 찾습니다.
+# 실측 근거: **광고 없을 때 어비스 y387**(2026-07-16, 옛 ptAbyssMenu 값) /
+# **광고 있을 때 y531**(2026-08-08) - 두 경우 모두 이 영역(y180~700) 안입니다.
+# 위쪽을 배너 아래(180)에서 시작하는 것은 **의도한 것**입니다: 배너까지 포함하면
+# '어비스 신규 던전 오픈' 같은 광고 문구를 어비스 항목으로 잘못 잡아 광고를 누릅니다.
+$rgAbyssMenu   = @(Get-ConfigValue $config @('ocrRegions', 'abyssMenu') @(850, 180, 350, 520))
 $rgAbyssCards  = @(Get-ConfigValue $config @('ocrRegions', 'abyssCards') @(690, 110, 280, 310)) # 어비스 선택 화면 우측 던전 배너 3장의 제목 영역 (2026-07-16 개편 화면 실측)
 $rgMenuExitLabel = @(Get-ConfigValue $config @('ocrRegions', 'menuExitLabel') @(1160, 600, 112, 90)) # ESC 메뉴 우하단 '게임 종료' 문구 (메뉴 열림 2차 신호, 두 창 크기 실측)
 $rgNoticeTabs    = @(170, 495, 930, 62)   # 공지 게시판 팝업 하단 탭 줄(공지사항/이벤트/쿠폰 입력/FAQ) - 2026-07-19 타 PC 캡처 실측
@@ -1556,9 +1602,18 @@ for ($entryIndex = 0; $entryIndex -lt $rawAfterEntryKeys.Count; $entryIndex++) {
   }
 }
 
-$logDir = Join-Path $PSScriptRoot 'Log'
+# 로그/신호 폴더는 실행 위치와 무관하게 %LOCALAPPDATA%\HoneyNogi\Log 로 통일합니다
+# (2026-08-05 사용자 결정). exe 는 스크립트가 원래 그 폴더에 풀려 실행되므로 경로가 그대로라
+# 기존 사용자 영향이 없고, 저장소에서 직접 돌리는 개발/실기 로그도 같은 곳에 모입니다.
+# LOCALAPPDATA 를 못 얻는 비정상 환경만 기존처럼 스크립트 옆 Log 로 폴백 (런처와 같은 가드).
+$honeyLogBase = [string][Environment]::GetFolderPath('LocalApplicationData')
+if ([string]::IsNullOrWhiteSpace($honeyLogBase)) {
+  $logDir = Join-Path $PSScriptRoot 'Log'
+} else {
+  $logDir = Join-Path $honeyLogBase 'HoneyNogi\Log'
+}
 if (-not (Test-Path -LiteralPath $logDir)) {
-  New-Item -ItemType Directory -Path $logDir | Out-Null
+  New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
 $logPath = Join-Path $logDir 'mabinogi_run_once.log'
 $logRecoveryPath = Join-Path $logDir 'mabinogi_run_once.recovery.log'
@@ -6858,6 +6913,7 @@ function Return-ToAbyssSelection {
   $unknownSince = $null   # '알 수 없는 화면' 상태가 시작된 시각 (오클릭으로 열린 우편함 등 복구용)
   $xAttempts = 0          # 닫기(X) 후보 순환 인덱스
   $stellaHandled = 0      # 복귀 중 스텔라 픽 처리 횟수 (무한 클릭 방지 상한용)
+  $abyssMenuMissCount = 0 # 메뉴에서 '어비스' 글자를 못 찾은 횟수 (진단 캡처 1회용)
 
   while ((Get-Date) -lt $deadline) {
     # 0) 화면 캡처가 안 되는 동안은 판단이 불가능하므로 제한 시간을 멈추고 기다립니다.
@@ -6890,10 +6946,42 @@ function Return-ToAbyssSelection {
     if (Test-AbyssMenu -Game $Game) {
       $unknownSince = $null
       if (-not $loggedMenu) { Write-RunLog '[어비스] 어비스 메뉴 감지'; $loggedMenu = $true }
+      # **글자를 찾아 누릅니다** - 고정 좌표는 메뉴 구성이 바뀌면 조용히 다른 항목을 누릅니다.
+      # 2026-08-08 실사고: 상단에 'NEXON ESSENTIAL' 광고 배너(y33~175)가 생기면서 타일
+      # 그리드가 통째로 아래로 밀려, 옛 좌표 (971,387) 이 '아르바이트' 아이콘이 됐습니다
+      # (실측: 어비스는 (971,531) 로 이동). 배너 높이는 광고마다 다를 수 있어 새 고정 좌표로
+      # 바꾸면 다음 배너에서 또 깨집니다 - 생활 분기의 '가까운 위치 찾기'와 같은 계약입니다.
+      # 못 찾으면 클릭하지 않습니다 (엉뚱한 항목을 여는 것보다 재시도가 낫습니다).
+      $abyssMenuPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgAbyssMenu[0] -ReferenceY $rgAbyssMenu[1] `
+        -RegionWidth $rgAbyssMenu[2] -RegionHeight $rgAbyssMenu[3] -SearchText '어비스' -ExactText '어비스' -Scale 4
+      if (-not $abyssMenuPoint) {
+        $abyssMenuMissCount++
+        Write-RunLog "[어비스] 메뉴에서 '어비스' 글자를 찾지 못했습니다 - 재시도 ($abyssMenuMissCount)"
+        if ($abyssMenuMissCount -eq 3) { Write-LifeDiagnostics -Game $Game -Context '어비스 메뉴 항목 미발견' }
+        Start-Sleep -Seconds 2
+        continue
+      }
       Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptAbyssMenu[0] -ReferenceY $ptAbyssMenu[1]
-      Write-RunLog '[어비스] 어비스 메뉴 클릭'
+      Click-ScreenPoint -X $abyssMenuPoint.X -Y $abyssMenuPoint.Y
+      Write-RunLog "[어비스] 어비스 메뉴 클릭 (글자 탐색 화면좌표 $([int]$abyssMenuPoint.X),$([int]$abyssMenuPoint.Y))"
       Start-Sleep -Seconds 2
+      # **클릭 검증** (2026-08-08 사용자 요청): 눌렀는데 다른 화면이 열렸으면 메뉴로 되돌립니다.
+      # 검증 없이 넘기면 엉뚱한 창(아르바이트 등)이 열린 채 '알 수 없는 화면'으로만 돌다가
+      # 시간 초과로 끝납니다 - 무엇이 잘못됐는지도 로그에 안 남습니다.
+      foreach ($abyssOpenTry in 1..6) {
+        Start-Sleep -Seconds 1
+        if ($script:screenCaptureFailing) { continue }
+        if (Test-AbyssSelectionScreen -Game $Game) { break }
+        if (Test-AbyssMenu -Game $Game) { break }      # 아직 메뉴 - 다음 회전에서 다시 클릭
+      }
+      if (-not $script:screenCaptureFailing -and -not (Test-AbyssSelectionScreen -Game $Game) -and
+        -not (Test-AbyssMenu -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game)) {
+        Write-RunLog '[어비스] 어비스가 아닌 화면이 열렸습니다 - ESC 로 되돌립니다'
+        Write-LifeDiagnostics -Game $Game -Context '어비스 메뉴 오클릭'
+        Focus-Game -Game $Game
+        Press-KeyOnce -VirtualKey 0x1B
+        Start-Sleep -Seconds 2
+      }
       continue
     }
 
@@ -7026,6 +7114,2068 @@ function Press-KeyOnce {
   [HoneyNogiInput]::keybd_event($VirtualKey, 0, 2, [UIntPtr]::Zero)
 }
 
+# ============================================================
+#  '생활(채집)' 대분류 (v2.0.0 - 2026-08-05 사용자 시연 251프레임 실측 + Codex 설계 합의.
+#  흐름: C(내 정보) → 생활 스킬 → 스킬 셀 → 대상 행 → '가까운 위치 찾기' → 게임이 자동
+#  이동(전투 포함)·자동 반복 채집 → 퀘스트 소멸 = 1사이클. 판정은 퀘스트 존재 기반 -
+#  카운트 파싱은 로그용 보조 (사용자 합의 단순화). 실측 근거: 던전이미지\생활\흐름캡처\ 9장)
+# ============================================================
+
+# 스킬 셀 좌표 (생활 스킬 창 8열 그리드 y205 - 실측: x 236/366/496/625/755/884/1014/1143).
+# 셀 라벨 OCR 은 실측상 판독 불가(흐린 글꼴) → 고정 좌표 클릭 후 '우측 대상 목록 내용'으로
+# 사후 검증합니다 (Sig = 해당 스킬 대상들의 고유 조각 - 다른 스킬 대상과 겹치면 안 되며
+# tests\test_life_gather.ps1 이 전 조합을 대조합니다. 2026-08-07 '버섯' 충돌 실사고).
+# 미지원: 낚시(채집 흐름 미검증) - 안내 정지
+# Order = 게임 대상 목록의 실제 표시 순서 (GUI $script:lifeSkills 와 동일). 판독이 안 되는
+# 짧은 이름의 행 위치를 '판독된 앵커 + 균일 격자'로 추론하는 데 씁니다 - 2026-08-06 실측:
+# WinRT OCR 이 1글자 한글('물')을 s3~s6 전 스케일에서 놓쳐 순서 기반 보완이 유일한 해법.
+$lifeSkillMenuTable = @{
+  daily  = @{ Name = '일상 채집'; Cell = @(236, 205); Sig = @('둥지', '젖소', '사과', '차나무', '헤이즐넛')
+              Order = @('둥지', '거미줄', '물', '우물', '젖소', '사과 나무', '차나무', '거미줄 뭉치', '헤이즐넛', '얽힌 거미줄') }
+  wood   = @{ Name = '나무 베기'; Cell = @(366, 205); Sig = @('뾰족', '굵은', '갑옷', '어스름')
+              Order = @('나무', '뾰족 나무', '굵은 나무', '쓸 만한 나무', '갑옷 나무', '어스름 나무', '벼락 나무', '흰 껍질 나무') }
+  mining = @{ Name = '광석 캐기'; Cell = @(496, 205); Sig = @('광맥', '석탄', '얼음')
+              Order = @('광맥', '철 광맥', '얼음', '석탄 광맥', '동 광맥', '백동 광맥', '은 광맥', '운철 광맥', '백금 광맥') }
+  # 약초 Sig 에서 '버섯'을 뺐습니다 - 호미질에 '개암 버섯'이 생겨 더는 고유 조각이 아닙니다
+  # (약초를 누르려다 호미질이 열려도 '버섯'만 보고 맞다고 확정할 위험 - Codex 지적 2026-08-07)
+  herb   = @{ Name = '약초 채집'; Cell = @(625, 205); Sig = @('허브', '블러디', '화살꽃')
+              Order = @('허브', '블러디 허브', '화살꽃', '마나 허브', '새록 버섯', '튼튼 버섯', '끈기 풀', '쑥쑥 버섯', '숨숨꽃', '깔끔 버섯', '생채기꽃', '증폭 버섯', '진정초', '끈적 풀', '솔솔 버섯', '산뜻 버섯') }
+  # 2026-08-07 실측 추가: 스킬 창은 열 때마다 8열 전체 그리드라 5~6번째 셀도 바로 클릭됩니다
+  # (양털 755 / 추수 884, y205 - 앞 4종과 같은 행). 스킬 선택 뒤에는 4열로 좁아지지만
+  # 워커는 창을 열자마자 셀을 누르므로 8열 좌표가 항상 맞습니다.
+  wool   = @{ Name = '양털 깎기'; Cell = @(755, 205); Sig = @('먹구름', '구름털', '복슬', '곱슬')
+              Order = @('양', '곱슬 양', '먹구름 양', '구름털 양', '복슬 양') }
+  # 추수는 대상이 밀/콩/쌀 등 1글자라 목록·상세 어디서도 이름이 안 읽힙니다 - 스킬 설명
+  # ('낫으로 잘 여문 곡식')으로 스킬을 확인하고, 행은 목록 순서(최상단 기준)로 찾습니다
+  harvest = @{ Name = '추수'; Cell = @(884, 205); Sig = @('옥수수', '귀리', '곡식', '낫으로')
+              Order = @('밀', '옥수수', '콩', '쌀', '귀리') }
+  hoe    = @{ Name = '호미질'; Cell = @(1014, 205); Sig = @('감자', '양파', '조개', '파스', '양배추')
+              Order = @('감자', '양파', '조개', '파스닙', '양배추', '호박', '개암 버섯') }
+  insect = @{ Name = '곤충 채집'; Cell = @(1143, 205); Sig = @('빛무리', '곤충무리', '설원', '고요한')
+              Order = @('빛 무리', '설원 빛 무리', '곤충 무리', '고요한 빛 무리', '따스한 빛 무리', '차가운 빛 무리', '삭막한 곤충 무리', '황폐한 곤충 무리', '일렁이는 빛 무리') }
+}
+# 대상 목록 첫 행의 기준 Y (실측: 일상 '둥지'·추수 '밀'·양털 '양' 모두 394. 스킬 셀을 누른
+# 직후 목록은 항상 최상단이라, 이름이 전혀 안 읽히는 짧은 대상은 이 값 + 순서 x 간격으로
+# 위치를 계산합니다 - 2026-08-07 실측)
+$lifeListFirstRowY = 394
+$lifeListRowGap = 90                      # 대상 목록 행 간격(실측) - 격자 추론용
+# 대상 이름 이형 (실측 깨짐 - 행 조합 후 공백 제거 비교. 새 깨짐은 실기 로그로 수집해 추가)
+# '나무'→'나부' 는 2회 실측 공통 깨짐 (트래커 '사과나부', 목록 '나부만한쓸' - 08-05).
+# '흰'→'혼!' 은 상세 제목 s3 실측 (23:51 실기 - 자기 팝업을 다른 대상으로 오판하던 사고)
+$lifeTargetVariants = @{
+  '얽힌거미줄' = @('읽힌거미줄', '읽힌거미좋', '읽힌거미줗')
+  '사과나무'   = @('ÅI과나무', '사과나부')
+  '흰껍질나무' = @('흰껍질나부', '혼!껍질나무', '혼!껍질나부')
+  '쓸만한나무' = @('쓸만한나부')
+  '둥지'       = @('등지', '둥人I')
+  '거미줄'     = @('거미좋', '거미줗')
+  '거미줄뭉치' = @('거미줄풍치', '거미좋뭉치', '거미줄뭉지')
+  '화살꽃'     = @('호b살꽃', '화살것')
+  '벼락나무'   = @('벍락나무', '벼락나부', '벍락나부')
+  '운철광맥'   = @('문철광맥', '운철괌맥', '문철괌맥')
+  '은광맥'     = @('으광맥', '은괌맥', '으괌맥')
+  '석탄광맥'   = @('석탄괌맥', '섹탄광맥')
+  '백동광맥'   = @('백동괌맥', '밸동광맥')
+  '파스닙'     = @('파스님', '파스납')
+  '빛무리'     = @('국빛무리', '르국빛무리', '빛부리')
+  '곤충무리'   = @('들곤충무리', '수곤충무리', '곤충부리')
+  # 2026-08-08 hyodong 제보(1908 창): '빛'이 통째로 소실돼 읽힘. 치환 규칙으로는 못 잡습니다
+  # (없어진 글자는 바꿀 대상이 없음) - 이형으로 직접 등록해야 합니다
+  '고요한빛무리' = @('고요한무리')
+}
+# ── 상세 팝업 '제목 전용' 이형 (2026-08-08 8종 전 대상 팝업 전수 실측) ──
+# 위 공용 표와 **분리**합니다. 공용 표는 목록 행 선택과 퀘스트 소유 판정에도 쓰이는데,
+# 퀘스트 쪽은 정확 일치가 아니라 Contains 비교라 깨짐 문자열이 섞이면 엉뚱한 행을 클릭하거나
+# 남의 퀘스트를 자기 것으로 볼 수 있습니다 (Codex 지적). 이 표는 **클릭 직전 제목 재확인**
+# 에서만 쓰이고, 그 판정은 틀려도 '차단하지 않음'으로만 흐르므로 위험이 한 방향입니다.
+# 아래 이름들은 상세·링크 영역, s3·s4 어느 조합으로도 정상 판독이 안 됩니다 (전수 재측정으로
+# 확인 - 배율/영역 문제가 아니라 OCR 이 못 읽는 글자꼴).
+$lifeTitleVariants = @{
+  # '헤이즐넛' = @('헤OI즐넛') 은 제거했습니다 (2026-08-08): 공용 치환에 'OI'->'이' 가
+  # 생기면서 '헤OI즐넛' 이 정식 이름으로 복원돼 이형 등록이 중복이 됩니다
+  # (그대로 두면 이형 표 중복 가드가 실패합니다)
+  '화살꽃'     = @('호발꽃')
+  '벼락나무'   = @('H*락나무')
+  '광맥'       = @('고十OH')
+  '은광맥'     = @('으과DH')
+  '석탄광맥'   = @('A-IEY광DH')
+  '동광맥'     = @('도과DH')
+  '백동광맥'   = @('BHE고十DH')
+  '백금광맥'   = @('BHZ고十DH')
+  '양'         = @('0홀')
+  '곱슬양'     = @('고스0')
+  '먹구름양'   = @('04기르0')
+  '끈기풀'     = @('=츹')
+}
+
+function Test-LifeTitleNameMatches {
+  # 제목 비교 전용 - 공용 이름 매칭 + 제목 전용 이형 표 (순수 - 진리표 대상).
+  param([string]$Title, [string]$TargetName)
+  if (Test-LifeNameMatches -RowText $Title -TargetName $TargetName) { return $true }
+  $targetNorm = Get-LifeNormalizedName $TargetName
+  if ($lifeTitleVariants.ContainsKey($targetNorm)) {
+    if (@($lifeTitleVariants[$targetNorm]) -contains (Get-LifeNormalizedName $Title)) { return $true }
+  }
+  return $false
+}
+# 채집 퀘스트 판독용 넓은 영역 (기본 rgQuestTracker 는 첫 줄만 보는 좁은 영역이라, 획득
+# 알림/경험치 배지가 덮거나 퀘스트가 아래로 밀리면 '없음'으로 오판 - 2026-08-07 실사고:
+# 채집 중인데 40초 만에 '끝났다'고 보고 다른 대상으로 넘어감). 우측 퀘스트 목록 전체를
+# 보고 '채집'+'장소' 조합을 찾습니다 (주간 목표 등 다른 줄에는 이 조합이 없어 오탐 없음)
+$rgLifeQuestWide = @(955, 195, 315, 240)
+$rgLifeStats = @(150, 330, 300, 180)     # 내 정보 능력치 라벨 영역 ('생활력' = 화면 확정 신호)
+$rgLifeTargetList = @(700, 140, 520, 540) # 생활 스킬 창 우측 대상 목록 (행 간격 ~90px, 레벨 열 x>1100)
+$rgLifeDetail = @(430, 150, 420, 300)     # 대상 상세 팝업 (제목 y~191, '채집물' y~218)
+$rgLifeFindLink = @(430, 150, 420, 470)   # '가까운 위치 찾기' 링크 탐색 영역 (팝업 전체 높이 -
+                                          # 링크 y 는 설명 길이에 따라 대상별 상이. 00:53 실사고)
+$ptLifeSkillMenu = @(68, 393)             # 내 정보 좌측 '생활 스킬' 메뉴 (실측 50~86,393)
+$ptLifeDetailConfirm = @(636, 642)        # 상세 팝업 확인 버튼
+$ptLifeWindowClose = @(1228, 67)          # 전체 창 우상단 X (보유한 재화 창과 동일 위치)
+# 직전 Test-LifeWindowOpen 이 글리프 서명으로 찾아낸 X 중심 (기준 좌표). 닫기 클릭이 이 값을
+# 우선 쓰고, 못 찾았을 때만 위 상수로 폴백합니다 - 탐지와 클릭이 같은 환산을 왕복해야
+# '판정은 고쳤는데 클릭이 15px 아래로 빗나가는' 다음 사고가 생기지 않습니다 (2026-08-08)
+$script:lifeCloseGlyphHit = $null
+
+function Invoke-LifeWindowCloseClick {
+  # 생활 창 우상단 X 클릭 - 탐지된 글리프 중심 우선, 없으면 기준 상수 폴백
+  param([System.Diagnostics.Process]$Game)
+  $hit = $script:lifeCloseGlyphHit
+  if ($hit -and $hit.Found) {
+    Click-GamePoint -Game $Game -ReferenceX ([int]$hit.ReferenceX) -ReferenceY ([int]$hit.ReferenceY)
+    return
+  }
+  Click-GamePoint -Game $Game -ReferenceX $ptLifeWindowClose[0] -ReferenceY $ptLifeWindowClose[1]
+}
+$ptLifeListCenter = @(950, 410)           # 대상 목록 중앙 (휠 스크롤 커서 위치)
+
+function Get-LifeNormalizedName {
+  param([string]$Name)
+  return (([string]$Name) -replace '\s', '')
+}
+
+# 공통 깨짐 치환 쌍 (판독 → 실제). 대상 이름 매칭과 퀘스트 트래커 소유 판정이 함께 씁니다 -
+# 한쪽만 고치면 '목록에서는 찾는데 트래커에서는 남의 퀘스트로 보이는' 불일치가 납니다.
+# '일럼'→'일렁' 은 2026-08-08 실측: 곤충 '일렁이는 빛 무리' 가 s3~s6 **전 배율에서 일관되게**
+# '일럼이는빛무리' 로 깨져 목록에서 대상을 못 찾았습니다(레벨 해금 후 첫 시도에서 발견).
+# 목록의 다른 대상에 '일럼' 이 정당하게 들어간 이름이 없어 오탐 없음.
+# 2026-08-08 hyodong 제보(1908 창)로 2쌍 추가:
+#  · 'OI' -> '이' : 한글 '이'가 라틴 O+I 로 쪼개져 읽힘 ('일럼OI는빛무리'). 개발 PC 배율표
+#    s6 행에도 이미 관측돼 있었는데 규칙에 반영되지 않아 놓쳤습니다.
+#  · '및'  -> '빛' : '빛'이 '및'으로 읽힘 ('차가운및무리', '일럼이는및무리').
+#    **좁은 쌍('및무리'->'빛무리')으로 넣으면 안 됩니다** - 아래 Get-LifeRepairedTexts 가
+#    치환 여부를 '원문 기준'으로 판정하므로, '일럼이는및부리'처럼 깨짐이 겹친 문자열에서는
+#    '및무리' 조각이 원문에 없어 규칙이 아예 발동하지 않습니다.
+$lifeNameRepairPairs = @(@('나부', '나무'), @('부리', '무리'), @('곤춤', '곤충'), @('일럼', '일렁'),
+  @('OI', '이'), @('및', '빛'))
+
+function Get-LifeRepairedTexts {
+  # 판독 문자열의 '깨짐 보정 사본들'을 돌려줍니다 (원문 + 규칙별 사본 + 전부 적용한 사본).
+  # 한 문자열에 두 깨짐이 겹칠 수 있어 전부 적용한 사본이 필요합니다 (황폐한곤춤부리).
+  param([string]$Text)
+  $normalized = ([string]$Text) -replace '\s', ''
+  $texts = @($normalized)
+  if (-not $normalized) { return $texts }
+  $allRepaired = $normalized
+  foreach ($repairPair in $lifeNameRepairPairs) {
+    if (-not $normalized.Contains($repairPair[0])) { continue }
+    $texts += , $normalized.Replace($repairPair[0], $repairPair[1])
+    $allRepaired = $allRepaired.Replace($repairPair[0], $repairPair[1])
+  }
+  if ($allRepaired -ne $normalized) { $texts += , $allRepaired }
+  return $texts
+}
+
+function Get-LifeAllTargetNames {
+  # 지원 8종 전체의 대상 이름 (퀘스트 소유 판정용).
+  # 현재 스킬의 Order 만 후보로 쓰면 **다른 스킬의 잔여 퀘스트가 전부 '미확정'** 이 되고,
+  # 더 나쁘게는 현재 스킬의 짧은 대상으로 오인됩니다 (2026-08-07 감사 실측:
+  # 나무 베기 중 '사과 나무'/'차나무' 퀘스트 → '나무', 양털 중 '양파'/'양배추' → '양').
+  param()
+  $allNames = @()
+  foreach ($skillKey in $lifeSkillMenuTable.Keys) {
+    foreach ($targetName in @($lifeSkillMenuTable[$skillKey].Order)) { $allNames += , $targetName }
+  }
+  return $allNames
+}
+
+function Get-LifeQuestOwner {
+  # 퀘스트 트래커 판독이 '어느 대상의 채집인지' 정합니다 (순수 - 진리표 대상).
+  # 반환: 대상 이름 (못 정하면 '')
+  # 단순 부분 문자열 비교는 형제 대상의 퀘스트를 자기 것으로 인수합니다 - '우물' 퀘스트를
+  # 목표 '물' 이, '얽힌 거미줄' 을 '거미줄' 이, '뾰족 나무' 를 '나무' 가 가로챕니다
+  # (2026-08-07 감사). **긴 이름부터** 대조해 어느 대상인지 먼저 확정합니다.
+  # 트래커 이름도 깨지므로 이형 표와 공통 치환 사본을 모두 후보로 씁니다.
+  param([string]$QuestText, [string[]]$Order = @())
+  $haystacks = @(Get-LifeRepairedTexts -Text $QuestText)
+  if (-not $haystacks[0]) { return '' }
+  # 길이 내림차순 + 이름 오름차순(2차 키) - 같은 길이 대상이 여럿이라 PS 5.1 Sort-Object 의
+  # 동률 순서가 불확정이면 결과가 흔들립니다 (Codex 지적)
+  foreach ($candidate in (@($Order) | Sort-Object { -(Get-LifeNormalizedName $_).Length }, { Get-LifeNormalizedName $_ })) {
+    $candidateNorm = Get-LifeNormalizedName $candidate
+    if (-not $candidateNorm) { continue }
+    $needles = @($candidateNorm)
+    if ($lifeTargetVariants.ContainsKey($candidateNorm)) { $needles += @($lifeTargetVariants[$candidateNorm]) }
+    foreach ($needle in $needles) {
+      foreach ($haystack in $haystacks) {
+        if ($haystack.Contains($needle)) { return $candidate }
+      }
+    }
+  }
+  return ''
+}
+
+function Test-LifeNameMatches {
+  # 행 조합 텍스트가 설정 대상과 일치하는지 (공백 제거 정확 일치 + 실측 이형 - 순수 판정)
+  param([string]$RowText, [string]$TargetName)
+  $rowNorm = Get-LifeNormalizedName $RowText
+  $targetNorm = Get-LifeNormalizedName $TargetName
+  if ($rowNorm -eq $targetNorm) { return $true }
+  if ($lifeTargetVariants.ContainsKey($targetNorm) -and (@($lifeTargetVariants[$targetNorm]) -contains $rowNorm)) {
+    return $true
+  }
+  # 공통 깨짐 보정 (판독 쪽을 정확 치환한 사본으로 재비교):
+  #  '나무'→'나부'  실측 3회 (사과나부/나부만한쓸/흰껍질나부)
+  #  '무리'→'부리'  실측 2회 (설원빛부리/고요한빛부리 - 곤충 채집, 2026-08-07)
+  #  '곤충'→'곤춤'  실측 1회 (황폐한곤춤부리 - 같은 행에 두 깨짐이 겹침)
+  # 일부 대상만 이형 등록하면 같은 계열 다른 대상이 빠지므로 규칙으로 처리합니다.
+  # 한 행에 두 개 이상 겹칠 수 있어(황폐한곤춤부리 = 곤춤 + 부리) **개별 치환뿐 아니라
+  # 전부 적용한 사본까지** 비교합니다 (Codex 지적 - '부리'만 고치면 '곤춤'이 남아 실패).
+  # 현재 대상 목록에 정당한 '나부'/'부리'/'곤춤'이 든 이름이 없어 오탐 없음 - 새 대상 추가 시 재확인
+  $repairCandidates = @()
+  $allRepaired = $rowNorm
+  foreach ($repairPair in $lifeNameRepairPairs) {
+    if (-not $rowNorm.Contains($repairPair[0])) { continue }
+    $repairCandidates += , $rowNorm.Replace($repairPair[0], $repairPair[1])
+    $allRepaired = $allRepaired.Replace($repairPair[0], $repairPair[1])
+  }
+  if ($allRepaired -ne $rowNorm) { $repairCandidates += , $allRepaired }
+  foreach ($rowRepaired in $repairCandidates) {
+    if ($rowRepaired -eq $targetNorm) { return $true }
+    if ($lifeTargetVariants.ContainsKey($targetNorm) -and (@($lifeTargetVariants[$targetNorm]) -contains $rowRepaired)) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Get-LifeDetailTitleFromWords {
+  # 링크 탐색 판독(팝업 전체 영역)에서 **제목 줄**만 뽑습니다 (순수 - 진리표 대상).
+  # 제목은 팝업 최상단 줄이므로 가장 작은 Y 의 행을 X 순으로 이어 붙입니다.
+  # 용도: '가까운 위치 찾기'를 누르기 직전에, **링크를 찾은 그 판독 그대로** 대상 이름을
+  # 다시 확인하기 위함입니다 (2026-08-07 사용자 제안). 지금까지는 제목 검증과 링크 클릭이
+  # 서로 다른 캡처라, 그 사이에 팝업이 바뀌면 검증하지 않은 화면을 누를 수 있었습니다.
+  # **고정 Y 를 쓰면 안 됩니다** - 팝업이 세로 중앙 정렬이라 내용 길이에 따라 제목 Y 가
+  # 움직입니다 (실측: 사과 나무 = 위치 줄 '[일반필드] 던바튼' 있어 y191 /
+  # 나무 = 위치 줄 없어 y213). 그래서 '최상단 행'으로 잡습니다.
+  param($Words, [int]$RowTolerance = 14)
+  $wordList = @($Words)
+  if ($wordList.Count -eq 0) { return '' }
+  $topY = $null
+  foreach ($word in $wordList) {
+    if ($null -eq $topY -or [int]$word.Y -lt $topY) { $topY = [int]$word.Y }
+  }
+  $titleWords = @($wordList | Where-Object { [Math]::Abs([int]$_.Y - $topY) -le $RowTolerance } | Sort-Object { [int]$_.X })
+  $titleText = ((($titleWords | ForEach-Object { [string]$_.Text }) -join '') -replace '\s', '')
+  # 이름 줄이 통째로 안 읽히면 최상단 행이 라벨('채집물')이 됩니다 - 실측 전수 확인에서
+  # '채집물'/'자|집물' 로 나온 사례 4건 (물·우물·젖소·추수 대상들. 2026-08-07).
+  # 라벨을 제목으로 넘기면 '읽었는데 이름이 다르다' 로 오해할 소지가 있어 빈 값으로 둡니다.
+  if ($titleText.Contains('집물')) { return '' }
+  return $titleText
+}
+
+function Get-LifeTitleFromDetailText {
+  # 상세 영역 판독 문자열에서 제목부만 잘라 냅니다 (순수 - 진리표 대상).
+  # 구조가 '이름 → 채집물(라벨) → …' 이라 라벨 조각 '집물' 앞이 제목입니다.
+  # 라벨이 없으면 팝업 판독이 아니므로 빈 값 (클릭 직전 재확인을 건너뜁니다).
+  param([string]$DetailText)
+  $normalized = ([string]$DetailText) -replace '\s', ''
+  $labelIndex = $normalized.IndexOf('집물')
+  if ($labelIndex -lt 1) { return '' }
+  return $normalized.Substring(0, $labelIndex)
+}
+
+function Get-LifeTitleStripRegion {
+  # 제목 '띠' 영역을 라벨('채집물') 행 기준으로 계산합니다 (순수 - 진리표 대상).
+  # 팝업이 세로 중앙 정렬이라 제목 Y 가 고정이 아니어서(실측: 사과 나무 191 / 나무 213)
+  # 라벨 Y 에서 역산합니다 - 제목은 라벨보다 약 27px 위, 글자 높이 약 26px.
+  # 왜 필요한가: 넓은 영역 저배율로는 아예 안 읽히는 이름이 **좁은 띠 고배율에서는 읽힙니다**
+  # (2026-08-08 실측: '숨숨꽃'은 s6 에서만, '옥수수'는 s4·s6 에서, '흰 껍질 나무'·'운철 광맥'
+  #  은 s6 에서 깨짐 없이 판독). 라벨을 못 찾으면 $null (재확인 생략).
+  param($Words)
+  foreach ($word in @($Words)) {
+    if (([string]$word.Text).Contains('집물')) {
+      return @(440, ([int]$word.Y - 44), 300, 36)
+    }
+  }
+  return $null
+}
+
+function Get-LifeProgressValue {
+  # 채집 수량 표기('6/10')에서 '모은 개수'를 뽑습니다 (순수 - 진리표 대상). 못 읽으면 -1.
+  # 판독이 '0/0', '2/1' 처럼 튀는 일이 잦아(실측) 분모는 신뢰하지 않고 분자만 씁니다.
+  param([string]$CountText)
+  $normalized = ([string]$CountText) -replace '\s', ''
+  if ($normalized -notmatch '(\d{1,3})/(\d{1,3})') { return -1 }
+  $collected = [int]$Matches[1]
+  if ($collected -lt 0 -or $collected -gt 999) { return -1 }
+  return $collected
+}
+
+function Get-LifeQuestGoalValue {
+  # 채집 수량 표기('6/10')에서 '목표 개수'(분모)를 뽑습니다 (순수 - 진리표 대상). 못 읽으면 0.
+  # 분모는 '0/0', '2/1' 처럼 깨지는 실측이 있어 **분자보다 작으면 버립니다** (말이 안 되는 값).
+  param([string]$CountText)
+  $normalized = ([string]$CountText) -replace '\s', ''
+  if ($normalized -notmatch '(\d{1,3})/(\d{1,3})') { return 0 }
+  $collected = [int]$Matches[1]
+  $goal = [int]$Matches[2]
+  if ($goal -lt 1 -or $goal -gt 999) { return 0 }
+  if ($goal -lt $collected) { return 0 }
+  return $goal
+}
+
+function Get-LifeQuestGoalConsensus {
+  # 관측된 목표 개수(분모)들 중 **가장 많이 본 값**을 채택합니다 (순수 - 진리표 대상).
+  # 실측에서 분모가 '0/1' 처럼 튀는 회차가 섞이므로 한 번의 판독을 믿으면 안 됩니다.
+  # 동률이면 큰 값 - 깨짐은 대개 작은 값으로 나옵니다('/1', '/0').
+  param($GoalCounts)
+  $bestGoal = 0
+  $bestSeen = 0
+  if (-not $GoalCounts) { return 0 }
+  foreach ($goalKey in $GoalCounts.Keys) {
+    $seen = [int]$GoalCounts[$goalKey]
+    $goal = [int]$goalKey
+    if ($seen -gt $bestSeen -or ($seen -eq $bestSeen -and $goal -gt $bestGoal)) {
+      $bestGoal = $goal
+      $bestSeen = $seen
+    }
+  }
+  return $bestGoal
+}
+
+function Get-LifeConsensusVerdict {
+  # 여러 배율 판정의 합의 (순수 - 진리표 대상).
+  # 'mine'/'other' 는 **모든 확정 판정이 같을 때만** 채택하고, 엇갈리면 'unknown'(막지 않음).
+  # 확정이 하나도 없으면 'unknown'. 판정 하나로 확정하면 한 배율의 깨짐이 곧 오차단입니다.
+  param([string[]]$Verdicts)
+  $decided = @(@($Verdicts) | Where-Object { $_ -and $_ -ne 'unknown' })
+  if ($decided.Count -eq 0) { return 'unknown' }
+  $first = [string]$decided[0]
+  foreach ($verdict in $decided) { if ([string]$verdict -ne $first) { return 'unknown' } }
+  # 'other'(차단)는 확정 판정이 2개 이상 일치할 때만 - 단독 other 는 보류합니다
+  if ($first -eq 'other' -and $decided.Count -lt 2) { return 'unknown' }
+  return $first
+}
+
+function Get-LifeTitleVerdictFromDetail {
+  # 상세 영역 판독으로 내리는 클릭 직전 재확인 판정 (순수 - 진리표 대상).
+  # 반환: 'mine' / 'other' / 'unknown'
+  # 상세 판독의 제목 끝에는 **라벨('채집물')의 앞 1~2 글자가 남습니다** ('…채' / '…자|').
+  # 임의 축약이 아니라 '라벨 잔여 제거'라는 근거가 있는 절단이므로 0~2 자를 깎으며 봅니다.
+  # 잘못 깎여 다른 대상이 되는 위험은 Get-LifeTitleVerdict 의 '목표 이름의 일부면 unknown'
+  # 규칙이 막습니다 (예: '나무채' → '나무' 는 목표 '뾰족 나무'의 일부라 차단하지 않음).
+  param([string]$DetailText, [string]$TargetName, [string[]]$Order = @())
+  $title = Get-LifeTitleFromDetailText -DetailText $DetailText
+  if (-not $title) { return 'unknown' }
+  for ($trimCount = 0; $trimCount -le 2; $trimCount++) {
+    if (($title.Length - $trimCount) -lt 1) { break }
+    $candidate = $title.Substring(0, $title.Length - $trimCount)
+    $verdict = Get-LifeTitleVerdict -Title $candidate -TargetName $TargetName -Order $Order
+    if ($verdict -ne 'unknown') { return $verdict }
+  }
+  return 'unknown'
+}
+
+function Get-LifeTitleVerdict {
+  # 제목 문자열만으로 내리는 '고신뢰' 판정 (순수 - 진리표 대상).
+  # 반환: 'mine' / 'other' / 'unknown'
+  # 클릭 직전 재확인 전용입니다. Get-LifeDetailVerdict 의 규칙(꼬리 2자 trim, 본문 구제,
+  # 가독성 휴리스틱)을 그대로 쓰면 **정상 팝업을 다른 대상으로 오판**합니다 (Codex 재현:
+  # '거미줄XX' 가 2자 깎여 '거미줄' 이 되어 목표 '거미줄 뭉치' 를 차단). 여기서는 깎지 않고
+  # 정확 일치(이형·공통 치환 포함)만 봅니다.
+  # 그리고 읽힌 다른 이름이 **목표 이름의 일부**면 'unknown' 으로 둡니다 - 복합 이름의 앞
+  # 낱말이 누락돼 일부만 읽힌 경우('뾰족 나무' → '나무', '철 광맥' → '광맥')를 오차단하지
+  # 않기 위함입니다. 확신이 없으면 막지 않는다(fail-open)는 정책입니다.
+  param([string]$Title, [string]$TargetName, [string[]]$Order = @())
+  $titleNorm = Get-LifeNormalizedName $Title
+  if (-not $titleNorm) { return 'unknown' }
+  if (Test-LifeTitleNameMatches -Title $titleNorm -TargetName $TargetName) { return 'mine' }
+  $targetNorm = Get-LifeNormalizedName $TargetName
+  foreach ($otherName in @($Order)) {
+    if (Test-LifeNameMatches -RowText $otherName -TargetName $TargetName) { continue }   # 자기 자신 제외
+    if (-not (Test-LifeTitleNameMatches -Title $titleNorm -TargetName $otherName)) { continue }
+    # 목표 이름이 이 이름을 품고 있으면 '일부만 읽힌 것' 일 수 있어 확정하지 않습니다
+    if ($targetNorm.Contains((Get-LifeNormalizedName $otherName))) { return 'unknown' }
+    return 'other'
+  }
+  return 'unknown'
+}
+
+function Select-LifeFindNearestWord {
+  # '가까운 위치 찾기' 링크 클릭 지점 선택 (순수 - 진리표 대상).
+  # 행 단위로 묶어 결합 문구에 '위치찾기'가 있는 행만 링크로 인정하고, 그런 행이 정확히
+  # 1개일 때 그 행의 가로 중앙을 돌려줍니다 (설명 본문 오클릭 방지 - Codex 조건).
+  # '가까운' 단어 자체를 요구하면 실기 깨짐('가7)}운' - 2026-08-06 라운드 5 실측)에서
+  # 링크를 못 찾습니다. 안정 조각은 '위치찾기' 쪽입니다.
+  param($Words)
+  $rows = @()
+  foreach ($linkWord in @($Words)) {
+    $matched = $false
+    foreach ($row in $rows) {
+      if ([Math]::Abs([int]$linkWord.Y - [int]$row.Y) -le 14) { $row.Words += , $linkWord; $matched = $true; break }
+    }
+    if (-not $matched) { $rows += , @{ Words = @(, $linkWord); Y = [int]$linkWord.Y } }
+  }
+  $candidates = @()
+  foreach ($row in $rows) {
+    $sortedWords = @($row.Words | Sort-Object { [int]$_.X })
+    $rowText = (($sortedWords | ForEach-Object { [string]$_.Text }) -join '')
+    if ($rowText.Contains('위치찾기') -or $rowText.Contains('위치칮기')) {
+      $minX = [int]($sortedWords[0].X)
+      $maxX = [int]($sortedWords[@($sortedWords).Count - 1].X)
+      $candidates += , @{ X = [int](($minX + $maxX) / 2); Y = [int]$row.Y }
+    }
+  }
+  if (@($candidates).Count -ne 1) { return $null }
+  return $candidates[0]
+}
+
+function Test-LifeBodyNameAmbiguous {
+  # 상세 팝업 '본문 포함' 만으로 대상을 확정해도 되는 이름인지 (순수 - 진리표 대상).
+  # $true = 모호하니 본문 근거를 쓰면 안 됨.
+  # 본문 구조가 '이름 → 채집물 → 스킬명 레벨 N 이상 → 설명' 이라 스킬 이름은 **항상** 있고,
+  # 목록의 다른 대상이 이 이름을 통째로 품으면 그 대상 팝업에서도 똑같이 참이 됩니다.
+  # SelfName: 수식어(첫 낱말)로 검사할 때 '자기 자신' 판단에 쓸 원래 대상 이름.
+  param([string]$Name, [string[]]$Order = @(), [string]$SkillName = '', [string]$SelfName = '')
+  $nameNorm = Get-LifeNormalizedName $Name
+  if ($nameNorm.Length -lt 2) { return $true }
+  if ($SkillName) {
+    # 예: 목표 '나무' 는 스킬명 '나무 베기' 에 들어 있어 나무 베기의 모든 팝업 본문과 일치
+    if ((Get-LifeNormalizedName $SkillName).Contains($nameNorm)) { return $true }
+  }
+  $selfForCompare = $(if ($SelfName) { $SelfName } else { $Name })
+  foreach ($otherName in @($Order)) {
+    if (Test-LifeNameMatches -RowText $otherName -TargetName $selfForCompare) { continue }   # 자기 자신 제외
+    if ((Get-LifeNormalizedName $otherName).Contains($nameNorm)) { return $true }
+  }
+  return $false
+}
+
+function Get-LifeDetailVerdict {
+  # 대상 상세 팝업 판정 (순수 - 진리표 대상).
+  # 반환: 'match' / 'wrong-target' / 'unreadable' / 'no-label'
+  #  match       = 제목이 대상과 일치하거나, 본문에 대상 이름이 있음
+  #  wrong-target= 제목이 '정상 한글로 또렷이' 읽히는데 대상과 다름 = 오클릭 확정
+  #  unreadable  = 팝업은 떴으나 제목이 깨져 판단 불가 (호출부는 행 매칭 증거로 진행)
+  #  no-label    = 팝업 자체가 안 보임
+  # 라벨은 '채집물'의 안정 조각 '집물'로 찾습니다 (실기: '자|집물'/'재집물' 깨짐 다수).
+  # 제목부는 깨진 '채' 잔여(최대 2자)만 끝에서 잘라내며 정확 일치 - 무제한 접두 축소는
+  # '거미줄 뭉치' 팝업을 '거미줄' 설정과 오인하므로 2자 제한이 필수.
+  # unreadable 구분 근거(전수 배치 01:04 실측): 우물 제목 '丁亞'(한글 0자), 젖소 'C0자'
+  # (한글 1/3) 처럼 깨진 제목을 오클릭으로 확정해 3회 소진하던 사고 - 정상 오클릭이면
+  # 제목이 그 대상 이름으로 또렷이(한글 비율 0.8+) 읽힌다는 실측 성질을 이용합니다.
+  param([string]$DetailText, [string]$TargetName, [string[]]$Order = @(), [string]$SkillName = '')
+  $labelIndex = ([string]$DetailText).IndexOf('집물')
+  if ($labelIndex -lt 0) { return 'no-label' }
+  $detailTitle = ([string]$DetailText).Substring(0, $labelIndex)
+  # ⓪ 제목이 '깎아내지 않은 그대로' 목표와 일치하면 그 자리에서 확정합니다.
+  #    ① 의 오클릭 대조는 제목을 최대 2자 깎아 가며 비교하는데, 그 때문에 '거미줄 뭉치'
+  #    자기 팝업이 2자 깎여 '거미줄' 이 되어 오클릭으로 확정되는 반례가 있습니다
+  #    (실측 깨짐으로 '채' 가 사라져 제목이 정확히 '거미줄뭉치' 로 읽힐 때 - 2026-08-07 감사).
+  #    깎지 않은 일치가 깎은 일치보다 강한 증거이므로 순서를 앞에 둡니다.
+  if (Test-LifeNameMatches -RowText $detailTitle -TargetName $TargetName) { return 'match' }
+  # ① 오클릭 확정을 '가장 먼저' 검사합니다 (Codex 블로커): 제목 그대로가 같은 목록의 다른
+  #    대상과 정확히 일치하면 오클릭. 목표 검사를 먼저 하면 접두 축소(trim)가 '거미줄 뭉치'
+  #    팝업을 '거미줄' 목표로 오인합니다. 여기서는 trim 없이 원문만 비교합니다.
+  # 긴 이름부터 검사해야 '거미줄 뭉치' 팝업이 '거미줄'로 축소 해석되지 않습니다.
+  # 제목의 깨진 '채' 잔여(최대 2자)는 목표 검사와 같은 규칙으로 잘라내며 비교합니다.
+  foreach ($otherName in (@($Order) | Sort-Object { -(Get-LifeNormalizedName $_).Length })) {
+    if (Test-LifeNameMatches -RowText $otherName -TargetName $TargetName) { continue }   # 자기 자신 제외
+    for ($trimCount = 0; $trimCount -le 2; $trimCount++) {
+      if (($detailTitle.Length - $trimCount) -lt 1) { break }
+      $titleCandidate = $detailTitle.Substring(0, $detailTitle.Length - $trimCount)
+      if (Test-LifeNameMatches -RowText $titleCandidate -TargetName $otherName) { return 'wrong-target' }
+    }
+  }
+  # ② 제목이 목표와 일치 (깨진 '채' 잔여 최대 2자만 끝에서 제거)
+  for ($trimCount = 0; $trimCount -le 2; $trimCount++) {
+    if (($detailTitle.Length - $trimCount) -lt 1) { break }
+    $titleCandidate = $detailTitle.Substring(0, $detailTitle.Length - $trimCount)
+    if (Test-LifeNameMatches -RowText $titleCandidate -TargetName $TargetName) { return 'match' }
+  }
+  # ③ 본문 구제 (실측: 젖소 '…특징인젖소'). 라벨 '집물' 두 글자는 반드시 제외하고, 2자
+  #    이상 이름만 허용합니다 - '물' 같은 1글자는 라벨 자체에 들어 있어 전 팝업이 일치해
+  #    다른 대상을 통과시켰습니다 (Codex 블로커 반례).
+  #    이름 전체가 없으면 '고유 수식어'(첫 낱말, 2자 이상)로도 확인합니다 - 실측: 백동 광맥
+  #    본문은 '백동이 섞인…백동 광석'이라 '백동광맥'은 없지만 '백동'은 확실 (라운드 5)
+  $targetNorm = Get-LifeNormalizedName $TargetName
+  if ($targetNorm.Length -ge 2) {
+    $detailBody = ([string]$DetailText).Substring([Math]::Min($labelIndex + 2, ([string]$DetailText).Length))
+    # 전체 이름 경로에도 모호성 검사를 겁니다 (2026-08-07 감사 - high).
+    # 본문에는 **항상 스킬 이름이** 들어가고('… 나무 베기 레벨 1 이상'), 목록의 다른 대상이
+    # 목표 이름을 통째로 품는 경우도 많습니다(뾰족 나무 ⊃ 나무 / 철 광맥 ⊃ 광맥 /
+    # 설원 빛 무리 ⊃ 빛 무리 / 거미줄 뭉치 ⊃ 거미줄). 그런 목표는 본문 포함이 아무것도
+    # 증명하지 못하는데도 match 를 돌려줘, 제목이 깨진 순간 오클릭을 전혀 못 잡았습니다.
+    # (2026-08-06 Codex 블로커였던 1글자 '물' 문제가 2글자 기저 명사로 살아남은 것)
+    if ((-not (Test-LifeBodyNameAmbiguous -Name $TargetName -Order $Order -SkillName $SkillName)) -and
+      $detailBody.Contains($targetNorm)) {
+      return 'match'
+    }
+    $targetHead = (([string]$TargetName).Trim() -split '\s+')[0]
+    if ($targetHead.Length -ge 2 -and $targetHead -ne $targetNorm -and $detailBody.Contains($targetHead) -and
+      -not (Test-LifeBodyNameAmbiguous -Name $targetHead -Order $Order -SkillName $SkillName -SelfName $TargetName)) {
+      # 실측: 백동 광맥 본문은 '백동이 섞인…백동 광석' 이라 '백동광맥'은 없지만 '백동'은 확실
+      return 'match'
+    }
+  }
+  # ④ 목록 정보가 없을 때만 가독성 휴리스틱 (또렷한 한글 제목 = 오클릭)
+  if (@($Order).Count -eq 0) {
+    if ($detailTitle.Length -lt 2) { return 'unreadable' }
+    $hangulCount = 0
+    foreach ($titleChar in $detailTitle.ToCharArray()) {
+      if ($titleChar -ge [char]0xAC00 -and $titleChar -le [char]0xD7A3) { $hangulCount++ }
+    }
+    if (($hangulCount / [double]$detailTitle.Length) -ge 0.8) { return 'wrong-target' }
+  }
+  return 'unreadable'
+}
+
+function Get-LifeRequiredLevel {
+  # 상세 팝업 판독 문자열에서 대상의 요구 스킬 레벨('… 레벨 N 이상')을 뽑습니다 (순수 - 진리표 대상).
+  # 2026-08-07 실측: 곤충 채집 '일렁이는 빛 무리'는 레벨 27 이상이 필요한데 캐릭터가 25라
+  # '가까운 위치 찾기'를 눌러도 퀘스트가 생기지 않고 메뉴 사이클 3회를 소진했습니다.
+  # 원인이 화면에만 남아 로그만 보면 알 수 없었으므로, 실패 안내에 요구치를 함께 적습니다.
+  # '이상'은 OCR 이 자주 깨뜨리므로('레벨27이실h1') '레벨' + 숫자만으로 찾습니다.
+  # 캐릭터의 현재 레벨은 목록 머리글 판독이 불안정해('LⅥ2512,396') 비교하지 않습니다 -
+  # 요구치만 알려 주고 판단은 사용자에게 맡깁니다 (단정 금지).
+  # 못 찾거나 값이 비상식적이면 0 을 돌려 호출부가 안내를 생략하게 합니다.
+  # 탐색 범위는 라벨('채집물'의 안정 조각 '집물') **뒤쪽으로 제한**합니다 - 팝업 구조가
+  # '이름 → 채집물 → 스킬명 레벨 N 이상 → 설명' 이라 요구치는 반드시 라벨 뒤에 옵니다.
+  # 라벨이 없으면 상세 팝업이 아니거나 판독이 깨진 것이므로 안내하지 않습니다 (Codex 지적).
+  param([string]$DetailText)
+  $normalized = ([string]$DetailText) -replace '\s', ''
+  $labelIndex = $normalized.IndexOf('집물')
+  if ($labelIndex -lt 0) { return 0 }
+  $afterLabel = $normalized.Substring([Math]::Min($labelIndex + 2, $normalized.Length))
+  # (?!\d) 로 숫자 뒤가 더 이어지면 매칭하지 않습니다 - 없으면 '레벨1000'이 앞 세 자리만
+  # 잘려 100 으로 읽힙니다 (Codex 지적: 상한 검사만으로는 못 막는 접두부 절단)
+  $levelMatches = [regex]::Matches($afterLabel, '레벨(\d{1,3})(?!\d)')
+  if ($levelMatches.Count -eq 0) { return 0 }
+  # 서로 다른 값이 둘 이상 잡히면 어느 쪽이 요구치인지 확신할 수 없어 안내를 생략합니다
+  $distinctLevels = @($levelMatches | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique)
+  if ($distinctLevels.Count -ne 1) { return 0 }
+  $requiredLevel = [int]$distinctLevels[0]
+  # 생활 스킬 레벨은 두 자리대라 100 을 넘는 값은 판독 합성으로 봅니다 (예: '2512' → 251)
+  if ($requiredLevel -lt 1 -or $requiredLevel -gt 100) { return 0 }
+  return $requiredLevel
+}
+
+function Test-CaptureRecovered {
+  # 화면 캡처가 복구됐는지 확인합니다 (반환: 복구됨 여부).
+  # 2026-08-07 실사고(호미질 개암 버섯): 채집 3/10 진행 중 RDP 창이 최소화돼 캡처가 실패하자
+  # 생활 분기의 모든 대기 지점이 '캡처 실패 중이면 판독을 건너뛰고 continue' 하는 바람에
+  # **아무도 캡처를 시도하지 않아** 화면이 돌아와도 감지하지 못하고 한도까지 기다렸습니다
+  # ($script:screenCaptureFailing 은 캡처가 성공해야만 해제됨 - Codex 지적).
+  # 던전 분기는 같은 자리에서 OCR 판독을 복구 탐침으로 쓰는데, 여기서는 글자가 필요 없으므로
+  # 작은 영역을 뜨기만 합니다 (성공하면 Get-GameRegionCapture 안에서 플래그가 풀림).
+  param([System.Diagnostics.Process]$Game)
+  # 반환값은 Bitmap 이 아니라 Bitmap 속성을 가진 래퍼입니다 - 래퍼에 Dispose 를 부르면
+  # 'Dispose 메서드 없음' 예외가 납니다 (Codex 지적 - 복구되는 순간에만 터지는 경로라
+  # 실기에서 늦게 드러났을 사고)
+  $probeCapture = Get-GameRegionCapture -Game $Game -ReferenceX 0 -ReferenceY 0 `
+    -RegionWidth 40 -RegionHeight 40 -Scale 1
+  # 캡처가 $null 이면 실패입니다. GetWindowRect 실패 경로는 플래그를 세우지 않고 $null 만
+  # 돌려주므로, 플래그만 보면 '정상'으로 통과합니다 (Codex 지적 - 클릭 직전 게이트가 뚫림)
+  if (-not $probeCapture) { return $false }
+  $probeCapture.Bitmap.Dispose()
+  return (-not $script:screenCaptureFailing)
+}
+
+function Wait-LifeCaptureAlive {
+  # 화면이 그려질 때까지 기다립니다 (반환: 진행해도 되면 $true / 한도 초과면 $false).
+  # 판독과 입력이 섞인 구간 앞에 둡니다 - 캡처가 끊긴 채로 판독하면 '행 0개'가 나오고,
+  # 그걸 '목록이 사라졌다'로 해석해 미발견 정지(exit 4)까지 갔습니다 (2026-08-07 감사).
+  # 프리즈된 화면에 드래그·클릭을 보내는 것도 함께 막습니다 (안 보이는 채로 조작 금지).
+  param([System.Diagnostics.Process]$Game, [datetime]$Deadline, [string]$Context = '')
+  if (-not $script:screenCaptureFailing) { return $true }
+  Write-RunLog "[생활] 화면이 그려지지 않습니다 - 복구를 기다립니다 (${Context})"
+  while ($script:screenCaptureFailing) {
+    if ((Get-Date) -gt $Deadline) {
+      Write-RunLog "[생활] 사이클 한도 초과 - ${Context} 중단 (화면 미표시 상태)"
+      return $false
+    }
+    Test-SafeStopDuringCaptureFail
+    Start-Sleep -Seconds 2
+    [void](Test-CaptureRecovered -Game $Game)
+  }
+  # 대기 중에 한도를 넘겼을 수 있습니다 - 여기서 $true 를 돌려주면 호출부가 곧바로 드래그를
+  # 보냅니다 (한도 초과 후 입력 금지 계약 위반 - Codex 지적)
+  if ((Get-Date) -gt $Deadline) {
+    Write-RunLog "[생활] 화면은 복구됐지만 사이클 한도를 넘겼습니다 - ${Context} 중단"
+    return $false
+  }
+  Write-RunLog "[생활] 화면이 복구됐습니다 - ${Context} 계속"
+  return $true
+}
+
+function Confirm-LifeGameFront {
+  # 게임 창이 '실제로 전면'인지 확인하고, 아니면 전면화합니다 (최대 3회).
+  # 2026-08-07 실사고: 개발 창(에디터/터미널)이 게임을 덮은 채로 자동화가 계속 돌아
+  # 판독이 그 창의 글자('mabinogi_gui.ps1', 'GroupBox' 등)를 읽고, 클릭도 엉뚱한 곳에
+  # 들어갔습니다. 판독·클릭 전에 이 확인을 통과해야 진행합니다.
+  param([System.Diagnostics.Process]$Game)
+  foreach ($frontTry in 1..3) {
+    if (Test-GameForeground -Game $Game) { return $true }
+    Focus-Game -Game $Game
+    Start-Sleep -Milliseconds 600
+  }
+  Write-RunLog '[생활] 게임 창이 전면이 아닙니다(다른 창이 가림) - 이번 판단을 보류합니다'
+  return $false
+}
+
+function Test-LifeInfoScreen {
+  # 내 정보 화면 판정: 능력치 라벨 영역에 '생활력' (실측: (232,419) s3 정확 판독)
+  param([System.Diagnostics.Process]$Game)
+  if ($script:screenCaptureFailing) { return $false }
+  $statsText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeStats[0] -ReferenceY $rgLifeStats[1] `
+      -RegionWidth $rgLifeStats[2] -RegionHeight $rgLifeStats[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  return $statsText.Contains('생활력')
+}
+
+function Get-LifeTargetRows {
+  # 대상 목록을 행 단위로 조합해 반환 (레벨 열(x>1100) 제외, Y ±14px 그룹).
+  # 반환: @(@{ Text; Y }) - 행 클릭은 x950 고정 (행 전체가 버튼)
+  param([System.Diagnostics.Process]$Game, [int]$Scale)
+  $listWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgLifeTargetList[0] -ReferenceY $rgLifeTargetList[1] `
+      -RegionWidth $rgLifeTargetList[2] -RegionHeight $rgLifeTargetList[3] -Scale $Scale -Engine $ocrKoreanEngine)
+  $rows = @()
+  foreach ($listWord in ($listWords | Where-Object { [int]$_.X -lt 1100 } | Sort-Object { [int]$_.Y }, { [int]$_.X })) {
+    $matched = $false
+    foreach ($row in $rows) {
+      if ([Math]::Abs([int]$listWord.Y - [int]$row.Y) -le 14) {
+        $row.Words += , $listWord
+        $matched = $true
+        break
+      }
+    }
+    if (-not $matched) { $rows += , @{ Words = @(, $listWord); Y = [int]$listWord.Y } }
+  }
+  # 같은 행 안에서는 X 로 다시 정렬해 붙입니다 - 전역 Y,X 정렬만 쓰면 두 단어의 Y 중심이
+  # 1~2px 어긋날 때 순서가 뒤집힘 (GUI 실기 23:24 실측: '뾰족 나무' → '나무뾰족'으로
+  # 조합돼 정확 일치가 전부 빗나감 - 대상 미발견 실사고)
+  foreach ($row in $rows) {
+    $row.Text = (($row.Words | Sort-Object { [int]$_.X } | ForEach-Object { [string]$_.Text }) -join '')
+  }
+  return $rows
+}
+
+function Get-LifeTargetRowByOrder {
+  # 판독된 행들을 목록 순서(Order)에 대응시켜 '판독 안 된 대상'의 행 Y 를 추론합니다
+  # (순수 - 진리표 대상). 규칙:
+  #  ① 각 행 텍스트를 Order 의 어느 이름과 일치시켜 (인덱스, Y) 앵커를 만든다
+  #  ② 앵커가 2개 이상이고, 인덱스 차이 대비 Y 간격이 RowGap 과 ±12px 안에서 일관될 때만 채택
+  #  ③ 목표 인덱스의 Y = 앵커 Y + (목표 인덱스 - 앵커 인덱스) x RowGap
+  #  ④ 추론 Y 가 목록 영역(TopY~BottomY) 밖이면 $null (화면 밖 = 스크롤 필요)
+  # 앵커 1개 이하거나 간격이 흔들리면 추론하지 않습니다 (오클릭 방지 - 화면 대상은 정확
+  # 일치 경로가 이미 처리하므로, 이 함수는 '보이지만 안 읽히는 행' 전용 보완입니다)
+  param($Rows, [string[]]$Order, [string]$TargetName, [int]$RowGap = 90,
+        [int]$TopY = 150, [int]$BottomY = 680)
+  if (-not $Order -or @($Order).Count -eq 0) { return $null }
+  $targetIndex = -1
+  for ($orderIndex = 0; $orderIndex -lt @($Order).Count; $orderIndex++) {
+    if (Test-LifeNameMatches -RowText ([string]$Order[$orderIndex]) -TargetName $TargetName) { $targetIndex = $orderIndex; break }
+  }
+  if ($targetIndex -lt 0) { return $null }
+  # 앵커 수집: ① 정확/이형 일치 우선 ② 실패 시 '행에 이름이 포함'되면 앵커로 인정
+  # (아이콘 조각이 붙는 실측 '4거미줄' 때문에 정확 일치만으로는 앵커가 부족해 신뢰도가
+  # 떨어짐 - 2026-08-06 라운드 7). ②는 긴 이름부터 검사해 '거미줄 뭉치'를 '거미줄'로
+  # 오인하지 않게 합니다. 앵커는 위치 추정용이라 포함 매칭으로도 안전합니다.
+  $orderByLength = @(0..(@($Order).Count - 1) | Sort-Object { -(Get-LifeNormalizedName $Order[$_]).Length })
+  $anchors = @()
+  foreach ($row in @($Rows)) {
+    $rowNorm = Get-LifeNormalizedName ([string]$row.Text)
+    $anchorIndex = -1
+    for ($orderIndex = 0; $orderIndex -lt @($Order).Count; $orderIndex++) {
+      if (Test-LifeNameMatches -RowText ([string]$row.Text) -TargetName ([string]$Order[$orderIndex])) {
+        $anchorIndex = $orderIndex
+        break
+      }
+    }
+    if ($anchorIndex -lt 0) {
+      foreach ($candidateIndex in $orderByLength) {
+        $candidateNorm = Get-LifeNormalizedName ([string]$Order[$candidateIndex])
+        if ($candidateNorm.Length -ge 2 -and $rowNorm.Contains($candidateNorm)) {
+          $anchorIndex = $candidateIndex
+          break
+        }
+      }
+    }
+    if ($anchorIndex -ge 0) { $anchors += , @{ Index = $anchorIndex; Y = [int]$row.Y } }
+  }
+  if (@($anchors).Count -lt 2) { return $null }
+  # 앵커 간 간격 일관성 검사 (정렬 후 인접 쌍 전부)
+  $sorted = @($anchors | Sort-Object { [int]$_.Index })
+  for ($pairIndex = 1; $pairIndex -lt @($sorted).Count; $pairIndex++) {
+    $indexGap = [int]$sorted[$pairIndex].Index - [int]$sorted[$pairIndex - 1].Index
+    if ($indexGap -le 0) { return $null }
+    $expectedY = [int]$sorted[$pairIndex - 1].Y + ($indexGap * $RowGap)
+    if ([Math]::Abs([int]$sorted[$pairIndex].Y - $expectedY) -gt 12) { return $null }
+  }
+  # 목표와 가장 가까운 앵커 기준으로 환산 (누적 오차 최소화)
+  $nearest = $sorted[0]
+  foreach ($anchor in $sorted) {
+    if ([Math]::Abs([int]$anchor.Index - $targetIndex) -lt [Math]::Abs([int]$nearest.Index - $targetIndex)) { $nearest = $anchor }
+  }
+  $estimatedY = [int]$nearest.Y + (($targetIndex - [int]$nearest.Index) * $RowGap)
+  if ($estimatedY -lt $TopY -or $estimatedY -gt $BottomY) { return $null }
+  # 앵커 수를 함께 돌려줍니다 - 3개 이상이면 위치 신뢰도가 높아 '상세 제목이 안 읽혀도'
+  # 진행할 근거가 됩니다 (2026-08-06 라운드 6: 1글자 '물'은 제목·본문 어느 쪽으로도
+  # 검증이 불가능해, 격자 신뢰도 외에는 통과시킬 방법이 없음)
+  return @{ Y = $estimatedY; AnchorCount = @($sorted).Count }
+}
+
+function Find-LifeTargetScan {
+  # 탐색 스텝 1회의 판독: s4→s5 로 대상 행을 찾고, 행 증거/끝 판정용 rows 도 같은 판독으로
+  # 반환합니다. 반환: @{ Y = 행 Y 또는 $null; Rows = 첫 판독 성공 스케일의 행 배열 }.
+  # (기존 s4→s5→s3 + 별도 증거 판독 = 스텝당 OCR 4회가 스크롤 탐색을 느리게 함 -
+  #  2026-08-06 사용자 요청으로 2회로 축소. s3 전용 이형은 '나부' 공통 치환 규칙과 이형
+  #  맵이 커버 - 실측상 s3 는 보조였고 주력 판독은 s4/s5)
+  # FreshList = 스킬 셀을 누른 직후(목록이 최상단으로 초기화된 상태)라는 뜻. 이때만
+  # '순서 x 간격' 위치 계산을 허용합니다 - 스크롤한 뒤에는 첫 행 기준이 맞지 않습니다
+  param([System.Diagnostics.Process]$Game, [string]$TargetName, [string[]]$Order = @(), [switch]$FreshList)
+  $visibleRows = @()
+  foreach ($scanScale in @(4, 5)) {
+    $scanRows = @(Get-LifeTargetRows -Game $Game -Scale $scanScale)
+    if ($visibleRows.Count -eq 0 -and $scanRows.Count -gt 0) { $visibleRows = $scanRows }
+    foreach ($row in $scanRows) {
+      if (Test-LifeNameMatches -RowText ([string]$row.Text) -TargetName $TargetName) {
+        return @{ Y = [int]$row.Y; Rows = $visibleRows; Source = 'text' }
+      }
+    }
+  }
+  # 직접 판독 실패 - 목록 순서 격자로 추론 (짧은 이름 보완. 앵커 2개+간격 일관 시에만).
+  # 앵커 3개 이상은 'order-strong' - 상세 제목이 안 읽혀도 진행할 수 있는 신뢰도입니다
+  if (@($Order).Count -gt 0 -and @($visibleRows).Count -gt 0) {
+    $orderResult = Get-LifeTargetRowByOrder -Rows $visibleRows -Order $Order -TargetName $TargetName -RowGap $lifeListRowGap
+    if ($null -ne $orderResult) {
+      $orderSource = $(if ([int]$orderResult.AnchorCount -ge 3) { 'order-strong' } else { 'order' })
+      return @{ Y = [int]$orderResult.Y; Rows = $visibleRows; Source = $orderSource }
+    }
+  }
+  # 마지막 수단: 목록이 최상단인 게 확실할 때(스킬 셀 클릭 직후) '순서 x 간격'으로 계산.
+  # 추수의 밀/콩/쌀처럼 1글자 대상은 목록·상세 어디서도 이름이 안 읽혀 이 경로가 유일합니다
+  # 단, 캡처가 끊긴 상태에서는 쓰지 않습니다 - 판독이 전멸해도 이 폴백만은 행을 돌려주므로
+  # '목록이 안 읽히는데 클릭은 나가는' 경로가 됩니다 (2026-08-07 감사 high: 실제로 판독
+  # 2회 전멸 + CaptureFailing=true 인데 Y=574/Source=index 가 반환되는 것을 재현)
+  if ($FreshList -and @($Order).Count -gt 0 -and -not $script:screenCaptureFailing) {
+    for ($freshIndex = 0; $freshIndex -lt @($Order).Count; $freshIndex++) {
+      if (-not (Test-LifeNameMatches -RowText ([string]$Order[$freshIndex]) -TargetName $TargetName)) { continue }
+      $freshY = $lifeListFirstRowY + ($freshIndex * $lifeListRowGap)
+      if ($freshY -ge 150 -and $freshY -le 680) {
+        return @{ Y = [int]$freshY; Rows = $visibleRows; Source = 'index' }
+      }
+      break
+    }
+  }
+  return @{ Y = $null; Rows = $visibleRows; Source = 'none' }
+}
+
+function Invoke-LifeListScroll {
+  # 대상 목록 스크롤 (Steps>0 = 위쪽 항목 노출, <0 = 아래쪽 항목 노출).
+  # **드래그 방식** - 2026-08-06 실측 실험: 휠(0x0800)은 이 목록에서 위 방향이 전혀 먹지
+  # 않고 아래도 불안정해 '물'/'얽힌 거미줄' 같은 양 끝 대상을 못 찾던 원인이었습니다.
+  # 같은 화면에서 드래그는 전 방향 확실히 동작(실험 05/06 캡처) → 드래그로 전환.
+  # 게임 전면 + 커서 확인 후에만 입력하고, 실제 드래그 수행 여부를 반환합니다.
+  param([System.Diagnostics.Process]$Game, [int]$Steps)
+  if ($Steps -eq 0) { return $false }
+  if (-not (Test-GameForeground -Game $Game)) {
+    Focus-Game -Game $Game
+    Start-Sleep -Milliseconds 400
+    if (-not (Test-GameForeground -Game $Game)) {
+      Write-RunLog '[생활] 목록 스크롤: 게임 전면화 실패로 건너뜀'
+      return $false   # 다음 탐색 회차에서 재시도
+    }
+  }
+  # 드래그 구간은 '항목 카드가 실제로 깔린 영역'만 사용합니다 (실측: 스킬 제목 178 /
+  # 설명 212 / 경험치 바 288 / Lv 316 / 첫 항목 394~ - 2026-08-06 라운드 2 실사고:
+  # 시작점 y230 이 설명 영역이라 드래그가 목록에 먹지 않아 최상단 이동이 전부 무효였음).
+  # 방향: 아래 항목을 보려면 목록을 위로 끌어올림(FromY > ToY), 위쪽 항목은 반대.
+  # 거리는 2행(180px)만 - 길게 끌면 관성으로 5~7행이 한 번에 넘어가 중간 대상을 건너뜁니다
+  # (2026-08-06 라운드 3 실사고: 최상단(1~4행)에서 한 번 내렸더니 11~16행이 보임 →
+  # '새록 버섯'(5번) 미발견). 짧게·천천히 끌어 관성을 최소화합니다.
+  $dragCenterRefY = 520
+  $dragHalf = $lifeListRowGap
+  $fromRefY = $(if ($Steps -lt 0) { $dragCenterRefY + $dragHalf } else { $dragCenterRefY - $dragHalf })
+  $toRefY = $(if ($Steps -lt 0) { $dragCenterRefY - $dragHalf } else { $dragCenterRefY + $dragHalf })
+  $fromPoint = Get-ScaledScreenPoint -Game $Game -ReferenceX $ptLifeListCenter[0] -ReferenceY $fromRefY
+  $toPoint = Get-ScaledScreenPoint -Game $Game -ReferenceX $ptLifeListCenter[0] -ReferenceY $toRefY
+  # 시작 지점 커서 확인 (Click-ScreenPoint 와 같은 규칙 - 확인 실패 시 입력 금지)
+  $cursorReady = $false
+  foreach ($cursorTry in 1..2) {
+    [HoneyNogiInput]::SetCursorPos([int]$fromPoint.X, [int]$fromPoint.Y) | Out-Null
+    Start-Sleep -Milliseconds 80
+    $cursorNow = New-Object HoneyNogiInput+POINT
+    if ([HoneyNogiInput]::GetCursorPos([ref]$cursorNow) -and
+        [Math]::Abs($cursorNow.X - [int]$fromPoint.X) -le 3 -and
+        [Math]::Abs($cursorNow.Y - [int]$fromPoint.Y) -le 3) {
+      $cursorReady = $true
+      break
+    }
+  }
+  if (-not $cursorReady) {
+    Write-RunLog "[생활] 목록 스크롤: 커서를 시작 지점($([int]$fromPoint.X),$([int]$fromPoint.Y))으로 확인하지 못해 건너뜀"
+    return $false
+  }
+  # 버튼을 누른 뒤에는 무슨 일이 있어도 떼야 합니다 (예외/중단으로 눌린 채 남으면 이후 모든
+  # 입력이 드래그로 처리됨 - Codex 조건). 이동 성공 여부는 마지막 커서 위치로 확인합니다.
+  $dragMoved = $false
+  [HoneyNogiInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)   # 왼쪽 버튼 누름
+  try {
+    Start-Sleep -Milliseconds 150
+    # 중간 단계 이동 - 한 번에 점프하면 게임이 드래그가 아닌 '클릭'으로 처리합니다.
+    # 단계를 잘게(16회) 나누고 마지막에 잠깐 멈춰 '던지는' 제스처가 되지 않게 합니다(관성 억제)
+    foreach ($moveStep in 1..16) {
+      $stepX = [int]$fromPoint.X + [int](([int]$toPoint.X - [int]$fromPoint.X) * $moveStep / 16.0)
+      $stepY = [int]$fromPoint.Y + [int](([int]$toPoint.Y - [int]$fromPoint.Y) * $moveStep / 16.0)
+      [HoneyNogiInput]::SetCursorPos($stepX, $stepY) | Out-Null
+      Start-Sleep -Milliseconds 45
+    }
+    Start-Sleep -Milliseconds 250     # 손을 멈춘 뒤 떼기 = 플링(관성) 방지
+    # 실제로 목표까지 이동했는지 확인 - 커서가 안 움직였으면 같은 자리 down/up = 항목 클릭
+    $cursorEnd = New-Object HoneyNogiInput+POINT
+    if ([HoneyNogiInput]::GetCursorPos([ref]$cursorEnd) -and
+        [Math]::Abs($cursorEnd.Y - [int]$toPoint.Y) -le 6 -and
+        [Math]::Abs($cursorEnd.Y - [int]$fromPoint.Y) -ge 40) {
+      $dragMoved = $true
+    }
+  } finally {
+    [HoneyNogiInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)   # 버튼 뗌 (항상)
+  }
+  if (-not $dragMoved) {
+    Write-RunLog '[생활] 목록 스크롤: 커서 이동을 확인하지 못했습니다 - 이번 스크롤은 무효로 처리'
+    Start-Sleep -Milliseconds 400
+    return $false
+  }
+  # 관성 스크롤이 멎기 전에 판독하면 중간 상태를 읽습니다
+  Start-Sleep -Milliseconds 900
+  return $true
+}
+
+function Test-LifeQuestFragments {
+  # 채집 퀘스트 문구 판정 (순수 - 진리표 대상): '채집 장소 탐색 - {대상} 채집 N/10'.
+  # 세 조각(채집/장소/탐색) 중 2개 이상이면 present 로 봅니다 - 한 조각이 깨져도(실측:
+  # '탐색'→'탐"', '장소'→'잠소') 놓치지 않기 위함 (2026-08-07 사용자 지적: '탐색'은
+  # 채집 퀘스트 공통 단어). 주간 목표 등 다른 줄에는 이 조합이 없어 오탐이 없습니다.
+  param([string]$QuestText)
+  $normalized = ([string]$QuestText) -replace '\s', ''
+  $hits = 0
+  foreach ($piece in @('채집', '장소', '탐색')) {
+    if ($normalized.Contains($piece)) { $hits++ }
+  }
+  return ($hits -ge 2)
+}
+
+function Get-LifeQuestState {
+  # 채집 퀘스트 상태 (Codex 합의 4상태 축약): 'present' / 'absent' / 'unknown'.
+  # 판독은 좁은 영역(첫 줄) → 없으면 넓은 영역(우측 퀘스트 목록 전체) 순서로 두 번 봅니다 -
+  # 획득 알림/경험치 배지가 첫 줄을 덮거나 퀘스트가 아래로 밀리면 좁은 영역만으로는
+  # '없음'이 되어 채집 중에 완료로 오판합니다 (2026-08-07 실사고).
+  # absent 는 HUD 가 보이는 확정 상태에서만. 그 외 전부 unknown (부재 오판 방지)
+  param([System.Diagnostics.Process]$Game)
+  if ($script:screenCaptureFailing) { return 'unknown' }
+  # ① 먼저 그냥 읽습니다 - 퀘스트 조각이 보이면 게임 화면이라는 증거이므로 전면화가
+  #    필요 없습니다 (전면화는 사용자 조작을 방해하니 꼭 필요할 때만 - 사용자 지시)
+  if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+      -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+      -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+  if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+      -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
+      -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+  # ② 안 읽혔을 때만 '다른 창이 가린 건 아닌지' 확인합니다 - 전면화 후 한 번 더 읽고,
+  #    전면화조차 안 되면 판단을 포기합니다(unknown - 부재로 세지 않음. 2026-08-07 실사고:
+  #    개발 창이 게임을 덮은 채 그 글자를 읽고 '퀘스트 없음'으로 완료 오판)
+  if (-not (Test-GameForeground -Game $Game)) {
+    Focus-Game -Game $Game
+    Start-Sleep -Milliseconds 700
+    if (-not (Test-GameForeground -Game $Game)) { return 'unknown' }
+    if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+        -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+        -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+    if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+        -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
+        -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+  }
+  # ③ 게임 화면이 확실한데도 퀘스트가 없을 때만 absent (게임플레이 HUD 가 증거)
+  if (Test-HomeEndEscHud -Game $Game) { return 'absent' }
+  return 'unknown'
+}
+
+function Get-LifeQuestCountText {
+  # 로그 표시용 N/10 (상태 전이에는 사용하지 않음 - 사용자 합의)
+  param([System.Diagnostics.Process]$Game)
+  $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+      -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $countMatch = [regex]::Match([string]$questText, '(\d+)\s*/\s*(\d+)')
+  if ($countMatch.Success) { return ('{0}/{1}' -f $countMatch.Groups[1].Value, $countMatch.Groups[2].Value) }
+  return ''
+}
+
+function Press-LifeMenuKey {
+  # C 키 strict 입력 (Codex 조건 + 사용자 합의): 전면화 → 전면 '확인' 후에만 입력.
+  # 기존 Press-KeyOnce 는 전역 입력이라 게임이 전면이 아니면 엉뚱한 곳에 들어감 - 확인 필수
+  param([System.Diagnostics.Process]$Game)
+  foreach ($focusTry in 1..3) {
+    Focus-Game -Game $Game
+    Start-Sleep -Milliseconds 400
+    if (Test-GameForeground -Game $Game) {
+      Press-KeyOnce -VirtualKey ([byte]0x43)   # C
+      return $true
+    }
+    Start-Sleep -Milliseconds 800
+  }
+  Write-RunLog '[경고] 게임 창을 전면으로 만들지 못해 C 키 입력을 건너뜁니다 - 잠시 후 재시도'
+  return $false
+}
+
+function Test-LifeWindowClosePixels {
+  # 생활 창(내 정보/생활 스킬 - 공통 우상단 X) 열림 판정식 (순수 - 진리표 대상).
+  # 주의: 이 4점 판정은 **기준 크기(1272x717) 창에서만 신뢰할 수 있습니다.** 창이 크면
+  # 제목줄 비비례 때문에 화면 최상단 좌표가 아래로 밀려 X 두 획 사이 틈을 읽습니다
+  # (2026-08-08 hyodong 제보). 지금은 Test-LifeWindowOpen 의 **폴백**으로만 쓰이고
+  # 1순위는 창 크기에 무관한 Find-LifeCloseGlyph 입니다.
+  # X 교차점 2점은 흰색(min 200+, 실측 249~255), 좌우 여백은 '교차점보다 100 이상 어두움'
+  # (상대 대비). 절대 임계(max 80)는 2차 실기에서 오판 - 미선택 생활 스킬 창은 배경이
+  # 반투명이라 뒤 필드가 비쳐 여백이 G103 까지 올라감 (22:51:46 실측 R49G96/R52G103.
+  # 필드 화면은 교차점부터 어긋나(4번 캡처 min R35) 상대 대비에서도 탈락 - 6장 재검증).
+  param($CrossA, $CrossB, $SideA, $SideB)
+  $crossMin = [Math]::Min(
+    [Math]::Min([Math]::Min([int]$CrossA.R, [int]$CrossA.G), [int]$CrossA.B),
+    [Math]::Min([Math]::Min([int]$CrossB.R, [int]$CrossB.G), [int]$CrossB.B))
+  if ($crossMin -lt 200) { return $false }
+  $sideMax = [Math]::Max(
+    [Math]::Max([Math]::Max([int]$SideA.R, [int]$SideA.G), [int]$SideA.B),
+    [Math]::Max([Math]::Max([int]$SideB.R, [int]$SideB.G), [int]$SideB.B))
+  return ($sideMax -le ($crossMin - 100))
+}
+
+# ── 우상단 닫기 X '글리프 서명' 탐색 (2026-08-08 hyodong 제보로 신설) ──
+# 고정 4점 판정은 **창 크기가 기준(1272x717)과 다르면 죽습니다.** 기준 좌표계가 제목줄을
+# 포함하는데 제목줄 높이는 창 크기에 비례하지 않아(실측: 개발/제보 PC 31px, 다른 제보 PC
+# 38px - PC마다 다름), 화면 최상단일수록 세로 오차가 커지기 때문입니다. 1908 창에서 4점은
+# X 글리프 경계 안이지만 **두 획 사이의 검은 틈**에 떨어져 항상 false 였습니다.
+# 그래서 '어디를 보느냐(고정 Y)'가 아니라 '무엇이 보이느냐(X 두 대각선의 교차)'로 바꿉니다.
+# 좌표 보정이 아니라 형태 탐색이라 제목줄 높이·창 크기·저장 좌표의 ±2px 오차에 전부 면역입니다.
+$rgLifeCloseGlyph = @(1196, 30, 64, 56)   # 우상단 닫기 X 주변 (기준 좌표계. 1272·1908 실측 글리프를 모두 포함하는 폭)
+
+function Find-LifeCloseGlyph {
+  # 밝기 배열에서 'X 자 교차' 서명을 찾습니다 (순수 - 진리표 대상).
+  # 서명: 중심이 밝고 / 네 대각선 방향이 밝고 / 네 축(상하좌우) 방향이 어둡다.
+  #   - 가로막대·세로막대·십자(+)·균일한 밝은 면은 축 검사에서 탈락합니다.
+  #   - 팔 길이를 여러 개 보고 과반을 요구해 안티앨리어싱 한 칸에 좌우되지 않게 합니다.
+  # 입력은 [int[][]] 밝기(0~255) 행 배열 - Drawing 없이 진리표를 돌리기 위함입니다.
+  # 반환: @{ Found; X; Y; Score } (X/Y 는 배열 안 좌표. 못 찾으면 Found=$false)
+  param([int[][]]$Luma, [int]$BrightMin = 170, [int]$DarkMax = 110, [int[]]$Arms = @(6, 8, 10))
+  $rows = @($Luma).Count
+  if ($rows -lt 1) { return @{ Found = $false; X = -1; Y = -1; Score = 0 } }
+  $cols = @($Luma[0]).Count
+  $maxArm = 0
+  foreach ($arm in $Arms) { if ($arm -gt $maxArm) { $maxArm = $arm } }
+  if ($rows -le (2 * $maxArm) -or $cols -le (2 * $maxArm)) { return @{ Found = $false; X = -1; Y = -1; Score = 0 } }
+  $bestScore = 0; $bestX = -1; $bestY = -1
+  for ($y = $maxArm; $y -lt ($rows - $maxArm); $y++) {
+    for ($x = $maxArm; $x -lt ($cols - $maxArm); $x++) {
+      if ($Luma[$y][$x] -lt $BrightMin) { continue }
+      $armHits = 0
+      foreach ($arm in $Arms) {
+        # 네 대각선이 전부 밝고, 네 축이 전부 어두워야 이 팔 길이가 '통과'입니다
+        if ($Luma[$y - $arm][$x - $arm] -lt $BrightMin) { continue }
+        if ($Luma[$y - $arm][$x + $arm] -lt $BrightMin) { continue }
+        if ($Luma[$y + $arm][$x - $arm] -lt $BrightMin) { continue }
+        if ($Luma[$y + $arm][$x + $arm] -lt $BrightMin) { continue }
+        if ($Luma[$y - $arm][$x] -gt $DarkMax) { continue }
+        if ($Luma[$y + $arm][$x] -gt $DarkMax) { continue }
+        if ($Luma[$y][$x - $arm] -gt $DarkMax) { continue }
+        if ($Luma[$y][$x + $arm] -gt $DarkMax) { continue }
+        $armHits++
+      }
+      # 과반(3개 중 2개 이상) 통과만 인정 - 한 칸짜리 얼룩으로 열리지 않게
+      if ($armHits -ge 2 -and $armHits -gt $bestScore) {
+        $bestScore = $armHits; $bestX = $x; $bestY = $y
+      }
+    }
+  }
+  return @{ Found = ($bestScore -ge 2); X = $bestX; Y = $bestY; Score = $bestScore }
+}
+
+function Get-LifeCloseGlyphHit {
+  # 우상단 ROI 를 **기준 단위(Scale 1)** 로 캡처해 X 글리프를 찾습니다.
+  # Scale 1 이라 반환 비트맵이 창 크기와 무관하게 항상 ROI 의 기준 크기(64x56)입니다
+  # - 판정식에서 창 크기가 사라지는 것이 이 설계의 핵심입니다.
+  # 반환: @{ Found; ReferenceX; ReferenceY } (찾으면 클릭에 그대로 쓸 기준 좌표)
+  param([System.Diagnostics.Process]$Game)
+  $miss = @{ Found = $false; ReferenceX = 0; ReferenceY = 0 }
+  if ($script:screenCaptureFailing) { return $miss }
+  # Get-GamePixel 의 원시 CopyFromScreen 과 달리 이 경로는 빈 프레임 판정과
+  # Register-CaptureFailure/Success 가 들어 있어 캡처 끊김을 '창 닫힘'으로 오인하지 않습니다
+  $capture = Get-GameRegionCapture -Game $Game -ReferenceX $rgLifeCloseGlyph[0] -ReferenceY $rgLifeCloseGlyph[1] `
+    -RegionWidth $rgLifeCloseGlyph[2] -RegionHeight $rgLifeCloseGlyph[3] -Scale 1
+  if (-not $capture) { return $miss }
+  try {
+    $bitmap = $capture.Bitmap
+    $height = $bitmap.Height
+    $width = $bitmap.Width
+    $luma = New-Object 'int[][]' $height
+    for ($y = 0; $y -lt $height; $y++) {
+      $row = New-Object 'int[]' $width
+      for ($x = 0; $x -lt $width; $x++) {
+        $color = $bitmap.GetPixel($x, $y)
+        $row[$x] = [int](([int]$color.R + [int]$color.G + [int]$color.B) / 3)
+      }
+      $luma[$y] = $row
+    }
+  } finally {
+    if ($capture.Bitmap) { $capture.Bitmap.Dispose() }
+  }
+  $hit = Find-LifeCloseGlyph -Luma $luma
+  if (-not $hit.Found) { return $miss }
+  return @{
+    Found      = $true
+    ReferenceX = ($rgLifeCloseGlyph[0] + [int]$hit.X)
+    ReferenceY = ($rgLifeCloseGlyph[1] + [int]$hit.Y)
+  }
+}
+
+function Test-LifeWindowOpen {
+  # 내 정보/생활 스킬 창이 열려 있는지 판정합니다 (두 화면 공통인 우상단 닫기 X 로).
+  # 1순위는 글리프 서명 탐색(창 크기 무관), 2순위는 기존 고정 4점 판정입니다.
+  # 4점 판정을 남겨 두는 이유: 기준 크기(1272x717) 창에서 지금까지의 동작을 그대로 보존하기
+  # 위함입니다 (둘 중 하나만 통과해도 열림 - 1272 실측 캡처 전수 동일 판정 확인).
+  # 찾은 글리프 중심은 $script:lifeCloseGlyphHit 에 남겨 '닫기 클릭'이 같은 좌표를 쓰게 합니다
+  # - 탐지와 클릭이 같은 환산을 왕복해야 '판정은 고쳤는데 클릭이 빗나가는' 다음 사고를 막습니다.
+  param([System.Diagnostics.Process]$Game)
+  if ($script:screenCaptureFailing) { return $false }
+  $glyphHit = Get-LifeCloseGlyphHit -Game $Game
+  if ($glyphHit.Found) {
+    $script:lifeCloseGlyphHit = $glyphHit
+    return $true
+  }
+  try {
+    $crossA = Get-GamePixel -Game $Game -ReferenceX 1227 -ReferenceY 65
+    $crossB = Get-GamePixel -Game $Game -ReferenceX 1228 -ReferenceY 67
+    $sideA = Get-GamePixel -Game $Game -ReferenceX 1210 -ReferenceY 65
+    $sideB = Get-GamePixel -Game $Game -ReferenceX 1245 -ReferenceY 65
+  } catch { return $false }
+  $pixelVerdict = Test-LifeWindowClosePixels -CrossA $crossA -CrossB $crossB -SideA $sideA -SideB $sideB
+  if (-not $pixelVerdict) { $script:lifeCloseGlyphHit = $null }
+  return $pixelVerdict
+}
+
+function Format-LifeMissingItemNotice {
+  # 준비물 부족 팝업에서 읽은 품목을 안내 조각으로 만듭니다 (순수 - 진리표 대상).
+  # 2026-08-07 실측: 곤충 채집 도구가 떨어지자 '입문용 곤충 채집망 0 / 1' 팝업이 떴는데
+  # 안내는 고정 문구 '(빈 병 등)' 이라 무엇을 사야 하는지 알 수 없었습니다. 품목은 스킬마다
+  # 다르므로(빈 병 / 채집망 …) 팝업이 적어 준 이름을 그대로 옮깁니다.
+  # 수량 표기(0/1)만 남거나 판독이 비면 조각을 만들지 않습니다 - 틀린 이름을 적느니 생략.
+  param([string]$ItemText)
+  $collapsed = (([string]$ItemText) -replace '\s+', ' ').Trim()
+  if (-not $collapsed) { return '' }
+  $nameOnly = ($collapsed -replace '\d+\s*/\s*\d+', '').Trim()
+  if ($nameOnly.Length -lt 2) { return '' }
+  return " (필요: $nameOnly)"
+}
+
+function Close-LifeBlockingDialog {
+  # 생활 흐름을 막는 모달 대화상자 처리 (2026-08-06 전수 배치 실측):
+  #  ① '퀘스트를 위해 필요한 아이템이 없습니다' - 준비물 부족. 빈 병(물/우물/젖소)뿐 아니라
+  #     채집 도구 소진도 여기로 옵니다 (2026-08-07 실측: '입문용 곤충 채집망 0/1').
+  #     채집 자체가 불가하므로 닫고 'material' 을 돌려 호출부가 조건부 정지하게 합니다.
+  #     닫기 전에 품목 줄을 읽어 두어 무엇이 필요한지 로그에 남깁니다.
+  #  ② '사냥터 퇴장 실패' 등 일반 오류 팝업 - 확인만 눌러 정리('closed').
+  #     이 팝업이 남으면 C 키가 먹지 않아 이후 회차까지 연쇄 실패합니다 (mining 5연속 실측).
+  #  ③ '게임 서버와 연결이 끊어졌습니다(ERROR 83)' - 재접속 전에는 무엇도 진행 불가.
+  #     'disconnected' 를 돌려 즉시 정지시킵니다 (2026-08-06 라운드 4 실측: 끊긴 채
+  #     3회차가 각 600초를 낭비하고 '가방 가득'으로 오인될 뻔함)
+  # 반환: 'disconnected' / 'material' / 'closed' / 'none'
+  param([System.Diagnostics.Process]$Game)
+  if ($script:screenCaptureFailing) { return 'none' }
+  # 판정은 팝업 본문이 있는 '중앙 한 영역'만 씁니다 - 서로 다른 위치의 낱말을 이어붙이면
+  # 정상 화면의 '실패'/'연결' 같은 단어가 조합돼 오판합니다 (Codex 조건)
+  $dialogText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
+      -RegionWidth 520 -RegionHeight 200 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if (-not $dialogText) { return 'none' }
+  # 강한 조합만 인정 (단일 낱말 금지)
+  $isDisconnected = ($dialogText.Contains('서버와연결') -or $dialogText.Contains('연결이끊') -or
+    $dialogText.Contains('다시접속') -or $dialogText.Contains('ERROR83'))
+  $isMaterialShortage = ($dialogText.Contains('아이템이없습니다') -or
+    ($dialogText.Contains('필요한아이템') -and $dialogText.Contains('없습니다')))
+  $isErrorDialog = (($dialogText.Contains('오류가발생') -and $dialogText.Contains('습니다')) -or
+    $dialogText.Contains('Blocked') -or $dialogText.Contains('퇴장실패') -or $dialogText.Contains('입장실패'))
+  if ($isDisconnected) {
+    Write-RunLog "[생활] 게임 서버 연결이 끊어졌습니다 (판독 '$dialogText') - 재접속이 필요합니다"
+    return 'disconnected'
+  }
+  if (-not $isMaterialShortage -and -not $isErrorDialog) { return 'none' }
+  # 준비물 부족이면 팝업을 닫기 전에 품목 줄을 읽어 둡니다 (닫은 뒤에는 사라짐).
+  # 실측 좌표: 본문 아래 아이템 상자 x418~855 / y445~494 ('입문용 곤충 채집망  0 / 1')
+  if ($isMaterialShortage) {
+    $script:lifeMissingItemText = Get-GameRegionOcrText -Game $Game -ReferenceX 418 -ReferenceY 445 `
+      -RegionWidth 440 -RegionHeight 50 -Scale 4 -Engine $ocrKoreanEngine
+  }
+  # 닫기 버튼은 팝업 종류에 따라 다릅니다 (실측: 준비물 부족 = '취소' y623 / 오류 팝업 =
+  # '확인' y618). **하단 버튼 밴드에서만** 찾고, 못 찾으면 클릭하지 않습니다 - 본문에 있는
+  # '확인' 같은 낱말이나 고정 좌표를 누르면 엉뚱한 조작이 됩니다 (Codex 조건)
+  $buttonBand = @(400, 560, 480, 120)
+  $closePoint = $null
+  foreach ($buttonText in @('취소', '확인')) {
+    $closePoint = Find-GameTextPoint -Game $Game -ReferenceX $buttonBand[0] -ReferenceY $buttonBand[1] `
+        -RegionWidth $buttonBand[2] -RegionHeight $buttonBand[3] -SearchText $buttonText -ExactText $buttonText
+    if ($closePoint) { break }
+  }
+  Focus-Game -Game $Game
+  if ($closePoint) {
+    Click-ScreenPoint -X $closePoint.X -Y $closePoint.Y
+  } else {
+    # 팝업 자체가 강한 조합으로 확정된 상태에서만 실측 예비 좌표를 씁니다 (버튼 글자가
+    # 초록 배경에서 안 읽히는 실측 - 2026-08-06 라운드 6: '사냥터 퇴장 실패'가 닫히지
+    # 않아 5연속 실패). 아래 '닫힘 확인'이 오클릭을 걸러 냅니다.
+    Write-RunLog "[생활] 닫기 버튼 글자를 못 읽어 실측 좌표로 닫기를 시도합니다 (판독 '$dialogText')"
+    Click-GamePoint -Game $Game -ReferenceX 636 -ReferenceY 618
+  }
+  Start-Sleep -Seconds 2
+  if ($isMaterialShortage) {
+    Write-RunLog "[생활] 준비물 부족 팝업 감지 - 닫았습니다$(Format-LifeMissingItemNotice -ItemText ([string]$script:lifeMissingItemText))"
+    return 'material'
+  }
+  # 오류 팝업은 '실제로 사라졌는지' 확인한 뒤에만 처리됐다고 봅니다 (Codex 조건).
+  # 안 닫혔으면 남은 예비 버튼 위치로 한 번 더 시도합니다 (확인/취소 위치가 팝업마다 다름)
+  $afterText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
+      -RegionWidth 520 -RegionHeight 200 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ($afterText -eq $dialogText) {
+    Click-GamePoint -Game $Game -ReferenceX 636 -ReferenceY 453
+    Start-Sleep -Seconds 2
+    $afterText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
+        -RegionWidth 520 -RegionHeight 200 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  }
+  if ($afterText -eq $dialogText) {
+    Write-RunLog "[생활] 팝업이 닫히지 않았습니다 (판독 '$afterText') - 다음 회차에서 재시도"
+    return 'none'
+  }
+  Write-RunLog "[생활] 진행을 막는 팝업 감지 - 닫았습니다 (판독 '$dialogText')"
+  return 'closed'
+}
+
+function Write-LifeDiagnostics {
+  # 생활 흐름 실패 지점의 원인 분석용 진단 세트 (조건부 정지 코드 4는 오류 catch 를 타지
+  # 않아 캡처가 없음 - 던전 Write-DgStageDiagnostics 와 같은 2026-07-22 교훈. 1차 실기
+  # 22:45 실패도 캡처 부재로 원인 미확정 → 신설). 스크린샷은 error_* 명명/보관 정책 공유.
+  param([System.Diagnostics.Process]$Game, [string]$Context)
+  try {
+    $diagStamp = Get-Date -Format 'yyyyMMdd_\hHH\mmm\sss'
+    if ($Game) {
+      $diagRect = New-Object HoneyNogiInput+RECT
+      if ([HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$diagRect)) {
+        $diagW = $diagRect.Right - $diagRect.Left
+        $diagH = $diagRect.Bottom - $diagRect.Top
+        if ($diagW -gt 0 -and $diagH -gt 0) {
+          $diagShot = Join-Path $logDir "error_$diagStamp.png"
+          $diagBmp = New-Object System.Drawing.Bitmap $diagW, $diagH
+          $diagGfx = [System.Drawing.Graphics]::FromImage($diagBmp)
+          try {
+            $diagGfx.CopyFromScreen($diagRect.Left, $diagRect.Top, 0, 0, $diagBmp.Size)
+            $diagBmp.Save($diagShot, [System.Drawing.Imaging.ImageFormat]::Png)
+            Write-RunLog "[진단] $Context - 화면 캡처 저장: $diagShot"
+          } finally {
+            $diagGfx.Dispose()
+            $diagBmp.Dispose()
+          }
+          $keepShots = Get-ConfigInteger $config @('diagnostics', 'keepScreenshots') 10 0 1000
+          if ($keepShots -gt 0) {
+            $oldShots = @(Get-ChildItem -LiteralPath $logDir -Filter 'error_*.png' -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepShots)
+            foreach ($old in $oldShots) {
+              Remove-Item -LiteralPath $old.FullName -Force -ErrorAction SilentlyContinue
+            }
+          }
+        }
+      }
+    }
+    # 생활 판정 재료 덤프: 창 상태 + 대상 목록 행 + 상세 영역 판독문 (분석 시 캡처와 대조)
+    $diagRows = @(Get-LifeTargetRows -Game $Game -Scale 4)
+    $rowDump = (@($diagRows | ForEach-Object { "$($_.Text)@$($_.Y)" }) -join ' | ')
+    Write-RunLog "[진단] $Context - 창픽셀=$(Test-LifeWindowOpen -Game $Game) 내정보=$(Test-LifeInfoScreen -Game $Game) 목록행: $rowDump"
+    $diagDetail = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
+        -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    Write-RunLog "[진단] $Context - 상세 영역 판독: '$diagDetail'"
+  } catch {
+    Write-RunLog "[진단] 진단 수집 실패: $($_.Exception.Message)"
+  }
+}
+
+function Close-LifeOpenWindows {
+  # 시작 상태 복구 (멱등 - Codex 조건): 상세 팝업이 열려 있으면 확인으로, 내 정보/생활
+  # 스킬 창이 열려 있으면(X 픽셀 판별 + 내정보 OCR 보조) X 로 닫습니다. 뭘 닫았으면 $true.
+  # X 클릭 후 실제로 닫혔는지 재확인하고 안 닫혔으면 1회 재클릭합니다 (1차 실기 22:45:25
+  # 재현: X 닫기 미확인 상태로 넘어가 다음 C 토글이 남은 창을 닫으며 재시도 1회 소실)
+  param([System.Diagnostics.Process]$Game)
+  $closed = $false
+  $detailText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
+      -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ($detailText.Contains('집물')) {
+    # '집물' = '채집물'의 안정 조각 (2차 실기: '채'가 '자|'로 깨져 팝업을 못 알아보고
+    # X 를 눌러 모달에 막히던 사고 - 팝업은 반드시 '확인'으로 먼저 닫아야 함)
+    Focus-Game -Game $Game
+    Click-GamePoint -Game $Game -ReferenceX $ptLifeDetailConfirm[0] -ReferenceY $ptLifeDetailConfirm[1]
+    Write-RunLog '[생활] 시작 정리: 대상 상세 팝업 확인 클릭'
+    Start-Sleep -Seconds 1
+    $closed = $true
+  }
+  foreach ($closeTry in 1..2) {
+    if (-not ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game))) { break }
+    Focus-Game -Game $Game
+    Invoke-LifeWindowCloseClick -Game $Game
+    Write-RunLog "[생활] 시작 정리: 정보/스킬 창 닫기(X) - $closeTry 회차"
+    Start-Sleep -Milliseconds 1200
+    $closed = $true
+  }
+  if ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game)) {
+    Write-RunLog '[생활] 경고: 창 닫기 2회 후에도 창이 남아 있습니다 (다음 단계에서 재처리)'
+  }
+  return $closed
+}
+
+function Invoke-LifeMenuSequence {
+  # 메뉴 사이클 1회: C → 내 정보 확인 → 생활 스킬 → 스킬 셀 → 대상 행 → 상세 확인 →
+  # 가까운 위치 찾기. 성공 $true / 실패 $false (호출부가 재시도).
+  # Deadline = 사이클 하드 상한: 이 함수 한 번에 탐색 12회·OCR 수십 회가 들어 있어 내부
+  # 검사 없이는 한도를 넘긴 뒤에도 클릭이 이어짐 (Codex 지적 - 특히 초과 후 '가까운 위치
+  # 찾기' 입력 금지). 주요 입력 전마다 검사하고 초과 시 $false (호출부 말미 검사가 exit 4)
+  param([System.Diagnostics.Process]$Game, $SkillEntry, [string]$TargetName, [datetime]$Deadline)
+  if ((Get-Date) -gt $Deadline) { return $false }
+  # 다른 창이 게임을 덮고 있으면 판독·클릭이 전부 엉뚱한 곳으로 갑니다 (2026-08-07 실사고)
+  if (-not (Confirm-LifeGameFront -Game $Game)) { Start-Sleep -Seconds 3; return $false }
+  # 1) 내 정보 열기 (이미 열려 있으면 C 생략 - 토글 사고 방지).
+  # 판독 '도중' 캡처가 끊기면 false 가 '안 열림'으로 오인돼 열린 창에 C 토글이 들어갈 수
+  # 있으므로, 판독 후 캡처 플래그를 재확인해 무효 처리합니다 (Codex 경계 재현)
+  if ($script:screenCaptureFailing) { return $false }
+  $infoAlreadyOpen = Test-LifeInfoScreen -Game $Game
+  if ($script:screenCaptureFailing) { return $false }
+  if (-not $infoAlreadyOpen) {
+    # 내정보는 아니지만 생활 창(스킬창 등)이 남아 있으면 **C 가 먹지 않습니다**.
+    # (2026-08-08 hyodong 제보 실측: 생활 스킬 창이 열린 채 C 를 두 번 눌렀는데 12초 동안
+    #  화면이 픽셀 0.03% 만 달라진 정지 상태 - 즉 '닫는 토글'이 아니라 '무시'였습니다.
+    #  이 구분이 중요합니다: 토글이면 다음 사이클에 자기 복구되지만, 무시면 X 로 닫아 주기
+    #  전까지 영구 고착이라 재시도 3회가 그대로 소진됩니다.) → X 로 먼저 닫고 확인
+    if (Test-LifeWindowOpen -Game $Game) {
+      Focus-Game -Game $Game
+      Invoke-LifeWindowCloseClick -Game $Game
+      Write-RunLog '[생활] 잔존 창 감지 - X로 닫고 내 정보를 새로 엽니다'
+      Start-Sleep -Milliseconds 1200
+      # 닫힘을 확인하고 나서 C 를 누릅니다. 아직 열려 있는데 C 를 보내면 무시돼 재시도 1회를
+      # 통째로 버립니다 (위 실측). 닫힘 확인 실패는 사이클 실패로 돌려 다음 회차가 다시
+      # 시도하게 둡니다 - 여기서 억지로 C 를 눌러 봐야 같은 자리에서 소진될 뿐입니다.
+      if (Test-LifeWindowOpen -Game $Game) {
+        Write-RunLog '[생활] 창이 아직 닫히지 않아 C 입력을 보류합니다 - 재시도'
+        Write-LifeDiagnostics -Game $Game -Context '창 닫기 확인 실패'
+        return $false
+      }
+    }
+    if (-not (Press-LifeMenuKey -Game $Game)) { return $false }
+    $infoSeen = $false
+    foreach ($infoTry in 1..5) {
+      Start-Sleep -Milliseconds 900
+      if (Test-LifeInfoScreen -Game $Game) { $infoSeen = $true; break }
+    }
+    if (-not $infoSeen) {
+      Write-RunLog '[생활] 내 정보 화면이 열리지 않았습니다 - 재시도'
+      Write-LifeDiagnostics -Game $Game -Context '내 정보 열림 실패'
+      return $false
+    }
+  }
+  Write-RunLog '[생활] 내 정보 화면 확인'
+  # 2) 좌측 '생활 스킬' 메뉴 클릭 → 화면 전환 확인 (스킬 창은 좌측 메뉴가 없는 레이아웃이라
+  #    '생활력' 신호 소멸 = 전환 증거. 전환 확인 전에는 다음 클릭 금지 - 클릭 정책/Codex 조건)
+  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
+  Focus-Game -Game $Game
+  Click-GamePoint -Game $Game -ReferenceX $ptLifeSkillMenu[0] -ReferenceY $ptLifeSkillMenu[1]
+  $menuMoved = $false
+  foreach ($moveTry in 1..4) {
+    Start-Sleep -Milliseconds 900
+    if ($script:screenCaptureFailing) { continue }
+    $infoStillVisible = Test-LifeInfoScreen -Game $Game
+    # 판독 도중 캡처가 끊기면 false 를 '전환됨'으로 인정하면 안 됩니다 (Codex 경계 재현 -
+    # 캡처 실패 중 다음 셀 클릭이 이어지는 사고). 이번 확인은 무효로 하고 다음 회차로.
+    if ($script:screenCaptureFailing) { continue }
+    if (-not $infoStillVisible) { $menuMoved = $true; break }
+  }
+  if (-not $menuMoved) {
+    Write-RunLog "[생활] '생활 스킬' 화면 전환을 확인하지 못했습니다 - 재시도"
+    Write-LifeDiagnostics -Game $Game -Context '생활 스킬 전환 실패'
+    return $false
+  }
+  # 3) 스킬 셀 클릭 → 우측 대상 목록 내용으로 검증 (셀 라벨 OCR 은 판독 불가 실측).
+  #    전환 확인 직후는 화면이 아직 그려지는 중일 수 있어(1차 실기 22:45:24 시그니처 실패
+  #    의심 원인) 안정 대기 후 클릭하고, 검증도 3회 x 3스케일로 여유를 둡니다
+  Start-Sleep -Milliseconds 800
+  Focus-Game -Game $Game
+  Click-GamePoint -Game $Game -ReferenceX ([int]$SkillEntry.Cell[0]) -ReferenceY ([int]$SkillEntry.Cell[1])
+  Start-Sleep -Milliseconds 1200
+  $skillVerified = $false
+  foreach ($verifyTry in 1..3) {
+    foreach ($sigScale in @(4, 5, 3)) {
+      $listRows = @(Get-LifeTargetRows -Game $Game -Scale $sigScale)
+      $joined = (($listRows | ForEach-Object { [string]$_.Text }) -join '')
+      foreach ($sigPiece in @($SkillEntry.Sig)) {
+        if ($joined.Contains([string]$sigPiece)) { $skillVerified = $true; break }
+      }
+      if ($skillVerified) { break }
+    }
+    if ($skillVerified) { break }
+    Start-Sleep -Milliseconds 900
+  }
+  if (-not $skillVerified) {
+    Write-RunLog "[생활] '$([string]$SkillEntry.Name)' 선택을 확인하지 못했습니다 (대상 목록 미검증) - 재시도"
+    Write-LifeDiagnostics -Game $Game -Context '스킬 선택 검증 실패'
+    return $false
+  }
+  Write-RunLog "[생활] 채집 스킬 '$([string]$SkillEntry.Name)' 선택 확인"
+  # 4) 대상 행 탐색: 목록 맨 위로 스크롤 후, '목록 끝'에 닿을 때까지 아래로 단계 탐색.
+  #    끝 판정 = 스크롤 전후 행 구성이 그대로 (GUI 실기 23:24 실사고: 나무 베기 목록이
+  #    고정 4회 탐색 범위보다 길어 하단 대상 도달 전에 포기 → 회수 상한이 아니라 끝 도달로
+  #    변경, 무한 방지 안전 상한 12회). 최상단 스크롤은 직전 시그니처 검증으로 목록 존재가
+  #    확정된 상태에서만 보냅니다.
+  $targetRowY = $null
+  $targetRowSource = 'none'
+  # 4-0) 지금 화면에 이미 대상이 보이면 스크롤 없이 바로 클릭합니다 (2026-08-06 사용자
+  #      관찰: 상단에 있는 '거미줄'도 매번 최상단 정렬을 2회 하고 눌러 시간을 낭비).
+  #      스킬 셀 클릭 직후 목록은 그 스킬의 첫 화면이라 상단 대상은 대개 여기서 잡힙니다.
+  # 스킬 셀을 방금 눌러 목록이 최상단인 시점이라 순서 기반 위치 계산을 허용합니다.
+  # 판독 전에 화면이 살아 있는지 확인합니다 - 캡처가 끊긴 채 이 판독을 하면 순서 폴백이
+  # '보이지도 않는 행'을 돌려주고 그대로 클릭까지 갑니다 (2026-08-07 감사 high)
+  if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline $Deadline -Context '대상 빠른 확인')) { return $false }
+  $quickScan = Find-LifeTargetScan -Game $Game -TargetName $TargetName -Order @($SkillEntry.Order) -FreshList
+  if ($null -ne $quickScan.Y) {
+    $targetRowY = [int]$quickScan.Y
+    $targetRowSource = [string]$quickScan.Source
+    Write-RunLog "[생활] '$TargetName' 이 현재 화면에 있어 스크롤 없이 선택합니다 (Y=$targetRowY, 근거 $targetRowSource)"
+  }
+  # 4-1) 못 찾았을 때만 목록 최상단으로 정렬 ('행 구성이 안 바뀔 때까지' - 전수 배치
+  #      01:03 실사고: 이전 스크롤 위치가 남아 목록 상단의 '물'이 탐색 범위 밖이었음.
+  #      아래로만 훑는 구조라 최상단 도달이 전제)
+  $previousRowsKey = ''
+  if ($null -eq $targetRowY) {
+    # 정렬 전에 '이미 최상단인지' 먼저 판단합니다 - 목록 첫 항목(Order[0])이 보이면 위로
+    # 갈 곳이 없으므로 드래그 0회 (2026-08-06 사용자 지적: 최상단에서도 확인 목적으로
+    # 2번씩 끌던 낭비. 판독은 위 quickScan 결과를 재사용해 추가 OCR 도 없음)
+    $topRows = @($quickScan.Rows)
+    $topRowsKey = (($topRows | ForEach-Object { [string]$_.Text }) -join '|')
+    $firstItemName = $(if (@($SkillEntry.Order).Count -gt 0) { [string]$SkillEntry.Order[0] } else { '' })
+    $alreadyAtTop = $false
+    if ($firstItemName) {
+      foreach ($topRow in $topRows) {
+        if (Test-LifeNameMatches -RowText ([string]$topRow.Text) -TargetName $firstItemName) { $alreadyAtTop = $true; break }
+      }
+    }
+    if ($alreadyAtTop) {
+      Write-RunLog "[생활] 목록이 이미 최상단입니다 - 정렬 생략 (판독: $topRowsKey)"
+    } else {
+      # 판독에 성공한 회차만 예산(12회)을 소모합니다 - 캡처 플래핑으로 회차가 깎이면
+      # 화면이 멀쩡할 때도 정렬을 다 못 하고 넘어갑니다 (2026-08-07 Codex 지적)
+      $topTries = 0
+      while ($topTries -lt 12) {
+        # 최상단 정렬도 사이클 한도 안에서만 (드래그 1회 약 2초 - 12회면 한도를 넘길 수 있음)
+        if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 목록 정렬 중단'; return $false }
+        if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline $Deadline -Context '목록 정렬')) { return $false }
+        if (-not (Invoke-LifeListScroll -Game $Game -Steps 1)) { break }
+        $topRows = @(Get-LifeTargetRows -Game $Game -Scale 4)
+        # 캡처가 끊겨 0행이면 '목록이 사라진 것'이 아니라 화면이 안 그려진 것입니다 (2026-08-07 감사)
+        if ($topRows.Count -eq 0 -and $script:screenCaptureFailing) { continue }
+        $topTries++
+        if ($topRows.Count -eq 0) { break }
+        $currentTopKey = (($topRows | ForEach-Object { [string]$_.Text }) -join '|')
+        # 첫 항목이 보이면 그 자리가 최상단 - 더 끌지 않습니다
+        if ($firstItemName) {
+          $reachedTop = $false
+          foreach ($topRow in $topRows) {
+            if (Test-LifeNameMatches -RowText ([string]$topRow.Text) -TargetName $firstItemName) { $reachedTop = $true; break }
+          }
+          if ($reachedTop) { $topRowsKey = $currentTopKey; break }
+        }
+        if ($currentTopKey -eq $topRowsKey) { break }
+        $topRowsKey = $currentTopKey
+      }
+      Write-RunLog "[생활] 목록 최상단 정렬 완료 (판독: $topRowsKey)"
+    }
+    $lastScrollSent = $false
+    # 여기도 판독에 성공한 회차만 예산을 소모합니다 (캡처 플래핑이 탐색 범위를 갉아먹지 않게)
+    $scrollStep = -1
+    while ($scrollStep -lt 11) {
+      if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 대상 탐색 중단'; return $false }
+      # 화면이 안 그려지는 동안에는 판독도 드래그도 하지 않습니다 - 0행 판독을 '목록 소멸'로,
+      # 프리즈된 화면을 '끝까지 훑었다'로 오인하고 미발견 정지(exit 4)로 직행했습니다 (2026-08-07 감사)
+      if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline $Deadline -Context '대상 탐색')) { return $false }
+      # 스텝당 판독 1벌(s4→s5): 대상 찾기 + 행 증거 + 끝 판정이 같은 결과를 공유합니다
+      $scanResult = Find-LifeTargetScan -Game $Game -TargetName $TargetName -Order @($SkillEntry.Order)
+      if ($null -ne $scanResult.Y) {
+        $targetRowY = [int]$scanResult.Y
+        $targetRowSource = [string]$scanResult.Source
+        if ($targetRowSource -like 'order*') {
+          Write-RunLog "[생활] '$TargetName' 행을 목록 순서로 추정했습니다 (Y=$targetRowY - 이름 판독 실패 보완)"
+        }
+        break
+      }
+      # 아래로 스크롤하기 전에 목록이 계속 보인다는 증거를 요구합니다 - 행이 하나도 안 읽히면
+      # 목록 소멸/화면 전환/OCR 전멸을 구분할 수 없으므로 휠을 멈추고 미발견 처리로 넘깁니다
+      # (Codex 조건: 추가 입력은 원래 화면이 유지될 때만)
+      $visibleRows = @($scanResult.Rows)
+      if ($visibleRows.Count -eq 0 -and $script:screenCaptureFailing) {
+        # 판독 도중 화면이 멈췄으면 목록 소멸의 증거가 아닙니다 - 예산을 쓰지 않고 다시 시도
+        continue
+      }
+      $scrollStep++
+      if ($visibleRows.Count -eq 0) {
+        Write-RunLog '[생활] 대상 목록이 더 이상 읽히지 않습니다 - 탐색 중단'
+        break
+      }
+      # 끝 판정은 '스크롤을 실제로 보냈는데도' 행 구성이 그대로일 때만 - 전면화/커서 확인
+      # 실패로 건너뛴 회차의 동일 화면을 끝으로 오인하면 일시 문제가 미발견 정지가 됨 (Codex)
+      $rowsKey = (($visibleRows | ForEach-Object { [string]$_.Text }) -join '|')
+      if ($lastScrollSent -and ($rowsKey -eq $previousRowsKey)) {
+        Write-RunLog '[생활] 목록 끝까지 탐색했지만 대상을 찾지 못했습니다'
+        break
+      }
+      $previousRowsKey = $rowsKey
+      if ($scrollStep -eq 11) { break }   # 마지막 회차는 재탐색이 없으므로 스크롤도 보내지 않음
+      # 판독(OCR)에 시간이 든 뒤이므로 실제 입력 직전에 한도를 다시 확인합니다 (Codex 조건)
+      if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 대상 탐색 중단'; return $false }
+      $lastScrollSent = [bool](Invoke-LifeListScroll -Game $Game -Steps -1)
+    }
+  }
+  if ($null -eq $targetRowY) {
+    # 캡처가 끊긴 상태의 '못 찾음'은 목록에 없다는 증거가 아닙니다. 여기서 미발견으로 확정하면
+    # 화면이 몇 초 뒤 돌아와도 자동화가 이미 멈춘 뒤입니다 (exit 4 = GUI 반복 전체 정지).
+    # 호출부의 캡처 대기·재시도로 넘깁니다 (2026-08-07 감사 - 검은 화면 진단 캡처가 실제
+    # 오류 캡처를 보관 10개에서 밀어내는 부작용도 함께 막습니다)
+    if ($script:screenCaptureFailing) {
+      Write-RunLog '[생활] 화면이 그려지지 않아 대상 목록을 확인하지 못했습니다 - 복구 후 재시도'
+      return $false
+    }
+    Write-RunLog "[오류] 채집 대상 '$TargetName' 을 목록에서 찾지 못했습니다 - 미해금이거나 화면 인식 실패입니다."
+    Write-LifeDiagnostics -Game $Game -Context '채집 대상 미발견'
+    Write-RunLog '[완료] 채집 대상 미발견 - 조건부 정지'
+    exit 4
+  }
+  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
+  # 클릭 직전에는 **새로 한 번 떠 봐야** 합니다. $script:screenCaptureFailing 은 '마지막 캡처
+  # 결과'라, 행을 읽은 직후 화면이 멈추면 플래그는 여전히 정상으로 남아 있어 그대로 클릭이
+  # 나갑니다 (Codex 지적 - 대기 함수는 플래그가 false 면 즉시 통과).
+  # 멈춰 있으면 기다렸다 누르지 않고 되돌아갑니다 - 복구 뒤 목록이 그대로라는 보장이 없어
+  # 행 Y 를 다시 읽는 편이 안전합니다 (호출부가 캡처 복구를 기다린 뒤 재시도).
+  if (-not (Test-CaptureRecovered -Game $Game)) {
+    Write-RunLog '[생활] 대상 행 클릭 직전에 화면이 멈췄습니다 - 목록을 다시 확인합니다'
+    return $false
+  }
+  Focus-Game -Game $Game
+  Click-GamePoint -Game $Game -ReferenceX $ptLifeListCenter[0] -ReferenceY $targetRowY
+  Start-Sleep -Milliseconds 1200
+  # 5) 상세 팝업 검증: 라벨('집물' 조각 - 실기 깨짐 대응) + 제목이 설정 대상과 일치해야 함
+  #    ('채집물'은 모든 대상 공통 문구라 단독으로는 오클릭을 못 잡음 - Codex 지적.
+  #    판정식은 Get-LifeDetailVerdict 순수 함수 - 실측 깨짐 '자|집물' 진리표 포함)
+  $detailOk = $false
+  foreach ($detailTry in 1..2) {
+    # 판독은 s3 → s4 사다리: 같은 팝업이라도 스케일에 따라 깨짐이 달라(23:51 실기 - s3
+    # '흰'→'혼!') 한 스케일의 깨짐으로 자기 팝업을 다른 대상으로 확정하지 않기 위함.
+    # verdict 는 스케일별로 누적해 '두 스케일 모두 wrong'일 때만 오클릭 확정합니다
+    # (마지막 스케일 판정만 남기면 스케일 순서에 따라 결과가 달라짐 - Codex 지적)
+    $detailMatched = $false
+    $detailWrongCount = 0
+    $detailUnreadableCount = 0
+    $detailText = ''
+    foreach ($detailScale in @(3, 4)) {
+      $detailText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
+          -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale $detailScale -Engine $ocrKoreanEngine) -replace '\s', ''
+      $detailVerdict = Get-LifeDetailVerdict -DetailText $detailText -TargetName $TargetName `
+        -Order @($SkillEntry.Order) -SkillName ([string]$SkillEntry.Name)
+      if ($detailVerdict -eq 'match') { $detailMatched = $true; break }
+      if ($detailVerdict -eq 'wrong-target') { $detailWrongCount++ }
+      if ($detailVerdict -eq 'unreadable') { $detailUnreadableCount++ }
+    }
+    if ($detailMatched) { $detailOk = $true; break }
+    if ($detailWrongCount -ge 2) {
+      # 두 스케일 모두 '정상 판독인데 다른 대상' = 오클릭 확정 (호출부가 정리 후 재시도)
+      Write-RunLog "[생활] 다른 대상의 상세 팝업입니다 (판독 '$detailText', 목표 '$TargetName') - 재시도"
+      return $false
+    }
+    if ($detailUnreadableCount -ge 2) {
+      # 제목이 깨져 판단 불가. 행을 '이름 정확 판독'으로 찾은 경우에만 자기 팝업으로 보고
+      # 진행합니다 (전수 배치 01:04 실측: 우물 '丁亞'/젖소 'C0자' 로 3회 소진하던 사고).
+      # 격자 추론(order)으로 찍은 행은 이름 근거가 없어 여기서 통과시키면 안 됩니다 -
+      # 추론이 빗나갔을 때 다른 대상을 채집하게 됨 (Codex 블로커)
+      if ($targetRowSource -eq 'order') {
+        # 앵커 2개짜리 약한 추론은 이름 근거가 없어 통과시키지 않습니다 (다른 대상 채집 방지)
+        Write-RunLog "[생활] 추정 행의 상세 제목을 확인하지 못했습니다 (판독 '$detailText') - 재시도"
+        return $false
+      }
+      if ($targetRowSource -eq 'order-strong') {
+        # 앵커 3개+ 격자 추론은 위치 신뢰도가 높아 진행합니다 - 1글자 대상('물')은 제목도
+        # 본문도 검증 수단이 없어(라벨 '집물'과 충돌) 이 경로가 유일합니다 (라운드 6 실측)
+        Write-RunLog "[생활] 추정 행(격자 앵커 3개+)의 상세 제목이 깨졌지만 진행합니다 (판독 '$detailText')"
+        $detailOk = $true
+        break
+      }
+      if ($targetRowSource -eq 'index') {
+        # 순서 기반(추수의 밀/콩/쌀 등)은 이름 검증이 불가능하므로, 최소한 '이 스킬의 대상'
+        # 인지만 확인합니다 - 상세 본문에 스킬 이름이 들어 있습니다 (실측: '…추수 레벨 1 이상')
+        $skillNameNorm = Get-LifeNormalizedName ([string]$SkillEntry.Name)
+        if ($detailText.Contains($skillNameNorm)) {
+          Write-RunLog "[생활] 순서로 찾은 행의 상세에서 '$([string]$SkillEntry.Name)' 확인 - 진행합니다"
+          $detailOk = $true
+          break
+        }
+        Write-RunLog "[생활] 순서로 찾은 행의 상세를 확인하지 못했습니다 (판독 '$detailText') - 재시도"
+        return $false
+      }
+      Write-RunLog "[생활] 상세 제목 판독이 깨졌지만(판독 '$detailText') 대상 행 일치 근거로 진행합니다"
+      $detailOk = $true
+      break
+    }
+    Start-Sleep -Milliseconds 900
+  }
+  if (-not $detailOk) {
+    Write-RunLog "[생활] 대상 상세 팝업을 확인하지 못했습니다 - 재시도"
+    Write-LifeDiagnostics -Game $Game -Context '상세 팝업 확인 실패'
+    return $false
+  }
+  # 상세가 '이 대상의 팝업'으로 확정된 뒤에만 요구 레벨을 남깁니다 - 확정 전에 남기면 오클릭한
+  # 다른 대상의 요구치가 그대로 실패 안내에 실립니다 (Codex 지적). 대상 이름을 함께 묶어
+  # 두고 안내 시점에 다시 대조합니다 - 재시도 중 대상이 바뀌는 경로는 없지만, 값이 어느
+  # 대상 것인지 근거 없이 쓰지 않기 위한 계약입니다.
+  $script:lifeLastDetail = @{
+    Target = [string]$TargetName
+    Level  = (Get-LifeRequiredLevel -DetailText $detailText)
+  }
+  # 6) 가까운 위치 찾기 - 링크 y 는 설명 길이에 따라 대상별로 달라(00:53 '둥지' 실사고:
+  #    사과나무 실측 고정 좌표가 빗나가 퀘스트 미생성 3회 소진) 글자 탐색으로만 클릭합니다.
+  #    고정 좌표 폴백은 원 사고 재도입이라 금지 - 못 찾으면 진단 후 재시도 (Codex 블로커).
+  #    순서: Focus → 판독 → 단일 후보 검증 → deadline 재검사 → 기준 좌표 클릭
+  #    (Click-GamePoint 가 클릭 시점 창 rect 로 환산 - 캡처 후 창 이동에도 안전)
+  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
+  # 링크 클릭은 사이클을 실제로 시작시키는 입력이라 전면 확인을 한 번 더 (Codex 클릭 정책)
+  if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
+  $linkWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgLifeFindLink[0] -ReferenceY $rgLifeFindLink[1] `
+      -RegionWidth $rgLifeFindLink[2] -RegionHeight $rgLifeFindLink[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $linkWord = Select-LifeFindNearestWord -Words $linkWords
+  if ($null -eq $linkWord) {
+    Write-RunLog "[생활] '가까운 위치 찾기' 링크를 찾지 못했습니다 - 재시도"
+    Write-LifeDiagnostics -Game $Game -Context '위치 찾기 링크 미발견'
+    return $false
+  }
+  # **누르기 직전 같은 프레임 재검증** (2026-08-07 사용자 제안): 링크를 찾은 바로 그 판독에
+  # 팝업 제목도 들어 있습니다. 지금까지는 제목 검증(위 5단계)과 링크 클릭이 서로 다른
+  # 캡처라, 그 사이에 팝업이 바뀌면 검증하지 않은 화면을 누를 수 있었습니다.
+  # 여기서는 '다른 대상임이 또렷이 읽힐 때만' 막습니다 - 제목이 깨지는 건 흔하고(5단계가
+  # 행 근거로 이미 통과시킨 경우도 있음) 여기서 unreadable 로 되돌리면 정상 대상까지
+  # 시작을 못 합니다. 즉 새로 막는 것은 '검증 후 팝업이 다른 대상으로 바뀐' 경우뿐입니다.
+  $linkTitle = Get-LifeDetailTitleFromWords -Words $linkWords
+  $firstFrameTitle = $linkTitle
+  $firstFrameLinkY = [int]$linkWord.Y
+  $deepRecheckDone = $false
+  $linkVerdict = Get-LifeTitleVerdict -Title $linkTitle -TargetName $TargetName -Order @($SkillEntry.Order)
+  # 링크 판독만으로는 제목 인식률이 낮습니다 (2026-08-07 전수 실측 47/65 = 72%).
+  # 링크 탐색 영역은 세로가 상세 영역의 1.5배(470 vs 300)라 같은 배율에서 글자가 작아지고,
+  # 게다가 s3 한 배율뿐입니다 - 광석 캐기는 '은 광맥'이 '으과DH' 로 깨졌습니다.
+  # 못 정했을 때만 상세 영역을 s3→s4 사다리로 한 번 더 읽습니다 (5단계가 쓰는, 제목이 잘
+  # 읽히는 조합). 사이클이 수 분짜리라 판독 1~2회 추가는 무시할 수 있는 비용입니다.
+  if ($linkVerdict -eq 'unknown') {
+    $deepRecheckDone = $true
+    # **두 배율 합의**를 요구합니다 - 먼저 나온 판정으로 확정하면 s3 만으로 오차단하거나,
+    # s3 이 mine 이라고 s4 의 other 를 안 보고 클릭합니다 (5단계의 '두 스케일 모두 wrong 일
+    # 때만 오클릭 확정' 규칙과 어긋남 - Codex 지적). 엇갈리면 unknown = 막지 않음.
+    $recheckVerdicts = @()
+    $recheckTitles = @()
+    foreach ($recheckScale in @(3, 4)) {
+      if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 클릭 직전 재확인 중단'; return $false }
+      $recheckText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
+          -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale $recheckScale -Engine $ocrKoreanEngine) -replace '\s', ''
+      $recheckVerdicts += , (Get-LifeTitleVerdictFromDetail -DetailText $recheckText -TargetName $TargetName -Order @($SkillEntry.Order))
+      $recheckTitles += , (Get-LifeTitleFromDetailText -DetailText $recheckText)
+    }
+    $linkVerdict = Get-LifeConsensusVerdict -Verdicts $recheckVerdicts
+    foreach ($recheckTitle in $recheckTitles) { if ($recheckTitle) { $linkTitle = $recheckTitle; break } }
+    # 그래도 못 정했으면 **제목 띠만 좁게 잘라 고배율**로 봅니다. 넓은 영역으로는 아예 안
+    # 읽히던 이름이 여기서 읽힙니다 (2026-08-08 실측 - 위 Get-LifeTitleStripRegion 주석).
+    # 'mine' 은 한 배율만 맞아도 인정하고(막지 않는 방향이라 안전), 'other'(차단)는 합의 필요.
+    if ($linkVerdict -eq 'unknown') {
+      $stripRegion = Get-LifeTitleStripRegion -Words $linkWords
+      if ($stripRegion) {
+        $stripVerdicts = @()
+        foreach ($stripScale in @(4, 5, 6)) {
+          if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 제목 띠 재확인 중단'; return $false }
+          $stripWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $stripRegion[0] -ReferenceY $stripRegion[1] `
+              -RegionWidth $stripRegion[2] -RegionHeight $stripRegion[3] -Scale $stripScale -Engine $ocrKoreanEngine)
+          $stripTitle = ((@($stripWords | Sort-Object { [int]$_.X } | ForEach-Object { [string]$_.Text }) -join '') -replace '\s', '')
+          if (-not $stripTitle) { continue }
+          $stripVerdict = Get-LifeTitleVerdict -Title $stripTitle -TargetName $TargetName -Order @($SkillEntry.Order)
+          if ($stripVerdict -eq 'mine') { $linkVerdict = 'mine'; $linkTitle = $stripTitle; break }
+          $stripVerdicts += , $stripVerdict
+          if (-not $linkTitle) { $linkTitle = $stripTitle }
+        }
+        if ($linkVerdict -eq 'unknown') { $linkVerdict = Get-LifeConsensusVerdict -Verdicts $stripVerdicts }
+      }
+    }
+  }
+  if ($deepRecheckDone) {
+    # 깊은 재확인은 새 캡처를 여러 장 썼습니다. 여기서 링크 좌표만 갱신하면 '판정은 A 팝업,
+    # 클릭은 B 팝업' 이 될 수 있습니다 (Codex 지적). 그래서 **마지막 프레임에서 링크와 제목을
+    # 함께 다시 얻고, 첫 프레임과 같은 팝업인지 확인**한 뒤에만 앞의 판정을 적용합니다.
+    if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
+    if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
+    $linkWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgLifeFindLink[0] -ReferenceY $rgLifeFindLink[1] `
+        -RegionWidth $rgLifeFindLink[2] -RegionHeight $rgLifeFindLink[3] -Scale 3 -Engine $ocrKoreanEngine)
+    $linkWord = Select-LifeFindNearestWord -Words $linkWords
+    if ($null -eq $linkWord) {
+      Write-RunLog "[생활] 재확인 후 '가까운 위치 찾기' 링크를 다시 찾지 못했습니다 - 재시도"
+      return $false
+    }
+    # 같은 팝업 판정: 링크 판독의 제목과 링크 Y 가 첫 프레임과 같아야 합니다. 제목이 안 읽히는
+    # 대상은 양쪽 다 빈 문자열이라 링크 Y 가 근거가 됩니다 (대상마다 링크 Y 가 다름).
+    $finalFrameTitle = Get-LifeDetailTitleFromWords -Words $linkWords
+    if (($finalFrameTitle -ne $firstFrameTitle) -or ([Math]::Abs([int]$linkWord.Y - $firstFrameLinkY) -gt 6)) {
+      Write-RunLog "[생활] 재확인 중에 팝업이 바뀌었습니다 (제목 '$firstFrameTitle' → '$finalFrameTitle') - 재시도"
+      return $false
+    }
+  }
+  if ($linkVerdict -eq 'other') {
+    Write-RunLog "[생활] 클릭 직전 재확인에서 다른 대상의 팝업입니다 (제목 '$linkTitle', 목표 '$TargetName') - 재시도"
+    Write-LifeDiagnostics -Game $Game -Context '클릭 직전 대상 불일치'
+    return $false
+  }
+  # 판독/전면화에 시간이 들 수 있어 실제 클릭 직전에 한도를 다시 확인합니다 (Codex 조건)
+  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
+  Write-RunLog "[생활] 대상 '$TargetName' 상세 확인 (제목 '$linkTitle') - '가까운 위치 찾기' 클릭 (링크 탐색 $([int]$linkWord.X),$([int]$linkWord.Y))"
+  Click-GamePoint -Game $Game -ReferenceX ([int]$linkWord.X) -ReferenceY ([int]$linkWord.Y)
+  Start-Sleep -Milliseconds 1500
+  return $true
+}
+
+function Invoke-LifeGatherCycle {
+  # 생활(채집) 1사이클: 메뉴 사이클 → 퀘스트 생성 확인 → 존재 대기 → 소멸 = 완료 (exit 0).
+  # 전체 deadline = life.gatherWaitSeconds (이동+전투+채집 포함 - 기본 600초)
+  param([System.Diagnostics.Process]$Game)
+  # 커스텀 항목 토큰이 깨진 채로는 시작하지 않습니다 - config 의 슬라이더 값으로 대신 돌면
+  # 사용자가 리스트에 넣지 않은 대상을 캐게 되고, 그 사이 남의 채집을 밀어낼 수 있습니다
+  if ($script:lifeCustomSpecInvalid) {
+    throw "생활 커스텀 반복 항목 형식이 올바르지 않습니다: '$env:HONEYNOGI_CUSTOM_ITEM' - GUI와 워커 버전이 어긋났을 수 있으니 꿀비노기를 최신 버전으로 맞춘 뒤 다시 시작해 주세요"
+  }
+  if ($lifeContent -eq 'process') {
+    Write-RunLog '[완료] 가공 자동화는 아직 지원하지 않습니다 - 조건부 정지'
+    exit 4
+  }
+  if (-not $lifeSkillMenuTable.ContainsKey($lifeSkillId)) {
+    Write-RunLog "[완료] 채집 스킬 '$lifeSkillId' 는 아직 자동화를 지원하지 않습니다 (낚시 외 채집 8종 지원) - 조건부 정지"
+    exit 4
+  }
+  $skillEntry = $lifeSkillMenuTable[$lifeSkillId]
+  Write-RunLog "[생활] 자동화 시작: $([string]$skillEntry.Name) - $lifeTargetName (진행이 ${lifeGatherWait}초 없으면 정지 / 절대 상한 ${lifeGatherHardCapSeconds}초)"
+  $questSeen = $false
+  $absentStreak = 0
+  $lastCountText = ''
+  # 메뉴 사이클이 확정한 상세의 요구 레벨 @{ Target; Level } (실패 안내용 - 매 사이클 초기화)
+  $script:lifeLastDetail = $null
+  # 시작 상태 복구 (준비 단계): 열린 생활 창 정리 → 출석/이벤트 화면 정리 → 기존 퀘스트 확인.
+  # (Clear-EventOverlay 는 생활 창을 '알 수 없는 화면'으로 오판할 수 있어 생활 창 정리를
+  #  먼저 합니다 - Codex 지적. 메인 흐름의 이벤트 정리도 이 이유로 생활 분기 뒤에 둠)
+  [void](Close-LifeOpenWindows -Game $Game)
+  [void](Clear-EventOverlay -Game $Game)
+  # 사이클 한도(deadline)는 '준비 정리 완료 시점'부터 잽니다 (Codex 합의 계약 - 위 정리
+  # 함수들의 내부 캡처 실패 대기는 이 한도 밖. 이후의 모든 내부 대기는 이 한도가 상한).
+  $cycleDeadline = (Get-Date).AddSeconds($lifeGatherWait)
+  # 시작 시점에 서버 연결이 끊겨 있으면 무엇도 진행되지 않습니다 - 퀘스트 판정보다 먼저
+  # 확인합니다 (Codex 조건: 초기 present 면 메뉴 루프를 건너뛰어 감지를 놓침)
+  if ((Close-LifeBlockingDialog -Game $Game) -eq 'disconnected') {
+    Write-RunLog '[완료] 게임 서버 연결이 끊어졌습니다 - 재접속 후 다시 시작해 주세요 (조건부 정지)'
+    exit 4
+  }
+  # 초기 퀘스트 확인은 '전면화 후 여러 번' 판독합니다 (2026-08-07 사용자 지적: 트래커가
+  # 잠깐 가려지면 없는 것으로 오판해 메뉴를 열고 다른 대상을 눌러 진행 중인 채집을 방해).
+  # present 가 한 번이라도 보이면 진행 중으로 간주 - 없는데 있다고 보면 잠깐 기다릴 뿐이지만,
+  # 있는데 없다고 보면 남의 채집을 망칩니다 (비대칭 위험이라 present 우선)
+  # 맵 이동 로딩 화면에서는 퀘스트도 HUD 도 없어 'unknown' 만 나옵니다 - 그 상태로 '없음'
+  # 판정을 내리면 이동 중에 메뉴를 열게 되므로, present/absent 가 확정될 때까지 기다립니다
+  # (최대 약 60초. 로딩은 보통 10~30초 - 2026-08-07 사용자 지적)
+  Focus-Game -Game $Game
+  Start-Sleep -Milliseconds 700
+  $initialState = 'unknown'
+  $initialAbsentProbe = 0
+  $loadingNoticed = $false
+  $initialProbes = 0
+  $initialPopupRounds = 0
+  while ($initialProbes -lt 20) {
+    if ((Get-Date) -gt $cycleDeadline) { break }
+    if ($script:screenCaptureFailing) {
+      Start-Sleep -Seconds 3
+      [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침이 없으면 화면이 돌아와도 못 알아챔
+      # 캡처 실패는 판독 시도를 소모하지 않습니다 - 소모하면 잠깐의 화면 정지가 20회를 다 태우고
+      # 'unknown' 인 채로 메뉴를 열어 진행 중인 채집을 방해합니다 (2026-08-07 감사).
+      # Clear-EventOverlay 의 '캡처 실패 중에는 시도 미소모' 와 같은 계약입니다.
+      continue
+    }
+    # 트래커를 가리는 팝업을 먼저 치웁니다. 특히 공지 게시판은 가장자리 HUD 가 그대로 보여
+    # Test-HomeEndEscHud 가 참이 되므로 '게임 화면인데 퀘스트 없음'(absent)으로 확정됩니다 -
+    # 그 상태로 메뉴를 열면 진행 중이던 채집을 끊습니다. 대기 루프(아래)에는 있던 방어가
+    # 초기 확인에만 빠져 있었습니다 (2026-08-07 감사)
+    if ($initialPopupRounds -lt 10) {
+      $popupHandled = $false
+      if (Invoke-PurchasePopupSweep -Game $Game) { $popupHandled = $true }
+      elseif (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { $popupHandled = $true }
+      elseif (Test-NoticeBoardPopup -Game $Game) {
+        Focus-Game -Game $Game
+        Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+        Write-RunLog '[생활] 공지 게시판 팝업 감지 - X로 닫기 (시작 확인 중)'
+        $popupHandled = $true
+      }
+      if ($popupHandled) {
+        $initialPopupRounds++
+        Start-Sleep -Seconds 2
+        continue      # 닫은 회차는 반드시 재캡처 - 같은 프레임으로 판정하면 오판 (Codex 계약)
+      }
+    }
+    $initialProbes++
+    $probeState = Get-LifeQuestState -Game $Game
+    if ($probeState -eq 'present') { $initialState = 'present'; break }
+    if ($probeState -eq 'absent') {
+      $initialAbsentProbe++
+      if ($initialAbsentProbe -ge 2) { $initialState = 'absent'; break }
+    } else {
+      $initialAbsentProbe = 0
+      if (-not $loadingNoticed) {
+        Write-RunLog '[생활] 게임플레이 화면이 아닙니다(맵 이동/로딩 추정) - 화면이 안정될 때까지 기다립니다'
+        $loadingNoticed = $true
+      }
+    }
+    Start-Sleep -Seconds 3
+  }
+  # present/absent 어느 쪽도 확정하지 못했으면 입력하지 않습니다 - 게임플레이 화면인지조차
+  # 모르는 상태에서 메뉴를 열면 진행 중인 채집을 끊거나 엉뚱한 화면을 누릅니다
+  # (2026-08-07 Codex 지적 - 주석의 '확정될 때까지' 계약이 코드에는 없었음)
+  if ($initialState -eq 'unknown') {
+    Write-RunLog '[완료] 게임플레이 화면을 확인하지 못했습니다 (로딩/다른 화면 지속) - 조건부 정지'
+    Write-LifeDiagnostics -Game $Game -Context '시작 화면 확인 실패'
+    exit 4
+  }
+  if ($initialState -eq 'present') {
+    # 트래커의 퀘스트가 '설정 대상의 것'인지 확인합니다 - 다른 대상의 채집을 이어받으면
+    # 엉뚱한 대상을 캐고 한도까지 대기합니다 (2026-08-06 라운드 5 실측: '거미줄' 잔여
+    # 퀘스트를 '물' 사이클이 이어받아 600초 초과). 트래커 이름도 깨지므로 느슨하게 비교.
+    # 판독은 **좁은 영역(퀘스트 첫 줄)만** 씁니다. 넓은 영역은 주간 목표 등 다른 퀘스트 줄까지
+    # 들어와, 줄 구분 없이 이름을 찾으면 남의 줄에 있는 더 긴 이름을 소유자로 집습니다
+    # (2026-08-07 감사 실측: '주간 목표 뾰족 나무' + '채집 장소 탐색 나무' → '뾰족 나무' 반환).
+    # 좁은 영역으로 못 정하면 아래 '미확정 = 내 것' 기본값이 안전하게 받아 줍니다.
+    $initialQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+        -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    # 후보는 **전 스킬의 대상 전체**입니다 - 현재 스킬 목록만 대조하면 다른 스킬의 잔여
+    # 퀘스트를 현재 스킬의 짧은 대상으로 오인합니다 ('사과 나무' → '나무' - 2026-08-07 감사).
+    # 단, **그 판독이 채집 퀘스트 줄일 때만** 이름을 찾습니다 - present 는 넓은 영역으로도
+    # 잡히므로, 좁은 영역에 '주간 목표 뾰족 나무' 같은 다른 줄이 들어와 있으면 그 이름을
+    # 소유자로 집어 남의 퀘스트로 오판합니다 (Codex 지적). 아니면 미확정 → 아래 기본값.
+    $questOwner = ''
+    if (Test-LifeQuestFragments -QuestText $initialQuestText) {
+      $questOwner = Get-LifeQuestOwner -QuestText $initialQuestText -Order (Get-LifeAllTargetNames)
+    }
+    # 어느 대상인지 못 정했으면(이름이 통째로 깨짐) '내 것'으로 봅니다 - 비대칭 비용 때문입니다.
+    # 남의 것을 내 것으로 보면 그 채집이 끝날 때까지 기다렸다가 한 회차를 헛돌 뿐이지만,
+    # 내 것을 남의 것으로 보면 3분 대기 후 exit 4 로 무인 반복 전체가 멈춥니다 (2026-08-07 감사)
+    $questMatchesTarget = $true
+    if ($questOwner) {
+      $questMatchesTarget = (Test-LifeNameMatches -RowText $questOwner -TargetName $lifeTargetName)
+    } else {
+      Write-RunLog "[생활] 진행 중인 퀘스트의 대상 이름을 확정하지 못했습니다 (판독 '$initialQuestText') - 내 채집으로 보고 이어서 대기합니다"
+    }
+    if ($questMatchesTarget) {
+      Write-RunLog '[생활] 진행 중인 채집 퀘스트 감지 - 이어서 대기합니다'
+      $questSeen = $true
+    } else {
+      # 다른 대상의 채집이 진행 중(이동/채집)이면 새 퀘스트를 만들 수 없고, 메뉴를 열어
+      # 다른 대상을 누르면 진행 중인 채집만 방해합니다 (2026-08-06 사용자 실기 관찰:
+      # "이동 중인데 중간에 다른 채집을 누른다"). 그 채집이 끝날 때까지 기다렸다가
+      # 시작합니다 - 바로 정지하면 대상을 바꿀 때마다 멈춰 버립니다(같은 날 실측).
+      Write-RunLog "[생활] 다른 대상의 채집이 진행 중입니다 (판독 '$initialQuestText') - 끝나기를 기다립니다"
+      # 소멸 판정도 '연속 3회' 확인해야 합니다 - 1회 판독으로 확정하면 트래커가 잠깐
+      # 가려진 사이 '끝났다'고 보고 메뉴를 열어 진행 중인 채집을 방해합니다
+      # (2026-08-07 사용자 실기 관찰: 5초 만에 끝났다고 판정하고 다른 대상을 누름)
+      $otherQuestGone = $false
+      $otherGoneStreak = 0
+      $otherLastCount = ''
+      $otherWaitProbes = 0
+      while ($otherWaitProbes -lt 60) {        # 3초 간격 - 상한은 약 3분 (사이클 한도 안에서)
+        if ((Get-Date) -gt $cycleDeadline) { break }
+        Start-Sleep -Seconds 3
+        if ($script:screenCaptureFailing) {
+          [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림)
+          continue      # 캡처 실패 회차는 예산을 소모하지 않습니다 (3분 정전이 exit 4 가 되던 문제)
+        }
+        $otherWaitProbes++
+        # 남은 수량을 보여 줍니다 - 9/10 이면 곧 끝난다는 걸 로그로 알 수 있게 (사용자 요청)
+        $otherCount = Get-LifeQuestCountText -Game $Game
+        if ($otherCount -and $otherCount -ne $otherLastCount) {
+          Write-RunLog "[생활] 이전 채집 진행 중: $otherCount"
+          $otherLastCount = $otherCount
+        }
+        # 'absent'(게임플레이 HUD 가 보이는데 퀘스트가 없음) 일 때만 소멸로 셉니다.
+        # 맵 이동 로딩 화면에서는 퀘스트도 HUD 도 사라져 'unknown' 이 되는데, 이걸 소멸로
+        # 세면 이동 중에 다른 대상을 눌러 버립니다 (2026-08-07 사용자 지적)
+        # absent = HUD 가 보이는데 퀘스트 없음 = 게임 화면이 앞에 있다는 증거이므로 전면화
+        # 불필요 (가림 상황은 Get-LifeQuestState 내부에서 전면화+재판독으로 이미 처리)
+        $otherProbe = Get-LifeQuestState -Game $Game
+        # 소멸 확정 직전에도 전면 여부만 확인 (이미 전면이면 아무 동작 없음)
+        if ($otherProbe -eq 'absent' -and $otherGoneStreak -ge 2 -and -not (Test-GameForeground -Game $Game)) {
+          Focus-Game -Game $Game
+          Start-Sleep -Milliseconds 700
+          $otherProbe = Get-LifeQuestState -Game $Game
+        }
+        if ($otherProbe -ne 'absent') {
+          if ($otherProbe -eq 'unknown') { Write-RunLog '[생활] 화면이 전환 중입니다(로딩 추정) - 소멸 판정 보류' }
+          $otherGoneStreak = 0
+          continue
+        }
+        $otherGoneStreak++
+        if ($otherGoneStreak -ge 3) { $otherQuestGone = $true; break }
+      }
+      if (-not $otherQuestGone) {
+        Write-RunLog "[완료] 진행 중이던 다른 채집이 끝나지 않아 '$lifeTargetName' 을 시작할 수 없습니다 - 조건부 정지"
+        exit 4
+      }
+      Write-RunLog "[생활] 이전 채집이 끝났습니다 - '$lifeTargetName' 으로 시작합니다"
+    }
+  }
+  # 메뉴 사이클 (최대 3회 재시도)
+  if (-not $questSeen) {
+    $menuOk = $false
+    foreach ($menuTry in 1..3) {
+      # 팝업 방어 (구매/보상/협동/네트워크 + 주간 리셋 + 공지 게시판)
+      if (Invoke-PurchasePopupSweep -Game $Game) { Start-Sleep -Milliseconds 1200 }
+      if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { Start-Sleep -Milliseconds 1200 }
+      if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
+        Focus-Game -Game $Game
+        Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+        Write-RunLog '[생활] 공지 게시판 팝업 감지 - X로 닫기'
+        Start-Sleep -Seconds 2
+      }
+      # 진행 차단 모달(연결 끊김/준비물 부족/오류 팝업) 정리 - 남으면 C 키가 먹지 않아 연쇄 실패
+      $dialogState = Close-LifeBlockingDialog -Game $Game
+      if ($dialogState -eq 'disconnected') {
+        Write-RunLog '[완료] 게임 서버 연결이 끊어졌습니다 - 재접속 후 다시 시작해 주세요 (조건부 정지)'
+        exit 4
+      }
+      if ($dialogState -eq 'material') {
+        Write-RunLog "[완료] '$lifeTargetName' 채집에 필요한 준비물이 없습니다$(Format-LifeMissingItemNotice -ItemText ([string]$script:lifeMissingItemText)) - 조건부 정지"
+        exit 4
+      }
+      while ($script:screenCaptureFailing) {
+        # 영구 캡처 실패도 사이클 한도를 넘기면 정지합니다 (deadline 계약 - Codex 지적)
+        if ((Get-Date) -gt $cycleDeadline) {
+          Write-RunLog "[완료] 화면 캡처 실패가 지속돼 사이클 한도(${lifeGatherWait}초)를 넘겼습니다 - 조건부 정지"
+          exit 4
+        }
+        Test-SafeStopDuringCaptureFail
+        Start-Sleep -Seconds 2
+        [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 한도까지 여기 갇힘)
+      }
+      if (Invoke-LifeMenuSequence -Game $Game -SkillEntry $skillEntry -TargetName $lifeTargetName -Deadline $cycleDeadline) {
+        # 퀘스트 생성 확인: 약 12초(1.5초 x 8회 + OCR 시간) 안에 present 2회 (Codex 조건).
+        # 사이클 한도는 이 확인 루프에도 우선합니다 (하드 상한 계약)
+        $presentCount = 0
+        foreach ($confirmTry in 1..8) {
+          if ((Get-Date) -gt $cycleDeadline) { break }
+          Start-Sleep -Milliseconds 1500
+          if ((Get-LifeQuestState -Game $Game) -eq 'present') {
+            $presentCount++
+            if ($presentCount -ge 2) { break }
+          }
+        }
+        if ($presentCount -ge 2) {
+          Write-RunLog '[생활] 채집 퀘스트 생성 확인 - 자동 이동/채집을 기다립니다'
+          $questSeen = $true
+          $menuOk = $true
+          break
+        }
+        Write-RunLog '[생활] 채집 퀘스트가 생성되지 않았습니다 - 화면 정리 후 재시도'
+        # 링크를 눌렀는데 퀘스트가 안 생기는 원인은 화면에만 남습니다 (첫 회차만 캡처)
+        if ($menuTry -eq 1) { Write-LifeDiagnostics -Game $Game -Context '퀘스트 생성 실패' }
+        # 다른 대상의 채집 퀘스트가 아직 진행 중이면 새 퀘스트를 만들 수 없습니다
+        # (2026-08-06 라운드 7 실측: 얽힌 거미줄/증폭·산뜻 버섯이 이 상태로 3회 소진).
+        # 재시도해도 결과가 같으므로 안내 후 정지합니다 - 그 채집이 끝난 뒤 다시 시작하면 됩니다
+        $leftoverQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+            -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+        if (Test-LifeQuestFragments -QuestText $leftoverQuestText) {
+          # 소유 판정은 초기 확인과 같은 규칙(긴 이름 우선 + 이형·치환)을 씁니다 - 부분 문자열
+          # 비교는 '우물'을 '물'로, '얽힌 거미줄'을 '거미줄'로 오인합니다 (2026-08-07 감사).
+          # 여기서는 '다른 대상임이 확정될 때만' 정지합니다 - 확정 못 하면 재시도가 안전합니다
+          $leftoverOwner = Get-LifeQuestOwner -QuestText $leftoverQuestText -Order (Get-LifeAllTargetNames)
+          $leftoverIsOther = ($leftoverOwner -and -not (Test-LifeNameMatches -RowText $leftoverOwner -TargetName $lifeTargetName))
+          if ($leftoverIsOther) {
+            Write-RunLog "[완료] 다른 채집 퀘스트가 진행 중이라 '$lifeTargetName' 을 시작할 수 없습니다 (판독 '$leftoverQuestText') - 조건부 정지"
+            exit 4
+          }
+        }
+        # 준비물 부족/연결 끊김이면 재시도해도 결과가 같으므로 즉시 안내 정지
+        $questFailDialog = Close-LifeBlockingDialog -Game $Game
+        if ($questFailDialog -eq 'disconnected') {
+          Write-RunLog '[완료] 게임 서버 연결이 끊어졌습니다 - 재접속 후 다시 시작해 주세요 (조건부 정지)'
+          exit 4
+        }
+        if ($questFailDialog -eq 'material') {
+          Write-RunLog "[완료] '$lifeTargetName' 채집에 필요한 준비물이 없습니다$(Format-LifeMissingItemNotice -ItemText ([string]$script:lifeMissingItemText)) - 조건부 정지"
+          exit 4
+        }
+      }
+      [void](Close-LifeOpenWindows -Game $Game)
+      Start-Sleep -Seconds 2
+      if ((Get-Date) -gt $cycleDeadline) { break }
+    }
+    if (-not $menuOk) {
+      Write-LifeDiagnostics -Game $Game -Context '메뉴 사이클 3회 소진'
+      # 링크를 눌러도 퀘스트가 안 생기는 가장 흔한 원인은 '스킬 레벨 미달'입니다
+      # (2026-08-07 실측: 곤충 채집 '일렁이는 빛 무리' = 레벨 27 이상, 캐릭터는 25).
+      # 상세 팝업에 적힌 요구치를 그대로 안내합니다 - 캐릭터 레벨은 판독이 불안정해 단정하지 않습니다.
+      $levelNotice = ''
+      $detailRecord = $script:lifeLastDetail
+      if ($detailRecord -and ([string]$detailRecord.Target) -eq ([string]$lifeTargetName) -and ([int]$detailRecord.Level) -gt 0) {
+        $requiredLevel = [int]$detailRecord.Level
+        $levelNotice = " (이 대상은 '$([string]$skillEntry.Name) 레벨 ${requiredLevel} 이상'이 필요합니다 - 스킬 레벨이 모자라면 '가까운 위치 찾기'가 동작하지 않습니다)"
+      }
+      Write-RunLog "[완료] 채집 시작(가까운 위치 찾기)을 확정하지 못했습니다 - 조건부 정지${levelNotice}"
+      exit 4
+    }
+  }
+  # 퀘스트 존재 대기: 소멸(absent 3연속) = 사이클 완료. unknown 은 부재로 세지 않음 (Codex 조건)
+  #
+  # 한도는 '총 시간'이 아니라 **'진행이 멈춘 시간'** 으로 잽니다 (2026-08-08 사용자 지적:
+  # "잘 캐고 있는데 왜 잘리나"). 총 시간으로 재면 사용자가 대상별 소요를 미리 알아야 숫자를
+  # 정할 수 있는데 그건 알 수 없습니다 - 실측 소요가 100~520초로 대상마다 5배 차이입니다.
+  # 워커는 이미 수량('6/10')을 읽고 있으므로, **모은 개수가 늘면 건강한 것**으로 보고
+  # 한도를 다시 잽니다. 오래 걸리는 건 문제가 아니고, '아무 일도 안 일어나는' 게 문제입니다.
+  # 수량 판독은 '6/10 → 0/10 → 6/10' 처럼 튀므로(실측) **본 적 있는 최댓값**만 기준으로 씁니다
+  # (노이즈로 한도가 되살아나지 않게). 최댓값은 목표 개수를 넘지 못하니 무한 연장도 불가능하고,
+  # 그 위에 절대 상한(1시간)을 백스톱으로 둡니다 - 무인 운용에서 영원히 매달리지 않기 위함.
+  $waitPollCount = 0
+  $progressMaxCount = -1
+  $progressGoalCounts = @{}      # 목표 개수(분모) → 관측 횟수 (완료 로그 표기용)
+  $progressDeadline = (Get-Date).AddSeconds($lifeGatherWait)
+  $hardDeadline = (Get-Date).AddSeconds($lifeGatherHardCapSeconds)
+  while ($true) {
+    if ((Get-Date) -gt $hardDeadline) {
+      Write-RunLog "[완료] 채집이 절대 상한(${lifeGatherHardCapSeconds}초)을 넘겼습니다 - 조건부 정지 (수량은 늘고 있었지만 끝나지 않았습니다)"
+      exit 4
+    }
+    if ((Get-Date) -gt $progressDeadline) {
+      # 멈춘 진짜 원인이 '채집이 느려서'가 아니라 '화면이 안 그려져서'일 수 있습니다
+      # (2026-08-07 실측: 채집 3/10 진행 중 RDP 창이 최소화돼 16분간 캡처 실패).
+      if ($script:screenCaptureFailing) {
+        Write-RunLog "[완료] 화면이 그려지지 않는 상태가 ${lifeGatherWait}초 이어졌습니다 - 조건부 정지 (RDP 창 최소화/화면 잠금을 확인해 주세요)"
+        exit 4
+      }
+      $progressNote = $(if ($progressMaxCount -ge 0) { "마지막 진행 ${progressMaxCount}개" } else { '수량 판독 없음(이동 중 추정)' })
+      Write-RunLog "[완료] 채집 진행이 ${lifeGatherWait}초 동안 없었습니다 ($progressNote) - 조건부 정지 (이동이 아주 먼 대상이면 GUI 의 '채집 대기'를 늘려 주세요)"
+      exit 4
+    }
+    Start-Sleep -Seconds 3
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      # 복구 탐침 - 이게 없으면 RDP 창이 다시 열려도 플래그가 안 풀려 한도까지 대기했습니다
+      # (2026-08-07 실사고: 개암 버섯 채집 3/10 중 16분 캡처 실패 → 한도 초과 정지)
+      [void](Test-CaptureRecovered -Game $Game)
+      continue
+    }
+    # 대기 중 팝업 방어 (처리한 회차는 판정을 건너뜀 - 같은 프레임 오판 방지).
+    # 공지 게시판은 HUD 가 가장자리로 계속 보여 트래커가 가려지면 absent 오판 위험
+    # (Codex 지적) - 닫은 회차는 반드시 continue 로 재캡처합니다.
+    if (Invoke-PurchasePopupSweep -Game $Game) { continue }
+    if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { continue }
+    if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+      Write-RunLog '[생활] 공지 게시판 팝업 감지 - X로 닫기 (채집 대기 중)'
+      Start-Sleep -Seconds 2
+      continue
+    }
+    # 채집 대기 중 서버 연결이 끊기면 한도(기본 600초)를 통째로 낭비하므로 즉시 정지합니다
+    # (2026-08-06 라운드 4 실측: 끊긴 채 3회차가 각 600초 소진 → '가방 가득'으로 오인).
+    # 중앙 모달 뒤로 트래커가 보일 수 있어 퀘스트 상태와 무관하게 주기 확인합니다 - 다만
+    # 매 회차 OCR 은 비싸므로 5회차(약 15초)마다 (Codex 조건)
+    $waitPollCount++
+    $questState = Get-LifeQuestState -Game $Game
+    if ($questState -ne 'present' -or ($waitPollCount % 5) -eq 0) {
+      $waitDialogState = Close-LifeBlockingDialog -Game $Game
+      if ($waitDialogState -eq 'disconnected') {
+        Write-RunLog '[완료] 게임 서버 연결이 끊어졌습니다 - 재접속 후 다시 시작해 주세요 (조건부 정지)'
+        exit 4
+      }
+      if ($waitDialogState -ne 'none') { continue }
+    }
+    if ($questState -eq 'present') {
+      $absentStreak = 0
+      $countText = Get-LifeQuestCountText -Game $Game
+      if ($countText -and $countText -ne $lastCountText) {
+        Write-RunLog "[생활] 채집 진행: $countText"
+        $lastCountText = $countText
+      }
+      # 모은 개수가 '지금까지 본 최댓값'을 넘었을 때만 진행으로 인정하고 한도를 다시 잽니다
+      $countValue = Get-LifeProgressValue -CountText $countText
+      if ($countValue -gt $progressMaxCount) {
+        $progressMaxCount = $countValue
+        $progressDeadline = (Get-Date).AddSeconds($lifeGatherWait)
+      }
+      # 목표 개수(분모)도 모읍니다 - 완료 로그에 '마지막으로 본 수량'이 아니라 '목표'를
+      # 적기 위함입니다 (아래 완료 지점 주석 참고). 한 회차 판독은 못 믿으므로 표를 쌓습니다.
+      $goalValue = Get-LifeQuestGoalValue -CountText $countText
+      if ($goalValue -gt 0) {
+        if (-not $progressGoalCounts.ContainsKey($goalValue)) { $progressGoalCounts[$goalValue] = 0 }
+        $progressGoalCounts[$goalValue] = [int]$progressGoalCounts[$goalValue] + 1
+      }
+      continue
+    }
+    if ($questState -eq 'absent') {
+      # 여기의 absent 는 'HUD 가 보이는데 퀘스트가 없다' 는 뜻이라 게임 화면이 앞에 있다는
+      # 증거입니다 - 전면화가 필요 없습니다 (2026-08-07 사용자 지적: 가려지지도 않았는데
+      # 게임이 자꾸 앞으로 튀어나옴). 가림 상황은 Get-LifeQuestState 안에서 이미
+      # '판독 실패 → 전면화 → 재판독' 으로 처리되고, 실패하면 unknown 이라 여기 오지 않습니다.
+      $absentStreak++
+      if ($absentStreak -ge 3) {
+        # 완료 확정은 되돌릴 수 없으므로 이 순간에만 '게임이 실제로 전면인지' 확인합니다.
+        # HUD 가 보여도 게임이 전면이 아닐 수 있고(창 영역 밖의 다른 창), 그 상태의 판독은
+        # 신뢰할 수 없습니다. 이미 전면이면 아무 일도 하지 않아 사용자 방해가 없습니다
+        # (2026-08-07 사용자 지적 반영 - 판독 중에는 전면화하지 않되 확정 직전에만)
+        if (-not (Test-GameForeground -Game $Game)) {
+          Focus-Game -Game $Game
+          Start-Sleep -Milliseconds 700
+          if ((Get-LifeQuestState -Game $Game) -ne 'absent') {
+            Write-RunLog '[생활] 전면화 후 재확인하니 퀘스트가 남아 있습니다 - 완료 판정 취소'
+            $absentStreak = 0
+            continue
+          }
+        }
+        # 무엇을 캤는지 남깁니다 - 여러 대상을 번갈아 돌리면 로그만 봐서는 구분이 안 됩니다
+        # (2026-08-08 사용자 요청).
+        # 수량은 **목표 개수(분모)** 를 적습니다. '마지막으로 본 수량'을 적으면 거의 항상
+        # 1개 모자라게 나옵니다 - 마지막 개를 채우는 순간 트래커가 사라지는데 폴링이 3초
+        # 간격이라 그 프레임을 놓치기 때문입니다 (2026-08-08 사용자 제보: '9개' 로 표기됨).
+        # 퀘스트가 사라진 것 자체가 '목표를 다 모았다'는 뜻이므로 목표 개수가 정확합니다.
+        # 목표를 못 읽었으면 마지막 판독을 그대로 적되 '마지막 판독'임을 밝힙니다 (단정 금지).
+        $goalCount = Get-LifeQuestGoalConsensus -GoalCounts $progressGoalCounts
+        $doneCount = ''
+        if ($goalCount -gt 0 -and $goalCount -ge $progressMaxCount) { $doneCount = " ${goalCount}개" }
+        elseif ($progressMaxCount -ge 0) { $doneCount = " (마지막 판독 ${progressMaxCount}개)" }
+        Write-RunLog "[생활] 채집 퀘스트 종료 확인 - '$lifeTargetName'${doneCount} 완료"
+        Write-RunLog "[완료] 채집 1사이클 완료 - $([string]$skillEntry.Name) / $lifeTargetName${doneCount}"
+        exit 0
+      }
+      continue
+    }
+    # unknown: 부재 카운트 유지하지 않고 다음 판독으로
+    $absentStreak = 0
+  }
+}
+
 try {
   $game = Get-GameProcess
   Write-RunLog "[준비] 게임 확인: PID $($game.Id)"
@@ -7039,13 +9189,20 @@ try {
     if ([string]::IsNullOrWhiteSpace($repeatInfo)) { $repeatInfo = '(GUI 정보 없음 - 워커 단독 실행)' }
     $appVersionInfo = [string]$env:HONEYNOGI_APP_VERSION
     if ([string]::IsNullOrWhiteSpace($appVersionInfo)) { $appVersionInfo = '?' }
-    Write-RunLog "[설정] 꿀비노기 v$appVersionInfo, 콘텐츠 '$contentCategory', 반복 $repeatInfo, coordsVersion $(Get-ConfigValue $config @('coordsVersion') '?')"
+    # 대분류가 '생활'이면 contentCategory(전투 하위 선택)는 참고용으로만 남습니다.
+    # 생활 상세 설정(스킬/대상/대기 등)은 아래 섹션 목록의 'life' 한 줄 JSON 으로 남습니다.
+    Write-RunLog "[설정] 꿀비노기 v$appVersionInfo, 대분류 '$mainCategory', 콘텐츠 '$contentCategory', 반복 $repeatInfo, coordsVersion $(Get-ConfigValue $config @('coordsVersion') '?')"
     if ($script:customMode) {
       # 커스텀 리스트는 압축 문자열 한 줄로만 남깁니다 (타 PC 제보 분석 요건 -
       # customRepeat 섹션을 아래 목록에 넣으면 items 배열 전체가 JSON으로 쏟아져 제외)
       Write-RunLog "[설정] 커스텀 리스트: $($script:customListText) (현재 $($script:customPositionText), 이전 항목 '$env:HONEYNOGI_CUSTOM_PREV', 다음 항목 '$env:HONEYNOGI_CUSTOM_NEXT', 재시작 $($script:customRestart))"
     }
-    foreach ($sectionName in @('dungeons', 'normalDungeon', 'huntingGround', 'timeoutsSeconds', 'afterEntry', 'revive', 'rdp', 'window', 'diagnostics')) {
+    if ($script:lifeCustomMode) {
+      # 생활 커스텀은 이전/다음 항목 개념이 없습니다 (사이클마다 메뉴부터 새로 시작하므로
+      # 던전의 '다시 하기 vs 선택 화면' 갈림길이 없음) - 리스트와 현재 위치만 남깁니다
+      Write-RunLog "[설정] 생활 커스텀 리스트: $([string]$env:HONEYNOGI_CUSTOM_LIST) (현재 $([string]$env:HONEYNOGI_CUSTOM_POSITION))"
+    }
+    foreach ($sectionName in @('dungeons', 'normalDungeon', 'huntingGround', 'life', 'timeoutsSeconds', 'afterEntry', 'revive', 'rdp', 'window', 'diagnostics')) {
       $section = $config.$sectionName
       if ($null -eq $section) { continue }
       # 설명용 '_' 키와 부피 큰 profiles(좌표)는 빼고 실제 값만 한 줄 JSON으로 남깁니다
@@ -7159,6 +9316,16 @@ try {
     Test-SafeStopDuringCaptureFail
     Start-Sleep -Seconds 2
     $startExitDetected = Test-ExitButton -Game $game
+  }
+
+  # 대분류 '생활'이면 전투 콘텐츠 대신 채집 사이클로 진행합니다 (v2.0.0 - 내부에서 exit).
+  # 위 공통 처리(창 보정/구매 팝업 스윕)는 공유하되, 아래 Clear-EventOverlay 는 생활
+  # 창(내 정보/생활 스킬)을 '알 수 없는 화면'으로 오판할 수 있어 이 분기를 먼저 둡니다 -
+  # 출석/이벤트 정리는 사이클 내부에서 생활 창 정리 '후' 수행합니다 (Codex 지적).
+  # 아래 전투 시작 화면 판정(나가기/클리어/커스텀 보호)도 생활과 무관하므로 타지 않습니다.
+  if ($mainCategory -eq 'life') {
+    Invoke-LifeGatherCycle -Game $game
+    throw '생활 사이클이 종료 코드 없이 반환됐습니다 - 내부 오류'
   }
 
   # 아침 6시 리셋 후 뜨는 출석/이벤트/데일리 팝업(스텔라 픽 등)이 화면을 덮고 있으면

@@ -93,8 +93,20 @@ Assert-Case '일괄: 빈 리스트' (@($result.Items).Count) 0
 
 # ── 6. 본체 소스 계약 검사 ──────────────────────────────────────────────────
 $guiSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_gui.ps1') -Raw -Encoding UTF8
-Assert-Case '오버레이: 두 리스트에 MouseUp 연결' `
-  (($guiSource.Contains('$lvCrList.Add_MouseUp($cellEditMouseUp)')) -and ($guiSource.Contains('$lvAcrList.Add_MouseUp($cellEditMouseUp)'))) $true
+Assert-Case '오버레이: 네 리스트에 MouseUp 연결' `
+  (($guiSource.Contains('$lvCrList.Add_MouseUp($cellEditMouseUp)')) -and
+   ($guiSource.Contains('$lvAcrList.Add_MouseUp($cellEditMouseUp)')) -and
+   ($guiSource.Contains('$lvDcrList.Add_MouseUp($cellEditMouseUp)')) -and
+   ($guiSource.Contains('$lvLcrList.Add_MouseUp($cellEditMouseUp)'))) $true
+# 2026-08-08: 디스패처의 마지막 else 가 조건 없는 '어비스 폴백'이라, 새 리스트를 연결하는
+# 순간 그 클릭이 어비스 계획을 타고(엉뚱한 옵션) 적용은 어비스 리스트를 통째로 바꿨습니다
+# (Invoke-AcrCellEdit 는 대상 리스트를 인자로 받지 않고 $lvAcrList 를 직접 씁니다).
+# 전 리스트를 명시 분기로 좁히고 최종 else 를 return 으로 닫았습니다.
+Assert-Case '오버레이: 리스트 분기는 전부 명시 (어비스 폴백 금지)' `
+  (($guiSource.Contains('} elseif ($clickSender -eq $lvAcrList) {')) -and
+   ($guiSource.Contains('} elseif ($applyList -eq $lvAcrList) {')) -and
+   (-not ($guiSource -match '\} else \{\s*\r?\n\s*\$cellItems = @\(Get-AbyssCustomItemsFromList\)')) -and
+   (-not ($guiSource -match '\} else \{\s*\r?\n\s*Invoke-AcrCellEdit'))) $true
 Assert-Case '오버레이: 어비스 이벤트 연결은 리스트 생성 뒤 (시작 크래시 방지 - Codex 지적)' `
   ($guiSource.IndexOf('$lvAcrList = New-Object') -lt $guiSource.IndexOf('$lvAcrList.Add_MouseUp($cellEditMouseUp)')) $true
 Assert-Case '오버레이: 예약 콜백은 세션을 클로저로 캡처' `
@@ -109,21 +121,24 @@ Assert-Case '오버레이: DropDownClosed 는 숨기기만' `
 # 스크롤 허용 - 사용자 요청). 스냅샷 멱등 + 복원 + 리스트 편집 가드가 새 계약 (Codex 합의)
 Assert-Case '오버레이: 실행 시작 시 편집 취소 (스냅샷 잠금 뒤)' `
   ($guiSource -match "\`$IsRunning -and \`$null -eq \`$script:contentDetailEnabledSnapshot[\s\S]{0,1500}Hide-CellEditCombo") $true
-Assert-Case '잠금: 커스텀 리스트 3개는 스냅샷 제외(스크롤 허용)' `
-  ($guiSource -match "\`$scrollableLists = @\(\`$lvCrList, \`$lvAcrList, \`$lvDcrList\)") $true
+Assert-Case '잠금: 커스텀 리스트 4개는 스냅샷 제외(스크롤 허용)' `
+  ($guiSource -match "\`$scrollableLists = @\(\`$lvCrList, \`$lvAcrList, \`$lvDcrList, \`$lvLcrList\)") $true
 Assert-Case '잠금: 전부 캡처 후 별도 루프로 비활성' `
   ($guiSource -match 'foreach \(\$detailChild in @\(\$detailSnapshot\.Keys\)\) \{ \$detailChild\.Enabled = \$false \}') $true
 Assert-Case '잠금: 종료 전환 시 스냅샷 복원(+IsDisposed 방어) 후 폐기' `
   ($guiSource -match '\(-not \$IsRunning\) -and \$null -ne \$script:contentDetailEnabledSnapshot[\s\S]{0,400}IsDisposed[\s\S]{0,200}\$script:contentDetailEnabledSnapshot = \$null') $true
-Assert-Case '가드: 머리글 전체 토글 running 차단 3곳' `
-  ([regex]::Matches($guiSource, 'if \(\$script:running\) \{ return \}   # 실행 중').Count) 3
-Assert-Case '가드: 체크 토글 running 취소(ItemCheck) 3곳' `
-  ([regex]::Matches($guiSource, '\.NewValue = \$\w+\.CurrentValue').Count) 3
+Assert-Case '가드: 머리글 전체 토글 running 차단 4곳' `
+  ([regex]::Matches($guiSource, 'if \(\$script:running\) \{ return \}   # 실행 중').Count) 4
+Assert-Case '가드: 체크 토글 running 취소(ItemCheck) 4곳' `
+  ([regex]::Matches($guiSource, '\.NewValue = \$\w+\.CurrentValue').Count) 4
 Assert-Case '적용: 저장 실패 시 원복 (부채널 플래그)' `
   ([regex]::Matches($guiSource, 'lastCustomSaveOk').Count -ge 6) $true
 Assert-Case '적용: 강등 1건 이상이면 사전 확인창' `
   ($guiSource -match "DowngradeCount -gt 0[\s\S]{0,700}MessageBox") $true
-Assert-Case '표시 규칙 단일 소스: 추가와 편집이 같은 함수 사용' `
-  (([regex]::Matches($guiSource, 'Set-CustomListRowTexts -Row').Count -ge 3) -and ([regex]::Matches($guiSource, 'Set-AbyssListRowTexts -Row').Count -ge 3)) $true
+Assert-Case '표시 규칙 단일 소스: 추가와 편집이 같은 함수 사용 (4리스트)' `
+  (([regex]::Matches($guiSource, 'Set-CustomListRowTexts -Row').Count -ge 3) -and
+   ([regex]::Matches($guiSource, 'Set-AbyssListRowTexts -Row').Count -ge 3) -and
+   ([regex]::Matches($guiSource, 'Set-DeepListRowTexts -Row').Count -ge 3) -and
+   ([regex]::Matches($guiSource, 'Set-LifeListRowTexts -Row').Count -ge 3)) $true
 
 exit $fails

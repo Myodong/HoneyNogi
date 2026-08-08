@@ -127,7 +127,7 @@ try {
     mainCategory = 'battle'
     contentCategory = 'abyss'
     life = [pscustomobject]@{ content = 'gather'; skill = 'daily'; target = '둥지'
-      bagFull = 'stop'; toolWorn = 'stop'; gatherWaitSeconds = 120 }
+      bagFull = 'stop'; toolWorn = 'stop'; gatherWaitSeconds = 600 }
     ui = [pscustomobject]@{ logFontSize = 9; settingsOpen = $false; logOpen = $false }
   }
   $userConfigV4 = [pscustomobject]@{
@@ -159,7 +159,11 @@ try {
   Assert-Case '4→5(생활 사용자): 실행됨' $migratedV5Life $true
   Assert-Case '4→5(생활 사용자): mainCategory 보존' $resultV5Life.mainCategory 'life'
   Assert-Case '4→5(생활 사용자): life.skill 보존' $resultV5Life.life.skill 'wood'
-  Assert-Case '4→5(생활 사용자): life.gatherWaitSeconds 보존' $resultV5Life.life.gatherWaitSeconds 300
+  # '채집 대기'는 **의미가 바뀐 설정**이라 보존하지 않고 기본값으로 되돌립니다 (schema 6).
+  # 옛 값은 '사이클 총 시간' 기준으로 정한 숫자라, 새 의미('진행이 멈춘 시간')에서는 뜻이
+  # 달라집니다 - 실제로 구 기본값 120 이 남아 멀쩡한 채집을 잘랐습니다 (2026-08-08 실사고)
+  Assert-Case '4→6(생활 사용자): life.gatherWaitSeconds 는 의미 변경으로 기본값 복귀' $resultV5Life.life.gatherWaitSeconds 600
+  Assert-Case '4→6(생활 사용자): 되돌리기 전 값을 안내용으로 보관' $script:gatherWaitReset 300
   Assert-Case '4→5(생활 사용자): contentCategory 보존' $resultV5Life.contentCategory 'dungeon'
 
   # 6) 진행 저장 실패는 $null/false 로 호출부까지 전달되고 디스크 진행도는 바뀌지 않음

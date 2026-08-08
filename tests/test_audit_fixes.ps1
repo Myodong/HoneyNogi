@@ -154,8 +154,8 @@ Assert-Case '3차: 런처 powershell 이름 검색 fallback 제거' `
 # ── v1.2.1: 코드 4 상태줄에 실제 [완료] 사유 표시 (2026-08-02 오해 실사례) ──────────
 Assert-Case 'GUI: [완료] 사유 수집 3곳(기본/복구/최종 폴링)' `
   ([regex]::Matches($guiSource, "match '\\\[완료\\\]\\s\*\(\.\+\)'").Count) 3
-Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백' `
-  ($guiSource -match '\$code4Reason = "조건 정지: \$code4Reason"[\s\S]{0,200}elseif \(\$rbCatDeep\.Checked\)') $true
+Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백(생활 분기 선행)' `
+  ($guiSource -match '\$code4Reason = "조건 정지: \$code4Reason"[\s\S]{0,400}elseif \(\$script:mainCategory -eq ''life''\)[\s\S]{0,400}elseif \(\$rbCatDeep\.Checked\)') $true
 Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
   ($guiSource -match '\$script:lastWorkerDoneReason = ''''[\s\S]{0,400}Start-Process -FilePath ''powershell\.exe''') $true
 
@@ -170,8 +170,8 @@ Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 �
 # ── v1.2.1: 월요일 6시 주간 리셋 팝업이 복귀 대기를 막던 사고(08-03 06:02) ─────────
 Assert-Case '워커: 주간 리셋 팝업 소함수 추출' `
   ($workerSource -match 'function Close-WeeklyCoopResetPopup[\s\S]{0,900}협동[\s\S]{0,300}참여') $true
-Assert-Case '워커: 복귀 대기 2곳(던전/사냥터)+다음 층 대기에 주간 리셋 팝업 배선' `
-  ([regex]::Matches($workerSource, "if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[").Count) 3
+Assert-Case '워커: 복귀 대기 2곳+다음 층 대기+생활 사이클 3곳에 주간 리셋 팝업 배선' `
+  ([regex]::Matches($workerSource, "if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[").Count) 6
 Assert-Case '워커: 복귀 대기 공지 팝업 닫기 2곳' `
   ([regex]::Matches($workerSource, '공지 게시판 팝업 감지 - X로 닫기 \(복귀 대기 중\)').Count) 2
 Assert-Case '워커: 이벤트 스킵이 소함수 호출로 치환' `
@@ -226,10 +226,12 @@ Assert-Case 'GUI: 실행 중 대분류 버튼 잠금(Set-UiRunning)' `
 # 테마 일괄 적용 후 상태 스타일 재적용 (조건 E)
 Assert-Case 'GUI: 테마 후 대분류/슬라이더 스타일 재적용' `
   ($guiSource -match 'Apply-HoneyTheme -Root \$form[\s\S]{0,1200}?Update-MainCategoryVisual\s+Update-LifeSliders') $true
-# updateCategoryPanels 생활 게이트 (조건 B): 전투 플래그 전부 (-not isLife) 게이트
+# updateCategoryPanels 생활 게이트 (조건 B): 전투 플래그 전부 (-not isLife) 게이트.
+# 2026-08-08 생활 채집에 커스텀 반복이 생기면서 커스텀 게이트만 '사냥터 제외 + 생활은
+# 채집만'으로 바뀌었습니다 (가공은 리스트 자체가 없어 여전히 제외)
 Assert-Case 'GUI: 카테고리 패널 갱신에 isLife 게이트' `
   (($guiSource -match '\$isDungeon = \(-not \$isLife\) -and \$rbCatDungeon\.Checked') -and
-   ($guiSource -match '\$supportsCustom = \(-not \$isHunting\) -and \(-not \$isLife\)')) $true
+   ($guiSource -match '\$supportsCustom = \(-not \$isHunting\) -and \(\(-not \$isLife\) -or \$isLifeGather\)')) $true
 # 승인 오버레이 확장 (조건 A): (15,42) 유지 + 높이 158 + 미승인 시 대분류 잠금
 Assert-Case 'GUI: 승인 오버레이 514x158 + 대분류 승인 잠금' `
   (($guiSource -match '\$grpApproval\.Size = New-Object System\.Drawing\.Size\(514, 158\)') -and
@@ -237,10 +239,10 @@ Assert-Case 'GUI: 승인 오버레이 514x158 + 대분류 승인 잠금' `
 # config 스키마 5 (조건 F): mainCategory 최상위 이전 + life 섹션 allowlist
 Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life allowlist' `
   (($guiSource -match "if \(\`$usr\.PSObject\.Properties\['mainCategory'\]\) \{ \`$def\.mainCategory = \`$usr\.mainCategory \}") -and
-   ($guiSource -match "'deepCustomRepeat', 'assist', 'life'\)")) $true
+   ($guiSource -match "'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life'\)")) $true
 $auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-Case 'config: 스키마 5 + mainCategory 기본 battle + life 섹션' `
-  (([int]$auditConfigJson.configSchemaVersion -eq 5) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
+Assert-Case 'config: 스키마 7 + mainCategory 기본 battle + life 섹션' `
+  (([int]$auditConfigJson.configSchemaVersion -eq 7) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
    ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily')) $true
 Assert-Case 'GUI: 버전 2.0.0' `
   ($guiSource -match "\`$appVersion = '2\.0\.0'") $true
@@ -341,4 +343,47 @@ Assert-Case '워커: 네트워크 팝업 - 클리어 대기 배선(결과 감지
 Assert-Case '워커: 네트워크 팝업 - 결과 대기 배선(버튼 탐색 앞)' `
   ($workerSource -match 'if \(Close-NetworkUnstablePopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}\s+\$retryPoint = & \$FindRetryButton') $true
 
+# ── v2.0.0: 로그/신호 폴더 %LOCALAPPDATA%\HoneyNogi\Log 통일 (2026-08-05 사용자 결정) ──
+# 워커·GUI 가 같은 규칙이어야 안전 중지 신호/마커/로그 폴링이 만난다 (exe 는 경로 불변)
+Assert-Case '워커: 로그 폴더 LOCALAPPDATA 통일 + 빈 값 스크립트 옆 폴백' `
+  ($workerSource -match "GetFolderPath\('LocalApplicationData'\)[\s\S]{0,400}Join-Path \`$honeyLogBase 'HoneyNogi\\Log'") $true
+Assert-Case 'GUI: 로그 폴더 워커와 같은 규칙 + 폴더 생성' `
+  (($guiSource -match "GetFolderPath\('LocalApplicationData'\)[\s\S]{0,500}Join-Path \`$honeyLogBase 'HoneyNogi\\Log'") -and
+   ($guiSource -match 'New-Item -ItemType Directory -Path \$honeyLogDir -Force')) $true
+Assert-Case "GUI: scriptRoot 기준 'Log' 는 honeyLogDir 폴백 정의 1곳만 (신호/마커 어긋남 방지)" `
+  (([regex]::Matches($guiSource, "Join-Path \`$scriptRoot 'Log").Count -eq 1) -and
+   ([regex]::Matches($guiSource, 'Join-Path \$scriptRoot \("Log').Count -eq 0)) $true
+# 워커 부트스트랩 trap 도 같은 규칙 (초기화 오류가 옛 폴더로 가면 GUI 폴링이 못 봄 - Codex)
+Assert-Case '워커: 부트스트랩 trap 로그도 LOCALAPPDATA 규칙' `
+  ($workerSource -match '\$bootLogBase = \[string\]\[Environment\]::GetFolderPath\(''LocalApplicationData''\)[\s\S]{0,300}HoneyNogi\\Log') $true
+# 회차 보관도 통일 폴더 기준 (scriptRoot 로 남아 있으면 저장소 실행에서 보관 실패 - Codex)
+Assert-Case 'GUI: 회차 로그 보관(run_*.log)이 honeyLogDir 기준' `
+  ($guiSource -match '\$archivePath = Join-Path \$honeyLogDir \("run_') $true
+
+
+# ── 어비스 메뉴: 고정 좌표 → 글자 탐색 (2026-08-08 실사고) ──
+# 상단 광고 배너('NEXON ESSENTIAL')가 뜨면서 타일 그리드가 아래로 밀려, 옛 좌표 (971,387)
+# 이 '아르바이트' 아이콘이 됐습니다 (실측: 어비스는 (971,531)). 새 고정 좌표로 바꾸면
+# 다음 배너에서 또 깨지므로 글자를 찾아 누릅니다.
+Assert-Case '어비스 메뉴: 고정 좌표 대신 글자 탐색으로 클릭' `
+  ($workerSource -match "Find-GameTextPoint[^\r\n]*\`$rgAbyssMenu\[0\][\s\S]{0,200}-SearchText '어비스' -ExactText '어비스'") $true
+Assert-Case '어비스 메뉴: 글자를 못 찾으면 클릭하지 않고 재시도' `
+  ($workerSource -match "메뉴에서 '어비스' 글자를 찾지 못했습니다") $true
+Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복귀' `
+  ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,300}Press-KeyOnce -VirtualKey 0x1B') $true
+Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
+  ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상' `
+  ($workerSource -match '\$coordsVersionCurrent = 7') $true
+$abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
+Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
+Assert-Case 'config: coordsVersion 7' ([int]$auditConfigJson.coordsVersion) 7
+# 판독 영역은 '광고 없음(어비스 y387)' 과 '광고 있음(y531)' 을 모두 덮어야 합니다.
+# 실측: 광고 없을 때 y387(2026-07-16 옛 ptAbyssMenu) / 광고 있을 때 y531(2026-08-08).
+$abyssTop = [int]$auditConfigJson.ocrRegions.abyssMenu[1]
+$abyssBottom = $abyssTop + [int]$auditConfigJson.ocrRegions.abyssMenu[3]
+Assert-Case '어비스 메뉴: 광고 없을 때 위치(y387)를 덮음' (($abyssTop -le 387) -and ($abyssBottom -ge 387)) $true
+Assert-Case '어비스 메뉴: 광고 있을 때 위치(y531)를 덮음' (($abyssTop -le 531) -and ($abyssBottom -ge 531)) $true
+# 배너 영역(y33~175)은 **일부러 제외**합니다 - 포함하면 광고 문구의 '어비스'를 누릅니다
+Assert-Case '어비스 메뉴: 상단 광고 배너 영역은 제외 (광고 문구 오클릭 방지)' ($abyssTop -ge 176) $true
 exit $fails

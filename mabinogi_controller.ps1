@@ -13,6 +13,8 @@ $ErrorActionPreference = 'Stop'
 # 현재 권장 방식은 HoneyNogi.exe(GUI 컨트롤 패널)이며, 이 파일은 exe 에 포함되지 않습니다.
 # 주의: GUI(exe)가 실행 중일 때 이 컨트롤러를 함께 실행하면 시작 시 프로세스 정리 단계에서
 #       서로의 워커를 강제 종료할 수 있습니다. 한 가지 방식만 사용하세요.
+# 주의: 2026-08-05 로그 폴더 통일(%LOCALAPPDATA%\HoneyNogi\Log)이 이 레거시에는 적용되지
+#       않았습니다 - 저장소에서 직접 실행하면 워커 로그(%LOCALAPPDATA%)를 따라가지 못합니다.
 # ─────────────────────────────────────────────────────────────────────────────
 $workerScript = Join-Path $PSScriptRoot 'mabinogi_run_once.ps1'
 $logDir = Join-Path $PSScriptRoot 'Log'

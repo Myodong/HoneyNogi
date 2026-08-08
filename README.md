@@ -244,7 +244,7 @@ Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Terminal Server Client' -Nam
 
 ## 문제가 생기면
 
-1. `Log\mabinogi_run_once.log` 마지막 줄 확인 (현재 회차분 — 지난 회차 로그는 `run_시각.log`로 최근 10개 보관)
+1. `%LOCALAPPDATA%\HoneyNogi\Log\mabinogi_run_once.log` 마지막 줄 확인 (현재 회차분 — 지난 회차 로그는 `run_시각.log`로 최근 10개 보관. GUI의 '로그 폴더' 버튼으로 바로 열 수 있음)
    - 다른 프로그램이 로그 파일을 붙잡고 있으면 `mabinogi_run_once.recovery.log`로 자동 전환되니 그쪽도 확인
    - `화면 캡처 실패 - RDP 창이 최소화` → RDP 창을 다시 열기
    - `화면 캡처 실패 - RDP 연결이 끊긴 상태` → 몇 초 내 자동 복구 대기

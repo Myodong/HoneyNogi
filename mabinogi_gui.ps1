@@ -135,16 +135,30 @@ $appVersion = '2.0.0'
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
 $workerScript = Join-Path $scriptRoot 'mabinogi_run_once.ps1'
-$workerLog = Join-Path $scriptRoot 'Log\mabinogi_run_once.log'
-$workerRecoveryLog = Join-Path $scriptRoot 'Log\mabinogi_run_once.recovery.log'
+# 로그/신호/마커 폴더는 실행 위치와 무관하게 %LOCALAPPDATA%\HoneyNogi\Log 로 통일합니다
+# (2026-08-05 사용자 결정 - 워커와 같은 규칙이어야 안전 중지 신호/마커/로그 폴링이 만납니다).
+# exe 는 스크립트가 그 폴더에 풀려 실행되므로 경로가 그대로 = 기존 사용자 영향 없음.
+# LOCALAPPDATA 를 못 얻는 비정상 환경만 기존처럼 스크립트 옆 Log 폴백 (런처와 같은 가드).
+$honeyLogBase = [string][Environment]::GetFolderPath('LocalApplicationData')
+$honeyLogDir = $(if ([string]::IsNullOrWhiteSpace($honeyLogBase)) { Join-Path $scriptRoot 'Log' }
+  else { Join-Path $honeyLogBase 'HoneyNogi\Log' })
+if (-not (Test-Path -LiteralPath $honeyLogDir)) {
+  New-Item -ItemType Directory -Path $honeyLogDir -Force | Out-Null
+}
+$workerLog = Join-Path $honeyLogDir 'mabinogi_run_once.log'
+$workerRecoveryLog = Join-Path $honeyLogDir 'mabinogi_run_once.recovery.log'
 # 안전 중지 신호 파일: GUI가 만들면 워커가 '던전 밖(HUD) 확인' 시점에서 회차를 조기 종료합니다.
-$safeStopFlag = Join-Path $scriptRoot 'Log\safe_stop.flag'
+$safeStopFlag = Join-Path $honeyLogDir 'safe_stop.flag'
 # 커스텀 반복 완료 마커: 던전/어비스를 별도 파일로 두어 한쪽 모드로 먼저 시작해도 다른 쪽의
 # 미완료 복구 근거가 지워지지 않게 합니다. 워커가 클리어 확정(결과 화면 도달) 시점에 현재
 # 항목의 소유자 정보(리스트 지문/lap/index/항목 토큰)를 기록하고 코드 0에서 한 번만 전진합니다.
-$customDungeonMarkerFile = Join-Path $scriptRoot 'Log\custom_done.marker' # 기존 던전 마커 경로 호환
-$customAbyssMarkerFile = Join-Path $scriptRoot 'Log\abyss_custom_done.marker'
-$customDeepMarkerFile = Join-Path $scriptRoot 'Log\deep_custom_done.marker'
+$customDungeonMarkerFile = Join-Path $honeyLogDir 'custom_done.marker' # 기존 던전 마커 경로 호환
+$customAbyssMarkerFile = Join-Path $honeyLogDir 'abyss_custom_done.marker'
+$customDeepMarkerFile = Join-Path $honeyLogDir 'deep_custom_done.marker'
+# 생활(채집)은 마커를 만들지 않습니다 - 채집 사이클은 '퀘스트 소멸 = 완료'라 던전의 '클리어는
+# 됐는데 마무리 중 종료'라는 중간 상태가 없기 때문입니다. 경로만 전용으로 두어 공용 마커
+# 검사들이 다른 모드의 마커를 잘못 집어가지 않게 합니다 (파일은 생성되지 않음)
+$customLifeMarkerFile = Join-Path $honeyLogDir 'life_custom_done.marker'
 $customMarkerFile = $customDungeonMarkerFile
 $redirectScript = Join-Path $scriptRoot 'rdp_redirect_console.ps1'
 
@@ -255,13 +269,28 @@ function Update-ConfigToLatest {
     }
     # 2) 값 섹션들: '_' 주석 키를 제외하고, 최신 구조에 존재하는 키만 사용자 값으로 덮어씀
     #    (최신 구조에서 사라진 키는 버리고, 새로 생긴 키는 최신 기본값 유지)
-    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'assist', 'life')) {
+    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life')) {
       if ($usr.PSObject.Properties[$sect] -and $def.PSObject.Properties[$sect]) {
         foreach ($prop in $usr.$sect.PSObject.Properties) {
           if ($prop.Name -like '_*') { continue }
           if ($def.$sect.PSObject.Properties[$prop.Name]) { $def.$sect.($prop.Name) = $prop.Value }
         }
       }
+    }
+    # 2-0) '채집 대기' 특례 (schema 6): 이 설정은 **의미가 바뀌었습니다** - '사이클 총 시간'
+    #      → '진행이 멈춘 시간'(2026-08-08). 옛 값은 총 시간 기준으로 정한 숫자라 새 의미에서는
+    #      뜻이 달라집니다(실제로 구 기본값 120 이 그대로 남아 멀쩡한 채집을 잘랐습니다).
+    #      그래서 그대로 옮기지 않고 최신 기본값으로 되돌리고, 시작 로그로 안내합니다.
+    if ($usrSchema -lt 6 -and $def.PSObject.Properties['life'] -and
+      $def.life.PSObject.Properties['gatherWaitSeconds']) {
+      $oldGatherWait = 0
+      try {
+        if ($usr.PSObject.Properties['life'] -and $usr.life -and $usr.life.PSObject.Properties['gatherWaitSeconds']) {
+          $oldGatherWait = [int]$usr.life.gatherWaitSeconds
+        }
+      } catch { }
+      $def.life.gatherWaitSeconds = 600
+      if ($oldGatherWait -gt 0 -and $oldGatherWait -ne 600) { $script:gatherWaitReset = $oldGatherWait }
     }
     # 2-1) 커스텀 반복 특례: 리스트/설정은 위 루프로 이전하되 '진행 기록만' 초기화합니다.
     #      업데이트로 좌표/판정이 바뀌었을 수 있어 이어가기보다 처음부터가 안전 (요청사항 확정 스펙).
@@ -301,6 +330,18 @@ function Update-ConfigToLatest {
       if ($def.deepCustomRepeat.PSObject.Properties['progress']) { $def.deepCustomRepeat.progress = $null }
       else { $def.deepCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = ($script:customProgressReset -or $hadDeepCustomProgress)
+    }
+    if ($def.PSObject.Properties['lifeCustomRepeat']) {
+      $hadLifeCustomProgress = $false
+      try {
+        if ($usr.PSObject.Properties['lifeCustomRepeat'] -and $usr.lifeCustomRepeat -and
+            $usr.lifeCustomRepeat.PSObject.Properties['progress'] -and $usr.lifeCustomRepeat.progress) {
+          $hadLifeCustomProgress = $true
+        }
+      } catch { }
+      if ($def.lifeCustomRepeat.PSObject.Properties['progress']) { $def.lifeCustomRepeat.progress = $null }
+      else { $def.lifeCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
+      $script:customProgressReset = ($script:customProgressReset -or $hadLifeCustomProgress)
     }
     # 3) 자동부활 on/off (키 코드/횟수 상한은 최신 기본값 유지)
     if ($usr.PSObject.Properties['revive'] -and $def.PSObject.Properties['revive'] -and
@@ -1243,6 +1284,7 @@ $script:crMixLockState = @{
 $script:crSwitching = $false         # 카테고리 전환에 의한 커스텀 라디오 폴백/복원 중 가드 (enabled 보존)
 $script:customEnabledWish = $false   # 커스텀 반복 '선택 의도' - 던전 외 카테고리에서 라디오가 풀려도 보존 (config enabled 와 동기)
 $script:customProgressReset = $false # 업데이트 이전(Update-ConfigToLatest)에서 진행 기록을 초기화했는지 (시작 로그 안내용)
+$script:gatherWaitReset = 0          # '진행 없음' 설정을 기본값으로 되돌렸으면 '되돌리기 전 값' (의미 변경 안내용)
 $script:configMigrationError = $null # 설정 자동 이전 실패 원인 (실패와 '이전 불필요'를 구분해 시작 로그에 표시)
 $script:acrLockUpdating = $false     # 어비스 커스텀 방식·매칭 잠금 적용 중 재진입 가드 (라디오 Checked 변경 → 패널 갱신 → 재호출 방지)
 $script:acrLockOn = $false           # 어비스 방식·매칭이 리스트 값으로 잠겨 있는지 (비활성 라디오 툴팁 판정용)
@@ -2562,6 +2604,7 @@ $lblCrCoinTotal.Text = '바퀴당 은동전 0개'
 $lblCrCoinTotal.Location = New-Object System.Drawing.Point(293, 5)
 $lblCrCoinTotal.Size = New-Object System.Drawing.Size(119, 20)
 $lblCrCoinTotal.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$lblCrCoinTotal.AutoEllipsis = $true   # 항목이 많아 합계가 길어져도 두 줄로 깨지지 않게 (2026-08-08)
 $lblCrCoinTotal.ForeColor = [System.Drawing.Color]::SteelBlue
 $pnlCrRepeat.Controls.Add($lblCrCoinTotal)
 
@@ -2750,13 +2793,22 @@ $script:cellEditCombo.Add_DropDownClosed({
 $cellEditMouseUp = {
   param($clickSender, $clickArgs)
   if ($clickArgs.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
-  if ($script:crLoading -or $script:running) { return }
+  # customViewShuffled 도 막습니다: 랜덤 표시 중에는 화면 행 순서와 Get-*ItemsFromList 의
+  # 반환 순서(Tag = 등록 순서)가 서로 다른 좌표계라, HitTest 로 얻은 화면 인덱스로 읽고
+  # 쓰면 A 행을 읽어 B 행에 씁니다. 지금은 셔플이 실행 중에만 켜져 running 가드에 가려
+  # 도달하지 않지만, 로직이 옳아서가 아니라 가려져 있을 뿐이라 명시적으로 닫습니다
+  # (한 줄로 4리스트 전부 봉인 - 리스트별 비대칭 금지)
+  if ($script:crLoading -or $script:running -or $script:customViewShuffled) { return }
   if (-not $clickSender.Enabled -or -not $clickSender.Visible) { return }
   $cellHit = $clickSender.HitTest($clickArgs.X, $clickArgs.Y)
   if (-not $cellHit.Item -or -not $cellHit.SubItem) { return }
   $cellColumn = $cellHit.Item.SubItems.IndexOf($cellHit.SubItem)
   if ($cellColumn -lt 2) { return }   # 체크박스/# 열은 편집 대상 아님
   $cellRow = $cellHit.Item.Index
+  # 리스트마다 **명시 분기**입니다. 예전에는 마지막이 조건 없는 어비스 폴백(`} else {`)이라
+  # 새 리스트를 연결하는 순간 그 클릭이 어비스 계획을 타 엉뚱한 옵션이 떴습니다
+  # (2026-08-08 생활 리스트 추가하며 발견). 마지막 else 는 return 으로 닫아 5번째 리스트가
+  # 생겨도 같은 사고가 반복되지 않게 합니다.
   if ($clickSender -eq $lvCrList) {
     $cellItems = @(Get-CustomItemsFromList)
     if ($cellRow -ge $cellItems.Count) { return }
@@ -2765,10 +2817,16 @@ $cellEditMouseUp = {
     $cellItems = @(Get-DeepCustomItemsFromList)
     if ($cellRow -ge $cellItems.Count) { return }
     $cellPlan = Get-DcrCellEditPlan -ColumnIndex $cellColumn -Item $cellItems[$cellRow]
-  } else {
+  } elseif ($clickSender -eq $lvLcrList) {
+    $cellItems = @(Get-LifeCustomItemsFromList)
+    if ($cellRow -ge $cellItems.Count) { return }
+    $cellPlan = Get-LcrCellEditPlan -ColumnIndex $cellColumn -Item $cellItems[$cellRow]
+  } elseif ($clickSender -eq $lvAcrList) {
     $cellItems = @(Get-AbyssCustomItemsFromList)
     if ($cellRow -ge $cellItems.Count) { return }
     $cellPlan = Get-AcrCellEditPlan -ColumnIndex $cellColumn -Item $cellItems[$cellRow]
+  } else {
+    return   # 알 수 없는 리스트는 조용히 무시 (어비스 폴백 금지)
   }
   if (-not $cellPlan) { return }
   Show-CellEditCombo -ListView $clickSender -RowIndex $cellRow -ColumnIndex $cellColumn `
@@ -3232,6 +3290,7 @@ $lblDcrTributeTotal.Text = '바퀴당 마족공물 0개'
 $lblDcrTributeTotal.Location = New-Object System.Drawing.Point(293, 5)
 $lblDcrTributeTotal.Size = New-Object System.Drawing.Size(119, 20)
 $lblDcrTributeTotal.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$lblDcrTributeTotal.AutoEllipsis = $true   # 위와 같은 이유 (2026-08-08)
 $lblDcrTributeTotal.ForeColor = [System.Drawing.Color]::SteelBlue
 $pnlDcrRepeat.Controls.Add($lblDcrTributeTotal)
 
@@ -3253,7 +3312,245 @@ $btnDcrReset.Add_Click({
   })
 
 # ============================================================
-#  생활 카테고리 UI (v2.0.0 - 2026-08-05 시안 확정. GUI 단계만 - 워커 미구현이라 시작은 차단)
+#  '생활(채집) + 커스텀 반복' 목록/설정 화면 (v2.0.0 - 2026-08-08 시안 확정)
+#  입력은 위쪽 생활 슬라이더(채집 스킬/대상)를 그대로 씁니다 - 커스텀에서는 슬라이더가
+#  '담을 항목 고르기'용이 되고, 실제 실행 순서는 아래 리스트가 결정합니다.
+#  던전 커스텀과 다른 점: **항목마다 반복 횟수**가 있고, 층 전환 규칙·완료 마커가 없습니다
+#  (생활 사이클은 종료 코드 0 하나로 완료가 확정돼 마무리 복구 개념이 없습니다).
+# ============================================================
+# 반복 횟수 줄: 슬라이더 아래 독립 줄 (담기 전에 정하고 [추가] - 전투 커스텀과 같은 흐름)
+$pnlLcrInput = New-Object System.Windows.Forms.Panel
+$pnlLcrInput.Location = New-Object System.Drawing.Point(15, 150)
+$pnlLcrInput.Size = New-Object System.Drawing.Size(494, 26)
+$pnlLcrInput.Visible = $false
+$grpContentDetail.Controls.Add($pnlLcrInput)
+
+$lblLcrCount = New-Object System.Windows.Forms.Label
+$lblLcrCount.Text = '반복 횟수'
+$lblLcrCount.Location = New-Object System.Drawing.Point(0, 5)
+$lblLcrCount.Size = New-Object System.Drawing.Size(62, 20)
+$pnlLcrInput.Controls.Add($lblLcrCount)
+
+$numLcrCount = New-Object System.Windows.Forms.NumericUpDown
+$numLcrCount.Location = New-Object System.Drawing.Point(66, 1)
+$numLcrCount.Size = New-Object System.Drawing.Size(50, 24)
+$numLcrCount.Minimum = 1
+$numLcrCount.Maximum = 99
+$numLcrCount.Value = 1
+$pnlLcrInput.Controls.Add($numLcrCount)
+
+$lblLcrCountUnit = New-Object System.Windows.Forms.Label
+$lblLcrCountUnit.Text = '회  — 위에서 고른 스킬·대상을 이 횟수로 담습니다'
+$lblLcrCountUnit.Location = New-Object System.Drawing.Point(120, 5)
+$lblLcrCountUnit.Size = New-Object System.Drawing.Size(374, 20)
+$lblLcrCountUnit.ForeColor = $script:themeMuted
+$pnlLcrInput.Controls.Add($lblLcrCountUnit)
+
+# 리스트 (표 형태): 체크 / # / 스킬 / 대상 / 횟수 - 치수는 전투 커스텀과 동일 (392x174)
+$lvLcrList = New-Object System.Windows.Forms.ListView
+$lvLcrList.Location = New-Object System.Drawing.Point(15, 180)
+$lvLcrList.Size = New-Object System.Drawing.Size(392, 174)
+$lvLcrList.View = [System.Windows.Forms.View]::Details
+$lvLcrList.GridLines = $true
+$lvLcrList.CheckBoxes = $true
+$lvLcrList.FullRowSelect = $true
+$lvLcrList.MultiSelect = $false
+$lvLcrList.HideSelection = $false
+$lvLcrList.Visible = $false
+[void]$lvLcrList.Columns.Add('', 28)
+[void]$lvLcrList.Columns.Add('#', 32)
+[void]$lvLcrList.Columns.Add('스킬', 96)
+[void]$lvLcrList.Columns.Add('대상', 148)
+[void]$lvLcrList.Columns.Add('횟수', 46)
+$grpContentDetail.Controls.Add($lvLcrList)
+$lvLcrList.Add_MouseUp($cellEditMouseUp)   # 셀 편집 - 생성 직후 연결 (전투 3리스트와 공용 핸들러)
+
+# 0번(체크) 열 머리글 클릭 = 전체 선택/해제 (기존 세 커스텀 리스트와 같은 계약)
+$lvLcrList.Add_ColumnClick({
+    param($lcrClickSender, $lcrClickArgs)
+    if ($script:running) { return }   # 실행 중 전체 토글 금지
+    if ($lcrClickArgs.Column -ne 0 -or $lvLcrList.Items.Count -eq 0) { return }
+    $lcrAllChecked = $true
+    foreach ($lcrRow in $lvLcrList.Items) { if (-not $lcrRow.Checked) { $lcrAllChecked = $false; break } }
+    $lcrNewState = -not $lcrAllChecked
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try { foreach ($lcrRow in $lvLcrList.Items) { $lcrRow.Checked = $lcrNewState } }
+    finally { $script:crLoading = $prevLoading }
+  })
+$lvLcrList.Add_ItemCheck({
+    param($lcrCheckSender, $lcrCheckArgs)
+    if ($script:running) { $lcrCheckArgs.NewValue = $lcrCheckArgs.CurrentValue }   # 실행 중 체크 토글 금지
+  })
+
+$btnLcrAdd = New-Object System.Windows.Forms.Button
+$btnLcrAdd.Text = '추가'
+$btnLcrAdd.Location = New-Object System.Drawing.Point(413, 180)
+$btnLcrAdd.Size = New-Object System.Drawing.Size(94, 30)
+$btnLcrAdd.Visible = $false
+$grpContentDetail.Controls.Add($btnLcrAdd)
+
+$btnLcrDelete = New-Object System.Windows.Forms.Button
+$btnLcrDelete.Text = '삭제(체크)'
+$btnLcrDelete.Location = New-Object System.Drawing.Point(413, 216)
+$btnLcrDelete.Size = New-Object System.Drawing.Size(94, 30)
+$btnLcrDelete.Visible = $false
+$grpContentDetail.Controls.Add($btnLcrDelete)
+
+$btnLcrUp = New-Object System.Windows.Forms.Button
+$btnLcrUp.Text = '↑ 위로'
+$btnLcrUp.Location = New-Object System.Drawing.Point(413, 252)
+$btnLcrUp.Size = New-Object System.Drawing.Size(94, 30)
+$btnLcrUp.Visible = $false
+$grpContentDetail.Controls.Add($btnLcrUp)
+
+$btnLcrDown = New-Object System.Windows.Forms.Button
+$btnLcrDown.Text = '↓ 아래로'
+$btnLcrDown.Location = New-Object System.Drawing.Point(413, 288)
+$btnLcrDown.Size = New-Object System.Drawing.Size(94, 30)
+$btnLcrDown.Visible = $false
+$grpContentDetail.Controls.Add($btnLcrDown)
+
+# 랜덤 진행 토글 (생활은 층 혼합 개념이 없어 항상 사용 가능 - 잠금 게이트 없음)
+$chkLcrRandom = New-Object System.Windows.Forms.CheckBox
+$chkLcrRandom.Appearance = 'Button'
+$chkLcrRandom.Text = '랜덤'
+$chkLcrRandom.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$chkLcrRandom.Location = New-Object System.Drawing.Point(413, 324)
+$chkLcrRandom.Size = New-Object System.Drawing.Size(94, 30)
+$chkLcrRandom.FlatStyle = 'Flat'
+$chkLcrRandom.FlatAppearance.BorderColor = $script:themeBorder
+$chkLcrRandom.FlatAppearance.BorderSize = 1
+$chkLcrRandom.UseVisualStyleBackColor = $false
+$chkLcrRandom.BackColor = $script:themeControl
+$chkLcrRandom.Visible = $false
+$grpContentDetail.Controls.Add($chkLcrRandom)
+$chkLcrRandom.Add_CheckedChanged({
+    Update-CustomRandomToggleStyle -Toggle $chkLcrRandom
+    if ($script:uiReady -and -not $script:crLoading) {
+      Save-CustomRandomOrder -SectionName 'lifeCustomRepeat' -Enabled ([bool]$chkLcrRandom.Checked)
+    }
+  })
+
+$btnLcrAdd.Add_Click({
+    # 담을 항목은 위쪽 슬라이더의 현재 선택입니다 (가공 화면에서는 이 버튼이 보이지 않음)
+    $lcrSkill = $script:lifeSkills[$script:lifeSkillIndex]
+    $lcrTargets = @($lcrSkill.Targets)
+    if ($script:lifeTargetIndex -ge $lcrTargets.Count) { return }
+    $lcrTargetName = [string]$lcrTargets[$script:lifeTargetIndex]
+    if ([string]::IsNullOrWhiteSpace($lcrTargetName)) { return }
+    # 미지원 스킬(낚시)은 담기 자체를 막습니다 - 리스트에 들어가면 그 항목 차례에 반드시
+    # 멈추므로 담는 시점에 알려 주는 편이 낫습니다. 사용자가 [추가]를 누른 직후에만 뜰 수
+    # 있는 즉답 팝업이라 무인 운용을 막지 않습니다 (GUI 팝업 금지 규칙의 명시적 예외)
+    if ($script:lifeSupportedSkillIds -notcontains [string]$lcrSkill.Id) {
+      $lcrBlockText = ("'{0}'은(는) 아직 지원하지 않습니다.`n`n" -f [string]$lcrSkill.Name) +
+        '지원하는 채집 스킬로만 리스트를 구성해 주세요.'
+      Add-GuiLog ("[안내] 생활 커스텀 추가 차단: '{0}'은(는) 아직 지원하지 않습니다." -f [string]$lcrSkill.Name)
+      [System.Windows.Forms.MessageBox]::Show($lcrBlockText, '생활 커스텀 반복 - 추가 불가',
+        [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+      return
+    }
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try {
+      Add-LifeCustomListRow -Skill ([string]$lcrSkill.Id) -Target $lcrTargetName -Count ([int]$numLcrCount.Value)
+      Update-LifeCustomListNumbers
+    } finally { $script:crLoading = $prevLoading }
+    if ($script:uiReady) { Save-LifeCustomRepeatToConfig }
+  })
+
+$btnLcrDelete.Add_Click({
+    $lcrCheckedRows = @()
+    foreach ($lcrRow in $lvLcrList.Items) { if ($lcrRow.Checked) { $lcrCheckedRows += $lcrRow } }
+    if ($lcrCheckedRows.Count -eq 0) {
+      Add-GuiLog '[안내] 삭제할 항목의 앞 체크박스를 켠 뒤 [삭제(체크)]를 눌러 주세요. (첫 열 머리글 클릭 = 전체 선택/해제)'
+      return
+    }
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try {
+      foreach ($lcrRow in $lcrCheckedRows) { $lvLcrList.Items.Remove($lcrRow) }
+      Update-LifeCustomListNumbers
+    } finally { $script:crLoading = $prevLoading }
+    if ($script:uiReady) { Save-LifeCustomRepeatToConfig }
+  })
+
+$btnLcrUp.Add_Click({ Move-LifeCustomListRow -Delta (-1) })
+$btnLcrDown.Add_Click({ Move-LifeCustomListRow -Delta 1 })
+
+# 하단 줄: 리스트 반복 (무한 / 횟수 N바퀴) + 채집 횟수 합계 + 진행 초기화
+$pnlLcrRepeat = New-Object System.Windows.Forms.Panel
+$pnlLcrRepeat.Location = New-Object System.Drawing.Point(15, 360)
+$pnlLcrRepeat.Size = New-Object System.Drawing.Size(494, 28)
+$pnlLcrRepeat.Visible = $false
+$grpContentDetail.Controls.Add($pnlLcrRepeat)
+
+$lblLcrRepeat = New-Object System.Windows.Forms.Label
+$lblLcrRepeat.Text = '리스트 반복:'
+$lblLcrRepeat.Location = New-Object System.Drawing.Point(0, 5)
+$lblLcrRepeat.Size = New-Object System.Drawing.Size(80, 20)
+$pnlLcrRepeat.Controls.Add($lblLcrRepeat)
+
+$rbLcrInfinite = New-Object System.Windows.Forms.RadioButton
+$rbLcrInfinite.Text = '무한'
+$rbLcrInfinite.Location = New-Object System.Drawing.Point(85, 2)
+$rbLcrInfinite.Size = New-Object System.Drawing.Size(55, 22)
+$rbLcrInfinite.Checked = $true
+$pnlLcrRepeat.Controls.Add($rbLcrInfinite)
+
+$rbLcrCount = New-Object System.Windows.Forms.RadioButton
+$rbLcrCount.Text = '횟수:'
+$rbLcrCount.Location = New-Object System.Drawing.Point(145, 2)
+$rbLcrCount.Size = New-Object System.Drawing.Size(60, 22)
+$pnlLcrRepeat.Controls.Add($rbLcrCount)
+
+$numLcrLaps = New-Object System.Windows.Forms.NumericUpDown
+$numLcrLaps.Location = New-Object System.Drawing.Point(205, 0)
+$numLcrLaps.Size = New-Object System.Drawing.Size(50, 24)
+$numLcrLaps.Minimum = 1
+$numLcrLaps.Maximum = 999
+$numLcrLaps.Value = 1
+$numLcrLaps.Enabled = $false   # '횟수' 라디오를 골랐을 때만 활성
+$pnlLcrRepeat.Controls.Add($numLcrLaps)
+
+$lblLcrLaps = New-Object System.Windows.Forms.Label
+$lblLcrLaps.Text = '바퀴'
+$lblLcrLaps.Location = New-Object System.Drawing.Point(258, 5)
+$lblLcrLaps.Size = New-Object System.Drawing.Size(35, 20)
+$pnlLcrRepeat.Controls.Add($lblLcrLaps)
+
+# 리스트 1바퀴에 실제로 도는 채집 횟수 (항목 횟수의 합 - 은동전 합계 자리를 그대로 씁니다)
+$lblLcrCycleTotal = New-Object System.Windows.Forms.Label
+$lblLcrCycleTotal.Text = '바퀴당 0회'
+$lblLcrCycleTotal.Location = New-Object System.Drawing.Point(293, 5)
+$lblLcrCycleTotal.Size = New-Object System.Drawing.Size(119, 20)
+$lblLcrCycleTotal.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+# WinForms Label 은 폭을 넘기면 **줄바꿈**이 기본이라, 높이 20 짜리 한 줄 라벨에서는 둘째
+# 줄이 잘려 글자가 겹쳐 보입니다 (2026-08-08 실기 제보). AutoEllipsis 를 켜면 넘쳐도
+# 한 줄 + '…' 로 끝나 이 깨짐이 원천 차단됩니다 (렌더링 실측 확인).
+$lblLcrCycleTotal.AutoEllipsis = $true
+$lblLcrCycleTotal.ForeColor = [System.Drawing.Color]::SteelBlue
+$pnlLcrRepeat.Controls.Add($lblLcrCycleTotal)
+
+$btnLcrReset = New-Object System.Windows.Forms.Button
+$btnLcrReset.Text = '진행 초기화'
+$btnLcrReset.Location = New-Object System.Drawing.Point(414, 0)
+$btnLcrReset.Size = New-Object System.Drawing.Size(80, 26)
+$pnlLcrRepeat.Controls.Add($btnLcrReset)
+
+# 커스텀 설정 변경 = 즉시 저장 (기존 세 커스텀과 동일 패턴 - 로딩 중 가드)
+$rbLcrCount.Add_CheckedChanged({
+    $numLcrLaps.Enabled = $rbLcrCount.Checked
+    if ($script:uiReady -and -not $script:crLoading) { Save-LifeCustomRepeatToConfig }
+  })
+$numLcrLaps.Add_ValueChanged({ if ($script:uiReady -and -not $script:crLoading) { Save-LifeCustomRepeatToConfig } })
+$btnLcrReset.Add_Click({
+    Reset-CustomProgress -SectionName 'lifeCustomRepeat' `
+      -LogMessage '[안내] 생활 커스텀 반복 진행 기록을 초기화했습니다 - 다음 시작은 리스트 처음(1바퀴째 1번)부터입니다.'
+  })
+
+# ============================================================
+#  생활 카테고리 UI (v2.0.0 - 2026-08-05 시안 확정. 워커는 낚시 외 채집 8종 지원 - 2026-08-07)
 # ============================================================
 # 채집 스킬 9종 + 스킬별 채집 대상 (나무위키 '마비노기 모바일/생활 스킬' 실측 데이터.
 # Id 는 config 저장용 안정 식별자, Name 은 표시명. 대상은 게임 용어 그대로 저장 - Codex 합의)
@@ -3351,6 +3648,10 @@ $script:lifeSkillIndex = 0
 $script:lifeSkillPage = 0
 $script:lifeTargetIndex = 0
 $script:lifeTargetPage = 0
+# 자동화가 지원하는 채집 스킬 (워커 $lifeSkillMenuTable 과 1:1). 시작 게이트와 '적용된 설정'
+# 안내가 같은 목록을 봐야 하므로 script 스코프에 한 번만 둡니다 (2026-08-08 - 함수 지역
+# 변수였을 때 팝업 쪽에서 못 읽어 낚시도 지원되는 것처럼 보였습니다)
+$script:lifeSupportedSkillIds = @('daily', 'wood', 'mining', 'herb', 'wool', 'harvest', 'hoe', 'insect')
 $script:lifeCardFontNormal = New-Object System.Drawing.Font('Segoe UI', 9)
 $script:lifeCardFontBold = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
 $script:lifeCardSelectedBack = [System.Drawing.Color]::FromArgb(250, 240, 218)   # 선택 카드 배경 (확정 시안 #FAF0DA - 안전 중지 버튼과 동일 계열)
@@ -3488,54 +3789,11 @@ $lblLifeTargetDots.Size = New-Object System.Drawing.Size(484, 14)
 $lblLifeTargetDots.Visible = $false
 $grpContentDetail.Controls.Add($lblLifeTargetDots)
 
-# 상세 설정 - 채집: 소진 처리 2줄 (항목/기본값은 채집 흐름 실측 후 확정 - 요청사항.md)
-$lblLifeBag = New-Object System.Windows.Forms.Label
-$lblLifeBag.Text = '가방 가득 시:'
-$lblLifeBag.Location = New-Object System.Drawing.Point(15, 215)
-$lblLifeBag.Size = New-Object System.Drawing.Size(90, 20)
-$lblLifeBag.Visible = $false
-$grpContentDetail.Controls.Add($lblLifeBag)
-
-$pnlLifeBag = New-Object System.Windows.Forms.Panel
-$pnlLifeBag.Location = New-Object System.Drawing.Point(110, 212)
-$pnlLifeBag.Size = New-Object System.Drawing.Size(260, 24)
-$pnlLifeBag.Visible = $false
-$grpContentDetail.Controls.Add($pnlLifeBag)
-$rbLifeBagStop = New-Object System.Windows.Forms.RadioButton
-$rbLifeBagStop.Text = '멈춤'
-$rbLifeBagStop.Location = New-Object System.Drawing.Point(0, 0)
-$rbLifeBagStop.Size = New-Object System.Drawing.Size(60, 22)
-$rbLifeBagStop.Checked = $true
-$pnlLifeBag.Controls.Add($rbLifeBagStop)
-$rbLifeBagGo = New-Object System.Windows.Forms.RadioButton
-$rbLifeBagGo.Text = '계속 진행'
-$rbLifeBagGo.Location = New-Object System.Drawing.Point(70, 0)
-$rbLifeBagGo.Size = New-Object System.Drawing.Size(90, 22)
-$pnlLifeBag.Controls.Add($rbLifeBagGo)
-
-$lblLifeTool = New-Object System.Windows.Forms.Label
-$lblLifeTool.Text = '도구 내구도 소진 시:'
-$lblLifeTool.Location = New-Object System.Drawing.Point(15, 241)
-$lblLifeTool.Size = New-Object System.Drawing.Size(125, 20)
-$lblLifeTool.Visible = $false
-$grpContentDetail.Controls.Add($lblLifeTool)
-
-$pnlLifeTool = New-Object System.Windows.Forms.Panel
-$pnlLifeTool.Location = New-Object System.Drawing.Point(145, 238)
-$pnlLifeTool.Size = New-Object System.Drawing.Size(260, 24)
-$pnlLifeTool.Visible = $false
-$grpContentDetail.Controls.Add($pnlLifeTool)
-$rbLifeToolStop = New-Object System.Windows.Forms.RadioButton
-$rbLifeToolStop.Text = '멈춤'
-$rbLifeToolStop.Location = New-Object System.Drawing.Point(0, 0)
-$rbLifeToolStop.Size = New-Object System.Drawing.Size(60, 22)
-$rbLifeToolStop.Checked = $true
-$pnlLifeTool.Controls.Add($rbLifeToolStop)
-$rbLifeToolGo = New-Object System.Windows.Forms.RadioButton
-$rbLifeToolGo.Text = '계속 진행'
-$rbLifeToolGo.Location = New-Object System.Drawing.Point(70, 0)
-$rbLifeToolGo.Size = New-Object System.Drawing.Size(90, 22)
-$pnlLifeTool.Controls.Add($rbLifeToolGo)
+# '가방 가득 시' / '도구 내구도 소진 시' 옵션은 제거했습니다 (2026-08-08 사용자 판단).
+# 두 상황 모두 **게임이 스스로 채집을 멈춥니다**. 그러면 자동화도 진행이 없어 정지하므로
+# '계속 진행'이라는 선택지가 성립하지 않았습니다 - 고를 수 있게 두면 동작하는 것처럼
+# 오해만 됩니다 (워커는 이 값을 읽은 적이 없음). 준비물 부족 '감지'는 옵션이 아니라
+# 안내이므로 그대로 둡니다 (필요한 아이템 이름을 로그에 남기고 즉시 정지).
 
 # 상세 설정 - 가공: 1차는 안내만 (높이는 채집과 같은 268 유지 - 전환 시 폼 흔들림 방지, Codex 조건)
 $lblLifeProcessInfo = New-Object System.Windows.Forms.Label
@@ -3560,10 +3818,13 @@ function Update-LifeSliders {
   if ($script:lifeTargetIndex -ge @($lifeTargets).Count) { $script:lifeTargetIndex = 0 }
   if ($script:lifeTargetPage -ge $lifeTargetPages) { $script:lifeTargetPage = $lifeTargetPages - 1 }
   if ($script:lifeTargetPage -lt 0) { $script:lifeTargetPage = 0 }
+  # 커스텀 반복 화면에서는 카드 높이가 26 이라 아이콘이 들어갈 자리가 없습니다 - 글자만
+  # 남깁니다 (아이콘 9종은 일반 생활 모드 그대로. 시안 확정 - 2026-08-08)
+  $lifeIconsOff = ($script:mainCategory -eq 'life') -and $rbLifeGather.Checked -and $rbCustomRepeat.Checked
   # 렌더 공통 (카드 배열 / 항목 이름 배열 / 페이지 / 선택 인덱스)
   $lifeSliderSets = @(
     @{ Cards = $script:lifeSkillCards; Names = @($script:lifeSkills | ForEach-Object { [string]$_.Name })
-       Icons = @($script:lifeSkills | ForEach-Object { $script:lifeSkillIcons[[string]$_.Id] })
+       Icons = $(if ($lifeIconsOff) { $null } else { @($script:lifeSkills | ForEach-Object { $script:lifeSkillIcons[[string]$_.Id] }) })
        Page = $script:lifeSkillPage; Pages = $lifeSkillPages; Selected = $script:lifeSkillIndex
        Dots = $lblLifeSkillDots; Prev = $btnLifeSkillPrev; Next = $btnLifeSkillNext }
     @{ Cards = $script:lifeTargetCards; Names = @($lifeTargets | ForEach-Object { [string]$_ })
@@ -3815,17 +4076,37 @@ function Set-MainCategory {
 }
 
 function Test-LifeStartBlocked {
-  # 생활 대분류에서 시작 시도 차단 (워커 미구현 - GUI 단계). 팝업은 GUI 팝업 금지 규칙의
-  # 허용 예외 ② (사용자 버튼 클릭 즉답 - F9 도 PerformClick 경유라 같은 경로).
+  # 생활 대분류 시작 게이트 (v2.0.0): 낚시를 제외한 채집 8종만 시작 허용
+  # (2026-08-07 양털 깎기·추수·호미질·곤충 채집 추가 - 전 대상 전수 배치 검증 완료).
+  # 채집 자동화 자체는 2026-08-05 워커 단독 실기 1사이클 통과로 차단 해제 (Codex 합의 조건).
+  # 가공·미지원 스킬은 워커가 어차피 코드 4로 안내 정지하지만, 시작 전에 즉답 팝업으로
+  # 알려 주는 쪽이 무인 반복 진입을 막습니다. 팝업은 GUI 팝업 금지 규칙의 허용 예외 ②
+  # (사용자 버튼 클릭 즉답 - F9 도 PerformClick 경유라 같은 경로).
   # 승인 비동기 콜백의 우회 시작을 막기 위해 Invoke-StartAutomation 서두에서도 호출 (Codex 조건 D)
   if ($script:mainCategory -ne 'life') { return $false }
-  [System.Windows.Forms.MessageBox]::Show(
-    ("생활 자동화는 아직 개발 중입니다." + [Environment]::NewLine +
-      "현재는 화면 구성만 준비된 상태이며, 채집 자동화가 완성되면 사용할 수 있습니다."),
-    '생활 자동화 준비 중',
-    [System.Windows.Forms.MessageBoxButtons]::OK,
-    [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-  return $true
+  if ($rbLifeProcess.Checked) {
+    [System.Windows.Forms.MessageBox]::Show(
+      '가공 자동화는 아직 개발 중입니다. 현재는 채집만 사용할 수 있습니다.',
+      '가공 준비 중',
+      [System.Windows.Forms.MessageBoxButtons]::OK,
+      [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+    return $true
+  }
+  # 커스텀 반복에서는 슬라이더가 '담기용'이라 실제 실행 대상이 아닙니다 - 리스트가 결정하므로
+  # 슬라이더 선택으로 시작을 막으면 안 됩니다 (리스트에 미지원 스킬이 들어갈 수 없게
+  # [추가] 시점에서 이미 차단합니다. 빈 리스트 검사는 커스텀 시작 게이트 담당 - 2026-08-08)
+  if ($rbCustomRepeat.Checked) { return $false }
+  $selectedLifeSkill = $script:lifeSkills[$script:lifeSkillIndex]
+  if ($script:lifeSupportedSkillIds -notcontains [string]$selectedLifeSkill.Id) {
+    [System.Windows.Forms.MessageBox]::Show(
+      ("'" + [string]$selectedLifeSkill.Name + "' 자동화는 아직 지원하지 않습니다." + [Environment]::NewLine +
+        "현재 지원: 낚시를 제외한 채집 8종"),
+      '채집 스킬 준비 중',
+      [System.Windows.Forms.MessageBoxButtons]::OK,
+      [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+    return $true
+  }
+  return $false
 }
 
 # --- 설정 (on/off) ---
@@ -3884,20 +4165,21 @@ $btnAlwaysOn.Add_Click({
     # 생활 대분류: 전투 체크박스 대신 생활 설정만 표시 (Codex 조건 G.
     # 가공 선택 중에는 채집 전용 항목을 생략해 화면 상태와 일치 - Codex 권고)
     if ($script:mainCategory -eq 'life') {
+      # '준비 중' 안내는 **아직 지원하지 않는 것에만** 붙입니다 (2026-08-08 사용자 지시).
+      # 채집 8종은 전 대상 실기 검증까지 끝났는데 머리글이 계속 '준비 중'이라 사실과 달랐습니다.
       $lifeLines = New-Object System.Collections.Generic.List[string]
-      $lifeLines.Add('[생활 설정] (준비 중 - 자동화 완성 후 적용)')
+      $lifeLines.Add('[생활 설정]')
       if ($rbLifeProcess.Checked) {
-        $lifeLines.Add(' - 콘텐츠: 가공 (추후 지원)')
+        $lifeLines.Add(' - 콘텐츠: 가공 (아직 지원하지 않습니다 - 시작할 수 없음)')
       } else {
         $lifeSkillNow = $script:lifeSkills[$script:lifeSkillIndex]
         $lifeTargetsNow = @($lifeSkillNow.Targets)
         $lifeTargetName = $(if ($script:lifeTargetIndex -lt $lifeTargetsNow.Count) { [string]$lifeTargetsNow[$script:lifeTargetIndex] } else { '' })
         $lifeLines.Add(' - 콘텐츠: 채집')
-        $lifeLines.Add(" - 채집 스킬: $([string]$lifeSkillNow.Name)")
+        $lifeSkillNote = $(if ($script:lifeSupportedSkillIds -contains [string]$lifeSkillNow.Id) { '' } else { ' (아직 지원하지 않습니다 - 시작할 수 없음)' })
+        $lifeLines.Add(" - 채집 스킬: $([string]$lifeSkillNow.Name)$lifeSkillNote")
         $lifeLines.Add(" - 채집 대상: $lifeTargetName")
-        $lifeLines.Add(" - 채집 대기: $([int]$numGatherWait.Value)초")
-        $lifeLines.Add(" - 가방 가득 시: $(if ($rbLifeBagGo.Checked) { '계속 진행' } else { '멈춤' })")
-        $lifeLines.Add(" - 도구 내구도 소진 시: $(if ($rbLifeToolGo.Checked) { '계속 진행' } else { '멈춤' })")
+        $lifeLines.Add(" - 진행 없음 한도: $([int]$numGatherWait.Value)초 (총 시간 제한 아님)")
       }
       [System.Windows.Forms.MessageBox]::Show(($lifeLines -join "`n"), '적용된 설정',
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
@@ -3993,10 +4275,11 @@ $lblClearHuman.ForeColor = [System.Drawing.Color]::SteelBlue
 $grpSettings.Controls.Add($lblClearHuman)
 
 # 생활(채집) 전용: '채집 대기(초)' 줄 - 전투의 체크박스/클리어 대기 줄과 교대 표시
-# (updateCategoryPanels 가 mainCategory 에 따라 Visible 전환. 기본값 120초는 임시 -
-# 채집 흐름 실측 후 확정, 요청사항.md)
+# (updateCategoryPanels 가 mainCategory 에 따라 Visible 전환)
+# 의미는 '총 시간'이 아니라 **진행이 멈춘 채로 견디는 시간**입니다 (2026-08-08 설계 변경 -
+# 총 시간으로 재면 대상별 소요(실측 100~520초)를 사용자가 미리 알아야 숫자를 정할 수 있음).
 $lblGatherWait = New-Object System.Windows.Forms.Label
-$lblGatherWait.Text = '채집 대기(초):'
+$lblGatherWait.Text = '진행 없음(초):'
 $lblGatherWait.Location = New-Object System.Drawing.Point(15, 28)
 $lblGatherWait.Size = New-Object System.Drawing.Size(95, 20)
 $lblGatherWait.Visible = $false
@@ -4005,11 +4288,16 @@ $grpSettings.Controls.Add($lblGatherWait)
 $numGatherWait = New-Object System.Windows.Forms.NumericUpDown
 $numGatherWait.Location = New-Object System.Drawing.Point(112, 25)
 $numGatherWait.Size = New-Object System.Drawing.Size(65, 24)
-$numGatherWait.Minimum = 10
+$numGatherWait.Minimum = 60
 $numGatherWait.Maximum = 3600
-$numGatherWait.Value = 120
+$numGatherWait.Value = 600
 $numGatherWait.Visible = $false
 $grpSettings.Controls.Add($numGatherWait)
+$toolTip.SetToolTip($numGatherWait, ("채집 수량이 늘지 않은 채로 이 시간이 지나면 멈춥니다." + [Environment]::NewLine +
+    "수량이 오르는 동안은 오래 걸려도 자르지 않습니다 (총 시간 제한이 아닙니다)." + [Environment]::NewLine +
+    "이동이 아주 먼 대상에서 멈추면 늘려 주세요. 기본 600초 권장."))
+$toolTip.SetToolTip($lblGatherWait, ("채집 수량이 늘지 않은 채로 이 시간이 지나면 멈춥니다." + [Environment]::NewLine +
+    "수량이 오르는 동안은 오래 걸려도 자르지 않습니다 (총 시간 제한이 아닙니다)."))
 
 $lblGatherHuman = New-Object System.Windows.Forms.Label
 $lblGatherHuman.Location = New-Object System.Drawing.Point(185, 28)
@@ -4363,6 +4651,20 @@ function Format-CustomItemToken {
   # 어비스 항목 → "A|party|어려움|허상의 정박지|우연한 만남" 5조각.
   # 완료 마커 소유자·진행 지문·워커 환경변수가 모두 이 단일 토큰을 사용합니다.
   param($Item)
+  # 생활(채집) 항목 → "L|daily|사과 나무|3" 4조각 (skill 은 config 저장용 Id, count 는 반복 횟수).
+  # 던전/어비스보다 먼저 판정합니다 - 생활 항목에는 stage/dungeon 이 없어 아래 분기가
+  # 전부 빈 문자열 토큰을 만들어 서로 다른 항목이 같은 지문을 갖게 됩니다
+  $isLifeItem = $false
+  try {
+    $isLifeItem = (([string]$Item.kind -eq 'life') -or $null -ne $Item.PSObject.Properties['skill'])
+  } catch { }
+  if ($isLifeItem) {
+    $lifeCount = 1
+    try { $lifeCount = [int]$Item.count } catch { $lifeCount = 1 }
+    if ($lifeCount -lt 1) { $lifeCount = 1 }
+    if ($lifeCount -gt 99) { $lifeCount = 99 }
+    return ('L|{0}|{1}|{2}' -f [string]$Item.skill, [string]$Item.target, $lifeCount)
+  }
   $isAbyssItem = $false
   try {
     $isAbyssItem = (([string]$Item.kind -eq 'abyss') -or $null -ne $Item.PSObject.Properties['dungeon'])
@@ -4635,7 +4937,11 @@ function Update-CustomRepeatMixLock {
     $RbInfinite.Enabled = $false
     $NumLaps.Enabled = $false
     $mixState.Locked = $true
-    Add-GuiLog "[안내] 층이 섞인 혼합 리스트라 반복을 '횟수 1바퀴'로 고정합니다 (마지막→첫 항목 순환이 게임에서 불가능)."
+    # 생활 대분류에서는 커스텀 리스트 안내를 표시하지 않습니다 (잠금 상태 관리는 전투 복귀
+    # 대비로 그대로 - 2026-08-06 00:06 실기 제보: 생활 시작 중 이 안내가 떠 혼란)
+    if ($script:mainCategory -ne 'life') {
+      Add-GuiLog "[안내] 층이 섞인 혼합 리스트라 반복을 '횟수 1바퀴'로 고정합니다 (마지막→첫 항목 순환이 게임에서 불가능)."
+    }
   } elseif ((-not $mixLockNeeded) -and $mixWasLocked) {
     $prevLoading = $script:crLoading
     $script:crLoading = $true
@@ -4650,7 +4956,9 @@ function Update-CustomRepeatMixLock {
     $RbInfinite.Enabled = $true
     $NumLaps.Enabled = [bool]$RbCount.Checked   # 기존 규칙 복원: '횟수' 선택 시만 활성
     $mixState.Locked = $false
-    Add-GuiLog '[안내] 혼합 리스트가 해소돼 반복 방식 잠금을 풀고 이전 반복 설정을 복원했습니다.'
+    if ($script:mainCategory -ne 'life') {
+      Add-GuiLog '[안내] 혼합 리스트가 해소돼 반복 방식 잠금을 풀고 이전 반복 설정을 복원했습니다.'
+    }
   }
 }
 
@@ -4723,6 +5031,10 @@ function Show-CellEditCombo {
   $ListView.Controls.Add($script:cellEditCombo)
   $script:cellEditCombo.SetBounds($cellBounds.X, $cellBounds.Y, [Math]::Max($cellBounds.Width, 48), $cellBounds.Height)
   $script:cellEditCombo.DropDownWidth = [Math]::Max($cellBounds.Width, 170)   # '함께하기 · 파티(파티장)' 등 긴 문구 대응
+  # 기본 8줄이면 생활 횟수(99개)·약초 대상(16개)·어비스 함께 난이도(14개)가 전부 스크롤에
+  # 갇힙니다. 상한 16 = 가장 긴 대상 목록(약초)이 딱 들어오는 값이며, 그 이상은 드롭다운이
+  # 패널을 덮어 오히려 답답합니다(20줄로 실기해 보고 낮춤 - 2026-08-08). 짧은 목록은 그대로
+  $script:cellEditCombo.MaxDropDownItems = [Math]::Max(8, [Math]::Min(16, @($Options).Count))
   $script:cellEditCombo.Items.Clear()
   foreach ($comboOption in $Options) { [void]$script:cellEditCombo.Items.Add($comboOption) }
   $script:cellEditCombo.SelectedItem = $Current
@@ -4733,15 +5045,30 @@ function Show-CellEditCombo {
   $script:cellEditCombo.Visible = $true
   $script:cellEditCombo.BringToFront()
   [void]$script:cellEditCombo.Focus()
-  # Visible/Focus 가 자리잡은 뒤 드롭다운을 여는 편이 안정적. 예약 시점 세션을 캡처해
-  # 그 사이 상태가 바뀌었으면(다른 편집 시작/숨김/실행 시작) 열지 않습니다 (Codex 지적).
+  # Visible/Focus 가 자리잡은 뒤 드롭다운을 여는 편이 안정적. 예약 시점 세션을 지역 변수로
+  # 캡처해, 그 사이 상태가 바뀌었으면(다른 편집 시작/숨김/실행 시작) 열지 않습니다.
+  #
+  # 검사 자체는 반드시 **함수 안에서** 해야 합니다 (2026-08-08 실측 수정):
+  # PS 5.1 의 GetNewClosure() 는 새 동적 모듈을 만들고 **지역 변수만** 복사하므로,
+  # 함수 안에서 만든 클로저에서는 $script: 변수가 그 빈 모듈을 가리켜 전부 $null 로 읽힙니다.
+  # 그래서 예전 코드의 `[int]$script:cellEditSession -ne $openSession` 은 항상
+  # `0 -ne N` = 참이 되어 **드롭다운이 한 번도 열린 적이 없었습니다**(셀을 눌러도 콤보만
+  # 뜨고 목록이 안 펼쳐짐). 함수 호출은 실제 스크립트 스코프에서 실행되므로 안전합니다
+  # - 바로 위 Add_SelectionChangeCommitted 가 Invoke-CellEditApply 를 부르는 것과 같은 패턴.
   $openSession = [int]$script:cellEditSession
   $null = $script:cellEditCombo.BeginInvoke([Action] ({
-        if ([int]$script:cellEditSession -ne $openSession) { return }
-        if (-not $script:cellEditCombo.Visible -or -not $script:cellEditCombo.Parent) { return }
-        if ($script:running) { return }
-        $script:cellEditCombo.DroppedDown = $true
+        Open-CellEditDropDown -ExpectedSession $openSession
       }.GetNewClosure()))
+}
+
+function Open-CellEditDropDown {
+  # 예약된 드롭다운 펼침의 실행부. $script: 상태를 '지금' 다시 읽어야 하므로 클로저가 아니라
+  # 함수로 둡니다 (위 Show-CellEditCombo 주석의 GetNewClosure 함정 참고).
+  param([int]$ExpectedSession)
+  if ([int]$script:cellEditSession -ne $ExpectedSession) { return }
+  if (-not $script:cellEditCombo.Visible -or -not $script:cellEditCombo.Parent) { return }
+  if ($script:running) { return }
+  $script:cellEditCombo.DroppedDown = $true
 }
 
 function Invoke-CellEditApply {
@@ -4756,12 +5083,19 @@ function Invoke-CellEditApply {
   $script:cellEditContext = $null
   $applyList = $applyContext.List
   if ($applyContext.RowIndex -lt 0 -or $applyContext.RowIndex -ge $applyList.Items.Count) { return }
+  # 위 $cellEditMouseUp 의 분기와 **반드시 쌍으로** 유지합니다. 한쪽만 고치면 '클릭은 생활
+  # 옵션이 뜨는데 적용은 어비스 리스트를 통째로 바꾸는' 최악 조합이 됩니다
+  # (Invoke-AcrCellEdit 는 대상 리스트를 인자로 받지 않고 $lvAcrList 를 직접 씁니다).
   if ($applyList -eq $lvCrList) {
     Invoke-CrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
   } elseif ($applyList -eq $lvDcrList) {
     Invoke-DcrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
-  } else {
+  } elseif ($applyList -eq $lvLcrList) {
+    Invoke-LcrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
+  } elseif ($applyList -eq $lvAcrList) {
     Invoke-AcrCellEdit -RowIndex $applyContext.RowIndex -ColumnIndex $applyContext.ColumnIndex -Value $applyContext.Value
+  } else {
+    return   # 알 수 없는 리스트는 적용하지 않음 (어비스 폴백 금지)
   }
 }
 
@@ -5392,6 +5726,42 @@ function Invoke-DcrCellEdit {
   }
 }
 
+function Invoke-LcrCellEdit {
+  # 생활 리스트 행 단위 셀 편집 적용 (Invoke-DcrCellEdit 와 같은 골격 - 생활 전용 저장/라벨만 다름).
+  # 롤백에서 부르면 안 되는 것: Update-CustomRepeatMixLock('lcr' 키가 $script:crMixLockState 에
+  # 없어 $null 참조 예외) / Update-CustomRandomMixGate(생활에 없는 stage 의존 + 진행 기록·마커를
+  # 비가역으로 지울 수 있음). 생활이 되돌릴 것은 행 텍스트와 합계 라벨 둘뿐입니다.
+  param([int]$RowIndex, [int]$ColumnIndex, [string]$Value)
+  $editItems = @(Get-LifeCustomItemsFromList)
+  if ($RowIndex -ge $editItems.Count) { return }
+  $beforeItem = $editItems[$RowIndex]
+  $afterItem = Set-LcrItemCellValue -Item $beforeItem -ColumnIndex $ColumnIndex -Value $Value
+  # 비교는 **정규화가 끝난 after 기준**입니다: 스킬만 바꿔도 대상이 함께 폴백되므로
+  # '내가 고른 열'만 비교하면 오판합니다. 같은 스킬을 다시 고르면 3필드가 전부 같아
+  # 여기서 조용히 끝납니다 (불필요한 저장·로그 없음 - 기존 3리스트와 같은 계약)
+  if (([string]$beforeItem.skill -eq [string]$afterItem.skill) -and
+      ([string]$beforeItem.target -eq [string]$afterItem.target) -and
+      ([int]$beforeItem.count -eq [int]$afterItem.count)) { return }
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try { Set-LifeListRowTexts -Row $lvLcrList.Items[$RowIndex] -Item $afterItem } finally { $script:crLoading = $prevLoading }
+  $script:lastCustomSaveOk = $true
+  if ($script:uiReady) { Save-LifeCustomRepeatToConfig }
+  if (-not $script:lastCustomSaveOk) {
+    # 저장 실패: 화면과 config 이 어긋나지 않게 행을 원복하고 합계 라벨도 되돌립니다
+    # (저장 함수 말미의 라벨 갱신이 try/catch 밖이라 실패해도 이미 새 값으로 바뀌어 있음).
+    # 순서는 반드시 행 복원 → 라벨 (라벨이 리스트뷰를 다시 읽으므로 역순이면 무의미)
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    try { Set-LifeListRowTexts -Row $lvLcrList.Items[$RowIndex] -Item $beforeItem } finally { $script:crLoading = $prevLoading }
+    Update-LifeCustomTotalLabel
+    Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
+    return
+  }
+  Add-GuiLog ('[안내] 생활 항목 {0} 수정: {1} → {2}' -f ($RowIndex + 1),
+    (Get-LifeCustomItemLabel -Item $beforeItem), (Get-LifeCustomItemLabel -Item $afterItem))
+}
+
 function Update-DeepTributeTotalLabel {
   # 심층 하단 줄의 마족공물 예산 라벨 갱신 (리스트 편집·리스트 반복 설정 변경·복원 시 호출)
   $totalItems = @(Get-DeepCustomItemsFromList)
@@ -5449,6 +5819,367 @@ function Save-DeepCustomRepeatToConfig {
     Add-GuiLog "[경고] 심층 커스텀 반복 설정 저장 실패: $($_.Exception.Message) - 화면 목록과 저장된 설정이 다를 수 있습니다. 목록을 한 번 더 변경하면 다시 저장을 시도합니다."
   }
   Update-DeepTributeTotalLabel
+}
+
+# ============================================================
+#  생활(채집) 커스텀 반복 - 데이터 계층 (v2.0.0 - 2026-08-08)
+#  던전/어비스/심층과 다른 점 하나: **항목마다 반복 횟수**를 가집니다.
+#  진행 기록(lap/index)은 공용 계약 그대로 '실행 단위 1칸 = index 1칸'이므로,
+#  count 를 컨텍스트 계산 시점에 펼쳐서(Expand-LifeCustomItems) 그 배열 위에서 셉니다.
+#  등록 목록(items)은 펼치지 않고 그대로 저장 - 지문/랜덤 순열은 등록 단위입니다.
+# ============================================================
+function Get-LifeSkillNameById {
+  # 스킬 Id → 표시명 ('daily' → '일상 채집'). 못 찾으면 Id 를 그대로 돌려줍니다
+  # (config 를 직접 편집해 모르는 Id 가 들어와도 로그가 비지 않게)
+  param([string]$Id)
+  foreach ($skillDef in @($script:lifeSkills)) {
+    if ([string]$skillDef.Id -eq $Id) { return [string]$skillDef.Name }
+  }
+  return $Id
+}
+
+function Get-LifeSkillIdByName {
+  # 표시명 → 스킬 Id (리스트뷰는 표시명을 담으므로 역해석에 필요). 못 찾으면 빈 문자열
+  param([string]$Name)
+  foreach ($skillDef in @($script:lifeSkills)) {
+    if ([string]$skillDef.Name -eq $Name) { return [string]$skillDef.Id }
+  }
+  return ''
+}
+
+function Get-LifeCustomItemLabel {
+  # 로그·팝업용 항목 표기: '일상 채집 - 사과 나무 3회' (1회면 횟수 생략)
+  param($Item)
+  $label = ('{0} - {1}' -f (Get-LifeSkillNameById -Id ([string]$Item.skill)), [string]$Item.target)
+  $labelCount = 1
+  try { $labelCount = [int]$Item.count } catch { $labelCount = 1 }
+  if ($labelCount -gt 1) { $label += (' {0}회' -f $labelCount) }
+  return $label
+}
+
+function Expand-LifeCustomItems {
+  # 등록 항목(항목마다 count 회) → 실행 단위 배열. 한 항목의 count 사이클을 모두 끝내야
+  # 다음 항목으로 넘어가는 계약이라 같은 항목을 count 개 연속으로 놓습니다.
+  # 각 원소에 rep(몇 번째인지) / repTotal / sourceIndex(등록 순번)를 함께 실어
+  # 로그의 '(2/3회)' 표기와 리스트 하이라이트가 원본 항목을 찾을 수 있게 합니다.
+  # 열거용이라 return $expanded + 호출부 @() 규약 (PS 5.1 배열 풀림).
+  param($Items)
+  $expanded = @()
+  $sourceIndex = 0
+  foreach ($srcItem in @($Items)) {
+    if ($null -eq $srcItem) { continue }
+    $repTotal = 1
+    try { $repTotal = [int]$srcItem.count } catch { $repTotal = 1 }
+    if ($repTotal -lt 1) { $repTotal = 1 }
+    if ($repTotal -gt 99) { $repTotal = 99 }
+    for ($rep = 1; $rep -le $repTotal; $rep++) {
+      $expanded += [pscustomobject]@{
+        kind        = 'life'
+        skill       = [string]$srcItem.skill
+        target      = [string]$srcItem.target
+        count       = $repTotal
+        rep         = $rep
+        repTotal    = $repTotal
+        sourceIndex = $sourceIndex
+      }
+    }
+    $sourceIndex++
+  }
+  return $expanded
+}
+
+function Get-LifeCustomPositionText {
+  # 진행 위치 표기: '2바퀴째 3/7번 (일상 채집 - 사과 나무 2/3회)'.
+  # 앞부분은 공용 표기(실행 단위 기준)를 그대로 쓰고, 뒤에 '이 항목의 몇 번째 사이클'인지를
+  # 덧붙입니다 - 실행 단위로만 세면 리스트의 어느 줄인지 알 수 없기 때문입니다.
+  param([int]$Lap, [int]$Index, [int]$Total, $Item)
+  $text = Get-CustomPositionText -Lap $Lap -Index $Index -Total $Total
+  if ($null -eq $Item) { return $text }
+  $repNow = 1; $repAll = 1
+  try { $repNow = [int]$Item.rep } catch { $repNow = 1 }
+  try { $repAll = [int]$Item.repTotal } catch { $repAll = 1 }
+  if ($repAll -lt 1) { $repAll = 1 }
+  return ('{0} ({1} - {2} {3}/{4}회)' -f $text,
+    (Get-LifeSkillNameById -Id ([string]$Item.skill)), [string]$Item.target, $repNow, $repAll)
+}
+
+function Get-LifeCustomListCompact {
+  # 생활 리스트 압축 표기 (워커 [설정] 스냅샷 한 줄 기록용).
+  # 항목당 '1.일상 채집/사과 나무x3' 형식
+  param($Items)
+  $parts = @()
+  $seq = 0
+  foreach ($compactItem in @($Items)) {
+    if ($null -eq $compactItem) { continue }
+    $seq++
+    $compactCount = 1
+    try { $compactCount = [int]$compactItem.count } catch { $compactCount = 1 }
+    $parts += ('{0}.{1}/{2}x{3}' -f $seq, (Get-LifeSkillNameById -Id ([string]$compactItem.skill)),
+      [string]$compactItem.target, $compactCount)
+  }
+  return ($parts -join ' ')
+}
+
+function Set-LifeListRowTexts {
+  # 생활 리스트 1행의 표시 텍스트 갱신 - 표시 규칙의 단일 소스
+  # (열: 체크빈칸 / # / 스킬 / 대상 / 횟수. Get-LifeCustomItemsFromList 가 역해석하므로
+  #  표기를 바꾸면 그쪽도 함께 고쳐야 합니다)
+  param($Row, $Item)
+  $rowCount = 1
+  try { $rowCount = [int]$Item.count } catch { $rowCount = 1 }
+  if ($rowCount -lt 1) { $rowCount = 1 }
+  $Row.SubItems[2].Text = Get-LifeSkillNameById -Id ([string]$Item.skill)
+  $Row.SubItems[3].Text = [string]$Item.target
+  $Row.SubItems[4].Text = ('{0}회' -f $rowCount)
+}
+
+function Add-LifeCustomListRow {
+  # 생활 리스트뷰에 항목 1행 추가
+  param([string]$Skill, [string]$Target, [int]$Count)
+  $row = New-Object System.Windows.Forms.ListViewItem('')
+  [void]$row.SubItems.Add([string]($lvLcrList.Items.Count + 1))
+  for ($fillIndex = 2; $fillIndex -le 4; $fillIndex++) { [void]$row.SubItems.Add('') }
+  Set-LifeListRowTexts -Row $row -Item ([pscustomobject]@{
+      kind = 'life'; skill = $Skill; target = $Target; count = $Count
+    })
+  [void]$lvLcrList.Items.Add($row)
+}
+
+function Update-LifeCustomListNumbers {
+  # 각 행의 # 열을 1부터 다시 매깁니다 (추가/삭제/이동 직후. crLoading 가드로 이벤트 재발화 억제)
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try {
+    for ($rowIndex = 0; $rowIndex -lt $lvLcrList.Items.Count; $rowIndex++) {
+      $lvLcrList.Items[$rowIndex].SubItems[1].Text = [string]($rowIndex + 1)
+    }
+  } finally { $script:crLoading = $prevLoading }
+}
+
+function Move-LifeCustomListRow {
+  # 선택한 1줄을 위(-1)/아래(+1)로 이동합니다
+  param([int]$Delta)
+  if ($lvLcrList.SelectedItems.Count -eq 0) { return }
+  $row = $lvLcrList.SelectedItems[0]
+  $fromIndex = $row.Index
+  $toIndex = $fromIndex + $Delta
+  if ($toIndex -lt 0 -or $toIndex -ge $lvLcrList.Items.Count) { return }
+  $prevLoading = $script:crLoading
+  $script:crLoading = $true
+  try {
+    $lvLcrList.Items.RemoveAt($fromIndex)
+    [void]$lvLcrList.Items.Insert($toIndex, $row)
+    Update-LifeCustomListNumbers
+    $row.Selected = $true
+    $lvLcrList.EnsureVisible($toIndex)
+  } finally { $script:crLoading = $prevLoading }
+  if ($script:uiReady) { Save-LifeCustomRepeatToConfig }
+}
+
+function Get-LifeCustomItemsFromList {
+  # 생활 리스트뷰 → 계약 형태 항목 배열 (skill 은 Id 로 되돌립니다).
+  # PS 5.1 배열 풀림 주의: 열거용이므로 return $items 그대로 두고 호출부에서 @()로 감쌉니다.
+  $items = @()
+  $lcrSourceRows = @($lvLcrList.Items)
+  if ($script:customViewShuffled) { $lcrSourceRows = @($lcrSourceRows | Sort-Object { $(if ($null -ne $_.Tag) { [int]$_.Tag } else { [int]$_.Index }) }) }
+  foreach ($listRow in $lcrSourceRows) {
+    $rowCount = 1
+    try { $rowCount = [int](([string]$listRow.SubItems[4].Text) -replace '[^\d]', '') } catch { $rowCount = 1 }
+    if ($rowCount -lt 1) { $rowCount = 1 }
+    if ($rowCount -gt 99) { $rowCount = 99 }
+    $items += [pscustomobject]@{
+      kind   = 'life'
+      skill  = (Get-LifeSkillIdByName -Name ([string]$listRow.SubItems[2].Text))
+      target = [string]$listRow.SubItems[3].Text
+      count  = $rowCount
+    }
+  }
+  return $items
+}
+
+function Get-LifeCustomCycleTotal {
+  # 리스트 1바퀴에 실제로 도는 사이클 수 (항목 count 합계) - 하단 줄 안내 라벨용
+  param($Items)
+  $total = 0
+  foreach ($totalItem in @($Items)) {
+    if ($null -eq $totalItem) { continue }
+    $itemCount = 1
+    try { $itemCount = [int]$totalItem.count } catch { $itemCount = 1 }
+    if ($itemCount -lt 1) { $itemCount = 1 }
+    if ($itemCount -gt 99) { $itemCount = 99 }
+    $total += $itemCount
+  }
+  return $total
+}
+
+function Set-LifeCustomRepeatOnConfig {
+  # lifeCustomRepeat 섹션을 현재 UI 상태로 갱신합니다 (Save-Config 는 호출부 몫).
+  # progress 는 절대 건드리지 않고 그대로 옮겨 담습니다 (진행 기록 비파괴 원칙).
+  param($Config)
+  $prevProgress = $null
+  if ($Config.PSObject.Properties['lifeCustomRepeat'] -and $Config.lifeCustomRepeat -and
+      $Config.lifeCustomRepeat.PSObject.Properties['progress']) {
+    $prevProgress = $Config.lifeCustomRepeat.progress
+  }
+  $node = [pscustomobject]@{
+    '_설명'         = "'생활(채집) 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 실행하며, 한 항목의 count 사이클을 모두 끝낸 뒤 다음 항목으로 넘어갑니다. progress 는 이어가기용 진행 기록이므로 직접 수정하지 마세요."
+    '_items'        = "각 항목: skill(채집 스킬 Id - daily/wood/mining/herb/wool/harvest/hoe/insect/fishing) / target(채집 대상 이름, 게임 표기 그대로) / count(반복 횟수 1~99)"
+    items           = [array]@(Get-LifeCustomItemsFromList)
+    randomOrder     = [bool]$chkLcrRandom.Checked
+    listRepeat      = $(if ($rbLcrCount.Checked) { 'count' } else { 'infinite' })
+    listRepeatCount = [int]$numLcrLaps.Value
+    progress        = $prevProgress
+  }
+  if ($Config.PSObject.Properties['lifeCustomRepeat']) { $Config.lifeCustomRepeat = $node }
+  else { $Config | Add-Member -NotePropertyName 'lifeCustomRepeat' -NotePropertyValue $node }
+}
+
+function Save-LifeCustomRepeatToConfig {
+  # 생활 커스텀 즉시 저장 경로 (던전/어비스/심층 저장 경로 무접촉 - 실패 신호는 같은 부채널).
+  # 던전의 '층 혼합 → 1바퀴 강제' 잠금은 적용하지 않습니다: 생활은 사이클마다 C키부터
+  # 새로 시작해 스킬을 섞어도 기술적 제약이 없습니다 (시안 확정)
+  $script:lastCustomSaveOk = $false
+  $cfg = Read-Config
+  if (-not $cfg) {
+    Add-GuiLog '[경고] config.json 을 읽지 못해 생활 커스텀 반복 설정을 저장하지 못했습니다 - 화면 목록과 저장된 설정이 다를 수 있습니다. 목록을 한 번 더 변경하면 다시 저장을 시도합니다.'
+    return
+  }
+  Set-LifeCustomRepeatOnConfig -Config $cfg
+  try {
+    Save-Config $cfg
+    $script:lastCustomSaveOk = $true
+  }
+  catch {
+    Add-GuiLog "[경고] 생활 커스텀 반복 설정 저장 실패: $($_.Exception.Message) - 화면 목록과 저장된 설정이 다를 수 있습니다. 목록을 한 번 더 변경하면 다시 저장을 시도합니다."
+  }
+  Update-LifeCustomTotalLabel
+}
+
+function Update-LifeCustomTotalLabel {
+  # 하단 줄의 사이클 수 라벨 갱신 (리스트 편집·반복 설정 변경·복원 시 호출).
+  # 횟수 모드에서는 **총합만** 씁니다 (2026-08-08 사용자 지적): 바퀴 수는 바로 왼쪽
+  # 입력칸에 보이므로 '바퀴당 N · 총 M' 은 중복인데다, 라벨 폭 119px 를 넘겨(127px)
+  # 두 줄로 깨졌습니다. 무한 모드는 총합이 없으므로 '바퀴당' 표기가 정보 그 자체라 유지합니다.
+  # 단위는 '사이클'이 아니라 **'회'** - 오른쪽 [횟수] 열('3회')과 위쪽 [반복 횟수 N 회]
+  # 입력이 이미 '회'를 쓰고 있어 한 화면에서 같은 것을 두 이름으로 부르지 않게 합니다
+  # (2026-08-08 사용자 지적).
+  $totalItems = @(Get-LifeCustomItemsFromList)
+  $perLap = Get-LifeCustomCycleTotal -Items $totalItems
+  if ($rbLcrCount.Checked) {
+    $lblLcrCycleTotal.Text = ('총 {0:N0}회' -f ($perLap * [int]$numLcrLaps.Value))
+  } else {
+    $lblLcrCycleTotal.Text = ('바퀴당 {0:N0}회' -f $perLap)
+  }
+}
+
+# ============================================================
+#  생활(채집) 커스텀 반복 - 셀 편집 (2026-08-08)
+#  아래 두 함수는 **순수 함수(진리표 대상)** 입니다. 컨트롤($lvLcrList/$numLcrCount 등)을
+#  한 번이라도 참조하면 tests/source_test_helpers.ps1 의 AST 추출 단독 실행이 불가능해져
+#  진리표 자체를 못 돌립니다. 참조 허용은 $script:lifeSkills / $script:lifeSupportedSkillIds
+#  와 Get-LifeSkillNameById / Get-LifeSkillIdByName 뿐입니다.
+# ============================================================
+function Get-LifeSkillTargets {
+  # 스킬 Id → 그 스킬의 대상 배열. 모르는 Id 면 빈 배열.
+  # 열거용이라 return $targets + 호출부 @() 규약 (PS 5.1 배열 풀림)
+  param([string]$SkillId)
+  $targets = @()
+  foreach ($skillDef in @($script:lifeSkills)) {
+    if ([string]$skillDef.Id -eq $SkillId) { $targets = @($skillDef.Targets); break }
+  }
+  return $targets
+}
+
+function Get-LcrCellEditPlan {
+  # 생활 리스트 셀 편집 계획: 편집 가능하면 @{ Options; Current }, 아니면 $null (순수 - 진리표 대상).
+  # 어비스의 Scope 키(리스트 전체 일괄)는 쓰지 않습니다 - 생활은 스킬 혼합이 자유라
+  # 전 열이 행 단위입니다 (Save-LifeCustomRepeatToConfig 주석의 계약).
+  # 현재값이 옵션에 없으면 **목록 끝에** 덧붙입니다: 콤보가 DropDownList 라 현재값이 목록에
+  # 없으면 선택이 비어 사용자가 지금 값을 못 봅니다. 끝에 붙이는 이유는 낚시 같은 미지원
+  # 값이 목록 첫 줄에 와서 '고르라는 것'처럼 보이지 않게 하기 위함입니다.
+  param([int]$ColumnIndex, $Item)
+  switch ($ColumnIndex) {
+    2 {
+      # 스킬: **지원 8종만** 옵션에 넣습니다. [추가] 버튼과 시작 게이트가 막는 낚시를
+      # 셀 편집이 우회하는 뒷문이 되지 않게 (미지원 스킬은 새로 들어올 수 없음).
+      # 옵션은 Id 가 아니라 표시명이어야 합니다 - 리스트 셀에 들어가는 값이 표시명이고
+      # Get-LifeCustomItemsFromList 가 그 문자열을 Id 로 역해석하기 때문입니다.
+      $skillOptions = @()
+      foreach ($supportedId in @($script:lifeSupportedSkillIds)) {
+        $skillOptions += (Get-LifeSkillNameById -Id ([string]$supportedId))
+      }
+      $skillCurrent = Get-LifeSkillNameById -Id ([string]$Item.skill)
+      if ((-not [string]::IsNullOrWhiteSpace($skillCurrent)) -and ($skillOptions -notcontains $skillCurrent)) {
+        $skillOptions += $skillCurrent
+      }
+      return @{ Options = @($skillOptions); Current = [string]$skillCurrent }
+    }
+    3 {
+      # 대상: 그 행의 스킬이 가진 목록만 (어비스 난이도 열이 항목의 mode 를 보고 옵션을
+      # 바꾸는 것과 같은 '행 상태의 함수'). 모르는 스킬 Id 면 고를 대상 자체가 없어 편집 불가
+      $targetOptions = @(Get-LifeSkillTargets -SkillId ([string]$Item.skill))
+      if ($targetOptions.Count -eq 0) { return $null }
+      $targetCurrent = [string]$Item.target
+      if ((-not [string]::IsNullOrWhiteSpace($targetCurrent)) -and ($targetOptions -notcontains $targetCurrent)) {
+        $targetOptions += $targetCurrent
+      }
+      return @{ Options = @($targetOptions); Current = $targetCurrent }
+    }
+    4 {
+      # 횟수: 1~99 (config·펼침 함수와 같은 범위). 현재값도 같은 범위로 클램프해
+      # 손편집된 0/300 같은 값에서도 선택이 비지 않게 합니다
+      $countOptions = @()
+      foreach ($countValue in 1..99) { $countOptions += ('{0}회' -f $countValue) }
+      $countNow = 1
+      try { $countNow = [int]$Item.count } catch { $countNow = 1 }
+      if ($countNow -lt 1) { $countNow = 1 }
+      if ($countNow -gt 99) { $countNow = 99 }
+      return @{ Options = @($countOptions); Current = ('{0}회' -f $countNow) }
+    }
+  }
+  return $null
+}
+
+function Set-LcrItemCellValue {
+  # 선택값을 생활 항목에 적용하고 [추가]와 같은 조합 정규화를 수행합니다 (순수 - 진리표 대상).
+  # 입력 $Item 은 변형하지 않고 새 객체를 돌려줍니다.
+  param($Item, [int]$ColumnIndex, [string]$Value)
+  $newSkill = [string]$Item.skill
+  $newTarget = [string]$Item.target
+  $newCount = 1
+  try { $newCount = [int]$Item.count } catch { $newCount = 1 }
+  switch ($ColumnIndex) {
+    2 {
+      # 모르는 표시명이면 이전 스킬을 유지합니다 - skill 이 빈 값으로 저장되면 워커가
+      # 스킬 창에서 아무것도 찾지 못합니다 (심층 Set-DcrItemCellValue 의 stage 방어와 같은 결)
+      $parsedSkillId = Get-LifeSkillIdByName -Name $Value
+      if ($parsedSkillId) { $newSkill = $parsedSkillId }
+    }
+    3 { $newTarget = $Value }
+    4 {
+      # 숫자가 하나도 없으면(형식 오류) 이전 값을 유지하고, 숫자가 있으면 그 값을 쓴 뒤
+      # 아래에서 1~99 로 클램프합니다 - '0회'와 '300회'가 같은 규칙을 따르게
+      $parsedText = ($Value -replace '[^\d]', '')
+      if ($parsedText) { try { $newCount = [int]$parsedText } catch { } }
+    }
+  }
+  if ($newCount -lt 1) { $newCount = 1 }
+  if ($newCount -gt 99) { $newCount = 99 }
+  # 조합 무결성 재확정 (어느 열을 고쳤든 매번): 스킬과 대상은 종속 관계라 스킬을 바꾸면
+  # 이전 대상이 새 스킬에 없을 수 있고, 그대로 두면 워커가 대상 행을 못 찾아 반드시 멈춥니다.
+  # 판정은 '스킬이 바뀌었는가'가 아니라 **'지금 대상이 새 스킬에 있는가'** 입니다 - 같은 스킬을
+  # 다시 골랐을 때 대상이 보존돼야 '변경 없음' 조기 반환이 성립합니다(조용한 재저장 방지).
+  # 슬라이더도 같은 규칙을 씁니다(스킬 변경 시 대상은 첫 항목으로 폴백 - Codex 합의).
+  $newTargets = @(Get-LifeSkillTargets -SkillId $newSkill)
+  if ($newTargets.Count -gt 0 -and ($newTargets -notcontains $newTarget)) {
+    $newTarget = [string]$newTargets[0]
+  }
+  return [pscustomobject]@{
+    kind   = 'life'
+    skill  = $newSkill
+    target = $newTarget
+    count  = $newCount
+  }
 }
 
 function Get-AbyssListLock {
@@ -5621,6 +6352,7 @@ function Get-CustomActiveListView {
   param([string]$SectionName = $script:customConfigSection)
   if ($SectionName -eq 'abyssCustomRepeat') { return $lvAcrList }
   if ($SectionName -eq 'deepCustomRepeat') { return $lvDcrList }
+  if ($SectionName -eq 'lifeCustomRepeat') { return $lvLcrList }
   return $lvCrList
 }
 
@@ -5632,7 +6364,18 @@ function Set-CustomListRandomView {
   param($Context)
   if (-not $Context -or -not $Context.RandomOrder -or -not $Context.Order) { return }
   $view = Get-CustomActiveListView -SectionName ([string]$Context.SectionName)
-  if ($view.Items.Count -ne [int]$Context.Total) { return }   # 화면-config 불일치면 표시만 생략 (안전)
+  # 리스트 행 수 기준은 '등록 항목 수'입니다. 생활만 Total 이 펼친 실행 칸 수라 다르므로
+  # RegisteredTotal/RegisteredIndex 를 씁니다 (리스트에는 항목이 한 줄씩만 있음)
+  $viewTotal = [int]$Context.Total
+  $viewIndex = [int]$Context.Index
+  if ([string]$Context.SectionName -eq 'lifeCustomRepeat') {
+    $viewTotal = [int]$Context.RegisteredTotal
+    $viewIndex = [int]$Context.RegisteredIndex
+    # 등록 인덱스는 '등록 순서'의 번호라 화면(순열 순서) 행 위치로 한 번 되짚어야 합니다
+    $viewIndex = @($Context.Order).IndexOf([int]$Context.RegisteredIndex)
+    if ($viewIndex -lt 0) { $viewIndex = 0 }
+  }
+  if ($view.Items.Count -ne $viewTotal) { return }   # 화면-config 불일치면 표시만 생략 (안전)
   $prevLoading = $script:crLoading
   $script:crLoading = $true
   $view.BeginUpdate()
@@ -5654,9 +6397,9 @@ function Set-CustomListRandomView {
       $orderedRows[$vi].SubItems[1].Text = ('{0} ({1})' -f ($vi + 1), ([int]$orderedRows[$vi].Tag + 1))
       $orderedRows[$vi].BackColor = [System.Drawing.Color]::White
     }
-    if ([int]$Context.Index -ge 0 -and [int]$Context.Index -lt $view.Items.Count) {
-      $view.Items[[int]$Context.Index].BackColor = [System.Drawing.Color]::FromArgb(245, 231, 201)
-      $view.Items[[int]$Context.Index].EnsureVisible()
+    if ($viewIndex -ge 0 -and $viewIndex -lt $view.Items.Count) {
+      $view.Items[$viewIndex].BackColor = [System.Drawing.Color]::FromArgb(245, 231, 201)
+      $view.Items[$viewIndex].EnsureVisible()
     }
     $script:customViewShuffled = $true
   } finally {
@@ -5668,7 +6411,7 @@ function Set-CustomListRandomView {
 function Restore-CustomListRegisteredView {
   # 등록 순서 표기 복원 - 모든 정지 경로 공용 (Set-UiRunning(false) 서두에서 호출)
   if (-not $script:customViewShuffled) { return }
-  foreach ($view in @($lvCrList, $lvAcrList, $lvDcrList)) {
+  foreach ($view in @($lvCrList, $lvAcrList, $lvDcrList, $lvLcrList)) {
     if ($view.Items.Count -eq 0) { continue }
     $tagsOk = $true
     foreach ($viewRow in $view.Items) { if ($null -eq $viewRow.Tag) { $tagsOk = $false; break } }
@@ -5809,7 +6552,9 @@ function Get-CustomCurrentContext {
     try { $index = [int]$node.progress.index } catch { $index = 0 }
   }
   if ($lap -lt 1) { $lap = 1 }
-  if ($index -lt 0 -or $index -ge $items.Count) { $index = 0 }
+  # 상한 검사는 아래 '실행 단위' 개수가 확정된 뒤에 합니다 (생활은 count 만큼 펼쳐서
+  # 실행 칸이 등록 항목 수보다 많음 - 여기서 등록 수로 자르면 정상 진행이 1번으로 되감김)
+  if ($index -lt 0) { $index = 0 }
   $listRepeat = 'infinite'
   if ($node.PSObject.Properties['listRepeat']) { try { $listRepeat = [string]$node.listRepeat } catch { } }
   $listRepeatCount = 1
@@ -5832,16 +6577,36 @@ function Get-CustomCurrentContext {
   }
   $executionItems = $items
   if ($randomOrder -and $shuffleOrder) { $executionItems = @(Get-CustomExecutionItems -Items $items -Order $shuffleOrder) }
-  $positionText = Get-CustomPositionText -Lap $lap -Index $index -Total $items.Count
+  # 생활만 '항목 1개 = count 사이클'이라 실행 단위로 펼칩니다 (셔플 뒤에 펼쳐야 한 항목의
+  # count 사이클이 연속으로 붙습니다). 등록 목록/지문/순열은 그대로 - 펼침은 실행용입니다
+  $isLifeSection = ($SectionName -eq 'lifeCustomRepeat')
+  if ($isLifeSection) { $executionItems = @(Expand-LifeCustomItems -Items $executionItems) }
+  # 진행 index 는 '실행 단위' 위에서 셉니다 - 생활은 펼친 개수가 총 칸 수입니다
+  $executionTotal = @($executionItems).Count
+  if ($executionTotal -lt 1) { return $null }
+  if ($index -ge $executionTotal) { $index = 0 }
+  $currentItem = @($executionItems)[$index]
+  if ($isLifeSection) {
+    $positionText = Get-LifeCustomPositionText -Lap $lap -Index $index -Total $executionTotal -Item $currentItem
+  } else {
+    $positionText = Get-CustomPositionText -Lap $lap -Index $index -Total $executionTotal
+  }
   if ($randomOrder) { $positionText += ' (랜덤)' }
   return @{
     Items           = $items
     ExecutionItems  = $executionItems
-    Total           = $items.Count
+    Total           = $executionTotal
+    RegisteredTotal = $items.Count
     Lap             = $lap
     Index           = $index
-    Item            = $executionItems[$index]
-    RegisteredIndex = $(if ($randomOrder -and $shuffleOrder) { [int]$shuffleOrder[$index] } else { $index })
+    Item            = $currentItem
+    # 생활은 index 가 '펼친 칸' 번호라 등록 순번을 항목이 실어 온 sourceIndex 로 되짚습니다
+    # (sourceIndex 는 셔플된 실행 순서에서의 위치 - 순열을 한 번 더 통과시켜야 등록 번호)
+    RegisteredIndex = $(if ($isLifeSection) {
+        $lifeSourceIndex = 0
+        try { $lifeSourceIndex = [int]$currentItem.sourceIndex } catch { $lifeSourceIndex = 0 }
+        if ($randomOrder -and $shuffleOrder -and $lifeSourceIndex -lt @($shuffleOrder).Count) { [int]$shuffleOrder[$lifeSourceIndex] } else { $lifeSourceIndex }
+      } elseif ($randomOrder -and $shuffleOrder) { [int]$shuffleOrder[$index] } else { $index })
     RandomOrder     = $randomOrder
     Order           = $shuffleOrder
     ShuffleValid    = $shuffleValid
@@ -5868,7 +6633,12 @@ function Step-CustomProgress {
   if ($node.PSObject.Properties['items']) { $items = @($node.items) }
   $prevProgress = $null
   if ($node.PSObject.Properties['progress'] -and $node.progress) { $prevProgress = $node.progress }
-  $next = Get-CustomNextProgress -Progress $prevProgress -ItemCount $items.Count
+  # 전진 칸 수 = '실행 단위' 개수. 생활만 항목마다 count 사이클이라 펼친 개수를 씁니다
+  # (등록 수로 전진하면 count 2 이상인 항목이 1회만 돌고 다음 항목으로 넘어갑니다).
+  # 셔플 순열은 여전히 등록 항목 단위 - 펼침은 순열과 무관하게 개수만 바꿉니다
+  $stepUnitCount = $items.Count
+  if ($SectionName -eq 'lifeCustomRepeat') { $stepUnitCount = @(Expand-LifeCustomItems -Items $items).Count }
+  $next = Get-CustomNextProgress -Progress $prevProgress -ItemCount $stepUnitCount
   $newProgress = [pscustomobject]@{
     lap         = [int]$next.lap
     index       = [int]$next.index
@@ -5941,7 +6711,9 @@ function Confirm-CustomShuffleReady {
   $gateItems = @()
   if ($node.PSObject.Properties['items']) { $gateItems = @($node.items) }
   if ($gateItems.Count -lt 1) { return $false }
-  if ($SectionName -ne 'abyssCustomRepeat') {
+  # 층 전환 규칙은 던전/심층에만 있습니다. 어비스는 층 제약이 없고, 생활은 항목에 stage 가
+  # 아예 없어 이 검사를 돌리면 빈 값끼리 비교한 헛 위반이 나옵니다 (2026-08-08 생활 커스텀 신설)
+  if ($SectionName -ne 'abyssCustomRepeat' -and $SectionName -ne 'lifeCustomRepeat') {
     $gateWrapIssues = @(@(Get-CustomTransitionIssues -Items $gateItems -ListRepeat 'infinite' -ListRepeatCount 1) |
         Where-Object { [bool]$_.Wrap })
     if ($gateWrapIssues.Count -gt 0) {
@@ -6082,11 +6854,7 @@ function Load-SettingsToUi {
         if ([string]$savedTargets[$targetIdx] -eq $savedTarget) { $script:lifeTargetIndex = $targetIdx; break }
       }
       $script:lifeTargetPage = [Math]::Floor($script:lifeTargetIndex / 3)
-      $rbLifeBagGo.Checked = ([string]$lifeCfg.bagFull -eq 'continue')
-      $rbLifeBagStop.Checked = -not $rbLifeBagGo.Checked
-      $rbLifeToolGo.Checked = ([string]$lifeCfg.toolWorn -eq 'continue')
-      $rbLifeToolStop.Checked = -not $rbLifeToolGo.Checked
-      $gatherWaitSaved = 120
+      $gatherWaitSaved = 600
       try { $gatherWaitSaved = [int]$lifeCfg.gatherWaitSeconds } catch { }
       $numGatherWait.Value = [Math]::Min([Math]::Max($gatherWaitSaved, [int]$numGatherWait.Minimum), [int]$numGatherWait.Maximum)
     }
@@ -6241,6 +7009,38 @@ function Load-SettingsToUi {
         -RbInfinite $rbDcrInfinite -RbCount $rbDcrCount -NumLaps $numDcrLaps -StateKey 'dcr'
     }
   } catch { $script:crLoading = $false }
+  # 저장된 생활(채집) 커스텀 반복 목록/반복 방식 복원. 진행 기록은 시작 시 지문과 함께 판정합니다.
+  # 심층과 달리 '혼합 리스트 1바퀴 고정'은 적용하지 않습니다 (생활은 스킬을 섞어도 무제약)
+  try {
+    if ($cfg.PSObject.Properties['lifeCustomRepeat'] -and $cfg.lifeCustomRepeat) {
+      $lcr = $cfg.lifeCustomRepeat
+      $script:crLoading = $true
+      try {
+        $lvLcrList.Items.Clear()
+        if ($lcr.PSObject.Properties['items']) {
+          foreach ($lcrSavedItem in @($lcr.items)) {
+            if ($null -eq $lcrSavedItem) { continue }
+            # 계약 밖 값(직접 편집 등)은 행으로 넣지 않습니다 - 모르는 스킬 Id 나 빈 대상은
+            # 워커가 스킬 창에서 찾지 못해 그 항목 차례에 반드시 멈춥니다
+            $lcrSavedSkill = [string]$lcrSavedItem.skill
+            $lcrSavedTarget = [string]$lcrSavedItem.target
+            if ([string]::IsNullOrWhiteSpace($lcrSavedSkill) -or [string]::IsNullOrWhiteSpace($lcrSavedTarget)) { continue }
+            if ([string](Get-LifeSkillNameById -Id $lcrSavedSkill) -eq $lcrSavedSkill) { continue }
+            $lcrSavedCount = 1
+            try { $lcrSavedCount = [int]$lcrSavedItem.count } catch { $lcrSavedCount = 1 }
+            if ($lcrSavedCount -lt 1) { $lcrSavedCount = 1 }
+            if ($lcrSavedCount -gt 99) { $lcrSavedCount = 99 }
+            Add-LifeCustomListRow -Skill $lcrSavedSkill -Target $lcrSavedTarget -Count $lcrSavedCount
+          }
+        }
+        Update-LifeCustomListNumbers
+        if ([string]$lcr.listRepeat -eq 'count') { $rbLcrCount.Checked = $true } else { $rbLcrInfinite.Checked = $true }
+        try { $numLcrLaps.Value = [Math]::Min(999, [Math]::Max(1, [int]$lcr.listRepeatCount)) } catch { $numLcrLaps.Value = 1 }
+        $numLcrLaps.Enabled = $rbLcrCount.Checked
+        Update-LifeCustomTotalLabel
+      } finally { $script:crLoading = $false }
+    }
+  } catch { $script:crLoading = $false }
   # 랜덤 진행 토글 복원 (3섹션 - JSON 불리언만 인정. 프로그램적 변경은 crLoading 가드로
   # 저장 이벤트 억제, 복원 후 층 혼합 게이트를 다시 계산합니다)
   $script:crLoading = $true
@@ -6248,10 +7048,12 @@ function Load-SettingsToUi {
     try { $chkCrRandom.Checked = (Get-CustomRandomOrderEnabled -Node $cfg.customRepeat) } catch { }
     try { $chkAcrRandom.Checked = (Get-CustomRandomOrderEnabled -Node $cfg.abyssCustomRepeat) } catch { }
     try { $chkDcrRandom.Checked = (Get-CustomRandomOrderEnabled -Node $cfg.deepCustomRepeat) } catch { }
+    try { $chkLcrRandom.Checked = (Get-CustomRandomOrderEnabled -Node $cfg.lifeCustomRepeat) } catch { }
   } finally { $script:crLoading = $false }
   Update-CustomRandomToggleStyle -Toggle $chkCrRandom
   Update-CustomRandomToggleStyle -Toggle $chkAcrRandom
   Update-CustomRandomToggleStyle -Toggle $chkDcrRandom
+  Update-CustomRandomToggleStyle -Toggle $chkLcrRandom
   Update-CustomRandomMixGate -Toggle $chkCrRandom -Items @(Get-CustomItemsFromList) -SectionName 'customRepeat'
   Update-CustomRandomMixGate -Toggle $chkDcrRandom -Items @(Get-DeepCustomItemsFromList) -SectionName 'deepCustomRepeat'
   # 저장된 난이도 복원 (없거나 빈 값이면 '게임 그대로'. 목록에 없는 이름이 저장돼
@@ -6383,16 +7185,14 @@ function Save-SettingsFromUi {
     content   = $(if ($rbLifeProcess.Checked) { 'process' } else { 'gather' })
     skill     = [string]$lifeSkillSave.Id
     target    = $(if ($script:lifeTargetIndex -lt $lifeTargetsSave.Count) { [string]$lifeTargetsSave[$script:lifeTargetIndex] } else { '' })
-    bagFull   = $(if ($rbLifeBagGo.Checked) { 'continue' } else { 'stop' })
-    toolWorn  = $(if ($rbLifeToolGo.Checked) { 'continue' } else { 'stop' })
     gatherWaitSeconds = [int]$numGatherWait.Value
   }
   if (-not $cfg.PSObject.Properties['life']) {
     $cfg | Add-Member -NotePropertyName 'life' -NotePropertyValue ([pscustomobject]@{
-      '_설명' = "'생활' 대분류 설정입니다 (v2.0.0 - 채집 자동화는 개발 중이라 아직 시작할 수 없습니다)"
+      '_설명' = "'생활' 대분류 설정입니다 (v2.0.0 - 채집은 낚시를 제외한 8종 지원. 낚시·가공은 개발 중)"
     })
   }
-  foreach ($lifeKey in @('content', 'skill', 'target', 'bagFull', 'toolWorn', 'gatherWaitSeconds')) {
+  foreach ($lifeKey in @('content', 'skill', 'target', 'gatherWaitSeconds')) {
     if ($cfg.life.PSObject.Properties[$lifeKey]) { $cfg.life.$lifeKey = $lifeValues[$lifeKey] }
     else { $cfg.life | Add-Member -NotePropertyName $lifeKey -NotePropertyValue $lifeValues[$lifeKey] }
   }
@@ -6481,6 +7281,7 @@ function Save-SettingsFromUi {
   Set-CustomRepeatOnConfig -Config $cfg
   Set-AbyssCustomRepeatOnConfig -Config $cfg
   Set-DeepCustomRepeatOnConfig -Config $cfg
+  Set-LifeCustomRepeatOnConfig -Config $cfg
 
   try {
     Save-Config $cfg
@@ -6523,7 +7324,7 @@ function Set-UiRunning {
   # 전이 토큰이라 중복 호출(true→true 등)에도 원상태가 유실되지 않습니다 (Codex 합의 계약).
   if ($IsRunning -and $null -eq $script:contentDetailEnabledSnapshot) {
     $detailSnapshot = @{}
-    $scrollableLists = @($lvCrList, $lvAcrList, $lvDcrList)
+    $scrollableLists = @($lvCrList, $lvAcrList, $lvDcrList, $lvLcrList)
     foreach ($detailChild in $grpContentDetail.Controls) {
       if ($scrollableLists -contains $detailChild) { continue }
       $detailSnapshot[$detailChild] = [bool]$detailChild.Enabled
@@ -6550,11 +7351,18 @@ function Set-UiRunning {
   }
 }
 
+function Get-CycleWaitSecondsForEstimate {
+  # 시간 지정 판단에 쓸 '한 사이클 예상 상한' - 대분류별 설정을 따릅니다
+  # (생활에서 숨겨진 전투 클리어 대기값을 참조하면 목표 시각을 크게 넘기거나 잘못 거부 - Codex)
+  if ($script:mainCategory -eq 'life') { return [int]$numGatherWait.Value }
+  return [int]$numClearWait.Value
+}
+
 function Test-TimeAllowsNextCycle {
   # 시간 지정 모드에서 "지금 시작하면 목표 시각 안에 끝날 수 있는지" 판단합니다.
-  # 판단 기준: 현재 시각 + 클리어 대기 설정 시간 <= 목표 시각
+  # 판단 기준: 현재 시각 + 대분류별 사이클 상한(전투=클리어 대기/생활=진행 없음 한도) <= 목표 시각
   if ($null -eq $script:targetTime) { return $true }
-  $estimatedEnd = (Get-Date).AddSeconds([int]$numClearWait.Value)
+  $estimatedEnd = (Get-Date).AddSeconds((Get-CycleWaitSecondsForEstimate))
   return ($estimatedEnd -le $script:targetTime)
 }
 
@@ -6567,7 +7375,7 @@ function Move-WorkerLogToArchive {
   if (-not (Test-Path -LiteralPath $Path)) { return [long]0 }
   try {
     $archiveStamp = (Get-Item -LiteralPath $Path -ErrorAction Stop).LastWriteTime.ToString('yyyyMMdd_\hHH\mmm\sss')
-    $archivePath = Join-Path $scriptRoot ("Log\run_{0}{1}.log" -f $archiveStamp, $Suffix)
+    $archivePath = Join-Path $honeyLogDir ("run_{0}{1}.log" -f $archiveStamp, $Suffix)
     Move-Item -LiteralPath $Path -Destination $archivePath -Force -ErrorAction Stop
     return [long]0
   } catch {
@@ -6589,7 +7397,7 @@ function Start-NextCycle {
   $script:recoveryLogOffset = Move-WorkerLogToArchive -Path $workerRecoveryLog -Suffix '_recovery'
   # 보관 개수(10개) 초과분은 오래된 것부터 삭제 (정리는 파일명이 아니라 수정 시각 기준이라
   # 옛 형식과 복구 로그가 섞여 있어도 함께 정리됩니다)
-  $oldRunLogs = @(Get-ChildItem -Path (Join-Path $scriptRoot 'Log') -Filter 'run_*.log' -ErrorAction SilentlyContinue |
+  $oldRunLogs = @(Get-ChildItem -Path $honeyLogDir -Filter 'run_*.log' -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -Skip 10)
   foreach ($oldLog in $oldRunLogs) { Remove-Item -LiteralPath $oldLog.FullName -Force -ErrorAction SilentlyContinue }
   $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $workerScript + '"'))
@@ -6623,7 +7431,11 @@ function Start-NextCycle {
     $env:HONEYNOGI_CUSTOM_RESTART = $(if ($script:customRestart) { '1' } else { '' })
     $env:HONEYNOGI_CUSTOM_RECOVERY = $(if ($script:customRecoveryPending) { '1' } else { '' })
     $env:HONEYNOGI_CUSTOM_POSITION = $customContext.Position
-    $env:HONEYNOGI_CUSTOM_LIST = $(if ($script:customConfigSection -eq 'deepCustomRepeat') {
+    $env:HONEYNOGI_CUSTOM_LIST = $(if ($script:customConfigSection -eq 'lifeCustomRepeat') {
+        # 생활은 펼친 실행 목록이 아니라 '등록 목록'을 기록합니다 (같은 항목이 count 개
+        # 늘어선 줄이 아니라 사용자가 짠 리스트 그대로여야 제보 로그를 읽을 수 있음)
+        Get-LifeCustomListCompact -Items $customContext.Items
+      } elseif ($script:customConfigSection -eq 'deepCustomRepeat') {
         Get-DeepCustomListCompact -Items $customContext.ExecutionItems
       } else { Get-CustomListCompact -Items $customContext.ExecutionItems })
     $env:HONEYNOGI_CUSTOM_MARKER = $customMarkerFile
@@ -6687,6 +7499,18 @@ function Start-NextCycle {
   $lblStatus.ForeColor = [System.Drawing.Color]::ForestGreen
   if ($customContext) {
     Add-GuiLog "=== ${cycleNumber}회차 시작($($customContext.Index + 1)/$($customContext.Total)) ==="
+    # 생활은 항목마다 반복 횟수가 있어 '리스트 몇 번째 / 그 항목의 몇 번째 사이클'을 함께
+    # 보여 줍니다 (던전은 항목 1개 = 1판이라 위 줄만으로 충분)
+    if ($script:customConfigSection -eq 'lifeCustomRepeat') {
+      $lifeStartItem = $customContext.Item
+      $lifeStartRep = 1; $lifeStartRepAll = 1
+      try { $lifeStartRep = [int]$lifeStartItem.rep } catch { $lifeStartRep = 1 }
+      try { $lifeStartRepAll = [int]$lifeStartItem.repTotal } catch { $lifeStartRepAll = 1 }
+      Add-GuiLog ('[커스텀] {0}/{1} {2} - {3} ({4}/{5}회)' -f
+        ([int]$customContext.RegisteredIndex + 1), [int]$customContext.RegisteredTotal,
+        (Get-LifeSkillNameById -Id ([string]$lifeStartItem.skill)), [string]$lifeStartItem.target,
+        $lifeStartRep, $lifeStartRepAll)
+    }
   } else {
     Add-GuiLog "=== ${cycleNumber}회차 시작 ==="
   }
@@ -6961,6 +7785,9 @@ $timer.Add_Tick({
           $code4Reason = ($script:lastWorkerDoneReason -replace '\s+', ' ').Trim()
           if ($code4Reason.Length -gt 80) { $code4Reason = $code4Reason.Substring(0, 80) + '…' }
           $code4Reason = "조건 정지: $code4Reason"
+        } elseif ($script:mainCategory -eq 'life') {
+          # 생활 폴백 - 숨겨진 전투 라디오(rbCatDeep 등)를 참조하면 엉뚱한 재화 문구 표시 (Codex)
+          $code4Reason = '조건 충족으로 정지 - 채집 시간 초과/미지원 항목 등 (자세한 내용은 로그 참고)'
         } elseif ($rbCatDeep.Checked) {
           $code4Reason = '조건 충족으로 정지 - 마족공물 소진 등 (자세한 내용은 로그 참고)'
         } else {
@@ -7019,12 +7846,32 @@ function Invoke-StartAutomation {
     # 생활 대분류 재검사 (Codex 조건 D): 승인 조회가 비동기라 '전투에서 시작 → 조회 중
     # 생활로 전환 → 콜백이 여기 직접 호출'로 버튼 게이트가 우회될 수 있음 - 서두에서 차단
     if (Test-LifeStartBlocked) { return }
-    $isCustomStart = ($rbCustomRepeat.Checked -and -not $rbCatHunting.Checked)
-    $script:customConfigSection = $(if ($rbCatAbyss.Checked) { 'abyssCustomRepeat' }
+    # 생활 대분류 시작: 전투 하위 라디오(던전/커스텀 체크 등)는 복귀 대비로 Checked 가
+    # 보존돼 있어, 게이트 없이는 던전 안내·커스텀 시작 경로가 그대로 실행됩니다
+    # (2026-08-06 00:06 실기 제보: 생활 시작인데 혼합 리스트 안내가 표시됨)
+    $isLifeStart = ($script:mainCategory -eq 'life')
+    # 생활 커스텀 (2026-08-08): 채집일 때만. 가공은 아직 리스트 자체가 없습니다
+    # ('$isLifeStart -and 채집'이 아니라 채집 라디오를 직접 봐야 - 가공 화면에서는 커스텀
+    #  라디오가 비활성이지만 Checked 는 보존될 수 있음)
+    $isLifeCustomStart = ($isLifeStart -and $rbCustomRepeat.Checked -and $rbLifeGather.Checked)
+    $isCustomStart = ($isLifeCustomStart -or
+      ($rbCustomRepeat.Checked -and -not $rbCatHunting.Checked -and -not $isLifeStart))
+    $script:customConfigSection = $(if ($isLifeCustomStart) { 'lifeCustomRepeat' }
+      elseif ($rbCatAbyss.Checked) { 'abyssCustomRepeat' }
       elseif ($rbCatDeep.Checked) { 'deepCustomRepeat' } else { 'customRepeat' })
-    $script:customMarkerFile = $(if ($rbCatAbyss.Checked) { $customAbyssMarkerFile }
+    # 생활은 완료 마커를 쓰지 않습니다 (사이클 완료 = 종료 코드 0 하나로 확정 - 던전처럼
+    # '클리어 후 마무리 중 종료'라는 중간 상태가 없음). 존재하지 않을 전용 경로를 줘서
+    # 마커 검사들이 항상 '없음'으로 통과하게 합니다
+    $script:customMarkerFile = $(if ($isLifeCustomStart) { $customLifeMarkerFile }
+      elseif ($rbCatAbyss.Checked) { $customAbyssMarkerFile }
       elseif ($rbCatDeep.Checked) { $customDeepMarkerFile } else { $customDungeonMarkerFile })
-    if ($rbCatDungeon.Checked) {
+    if ($isLifeStart) {
+      Add-GuiLog '[안내] 채집 자동화: 캐릭터가 필드에 있으면 어디서든 시작할 수 있습니다 (사이클마다 메뉴부터 다시 진행).'
+      if ($isLifeCustomStart) {
+        Add-GuiLog '[안내] 생활 커스텀 반복: 리스트 순서대로 항목을 실행하며, 한 항목의 지정 횟수를 모두 끝낸 뒤 다음 항목으로 넘어갑니다.'
+      }
+    }
+    if ($rbCatDungeon.Checked -and -not $isLifeStart) {
       if ($isCustomStart) {
         # 커스텀 반복 시작 안내 (한 번만 표시: 열어 둔 던전 하나 / 우연한 만남 강제)
         Add-GuiLog '[안내] 커스텀 반복: 시작 시 열어 둔 던전 하나에서 리스트 순서대로 동작합니다.'
@@ -7037,7 +7884,7 @@ function Invoke-StartAutomation {
     if ($rbCatAbyss.Checked -and $isCustomStart) {
       Add-GuiLog '[안내] 어비스 커스텀 반복: 리스트 순서대로 항목을 한 판씩 실행합니다.'
     }
-    if ($rbCatDeep.Checked) {
+    if ($rbCatDeep.Checked -and -not $isLifeStart) {
       if ($isCustomStart) {
         Add-GuiLog '[안내] 심층 커스텀 반복: 시작 시 열어 둔 심층던전 하나에서 리스트 순서대로 동작합니다 (난이도는 어려움 고정).'
         Add-GuiLog "[안내] '커스텀 반복'은 설정과 무관하게 '우연한 만남'으로 진행합니다."
@@ -7081,6 +7928,25 @@ function Invoke-StartAutomation {
       # 어비스 방식·매칭 통일 게이트: GUI 에서는 라디오 잠금으로 섞일 수 없지만 config 를 직접
       # 편집하면 섞인 리스트가 들어올 수 있어 시작을 거부하고 어떤 항목이 다른지 로그로 알립니다
       # (무인 운용 보호 - 팝업 없이 로그만).
+      # 생활 미지원 스킬 게이트: [추가] 시점에서 이미 막지만 config 를 직접 편집하면 낚시가
+      # 들어올 수 있습니다. 그 항목 차례에 반드시 멈추므로 시작 전에 거부합니다 (팝업 없이 로그만)
+      if ($script:customConfigSection -eq 'lifeCustomRepeat') {
+        $lcrGateBad = @()
+        $lcrGateSeq = 0
+        foreach ($lcrGateItem in @($crItems)) {
+          $lcrGateSeq++
+          if ($null -eq $lcrGateItem) { continue }
+          if ($script:lifeSupportedSkillIds -notcontains [string]$lcrGateItem.skill) {
+            $lcrGateBad += ('{0}번: {1}' -f $lcrGateSeq, (Get-LifeCustomItemLabel -Item $lcrGateItem))
+          }
+        }
+        if ($lcrGateBad.Count -gt 0) {
+          Add-GuiLog '[경고] 생활 커스텀 반복: 아직 지원하지 않는 채집 스킬이 리스트에 있어 시작할 수 없습니다 - 해당 항목을 삭제해 주세요.'
+          foreach ($lcrGateLine in $lcrGateBad) { Add-GuiLog ('[경고] ' + $lcrGateLine) }
+          $script:customActive = $false
+          return
+        }
+      }
       if ($script:customConfigSection -eq 'abyssCustomRepeat') {
         $acrGateIssues = @(Get-AbyssMatchingIssues -Items $crItems)
         if ($acrGateIssues.Count -gt 0) {
@@ -7154,7 +8020,10 @@ function Invoke-StartAutomation {
             return
           }
         } else {
-          Add-GuiLog "[안내] 커스텀 반복: 저장된 진행을 이어갑니다 - $(Get-CustomPositionText -Lap $crLapNow -Index $crIndexNow -Total $crItems.Count)부터 시작합니다."
+          # 생활은 '항목 x 횟수'를 펼친 개수가 총 칸 수라 표기도 그 기준이어야 합니다
+          $crResumeTotal = $(if ($script:customConfigSection -eq 'lifeCustomRepeat') {
+              @(Expand-LifeCustomItems -Items $crItems).Count } else { $crItems.Count })
+          Add-GuiLog "[안내] 커스텀 반복: 저장된 진행을 이어갑니다 - $(Get-CustomPositionText -Lap $crLapNow -Index $crIndexNow -Total $crResumeTotal)부터 시작합니다."
         }
       }
       # 랜덤 진행: 이번 바퀴 순열을 시작 전에 확보합니다 (아래 마커 복구 검사의 resumeContext 가
@@ -7222,7 +8091,8 @@ function Invoke-StartAutomation {
       if ($candidate -le (Get-Date)) { $candidate = $candidate.AddDays(1) }
       $script:targetTime = $candidate
       if (-not (Test-TimeAllowsNextCycle)) {
-        Add-GuiLog "[안내] 지정 시간($($script:targetTime.ToString('HH:mm')))까지 남은 시간이 클리어 대기($([int]$numClearWait.Value)초)보다 짧아 시작할 수 없습니다."
+        $estimateLabel = $(if ($script:mainCategory -eq 'life') { '진행 없음 한도' } else { '클리어 대기' })
+        Add-GuiLog "[안내] 지정 시간($($script:targetTime.ToString('HH:mm')))까지 남은 시간이 ${estimateLabel}($(Get-CycleWaitSecondsForEstimate)초)보다 짧아 시작할 수 없습니다."
         $script:targetTime = $null
         return
       }
@@ -7237,7 +8107,7 @@ function Invoke-StartAutomation {
 }
 
 $btnStart.Add_Click({
-    # 생활 대분류 시작 차단 (v2.0.0 GUI 단계 - 워커 미구현. F9 도 PerformClick 경유라 함께 차단)
+    # 생활 대분류 지원 범위 게이트 (가공/미지원 스킬 차단. F9 도 PerformClick 경유라 함께 검사)
     if (Test-LifeStartBlocked) { return }
     # 사용 승인 게이트 (새 자동화 시작 시 검사 - 스펙): 미승인 상태는 즉시 거부하고,
     # 승인 상태여도 명단을 한 번 더 비동기 조회한 뒤(최대 10초) 시작합니다.
@@ -7286,9 +8156,18 @@ $btnSafeStop.Add_Click({
       Add-GuiLog "[경고] 안전 중지 신호 파일을 만들지 못했습니다($($_.Exception.Message)) - 진행 중인 회차가 완전히 끝나는 시점에 멈춥니다."
     }
     $btnSafeStop.Text = '안전 중지 취소(F9)'
-    $lblStatus.Text = '안전 중지 예약됨 - 던전에서 나오는 대로 멈춥니다 (다시 누르면 취소)'
+    # 문구는 대분류마다 다릅니다 (2026-08-08 사용자 지적: 생활인데 '던전에서 나오면'이라고 안내).
+    # 전투는 워커가 결과 화면에서 '나가기'를 눌러 밖이 확인되는 시점에 회차를 마치지만,
+    # 생활은 그런 조기 종료 지점이 없어(채집을 중간에 버리면 퀘스트만 날아감) **진행 중인
+    # 채집을 끝까지 마친 뒤** GUI 가 다음 사이클을 시작하지 않는 방식으로 멈춥니다.
+    if ($script:mainCategory -eq 'life') {
+      $lblStatus.Text = '안전 중지 예약됨 - 이번 채집을 마치면 멈춥니다 (다시 누르면 취소)'
+      Add-GuiLog '안전 중지 예약: 진행 중인 채집을 끝까지 마친 뒤 다음 사이클을 시작하지 않습니다 (채집이 끝날 때까지 몇 분 걸릴 수 있습니다). 버튼을 다시 누르면 취소.'
+    } else {
+      $lblStatus.Text = '안전 중지 예약됨 - 던전에서 나오는 대로 멈춥니다 (다시 누르면 취소)'
+      Add-GuiLog '안전 중지 예약: 던전에서 나와 밖이 확인되면 멈춥니다. (버튼을 다시 누르면 취소)'
+    }
     $lblStatus.ForeColor = [System.Drawing.Color]::DarkOrange
-    Add-GuiLog '안전 중지 예약: 던전에서 나와 밖이 확인되면 멈춥니다. (버튼을 다시 누르면 취소)'
   })
 
 $btnKill.Add_Click({ Stop-AllRun '즉시 중지' })
@@ -7310,8 +8189,7 @@ $btnSave.Add_Click({
   })
 
 $btnOpenLog.Add_Click({
-    $logDir = Join-Path $scriptRoot 'Log'
-    if (Test-Path -LiteralPath $logDir) { Start-Process explorer.exe $logDir }
+    if (Test-Path -LiteralPath $honeyLogDir) { Start-Process explorer.exe $honeyLogDir }
   })
 
 $btnRecommendedWindow.Add_Click({
@@ -7387,10 +8265,11 @@ $updateCategoryPanels = {
   # 설명서 버튼 글자를 선택한 콘텐츠에 맞게 전환
   $btnManual.Text = $(if ($isLife) { '생활 설명서' } elseif ($isDungeon) { '던전 설명서' } elseif ($isDeep) { '심층 설명서' }
     elseif ($isHunting) { '사냥터 설명서' } else { '어비스 설명서' })
-  # 커스텀 반복 라디오는 던전/어비스에서 활성화합니다. 사냥터/생활로는 전환할 수 없고
-  # 선택 의도는 config 에 보존합니다 (생활은 1차 미지원 - 요청사항.md).
+  # 커스텀 반복 라디오는 던전/어비스/심층 + 생활 채집에서 활성화합니다. 사냥터와 생활 가공은
+  # 리스트 개념이 없어 전환할 수 없고, 선택 의도는 config 에 보존합니다.
+  # (생활 채집 커스텀은 2026-08-08 신설 - 그전까지 생활 전체가 미지원이었습니다)
   # crSwitching 가드: 이 프로그램적 전환이 라디오 CheckedChanged 의 enabled 저장을 오염시키지 않게 함
-  $supportsCustom = (-not $isHunting) -and (-not $isLife)
+  $supportsCustom = (-not $isHunting) -and ((-not $isLife) -or $isLifeGather)
   $rbCustomRepeat.Enabled = $supportsCustom
   if (-not $supportsCustom) {
     if ($rbCustomRepeat.Checked) {
@@ -7405,6 +8284,15 @@ $updateCategoryPanels = {
   $isDungeonCustom = $isDungeon -and $isCustom
   $isAbyssCustom = $isAbyss -and $isCustom
   $isDeepCustom = $isDeep -and $isCustom
+  $isLifeCustom = $isLifeGather -and $isCustom
+  # 커스텀에서는 슬라이더가 '담기용'이라 리스트 자리를 만들려고 카드를 글자만 남긴 26px 로
+  # 줄입니다 (아이콘 9종은 일반 생활 모드에서 그대로 - 시안 확정. 두 줄에서 60px 확보)
+  $lifeCardHeight = $(if ($isLifeCustom) { 26 } else { 56 })
+  $lifeSkillRowTop = 38
+  $lifeSkillDotsTop = $lifeSkillRowTop + $lifeCardHeight + 2
+  $lifeTargetCaptionTop = $lifeSkillDotsTop + 18
+  $lifeTargetRowTop = $lifeTargetCaptionTop + 18
+  $lifeTargetDotsTop = $lifeTargetRowTop + $lifeCardHeight + 2
   $grpContentDetail.Text = '콘텐츠 상세 설정'
   # 커스텀 반복 중에는 사냥터 카테고리로 전환하지 못하게 합니다.
   # 커스텀 반복을 해제하거나 다른 카테고리로 폴백하면 문구와 활성 상태가 즉시 원래대로 돌아옵니다.
@@ -7426,13 +8314,50 @@ $updateCategoryPanels = {
   $btnLifeTargetNext.Visible = $isLifeGather
   foreach ($lifeCardCtl in @($script:lifeTargetCards)) { $lifeCardCtl.Visible = $isLifeGather }
   $lblLifeTargetDots.Visible = $isLifeGather
-  $lblLifeBag.Visible = $isLifeGather
-  $pnlLifeBag.Visible = $isLifeGather
-  $lblLifeTool.Visible = $isLifeGather
-  $pnlLifeTool.Visible = $isLifeGather
   $lblLifeProcessInfo.Visible = $isLifeProcess
+  # 생활 슬라이더 두 줄의 세로 배치 - 커스텀이면 카드가 낮아져 아래 줄이 전부 올라옵니다
+  $btnLifeSkillPrev.Top = $lifeSkillRowTop
+  $btnLifeSkillPrev.Height = $lifeCardHeight
+  $btnLifeSkillNext.Top = $lifeSkillRowTop
+  $btnLifeSkillNext.Height = $lifeCardHeight
+  foreach ($lifeCardCtl in @($script:lifeSkillCards)) {
+    $lifeCardCtl.Top = $lifeSkillRowTop
+    $lifeCardCtl.Height = $lifeCardHeight
+  }
+  $lblLifeSkillDots.Top = $lifeSkillDotsTop
+  $lblLifeTargetCaption.Top = $lifeTargetCaptionTop
+  $btnLifeTargetPrev.Top = $lifeTargetRowTop
+  $btnLifeTargetPrev.Height = $lifeCardHeight
+  $btnLifeTargetNext.Top = $lifeTargetRowTop
+  $btnLifeTargetNext.Height = $lifeCardHeight
+  foreach ($lifeCardCtl in @($script:lifeTargetCards)) {
+    $lifeCardCtl.Top = $lifeTargetRowTop
+    $lifeCardCtl.Height = $lifeCardHeight
+  }
+  $lblLifeTargetDots.Top = $lifeTargetDotsTop
+  # 생활 커스텀 리스트 화면 (반복 횟수 줄 → 리스트+버튼 열 → 리스트 반복 줄)
+  $pnlLcrInput.Visible = $isLifeCustom
+  $lvLcrList.Visible = $isLifeCustom
+  $btnLcrAdd.Visible = $isLifeCustom
+  $btnLcrDelete.Visible = $isLifeCustom
+  $btnLcrUp.Visible = $isLifeCustom
+  $btnLcrDown.Visible = $isLifeCustom
+  $chkLcrRandom.Visible = $isLifeCustom
+  $pnlLcrRepeat.Visible = $isLifeCustom
+  if ($isLifeCustom) {
+    $lcrInputTop = $lifeTargetDotsTop + 20
+    $lcrListTop = $lcrInputTop + 30
+    $pnlLcrInput.Top = $lcrInputTop
+    $lvLcrList.Top = $lcrListTop
+    $btnLcrAdd.Top = $lcrListTop
+    $btnLcrDelete.Top = $lcrListTop + 36
+    $btnLcrUp.Top = $lcrListTop + 72
+    $btnLcrDown.Top = $lcrListTop + 108
+    $chkLcrRandom.Top = $lcrListTop + 144
+    $pnlLcrRepeat.Top = $lcrListTop + 186
+  }
   if ($isLifeGather) { Update-LifeSliders }
-  # 설정 그룹 내용 교대: 전투(체크 4개 + 클리어 대기 줄) ↔ 생활(채집 대기 줄).
+  # 설정 그룹 내용 교대: 전투(체크 4개 + 클리어 대기 줄) ↔ 생활(진행 없음 줄).
   # 공용 버튼(권장 창 모드/적용된 설정/설정 저장)과 저장 안내 라벨은 양쪽 유지 (시안 확정)
   $chkSpace.Visible = -not $isLife
   $chkFood.Visible = -not $isLife
@@ -7445,6 +8370,34 @@ $updateCategoryPanels = {
   $lblGatherWait.Visible = $isLife
   $numGatherWait.Visible = $isLife
   $lblGatherHuman.Visible = $isLife
+  # 공용 버튼 3개(권장 창 모드/적용된 설정/설정 저장) 배치도 대분류에 따라 갈립니다
+  # (2026-08-08 사용자 지시 - '설정 아래 가로 한 줄'은 생활에만).
+  #  · 전투: 오른쪽 세로 3단 (체크 4개 + 클리어 대기 줄이 왼쪽을 다 쓰므로 원래 자리 유지)
+  #  · 생활: 진행 없음 줄 하나뿐이라 아래가 비므로 폭 158 세 개를 가로로 (시안 확정)
+  # 두 배치 모두 그룹 안쪽 폭 514 안에 들어갑니다.
+  if ($isLife) {
+    $btnRecommendedWindow.Location = New-Object System.Drawing.Point(15, 56)
+    $btnAlwaysOn.Location = New-Object System.Drawing.Point(183, 56)
+    $btnSave.Location = New-Object System.Drawing.Point(351, 56)
+    foreach ($settingsBtn in @($btnRecommendedWindow, $btnAlwaysOn, $btnSave)) {
+      $settingsBtn.Size = New-Object System.Drawing.Size(158, 28)
+    }
+    # 저장 안내는 진행 없음 줄 오른쪽 빈 자리로 (버튼 줄과 겹치지 않게)
+    $lblSaveInfo.Location = New-Object System.Drawing.Point(350, 28)
+    $lblSaveInfo.Size = New-Object System.Drawing.Size(159, 20)
+    $grpSettings.Height = 94
+  }
+  else {
+    $btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)
+    $btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 70)
+    $btnSave.Location = New-Object System.Drawing.Point(390, 108)
+    foreach ($settingsBtn in @($btnRecommendedWindow, $btnAlwaysOn, $btnSave)) {
+      $settingsBtn.Size = New-Object System.Drawing.Size(108, 30)
+    }
+    $lblSaveInfo.Location = New-Object System.Drawing.Point(205, 82)
+    $lblSaveInfo.Size = New-Object System.Drawing.Size(180, 20)
+    $grpSettings.Height = 150
+  }
   # 어비스용 패널 (함께하기일 때만 매칭 줄이 난이도 아래에 나타나고 던전 목록이 내려감)
   # 파티(파티원)은 난이도/던전 선택이 의미가 없어(파티장이 결정) 두 줄을 숨기고
   # 매칭 줄을 난이도 자리로 올립니다.
@@ -7524,9 +8477,15 @@ $updateCategoryPanels = {
   #  던전 커스텀 반복 = 입력 줄 + 라디오 줄 0~2개 + 리스트 + 리스트 반복 줄: 라디오 줄 수에
   #  따라 리스트/버튼 열/하단 줄을 내리고 그룹 높이를 244~296 으로 재계산)
   if ($isLife) {
-    # 생활 상세: 채집(슬라이더 2줄 + 소진 2줄)·가공(안내) 모두 268 고정
-    # (채집↔가공 전환 시 탭/폼 흔들림 방지 - Codex 조건. 탭 이하 배치는 아래 공통 계산이 처리)
-    $grpContentDetail.Height = 268
+    if ($isLifeCustom) {
+      # 생활 커스텀: 슬라이더 두 줄(글자 카드 26)이 위로 접히고 그 아래 리스트 화면이 붙습니다.
+      # 위치는 위쪽 표시 블록이 이미 계산해 뒀으므로 여기서는 높이만 맞춥니다
+      $grpContentDetail.Height = $pnlLcrRepeat.Top + 36
+    } else {
+      # 생활 상세: 채집(슬라이더 2줄 + 소진 2줄)·가공(안내) 모두 268 고정
+      # (채집↔가공 전환 시 탭/폼 흔들림 방지 - Codex 조건. 탭 이하 배치는 아래 공통 계산이 처리)
+      $grpContentDetail.Height = 268
+    }
   } elseif ($isDungeon) {
     if ($isDungeonCustom) {
       $crRowTop = 50
@@ -7741,6 +8700,9 @@ if ($script:configMigrated) {
   Add-GuiLog '[안내] 업데이트 감지: 설정을 새 버전 형식으로 이전했습니다 (사용자 설정은 유지, 화면 좌표는 최신으로 갱신)'
   if ($script:customProgressReset) {
     Add-GuiLog '[안내] 업데이트로 커스텀 반복 진행 기록을 초기화했습니다 (리스트는 유지 - 다음 시작은 처음부터)'
+  }
+  if ($script:gatherWaitReset -gt 0) {
+    Add-GuiLog "[안내] '진행 없음' 설정의 의미가 바뀌어(사이클 총 시간 → 진행이 멈춘 시간) 기존 값 $($script:gatherWaitReset)초를 기본값 600초로 되돌렸습니다. 이제 채집 수량이 늘어나는 동안은 오래 걸려도 멈추지 않습니다."
   }
 }
 if ($script:configMigrationError) {

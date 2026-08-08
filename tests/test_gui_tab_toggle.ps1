@@ -93,8 +93,8 @@ Assert-Case '가드: 접힘 중 ScrollToCaret 생략' `
   ($guiSource -match 'return   # 접힘 중에는 ScrollToCaret 생략') $true
 Assert-Case '가드: 로그 지우기 시 배지 리셋' `
   ($guiSource -match '\$txtLog\.Clear\(\)[\s\S]{0,400}Reset-LogTabBadge') $true
-Assert-Case '가드: 토글 커스텀 배경색 확실 적용 5곳(설정/로그+랜덤 3)' `
-  ([regex]::Matches($guiSource, 'UseVisualStyleBackColor = \$false').Count) 5
+Assert-Case '가드: 토글 커스텀 배경색 확실 적용 6곳(설정/로그+랜덤 4)' `
+  ([regex]::Matches($guiSource, 'UseVisualStyleBackColor = \$false').Count) 6
 Assert-Case '가드: 하단 줄 간격 실측' `
   ($guiSource -match '\$script:footerGap = \$form\.ClientSize\.Height - \$btnOpenLog\.Top') $true
 # 로그 전용 하단 컨트롤은 로그 열림에 연동 (2026-08-04 추가 요청 - Log 폴더 열기는 항상 유지)

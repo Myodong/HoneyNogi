@@ -68,8 +68,9 @@ try {
   try { Initialize-RunLog -Reset } catch { $bothLockedThrew = $true }
   Check-Equal '기본·복구 로그가 모두 잠기면 조용히 진행하지 않고 오류' $bothLockedThrew $true
 
-  $scriptRoot = Join-Path $tempDir 'archive_app'
-  $archiveLogDir = Join-Path $scriptRoot 'Log'
+  # 보관 경로 계약 (2026-08-05 로그 통일): Move-WorkerLogToArchive 는 $honeyLogDir 에 보관
+  $honeyLogDir = Join-Path $tempDir 'archive_log'
+  $archiveLogDir = $honeyLogDir
   New-Item -ItemType Directory -Path $archiveLogDir | Out-Null
   $archiveSource = Join-Path $archiveLogDir 'mabinogi_run_once.recovery.log'
   [IO.File]::WriteAllText($archiveSource, "복구 로그`r`n", (New-Object Text.UTF8Encoding($true)))
