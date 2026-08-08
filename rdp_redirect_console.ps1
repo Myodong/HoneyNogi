@@ -3,6 +3,9 @@
 # Triggered automatically by the scheduled task 'HoneyNogiRDPToConsole'
 # whenever an RDP session disconnects (Event ID 24).
 $ErrorActionPreference = 'SilentlyContinue'
+# 이 스크립트만 '스크립트 옆 Log'를 유지합니다 (2026-08-05 로그 통일에서 의도적으로 제외):
+# 예약 작업이 SYSTEM 계정으로 실행돼 LocalApplicationData 해석이 SYSTEM 프로필로 가기 때문.
+# exe 실사용에서는 스크립트가 %LOCALAPPDATA%\HoneyNogi 에 있어 결과적으로 같은 폴더입니다.
 $logDir = Join-Path $PSScriptRoot 'Log'
 $logPath = Join-Path $logDir 'rdp_redirect.log'
 

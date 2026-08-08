@@ -57,7 +57,7 @@ Check-Pattern '진행 초기화 버튼 폭 80(폭 560 재배분)' $gui `
 Check-Pattern '리스트 조작 버튼 폭 94 유지' $gui `
   '\$btnCrAdd\.Size\s*=\s*New-Object System\.Drawing\.Size\(94, 30\)'
 Check-Pattern '커스텀 반복 중 사냥터 선택 비활성화' $gui `
-  '\$isCustom\s*=\s*\$supportsCustom\s+-and\s+\$rbCustomRepeat\.Checked[\s\S]{0,500}\$rbCatHunting\.Enabled\s*=\s*-not\s+\$isCustom'
+  '\$isCustom\s*=\s*\$supportsCustom\s+-and\s+\$rbCustomRepeat\.Checked[\s\S]{0,1200}\$rbCatHunting\.Enabled\s*=\s*-not\s+\$isCustom'
 Check-Pattern '커스텀 반복 중 사냥터 미지원 문구 표시' $gui `
   '\$rbCatHunting\.Text\s*=\s*\$\(if\s*\(\$isCustom\)\s*\{\s*''사냥터\(미지원\)''\s*\}\s*else\s*\{\s*''사냥터''\s*\}\)'
 

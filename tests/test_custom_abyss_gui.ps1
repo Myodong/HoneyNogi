@@ -17,7 +17,7 @@ function Check-Absent {
 }
 
 Check-Pattern '어비스에서도 커스텀 반복 선택 가능' `
-  '\$supportsCustom\s*=\s*\(-not \$isHunting\) -and \(-not \$isLife\)[\s\S]{0,120}\$rbCustomRepeat\.Enabled\s*=\s*\$supportsCustom'   # v2.0.0: 생활 미지원 게이트 포함
+  '\$supportsCustom\s*=\s*\(-not \$isHunting\) -and \(\(-not \$isLife\) -or \$isLifeGather\)[\s\S]{0,120}\$rbCustomRepeat\.Enabled\s*=\s*\$supportsCustom'   # v2.0.0: 사냥터·생활 가공만 제외 (생활 채집 커스텀 신설 - 2026-08-08)
 Check-Pattern '어비스 커스텀 GUI와 던전 커스텀 실행 상태 분리' `
   '\$isDungeonCustom\s*=\s*\$isDungeon\s+-and\s+\$isCustom[\s\S]{0,120}\$isAbyssCustom\s*=\s*\$isAbyss\s+-and\s+\$isCustom'
 Check-Pattern '어비스 커스텀 혼자하기·함께하기 입력' `
@@ -42,10 +42,11 @@ Check-Pattern '어비스 진행 초기화 활성·전용 섹션 연결' `
   '\$btnAcrReset\.Enabled\s*=\s*\$true[\s\S]{0,900}Reset-CustomProgress\s+-SectionName\s+''abyssCustomRepeat'''
 # 2026-07-28 심층던전 추가로 3분기(abyss/deep/기본)가 됐습니다 - 어비스가 abyssCustomRepeat 를
 # 고르고 기본이 customRepeat 인 계약만 고정합니다 (중간 elseif 는 허용)
+# 2026-08-08 생활 커스텀이 앞에 붙어 첫 분기가 lifeCustomRepeat 로 바뀌었습니다
 Check-Pattern '시작 시 어비스 진행 섹션 선택' `
-  '\$script:customConfigSection\s*=\s*\$\(if\s*\(\$rbCatAbyss\.Checked\)\s*\{\s*''abyssCustomRepeat''\s*\}[\s\S]{0,160}else\s*\{\s*''customRepeat''\s*\}\)'
+  '\$script:customConfigSection\s*=\s*\$\(if\s*\(\$isLifeCustomStart\)\s*\{\s*''lifeCustomRepeat''\s*\}[\s\S]{0,160}elseif\s*\(\$rbCatAbyss\.Checked\)\s*\{\s*''abyssCustomRepeat''\s*\}[\s\S]{0,160}else\s*\{\s*''customRepeat''\s*\}\)'
 Check-Pattern '던전·어비스 완료 마커 파일 분리' `
-  '\$customAbyssMarkerFile\s*=\s*Join-Path[^\r\n]*abyss_custom_done\.marker[\s\S]+\$script:customMarkerFile\s*=\s*\$\(if\s*\(\$rbCatAbyss\.Checked\)'
+  '\$customAbyssMarkerFile\s*=\s*Join-Path[^\r\n]*abyss_custom_done\.marker[\s\S]+\$script:customMarkerFile\s*=\s*\$\(if\s*\(\$isLifeCustomStart\)'
 Check-Absent '자동화 실행 미지원 표기 제거' '자동화 실행 미지원'
 Check-Absent '어비스 커스텀 시작 차단 제거' '어비스 커스텀 반복은 현재 자동화 실행을 지원하지 않습니다'
 Check-Pattern '상세 설정 제목 통일' '\$grpContentDetail\.Text\s*=\s*''콘텐츠 상세 설정'''

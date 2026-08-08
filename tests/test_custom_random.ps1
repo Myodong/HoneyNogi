@@ -88,16 +88,16 @@ Assert-Case '가드: 진행 초기화 시 마커 무효화' `
   ($guiSource -match '커스텀 진행 초기화 저장 실패[\s\S]{0,700}Remove-Item -LiteralPath \$customMarkerFile') $true
 Assert-Case '가드: 정지 시 등록 순서 표기 복원(모든 경로 공용)' `
   ($guiSource -match 'if \(-not \$IsRunning\) \{ Restore-CustomListRegisteredView \}') $true
-Assert-Case '가드: 저장 함수는 Tag 정렬로 등록 순서 보존 3곳' `
-  ([regex]::Matches($guiSource, 'if \(\$script:customViewShuffled\) \{ \$\w+SourceRows').Count) 3
-Assert-Case '가드: 랜덤 토글 3개 생성' `
-  ([regex]::Matches($guiSource, '\$chk(Cr|Acr|Dcr)Random = New-Object System\.Windows\.Forms\.CheckBox').Count) 3
-Assert-Case '가드: 토글 배치 - 버튼 열 5번째(listTop+144) 3곳' `
-  ([regex]::Matches($guiSource, 'Random\.Top = \$\w+ListTop \+ 144').Count) 3
-Assert-Case '가드: 반복 줄 30px 하향(listTop+186) 3곳' `
-  ([regex]::Matches($guiSource, 'Repeat\.Top = \$\w+ListTop \+ 186').Count) 3
-Assert-Case '가드: 저장 노드에 randomOrder 3섹션' `
-  ([regex]::Matches($guiSource, 'randomOrder     = \[bool\]\$chk\w+Random\.Checked').Count) 3
+Assert-Case '가드: 저장 함수는 Tag 정렬로 등록 순서 보존 4곳(던전/어비스/심층/생활)' `
+  ([regex]::Matches($guiSource, 'if \(\$script:customViewShuffled\) \{ \$\w+SourceRows').Count) 4
+Assert-Case '가드: 랜덤 토글 4개 생성' `
+  ([regex]::Matches($guiSource, '\$chk(Cr|Acr|Dcr|Lcr)Random = New-Object System\.Windows\.Forms\.CheckBox').Count) 4
+Assert-Case '가드: 토글 배치 - 버튼 열 5번째(listTop+144) 4곳' `
+  ([regex]::Matches($guiSource, 'Random\.Top = \$\w+ListTop \+ 144').Count) 4
+Assert-Case '가드: 반복 줄 30px 하향(listTop+186) 4곳' `
+  ([regex]::Matches($guiSource, 'Repeat\.Top = \$\w+ListTop \+ 186').Count) 4
+Assert-Case '가드: 저장 노드에 randomOrder 4섹션' `
+  ([regex]::Matches($guiSource, 'randomOrder     = \[bool\]\$chk\w+Random\.Checked').Count) 4
 Assert-Case '가드: 층 혼합 게이트 호출 6곳(저장2+롤백2+로드2)' `
   ([regex]::Matches($guiSource, 'Update-CustomRandomMixGate -Toggle').Count) 6
 Assert-Case '가드: 랜덤 상태 표기((랜덤) 접미)' `
@@ -107,8 +107,8 @@ Assert-Case '가드: 회차 시작 시 섞인 순서 표시 배선' `
 
 # config.json 기본 키
 $configJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-Case 'config: schema 5' ([int]$configJson.configSchemaVersion) 5   # v2.0.0: mainCategory/life 신설로 인상
-Assert-Case 'config: randomOrder 기본 false 3섹션' `
-  (($configJson.customRepeat.randomOrder -eq $false) -and ($configJson.deepCustomRepeat.randomOrder -eq $false) -and ($configJson.abyssCustomRepeat.randomOrder -eq $false)) $true
+Assert-Case 'config: schema 7' ([int]$configJson.configSchemaVersion) 7   # v2.0.0: life 신설(5) → '채집 대기' 의미 변경(6) → 가방/도구 옵션 제거(7)
+Assert-Case 'config: randomOrder 기본 false 4섹션' `
+  (($configJson.customRepeat.randomOrder -eq $false) -and ($configJson.deepCustomRepeat.randomOrder -eq $false) -and ($configJson.abyssCustomRepeat.randomOrder -eq $false) -and ($configJson.lifeCustomRepeat.randomOrder -eq $false)) $true
 
 exit $fails
