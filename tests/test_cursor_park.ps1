@@ -1,7 +1,11 @@
 ﻿# 커서 대피 지점 선택 진리표 (2026-08-09 제보 + 리뷰 적발).
 #
-# 제보: 물약 부족 팝업의 '닫기'를 눌러 닫았는데, 게임이 커서를 직접 그리기 때문에 커서가
-# '닫기' 글자 위에 남아 팝업이 다시 떴을 때 그 글자를 가려 영영 못 닫음.
+# 제보: 물약 부족 팝업의 '닫기'를 눌러 닫았는데 팝업이 다시 뜨자 두 번째부터 못 닫음.
+# 클릭 직후 커서가 '닫기' 위에 남아 있는 것이 유일하게 달라진 조건이었다.
+# ※ 처음에는 "게임이 커서를 직접 그려 캡처에 찍히고 글자를 가린다"고 적었으나, 실제 게임에
+#   대조군을 넣어 재실측한 결과 **커서 기여분은 0**이었다(하드웨어 커서 + BitBlt 캡처).
+#   남은 근거는 '포인터가 올라간 자리를 게임이 호버 UI 로 다시 그린다'이며, 이 프로젝트에는
+#   같은 계열 실사고 전례가 있다(v1.0.7 '발견한전' 절단). 기전은 미확정이다.
 # 리뷰 적발: 첫 구현은 좌/우 바깥만 고정 여백 12px 로 봐서, **권장 크기 1908x1076 을
 # 1920x1080 화면 (0,0) 에 띄운 대표 배치에서 아무 동작도 하지 않았습니다** (왼쪽은 화면 밖,
 # 오른쪽은 여백이 12px 미만). 그래서 이 진리표는 그 배치를 1급 케이스로 고정합니다.
@@ -101,6 +105,18 @@ Assert-Case '화면 목록 비었음: 이동 없음' `
 $workerRaw = [IO.File]::ReadAllText($workerPath)
 Assert-Case '배선: 대피 호출이 순수 판정 함수를 경유' `
   ($workerRaw -match 'Get-CursorParkPoint -Left \$rect\.Left') 'True'
+# 게임이 전면일 때만 커서를 건드립니다. 없으면 사용자가 게임 위에 올린 창에서 마우스를 쓰는
+# 동안 약 2초마다(클리어 대기 폴링 1초 × %2) 커서를 뺏어 PC 를 못 쓰게 만듭니다
+# (2026-08-09 3차 점검 하네스 재현 - v2.0.1 에 없던 UX 회귀).
+$parkBodyEarly = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Move-CursorOutsideGame'))
+Assert-Case '게이트: 게임이 전면일 때만 대피(사용자 마우스 강탈 방지)' `
+  ($parkBodyEarly -match 'if \(-not \(Test-GameForeground -Game \$Game\)\) \{ return \}') 'True'
+# ※ 유휴 검사는 쓰면 안 됩니다 - 우리 클릭(mouse_event)이 유휴를 0으로 리셋해서, 정작
+#   클릭 직후 대피(제보 시나리오 그 자체)를 항상 막습니다(3차 점검 실측).
+# 주석에는 '왜 쓰면 안 되는지'가 적혀 있으므로 주석을 뺀 코드로 검사합니다
+$parkCodeOnly = (($parkBodyEarly -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '게이트: 유휴 검사는 쓰지 않는다(클릭 직후 대피를 스스로 막음)' `
+  ($parkCodeOnly -match 'Get-UserIdleSeconds') 'False'
 Assert-Case '배선: 커서 현재 위치를 읽어 넘김(이미 밖이면 무동작)' `
   ($workerRaw -match 'GetCursorPos\(\[ref\]\$cursor\)') 'True'
 # 팝업 '탐색 전' 대피가 핵심입니다. 클릭 직후 대피만으로는 SetCursorPos 가 한 번 실패하거나
@@ -138,5 +154,32 @@ Assert-Case '실행: 대피 실패를 무음으로 삼키지 않는다(로그 �
   ([bool]($parkBody -match '커서 대피 실패')) 'True'
 Assert-Case '실행: 실제로 옮겼을 때만 프레임 대기(이미 창 밖이면 비용 0)' `
   ([bool]($parkBody -match 'SetCursorPos[^\r\n]*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*Start-Sleep -Milliseconds')) 'True'
+
+# ── ⑫ catch 안 switch 의 $_ 덮어쓰기 (2026-08-09 3차 점검) ────────────────────
+# PS 의 switch 는 블록 안에서 $_ 를 '현재 검사 중인 값'으로 덮어씁니다. 그래서 catch 안에서
+# switch 를 쓰고 그 블록에서 $_.Exception.Message 를 읽으면 **빈 문자열**이 됩니다.
+# 무음 죽음을 막으려고 넣은 경고가 정작 사유를 못 남기는 상태였습니다.
+function Test-CatchDollarUnderscore {
+  # 실제 동작을 재현해 '미리 담아야 한다'는 계약을 못 박습니다 (소스 가드만으로는 약함)
+  param([switch]$CaptureFirst)
+  $result = ''
+  try { throw '원인메시지' } catch {
+    if ($CaptureFirst) { $saved = $_.Exception.Message }
+    switch ('warn') {
+      'warn' { $result = $(if ($CaptureFirst) { $saved } else { $_.Exception.Message }) }
+      default { }
+    }
+  }
+  return $result
+}
+Assert-Case '함정: switch 안에서 $_ 를 읽으면 사유가 사라진다' (Test-CatchDollarUnderscore) ''
+Assert-Case '함정: catch 진입 직후 담으면 사유가 남는다' (Test-CatchDollarUnderscore -CaptureFirst) '원인메시지'
+Assert-Case '배선: 대피 catch 가 switch 전에 사유를 담는다' `
+  ([bool]($parkBody -match 'catch \{[\s\S]{0,900}?\$parkError = \$_\.Exception\.Message[\s\S]{0,200}?switch \(')) 'True'
+Assert-Case '배선: 경고 문구가 담아 둔 변수를 쓴다(switch 안 $_ 아님)' `
+  ([bool]($parkBody -match '커서 대피 실패: \$parkError')) 'True'
+# API 실패($false 반환)는 예외가 아니라 catch 로 안 잡힙니다 - 그냥 return 하면 또 무음입니다
+Assert-Case '배선: GetWindowRect/GetCursorPos 실패도 사유로 남긴다' `
+  ([bool](($parkBody -match 'GetWindowRect 실패') -and ($parkBody -match 'GetCursorPos 실패'))) 'True'
 
 exit $fails

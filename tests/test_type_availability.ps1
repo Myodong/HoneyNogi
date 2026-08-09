@@ -28,9 +28,30 @@ $ErrorActionPreference = 'Stop'
 $src = [IO.File]::ReadAllText($TargetPath)
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($TargetPath, [ref]$null, [ref]$null)
 
-# ① 그 스크립트가 로드하는 어셈블리를 그대로 로드
-foreach ($m in [regex]::Matches($src, '(?m)^\s*Add-Type -AssemblyName (\S+)')) {
-  try { Add-Type -AssemblyName $m.Groups[1].Value } catch { }
+# ① 그 스크립트가 로드하는 어셈블리를 로드 - 단 **조건부가 아닌 것만**.
+#    정규식으로 줄만 긁으면 `if ($false) { Add-Type ... }` 처럼 절대 실행되지 않는 코드까지
+#    로드한 것으로 쳐서 검사가 통과합니다 (2026-08-09 변이 M16 이 이 구멍으로 생존했음).
+#    그렇다고 '들여쓰기 0'만 인정하면 사용 직전 지연 로드(GUI 의 ZipFile 처럼 함수 try 안에서
+#    바로 다음 줄에 쓰는 정상 패턴)를 오탐합니다. 그래서 AST 로 **조건문/스위치/반복문 안에
+#    들어 있는지**만 봅니다 - 그 안이면 실행이 보장되지 않으므로 로드하지 않습니다.
+function Test-AstConditional {
+  param($Node)
+  $p = $Node.Parent
+  while ($null -ne $p) {
+    if (($p -is [System.Management.Automation.Language.IfStatementAst]) -or
+        ($p -is [System.Management.Automation.Language.SwitchStatementAst]) -or
+        ($p -is [System.Management.Automation.Language.LoopStatementAst])) { return $true }
+    $p = $p.Parent
+  }
+  return $false
+}
+foreach ($cmd in $ast.FindAll({ param($n)
+      $n -is [System.Management.Automation.Language.CommandAst] -and
+      $n.GetCommandName() -eq 'Add-Type' -and $n.Extent.Text -match '-AssemblyName' }, $true)) {
+  if (Test-AstConditional -Node $cmd) { continue }
+  if ($cmd.Extent.Text -match '-AssemblyName\s+(\S+)') {
+    try { Add-Type -AssemblyName $Matches[1] } catch { }
+  }
 }
 # ② 인라인 C# 타입 정의(HoneyNogiInput 등)도 그대로 컴파일
 foreach ($cmd in $ast.FindAll({ param($n)
@@ -90,12 +111,29 @@ try {
 # 워커가 커서 대피에 WinForms 를 쓰는 한, 로드 줄이 반드시 함께 있어야 합니다.
 # (위 검사가 이미 잡지만, 원인을 바로 알 수 있게 전용 단언을 하나 더 둡니다)
 $workerSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
+$workerLines = $workerSource -split "`r?`n"
 $usesForms = [bool]($workerSource -match '\[System\.Windows\.Forms\.')
-$loadsForms = [bool]($workerSource -match '(?m)^\s*Add-Type -AssemblyName System\.Windows\.Forms\s*$')
-Assert-Case '워커: WinForms 를 쓰면 로드도 한다' ($(if ($usesForms) { $loadsForms } else { $true })) 'True'
+# 로드 줄은 **최상위(들여쓰기 0)** 여야 하고, 첫 사용보다 **앞**이어야 합니다.
+# 조건문 안에 들어가거나 사용처 뒤로 밀리면 실행되지 않거나 늦어 08-09 사고가 그대로 재현됩니다.
+$loadLine = -1
+$firstUseLine = -1
+for ($i = 0; $i -lt $workerLines.Count; $i++) {
+  $line = $workerLines[$i]
+  if ($line -match '^\s*#') { continue }
+  if ($loadLine -lt 0 -and $line -match '^Add-Type -AssemblyName System\.Windows\.Forms\s*$') { $loadLine = $i }
+  if ($firstUseLine -lt 0 -and $line -match '\[System\.Windows\.Forms\.') { $firstUseLine = $i }
+}
+Assert-Case '워커: WinForms 를 쓰면 최상위에서 로드도 한다' `
+  ($(if ($usesForms) { [bool]($loadLine -ge 0) } else { $true })) 'True'
+Assert-Case '워커: WinForms 로드가 첫 사용보다 앞선다' `
+  ($(if ($usesForms -and $loadLine -ge 0 -and $firstUseLine -ge 0) { [bool]($loadLine -lt $firstUseLine) } else { $true })) 'True'
 
 # 무음 catch 금지: 조용히 죽은 기능을 다시 만들지 않기 위한 계약
+# (거리 기반 매칭은 주석이 늘면 깨지므로 함수 본문만 떼어 검사합니다)
+. (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
+$parkFn = [string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
+    -Names @('Move-CursorOutsideGame'))
 Assert-Case '워커: 커서 대피 catch 가 로그를 남긴다' `
-  ([bool]($workerSource -match '(?s)Move-CursorOutsideGame[\s\S]{0,3000}\} catch \{[\s\S]{0,600}커서 대피 실패')) 'True'
+  ([bool]($parkFn -match '커서 대피 실패')) 'True'
 
 exit $fails

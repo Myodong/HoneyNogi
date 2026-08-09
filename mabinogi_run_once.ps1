@@ -2191,9 +2191,23 @@ function Get-ScaledScreenPoint {
   # 최소화된 창의 GetWindowRect 는 화면 밖 좌표(-32000 부근)를 돌려줍니다. 그대로 쓰면
   # 클릭은 엉뚱한 곳으로 날아가고, Get-GamePixel 은 게임이 아닌 픽셀을 '카드 상태'로 읽습니다
   # (2026-08-09 리뷰: 캡처만 막고 이 원시 경로를 열어 두면 회색 비활성 오판으로 이어짐).
-  # 호출부는 이미 크기 throw 를 다루고 있으므로 같은 계약으로 막습니다.
+  #
+  # 다만 최소화는 **복구 가능한 일시 상태**입니다. 그냥 던지면 Click-GamePoint(호출부 80여 곳)
+  # 와 Get-GamePixel 이 이 예외를 잡지 않아 최상위 catch → exit 1 로 회차가 끝납니다.
+  # 판독은 성공했는데 클릭 직전에 창이 내려가는 짧은 경합만으로 무인 운용이 멈추는 셈입니다
+  # (2026-08-09 3차 점검). 캡처 경로와 같은 복원 계약(Invoke-AutoRefocus - 유휴 검사 준수)으로
+  # 잠깐 기다렸다 재확인하고, 그래도 최소화면 그때 명확한 사유로 던집니다.
   if ([HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) {
-    throw '게임 창이 최소화되어 있습니다.'
+    $iconRestored = $false
+    for ($restoreTry = 1; $restoreTry -le 12; $restoreTry++) {
+      try { Invoke-AutoRefocus -Game $Game | Out-Null } catch { }
+      Start-Sleep -Milliseconds 1000
+      if (-not [HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) { $iconRestored = $true; break }
+    }
+    if (-not $iconRestored) {
+      throw '게임 창이 최소화된 상태가 계속됩니다. 게임 창을 다시 연 뒤 시작해 주세요.'
+    }
+    Write-RunLog '[안내] 최소화된 게임 창을 복원해 진행합니다.'
   }
   $rect = New-Object HoneyNogiInput+RECT
   if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
@@ -2309,22 +2323,46 @@ function Get-CursorParkPoint {
 function Move-CursorOutsideGame {
   # 커서를 게임 창 **밖으로** 물립니다 (2026-08-09 제보).
   #
-  # 왜 필요한가: 이 게임은 커서를 **자기가 직접 그립니다**. 그래서 화면 캡처에 커서가 찍히고,
-  # 클릭한 자리에 커서가 그대로 남으면 **그 버튼 글자를 가려** 다음 판독에서 못 찾습니다.
-  # 실제 제보: 물약 부족 팝업의 '닫기'를 눌러 닫았는데 팝업이 다시 뜨자, 커서가 '닫기' 위에
-  # 남아 글자를 가려 두 번째부터 영영 못 닫음.
+  # 제보: 물약 부족 팝업의 '닫기'를 눌러 닫았는데 팝업이 다시 뜨자 두 번째부터 못 닫음.
+  # 클릭 직후 커서가 '닫기' 위에 남아 있는 것이 유일하게 달라진 조건이었습니다.
   #
-  # 창 밖으로 빼는 이유: 창 안 어디에 두든 그 자리가 다른 화면에서는 버튼일 수 있고
-  # (절대 규칙 4의 정신), 호버 툴팁이 또 다른 것을 가릴 수 있습니다. 창 밖이면 게임이
-  # 커서를 그리지 않으므로 가림도 호버도 원천적으로 없습니다.
+  # ⚠ 원인 기전은 **아직 확정되지 않았습니다** (2026-08-09 3차 점검).
+  #   처음 주석에는 "게임이 커서를 직접 그려 캡처에 찍히고 글자를 가린다"고 적었는데,
+  #   실행 중인 실제 게임에 **대조군을 넣어 재실측한 결과 커서 기여분이 0**이었습니다
+  #   (GetCursorInfo flags=1 = OS 하드웨어 커서, 워커의 모든 캡처는 Graphics.CopyFromScreen
+  #   = BitBlt SRCCOPY 라 하드웨어 커서는 원리적으로 안 찍힘). 그 서술과 '지연 0이면 40회 중
+  #   7회' 수치는 근거가 없어 삭제했습니다 - 이 프로젝트에서 오진 주석은 다음 진단을 막습니다.
+  #
+  # 그럼에도 이 조치를 두는 근거: **포인터가 올라간 자리는 게임이 호버 UI 를 새로 그립니다.**
+  # 그건 캡처에 그대로 찍히고, 이 프로젝트에는 같은 계열의 실사고 전례가 있습니다
+  # (v1.0.7 '발견한전' 절단 - 클릭 지점을 빈 배경으로 옮겨 해결. 이슈 문서 참고).
+  # 창 밖이면 호버 대상이 아예 없으므로 판독 대상 픽셀이 커서 위치에 흔들리지 않습니다.
   # 창이 화면을 꽉 채워 밖이 없으면 그대로 둡니다 (억지로 옮기면 오히려 다른 것을 가림).
   # 클릭 경로는 매번 SetCursorPos 로 목표에 다시 가져다 놓으므로 이 대피는 방해가 안 됩니다.
   param([System.Diagnostics.Process]$Game)
+  # 게임이 전면일 때만 커서를 건드립니다.
+  # 없으면 사용자가 게임 위에 올린 브라우저/에디터에서 마우스를 쓰는 동안 **약 2초마다**
+  # (클리어 대기 폴링 1초 × %2) 커서를 화면 가장자리로 뺏어 PC 를 못 쓰게 만듭니다.
+  # 권장 1908x1076 창은 1920x1080 을 거의 덮어 '창 안'이 사실상 '화면 전체'입니다
+  # (2026-08-09 3차 점검에서 하네스로 재현 - v2.0.1 에 없던 UX 회귀).
+  # ※ 유휴 검사(Get-UserIdleSeconds)는 쓰면 안 됩니다. 우리 클릭(mouse_event)이 유휴를 0으로
+  #   리셋해서, **정작 클릭 직후 대피(제보 시나리오 그 자체)를 항상 막습니다**(실측 확인).
+  #   전면 검사는 클릭 직전에 Focus-Game 이 불리므로 그 경로를 그대로 살립니다.
+  if (-not (Test-GameForeground -Game $Game)) { return }
+  # 실패 사유는 **한 곳에서만** 기록합니다 (예외든 API 실패든 같은 억제 규칙).
+  # API 는 예외가 아니라 $false 를 돌려주므로 catch 로는 안 잡힙니다 - 그대로 return 하면
+  # 또 무음이 됩니다 (2026-08-09 3차 점검 지적).
+  $parkFailReason = ''
   try {
     $rect = New-Object HoneyNogiInput+RECT
-    if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) { return }
+    if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
+      $parkFailReason = 'GetWindowRect 실패'
+    }
     $cursor = New-Object HoneyNogiInput+POINT
-    if (-not [HoneyNogiInput]::GetCursorPos([ref]$cursor)) { return }
+    if (-not $parkFailReason -and -not [HoneyNogiInput]::GetCursorPos([ref]$cursor)) {
+      $parkFailReason = 'GetCursorPos 실패'
+    }
+    if ($parkFailReason) { throw $parkFailReason }
     # 게임이 있는 화면을 먼저, 그다음 나머지 모니터 (옆 모니터에 여유가 있으면 그쪽도 사용)
     $gameScreen = [System.Windows.Forms.Screen]::FromHandle($Game.MainWindowHandle)
     $screenList = @()
@@ -2340,19 +2378,24 @@ function Move-CursorOutsideGame {
     # $null = 옮길 필요 없음(이미 창 밖) 또는 옮길 곳 없음(창이 전 모니터를 덮음)
     if ($null -eq $park) { return }
     [HoneyNogiInput]::SetCursorPos([int]$park.X, [int]$park.Y) | Out-Null
-    # 실제로 옮겼을 때만 한 프레임 분량을 기다립니다. 이 게임은 커서를 **자기가 그리므로**
-    # 커서가 화면에서 사라지려면 게임이 새 프레임을 한 장 더 그려야 하는데, 대피 직후
-    # 곧바로 캡처하면 커서가 옛 자리에 찍힌 프레임을 읽습니다(실측: 지연 0 이면 40회 중
-    # 7회가 옛 프레임, 100ms 지연은 0회). 이미 창 밖이라 무동작이면 여기 오지 않으므로
-    # 400ms 폴링의 정상 비용은 그대로입니다.
+    # 실제로 옮겼을 때만 한 프레임 분량을 기다립니다. 호버 UI 가 걷히려면 게임이 새 프레임을
+    # 한 장 더 그려야 하는데, 대피 직후 곧바로 캡처하면 호버가 남은 옛 프레임을 읽습니다.
+    # (30fps 면 33ms, 60fps 면 17ms - 여유 있게 120ms. 이미 창 밖이라 무동작이면 여기 오지
+    # 않으므로 폴링의 정상 비용은 그대로입니다.)
     Start-Sleep -Milliseconds 120
   } catch {
     # 대피 실패 자체는 '가림이 남을 수 있음'일 뿐이라 진행을 막지 않습니다. 다만 **무음은
     # 금지**입니다 - 이 catch 가 조용히 삼키는 바람에 어셈블리 미로드로 기능이 통째로 죽어
     # 있는 것을 아무도 몰랐습니다(2026-08-09). 연속 실패 중에는 첫 1회만 남깁니다.
+    #
+    # ★ 사유는 **switch 앞에서** 지역 변수에 담아야 합니다. PS 의 switch 는 블록 안에서 $_ 를
+    #   '현재 검사 중인 값'으로 덮어쓰기 때문에, switch 안에서 $_.Exception.Message 를 읽으면
+    #   빈 문자열이 됩니다(3차 점검 실측: `커서 대피 실패:  - ...`). 무음을 막으려고 넣은
+    #   로그가 정작 사유를 못 남기는 것을 놓칠 뻔했습니다.
+    $parkError = $_.Exception.Message
     switch (Get-RepeatWarnAction -WasWarned $script:cursorParkWarnActive -Failed $true) {
       'warn' {
-        Write-RunLog "[경고] 커서 대피 실패: $($_.Exception.Message) - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)"
+        Write-RunLog "[경고] 커서 대피 실패: $parkError - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)"
         $script:cursorParkWarnActive = $true
       }
       default { }
@@ -2650,6 +2693,27 @@ function Test-SafeStopDuringCaptureFail {
   # 안전하게 끝낼 수단을 남기기 위한 것입니다.
   # 단, 짧은 순단(RDP 재접속 몇 초)에 발동하면 '회차 완료 후 중지'라는 안전 중지의
   # 원래 약속이 깨지므로, 실패가 2분 이상 이어질 때만 조기 종료합니다.
+  #
+  # ★ 게임이 사라졌으면 화면은 **영영** 돌아오지 않습니다. 캡처 실패 대기 루프 7곳이 전부 이
+  #   함수를 거치므로 여기 한 곳에서 막습니다 (2026-08-09 3차 점검). 안전 중지는 사용자가
+  #   F9 를 눌러야만 발동하므로, 그것만으로는 무인 운용이 밤새 조용히 멈춰 있게 됩니다.
+  #   자동 복구가 원천적으로 불가능한 상태이므로 무한 대기보다 분명한 오류가 낫습니다.
+  if ($script:gameProcess) {
+    $gameGone = $false
+    try { $script:gameProcess.Refresh(); $gameGone = [bool]$script:gameProcess.HasExited }
+    catch { $gameGone = $true }   # 핸들 접근 자체가 실패 = 이미 사라진 것
+    if ($gameGone) {
+      Write-RunLog '[오류] 게임 프로세스가 종료되어 화면 캡처가 복구될 수 없습니다 - 대기를 멈추고 마칩니다. 게임을 다시 실행한 뒤 시작해 주세요.'
+      exit 1
+    }
+    # 프로세스는 살아 있는데 창 핸들이 사라진 경우(창만 닫힘/재생성 중)는 전환 중일 수 있어
+    # 바로 끊지 않고, 캡처 실패가 60초 이상 이어질 때만 마칩니다.
+    if ($script:gameProcess.MainWindowHandle -eq [IntPtr]::Zero -and $script:captureFailingSince -and
+        ((Get-Date) - $script:captureFailingSince).TotalSeconds -ge 60) {
+      Write-RunLog '[오류] 게임 창을 찾을 수 없는 상태가 60초 이상 이어졌습니다 - 대기를 멈추고 마칩니다. 게임 창을 다시 연 뒤 시작해 주세요.'
+      exit 1
+    }
+  }
   if (-not (Test-Path -LiteralPath $safeStopFlagPath)) { return }
   if (-not $script:captureFailingSince) { return }
   if (((Get-Date) - $script:captureFailingSince).TotalSeconds -lt 120) { return }
@@ -9554,6 +9618,9 @@ function Invoke-LifeGatherCycle {
 
 try {
   $game = Get-GameProcess
+  # 캡처 실패 대기 루프가 '게임이 아예 사라졌는지'를 확인할 수 있게 스크립트 스코프에 둡니다
+  # (Test-SafeStopDuringCaptureFail - 무한 대기 차단. 2026-08-09 3차 점검)
+  $script:gameProcess = $game
   Write-RunLog "[준비] 게임 확인: PID $($game.Id)"
 
   # ===== 적용 설정 스냅샷 (로그 파일 전용) =====

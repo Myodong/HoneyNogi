@@ -50,8 +50,12 @@ Check-NoPattern '캡처: 과소 창 게이트는 두지 않음(빠른 실패 보
 # 원시 좌표 경로(클릭/픽셀)도 최소화를 막아야 합니다. 캡처만 막으면 최소화된 창 뒤의 다른
 # 창 픽셀을 '회색 비활성 카드'로 오판해 상태 확인이 통과됩니다 (리뷰 적발).
 $scaledPoint = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-ScaledScreenPoint'))
-Check-Pattern '좌표: 최소화 창은 throw (클릭·픽셀 공용 입구)' $scaledPoint `
-  "IsIconic\(\`$Game\.MainWindowHandle\)\)\s*\{\s*\r?\n\s*throw '게임 창이 최소화"
+# 2026-08-09 3차 점검: 여기서 **즉시** throw 하면 Click-GamePoint(호출부 80여 곳)와
+# Get-GamePixel 이 잡지 않아 최상위 catch → exit 1 로 회차가 끝납니다. 판독 성공 직후
+# 클릭 직전에 창이 내려가는 짧은 경합만으로 무인 운용이 멈추므로, 복원을 기다렸다 재확인하고
+# 그때 던집니다. 상세 계약은 tests\test_stall_guards.ps1 이 담당합니다.
+Check-Pattern '좌표: 최소화 창은 복원 대기 후 throw (클릭·픽셀 공용 입구)' $scaledPoint `
+  '(?s)IsIconic.*Invoke-AutoRefocus.*최소화된 상태가 계속됩니다'
 Check-Pattern '좌표: 기존 과소 창 throw 유지' $scaledPoint '게임 창 크기가 너무 작습니다'
 
 # 원인 안내가 함께 추가되지 않으면 게이트만 넣은 셈이라 'RDP 창을 다시 열어 주세요' 라는
