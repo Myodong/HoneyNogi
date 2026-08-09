@@ -106,17 +106,37 @@ Assert-Case '배선: 커서 현재 위치를 읽어 넘김(이미 밖이면 무�
 # 팝업 '탐색 전' 대피가 핵심입니다. 클릭 직후 대피만으로는 SetCursorPos 가 한 번 실패하거나
 # 사용자가 커서를 다시 창 안에 두면 다음 팝업에서 원래 정체가 재현됩니다 (2026-08-09 리뷰).
 # 그래서 '몇 곳에 있나'가 아니라 **팝업 함수 각각이 탐색 전에 대피하는가**를 봅니다.
+# ※ 앵커는 **바로 다음 줄**로 묶습니다. `(?s)대피.*탐색` 같은 느슨한 패턴은 줄을 건너뛰어
+#   짝을 잘못 맺기 때문에, 실제로 탐색 전 대피 한 곳을 지워도 통과했습니다(2026-08-09 변이
+#   실험으로 확인). 개수도 `-ge` 가 아니라 **정확한 값**으로 고정합니다 - 늘리거나 줄일 때
+#   이 숫자를 함께 고쳐야 리뷰에 걸립니다.
 foreach ($popupFn in @('Invoke-PurchasePopupSweep', 'Invoke-AfterEntryKeys')) {
   $fnBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @($popupFn))
-  Assert-Case "배선: $popupFn 은 탐색 전에 대피" `
-    ($fnBody -match '(?s)Move-CursorOutsideGame -Game \$Game.*Find-GameTextPoint') 'True'
+  Assert-Case "배선: $popupFn 은 탐색 **바로 앞**에서 대피" `
+    ($fnBody -match 'Move-CursorOutsideGame -Game \$Game\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*\$\w+ = Find-GameTextPoint') 'True'
 }
 # 클리어 대기 루프는 함수가 아니라 본문 인라인이라 구매 팝업 블록을 직접 확인합니다
-Assert-Case '배선: 클리어 대기 구매 팝업도 탐색 전에 대피' `
-  ($workerRaw -match '(?s)Move-CursorOutsideGame -Game \$Game\r?\n\s*\$popupClosePoint = Find-GameTextPoint') 'True'
+Assert-Case '배선: 클리어 대기 구매 팝업도 탐색 바로 앞에서 대피' `
+  ($workerRaw -match 'Move-CursorOutsideGame -Game \$Game\r?\n\s*\$popupClosePoint = Find-GameTextPoint') 'True'
 Assert-Case '배선: 클릭 직후 대피도 유지(커서가 닫기 위에 남지 않게)' `
-  ($workerRaw -match '(?s)Click-ScreenPoint -X \$popupClosePoint\.X[^\r\n]*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*Move-CursorOutsideGame') 'True'
-Assert-Case '배선: 대피 호출 4곳 이상' `
-  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$Game').Count -ge 4) 'True'
+  ($workerRaw -match 'Click-ScreenPoint -X \$popupClosePoint\.X[^\r\n]*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*Move-CursorOutsideGame') 'True'
+Assert-Case '배선: 대피 호출 정확히 5곳 (탐색 전 3 + 클릭 후 2)' `
+  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$Game\s*$').Count) 5
+
+# ── ⑪ 실행 가드: 함수 본문이 실제로 도는가 ────────────────────────────────────
+# 위 ①~⑩은 전부 순수 함수 진리표 + 소스 문자열입니다. 그래서 Move-CursorOutsideGame 이
+# 어셈블리 미로드로 **전 PC에서 100% 무동작**인 것을 46종 중 아무도 잡지 못했습니다
+# (2026-08-09 배포 차단급). 타입 해석 전수 검사는 tests\test_type_availability.ps1 이
+# 담당하고, 여기서는 대피 함수가 쓰는 타입이 워커 어셈블리 세트에 있는지만 못 박습니다.
+$workerAsm = @([regex]::Matches($workerRaw, '(?m)^\s*Add-Type -AssemblyName (\S+)') | ForEach-Object { $_.Groups[1].Value })
+$parkBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Move-CursorOutsideGame'))
+if ($parkBody -match '\[System\.Windows\.Forms\.') {
+  Assert-Case '실행: 대피가 WinForms 를 쓰면 워커가 그 어셈블리를 로드한다' `
+    ([bool]($workerAsm -contains 'System.Windows.Forms')) 'True'
+}
+Assert-Case '실행: 대피 실패를 무음으로 삼키지 않는다(로그 필수)' `
+  ([bool]($parkBody -match '커서 대피 실패')) 'True'
+Assert-Case '실행: 실제로 옮겼을 때만 프레임 대기(이미 창 밖이면 비용 0)' `
+  ([bool]($parkBody -match 'SetCursorPos[^\r\n]*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*Start-Sleep -Milliseconds')) 'True'
 
 exit $fails

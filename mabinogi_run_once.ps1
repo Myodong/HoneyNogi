@@ -1647,6 +1647,9 @@ $script:focusWarnActive = $false
 $script:focusWarnSuppressed = 0
 $script:cursorWarnActive = $false
 $script:cursorWarnSuppressed = 0
+# 커서 대피(Move-CursorOutsideGame) 실패 경고 억제 상태 (2026-08-09 - 무음 catch 금지)
+$script:cursorParkWarnActive = $false
+$script:lastMinimizedRestoreAt = $null
 $script:runLogWriter = $null
 $script:runLogTargetPath = $null
 $script:runLogUsingRecovery = $false
@@ -1793,6 +1796,12 @@ foreach ($configWarning in @($script:configValidationWarnings)) {
 }
 
 Add-Type -AssemblyName System.Drawing
+# 워커는 GUI 와 **별도 프로세스**(powershell.exe -NoProfile -File)라 GUI 가 로드한 어셈블리를
+# 물려받지 않습니다. PS 5.1 은 타입 리터럴만으로 GAC 어셈블리를 자동 로드하지 않으므로,
+# 여기서 올리지 않으면 [System.Windows.Forms.Screen] 이 'Unable to find type' 로 던집니다.
+# 2026-08-09 실사고: 이 줄이 없어 커서 대피(Move-CursorOutsideGame)가 **전 PC에서 100%
+# 무동작**이었고, 함수 끝의 빈 catch 가 예외를 삼켜 로그에 흔적조차 남지 않았습니다.
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType=WindowsRuntime] | Out-Null
 [Windows.Graphics.Imaging.BitmapPixelFormat, Windows.Graphics.Imaging, ContentType=WindowsRuntime] | Out-Null
@@ -2328,10 +2337,32 @@ function Move-CursorOutsideGame {
     }
     $park = Get-CursorParkPoint -Left $rect.Left -Top $rect.Top -Right $rect.Right -Bottom $rect.Bottom `
       -Screens $screenList -CursorX $cursor.X -CursorY $cursor.Y
+    # $null = 옮길 필요 없음(이미 창 밖) 또는 옮길 곳 없음(창이 전 모니터를 덮음)
     if ($null -eq $park) { return }
     [HoneyNogiInput]::SetCursorPos([int]$park.X, [int]$park.Y) | Out-Null
+    # 실제로 옮겼을 때만 한 프레임 분량을 기다립니다. 이 게임은 커서를 **자기가 그리므로**
+    # 커서가 화면에서 사라지려면 게임이 새 프레임을 한 장 더 그려야 하는데, 대피 직후
+    # 곧바로 캡처하면 커서가 옛 자리에 찍힌 프레임을 읽습니다(실측: 지연 0 이면 40회 중
+    # 7회가 옛 프레임, 100ms 지연은 0회). 이미 창 밖이라 무동작이면 여기 오지 않으므로
+    # 400ms 폴링의 정상 비용은 그대로입니다.
+    Start-Sleep -Milliseconds 120
   } catch {
-    # 대피 실패는 기능 문제가 아니라 '가림이 남을 수 있음'일 뿐이라 조용히 넘어갑니다
+    # 대피 실패 자체는 '가림이 남을 수 있음'일 뿐이라 진행을 막지 않습니다. 다만 **무음은
+    # 금지**입니다 - 이 catch 가 조용히 삼키는 바람에 어셈블리 미로드로 기능이 통째로 죽어
+    # 있는 것을 아무도 몰랐습니다(2026-08-09). 연속 실패 중에는 첫 1회만 남깁니다.
+    switch (Get-RepeatWarnAction -WasWarned $script:cursorParkWarnActive -Failed $true) {
+      'warn' {
+        Write-RunLog "[경고] 커서 대피 실패: $($_.Exception.Message) - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)"
+        $script:cursorParkWarnActive = $true
+      }
+      default { }
+    }
+    return
+  }
+  # 성공 경로에서 회복 안내를 한 번 남깁니다 (실패가 이어지다 풀린 것을 알 수 있게)
+  if ($script:cursorParkWarnActive) {
+    Write-RunLog '[안내] 커서 대피가 정상으로 돌아왔습니다.'
+    $script:cursorParkWarnActive = $false
   }
 }
 
@@ -6203,20 +6234,42 @@ function Invoke-NormalDungeonCycle {
           Write-RunLog "[완료] $($retryDecision.Reason)"
           exit 4
         }
+        # 폴백 해제는 **확인된 경우에만** 내부 상태를 내립니다 (2026-08-09 리뷰 적발).
+        # 반환값을 버리고($null 로 흘리고) 무조건 $effective* 를 내리면, 실제로는 카드가 켜진
+        # 채인데 자동화만 '껐다'고 믿습니다. 그러면 이후 필요량 판정이 10 으로 내려가
+        # 20 이 드는 판에 그대로 입장해 재화를 더 씁니다. 반환 $true 도 '설정 반영'일 뿐이라
+        # 클릭 후 글자를 못 읽은 '재확인 생략'까지 포함하므로 $script:dgToggleRechecked 가
+        # 필요합니다 (호출 직후 즉시 스냅샷 - 다음 호출이 덮어씀).
+        # ※ *FallbackDone 은 성공/실패와 무관하게 latch 합니다. Set-DgToggleCard 는 내부에
+        #   자체 재클릭 로직이 있어 루프에서 반복 호출하면 안 되기 때문입니다(기존 계약).
+        #   확인 실패 시 $effectiveLoot/$effectiveCoin 이 그대로라 필요량은 큰 값으로 남고,
+        #   입장이 계속 막히면 아래 안전 정지가 실제 잔량 기준으로 마무리합니다(fail-closed).
         if ($null -ne $retryBalance -and $retryDecision.Coin -and -not $retryDecision.Loot -and $effectiveLoot -and -not $lootFallbackDone) {
           Write-RunLog "[던전] $($retryDecision.Reason)"
-          Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅' | Out-Null
-          $effectiveLoot = $false
+          $lootOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅')
+          if ($lootOffOk -and $script:dgToggleRechecked) {
+            $effectiveLoot = $false
+          } else {
+            Write-RunLog '[경고] 더블 루팅 해제를 확인하지 못했습니다 - 켜진 것으로 간주하고 진행합니다 (필요량을 낮추지 않음)'
+          }
           $lootFallbackDone = $true
         }
         if ($null -ne $retryBalance -and -not $retryDecision.Coin -and $effectiveCoin -and -not $coinFallbackDone) {
           if ($effectiveLoot) {
-            Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅' | Out-Null
-            $effectiveLoot = $false
+            $lootOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅')
+            if ($lootOffOk -and $script:dgToggleRechecked) {
+              $effectiveLoot = $false
+            } else {
+              Write-RunLog '[경고] 더블 루팅 해제를 확인하지 못했습니다 - 켜진 것으로 간주하고 진행합니다 (필요량을 낮추지 않음)'
+            }
           }
           Write-RunLog "[던전] $($retryDecision.Reason)"
-          Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)" | Out-Null
-          $effectiveCoin = $false
+          $coinOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)")
+          if ($coinOffOk -and $script:dgToggleRechecked) {
+            $effectiveCoin = $false
+          } else {
+            Write-RunLog "[경고] ${dgCurrencyName}(소탕) 해제를 확인하지 못했습니다 - 켜진 것으로 간주하고 진행합니다 (필요량을 낮추지 않음)"
+          }
           $coinFallbackDone = $true
         }
         # 잔량을 못 읽은 경우($null)의 '부족 추정' 해제 분기는 제거했습니다 (2026-07-29).
@@ -6902,13 +6955,20 @@ function Invoke-HuntingGroundCycle {
         if ($null -ne $retryBalance -and $retryBalance -ge 10 -and $retryBalance -lt 20) {
           Write-RunLog "[사냥터] 은동전 잔량 ${retryBalance}개 - 더블 루팅을 끄고 소탕만 계속합니다 (소탕만 계속 설정)"
           # 해제가 확인된 경우에만 내부 상태를 내립니다 (미확인이면 실제 카드가 켜진 채일 수
-          # 있어 이후 필요량 판정이 어긋남 - 교차 리뷰 지적). 폴백 처리 바퀴는 시도로 세지
-          # 않아 마지막 회전에서 발견돼도 재입장이 보장됩니다.
-          if ([bool](Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $false -Label '더블 루팅')) {
+          # 있어 이후 필요량 판정이 어긋남 - 교차 리뷰 지적).
+          # '확인'은 반환 $true 만으로 부족합니다 - 클릭 후 글자를 못 읽은 '재확인 생략'도
+          # $true 를 돌려주기 때문에 $script:dgToggleRechecked 를 함께 봅니다 (2026-08-09 리뷰).
+          # 공짜 재시도($enterTry--)도 **확인된 폴백에만** 줍니다. 확인 실패에도 주면
+          # $lootFallbackDone latch 를 빼는 순간 무한 반복이 되고, latch 를 둔 채 주면
+          # 아무 진전 없이 시도만 한 번 더 태우게 됩니다.
+          $htLootOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $false -Label '더블 루팅')
+          if ($htLootOffOk -and $script:dgToggleRechecked) {
             $effectiveLoot = $false
+            $enterTry--
+          } else {
+            Write-RunLog '[경고] 더블 루팅 해제를 확인하지 못했습니다 - 켜진 것으로 간주하고 진행합니다 (필요량 20개 유지)'
           }
           $lootFallbackDone = $true
-          $enterTry--
         }
       }
     }

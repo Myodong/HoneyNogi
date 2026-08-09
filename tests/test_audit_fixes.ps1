@@ -167,6 +167,23 @@ Assert-Case '진리표: 클릭+반영+재판독 = 생략 허용' (Test-SkipCross
 Assert-Case '진리표: 클릭+반영이지만 재판독 실패 = 생략 금지' (Test-SkipCrossCheck $true $true $false) $false
 Assert-Case '진리표: 클릭 안 함 = 생략 금지' (Test-SkipCrossCheck $false $true $true) $false
 Assert-Case '진리표: 설정 미반영 = 생략 금지' (Test-SkipCrossCheck $true $false $true) $false
+
+# ── 재화 부족 폴백도 같은 기준 (2026-08-09 리뷰 2차 적발) ────────────────────
+# 잔량 부족으로 카드를 끄는 폴백 4곳이 Set-DgToggleCard 결과를 **버리거나**(| Out-Null)
+# 반환값만 보고 $effectiveLoot/$effectiveCoin 을 내리고 있었습니다. 실제로는 카드가 켜진
+# 채인데 자동화만 '껐다'고 믿으면, 이후 필요량이 10 으로 내려가 20 이 드는 판에 그대로
+# 입장해 재화를 더 씁니다. 앞의 게이트들만 고치고 폴백을 빠뜨린 것이 이번 적발입니다.
+Assert-Case '폴백: 토글 결과를 버리는 호출 없음(| Out-Null 금지)' `
+  ([regex]::Matches($workerSource, 'Set-DgToggleCard[^\r\n]*\| Out-Null').Count) 0
+Assert-Case '폴백: 해제 확인은 Ok + Rechecked 동시 요구 4곳(던전3 + 사냥터1)' `
+  ([regex]::Matches($workerSource, '\$(?:lootOffOk|coinOffOk|htLootOffOk) -and \$script:dgToggleRechecked').Count) 4
+Assert-Case '폴백: 미확인이면 필요량을 낮추지 않는다는 안내 4곳' `
+  ([regex]::Matches($workerSource, '해제를 확인하지 못했습니다[^\r\n]*켜진 것으로 간주').Count) 4
+# latch 는 성공/실패 무관 (Set-DgToggleCard 는 내부 재클릭이 있어 루프 반복 호출 금지 계약)
+Assert-Case '폴백: lootFallbackDone latch 가 확인 분기 밖에 있음' `
+  ([regex]::Matches($workerSource, '(?m)^\s*\$lootFallbackDone = \$true\s*$').Count) 2
+Assert-Case '폴백: 사냥터 공짜 재시도는 확인된 경우에만' `
+  ($workerSource -match '\$htLootOffOk -and \$script:dgToggleRechecked\) \{\s*\r?\n\s*\$effectiveLoot = \$false\s*\r?\n\s*\$enterTry--') $true
 # 다중 스케일 1~2회전 (첫 회전 화면 전환 대비)
 Assert-Case '3차: 카드 다중 스케일 1~2회전' `
   ($workerSource -match 'if \(\$setTry -le 2\) \{ \$cardScales = @\(5, 3, 4\) \}') $true

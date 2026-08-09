@@ -1376,6 +1376,7 @@ $script:crSwitching = $false         # 카테고리 전환에 의한 커스텀 �
 $script:customEnabledWish = $false   # 커스텀 반복 '선택 의도' - 던전 외 카테고리에서 라디오가 풀려도 보존 (config enabled 와 동기)
 $script:customProgressReset = $false # 업데이트 이전(Update-ConfigToLatest)에서 진행 기록을 초기화했는지 (시작 로그 안내용)
 $script:customProgressResetSections = @() # 그중 실제로 초기화된 섹션들 (그 섹션 마커만 저장 성공 뒤 삭제)
+$script:customMarkerClearFailed = $false  # 그 마커 무효화가 실패했는지 (시작 안내에 경고로 노출)
 $script:gatherWaitReset = 0          # '진행 없음' 설정을 기본값으로 되돌렸으면 '되돌리기 전 값' (의미 변경 안내용)
 $script:configMigrationError = $null # 설정 자동 이전 실패 원인 (실패와 '이전 불필요'를 구분해 시작 로그에 표시)
 $script:acrLockUpdating = $false     # 어비스 커스텀 방식·매칭 잠금 적용 중 재진입 가드 (라디오 Checked 변경 → 패널 갱신 → 재호출 방지)
@@ -7539,7 +7540,6 @@ function Start-NextCycle {
       } elseif ($script:customConfigSection -eq 'deepCustomRepeat') {
         Get-DeepCustomListCompact -Items $customContext.ExecutionItems
       } else { Get-CustomListCompact -Items $customContext.ExecutionItems })
-    $env:HONEYNOGI_CUSTOM_MARKER = $customMarkerFile
     $env:HONEYNOGI_CUSTOM_OWNER = New-CustomMarkerOwnerJson -Context $customContext
     $repeatModeText = $(if ($customContext.ListRepeat -eq 'count') { "$($customContext.ListRepeatCount)바퀴" } else { '무한' })
     $env:HONEYNOGI_REPEAT_INFO = "커스텀 반복(항목 $($customContext.Total)개, $($customContext.Lap)바퀴째 $($customContext.Index + 1)번, $repeatModeText)"
@@ -7566,6 +7566,12 @@ function Start-NextCycle {
         $script:customMarkerIgnore = $true
       }
     }
+    # 정리에 실패한 회차에는 워커에게 **마커 경로를 주지 않습니다**(빈 값 = 기록 안 함,
+    # 워커 Write-CustomClearMarker 가 빈 경로면 즉시 return). 경로를 주면 묘비가 남은 채
+    # 워커가 같은 경로에 '정상' 마커를 기록하고, 다음 시작 게이트가 묘비만 보고 그 정상
+    # 마커를 지워 복구했어야 할 판을 다시 돌게 됩니다 (2026-08-09 재점검 적발).
+    # 반드시 위 정리 결과가 확정된 **뒤에** 설정해야 합니다.
+    $env:HONEYNOGI_CUSTOM_MARKER = $(if ($script:customMarkerIgnore) { '' } else { $customMarkerFile })
   } else {
     # 비커스텀 회차: GUI 프로세스에 잔존한 커스텀 환경변수를 정리합니다
     # (남으면 어비스/사냥터 워커가 커스텀 모드로 오동작 - Clear-CustomEnv 주석 참고)
@@ -8189,12 +8195,13 @@ function Invoke-StartAutomation {
         Add-GuiLog '[커스텀] 이전 완료 항목의 마무리를 복구합니다.'
       } else {
         # 구버전 타임스탬프/부분 파일/다른 리스트·위치의 마커는 오계상 방지를 위해 폐기합니다.
-        Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $customMarkerFile) {
+        # 무효화는 단일 계약을 거칩니다 - 맨 Remove-Item 은 실패 시 묘비를 남기지 않아
+        # 그 시점의 실패가 디스크에 기록되지 않습니다 (2026-08-09 재점검).
+        if (Clear-CustomMarkerFile -Path $customMarkerFile) {
+          Add-GuiLog '[안내] 현재 진행 위치와 맞지 않는 이전 완료 마커를 정리했습니다.'
+        } else {
           Add-GuiLog '[경고] 현재 진행 위치와 맞지 않는 완료 마커를 삭제하지 못했습니다 - 이번 회차는 마커를 무시합니다.'
           $script:customMarkerIgnore = $true
-        } else {
-          Add-GuiLog '[안내] 현재 진행 위치와 맞지 않는 이전 완료 마커를 정리했습니다.'
         }
       }
     }

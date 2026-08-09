@@ -39,6 +39,10 @@ foreach ($case in $imeCases) {
 
 # ── 2. 배선 가드 (워커 원문 검사) ─────────────────────────────────────────────
 $workerSource = [IO.File]::ReadAllText($workerPath)
+# 코드 조각을 **개수**로 세는 단언은 주석에 같은 문자열이 등장하면 어긋납니다
+# (2026-08-09: 주석에 '$enterTry--' 를 설명으로 적었더니 5 -> 6 으로 세어졌음).
+# 개수 계약은 이 주석 제거본으로 셉니다.
+$workerCode = (($workerSource -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 
 # Invoke-ClickUntil이 예비 지점 계약을 갖고, 예비 클릭은 원래 지점 클릭과 배타(elseif)여야 함
 Assert-Case '배선: Invoke-ClickUntil 예비 파라미터' `
@@ -62,7 +66,7 @@ Assert-Case '배선: 팝업 전용 판독 영역 정의' ($workerSource -match '
 # 위한 재클릭 정책 준수) - 던전/사냥터 각 사전+사후 4곳 + 사냥터 '소탕만 계속' 폴백 바퀴
 # 미계상 1곳(마지막 회전에서 발견돼도 재입장 보장 - 교차 리뷰) = 총 5곳
 Assert-Case '배선: 입장 루프 팝업/폴백 시도 미계상 5곳' `
-  ([regex]::Matches($workerSource, '\$enterTry--').Count -eq 5) $true
+  ([regex]::Matches($workerCode, '\$enterTry--').Count -eq 5) $true
 Assert-Case '배선: 팝업 대기 40초 한도 안전 정지' `
   ([regex]::Matches($workerSource, '\$imePopupWaitTotal -ge 40').Count -eq 4) $true
 
