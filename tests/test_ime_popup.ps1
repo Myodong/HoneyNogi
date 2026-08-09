@@ -82,7 +82,10 @@ Assert-Case '배선: Set-DgToggleCard 클릭 플래그(매 호출 초기화+클�
 Assert-Case '배선: 전환 직후 역방향 생략 2곳(던전/사냥터)' `
   (([regex]::Matches($workerSource, '소모량 표시 검증 생략').Count -eq 2) -and
    ([regex]::Matches($workerSource, '\$coinToggleClicked = \$script:dgToggleClicked').Count -eq 2) -and
-   ([regex]::Matches($workerSource, 'if \(\$coinToggleClicked -and \$coinToggleOk\)').Count -eq 2)) $true
+   # 2026-08-09 감사: 생략 조건에 '상태를 실제로 재판독함'($coinToggleRechecked)을 추가.
+   # Set-DgToggleCard 의 $true 는 클릭 후 판독 실패('재확인 생략')일 때도 나오므로,
+   # Ok 만으로 생략하면 검증 없이 넘어가는 셈이었습니다.
+   ([regex]::Matches($workerSource, 'if \(\$coinToggleClicked -and \$coinToggleOk -and \$coinToggleRechecked\)').Count -eq 2)) $true
 Assert-Case '배선: 역방향 루프 팝업 대기 2곳(던전/사냥터, 시도 미계상)' `
   (([regex]::Matches($workerSource, '\$imeOffWaitTotal -ge 40').Count -eq 2) -and
    ([regex]::Matches($workerSource, '\$offTry--').Count -eq 2)) $true

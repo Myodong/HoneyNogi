@@ -221,9 +221,11 @@ Assert-Case 'GUI: config 직접 편집 대비 시작 게이트' `
   ($guiText.Contains('[경고] 생활 커스텀 반복: 아직 지원하지 않는 채집 스킬이 리스트에 있어 시작할 수 없습니다 - 해당 항목을 삭제해 주세요.')) 'True'
 Assert-Case 'GUI: 커스텀에서는 슬라이더 시작 게이트 통과' `
   ([bool]($guiText -match "if \(\`$rbCustomRepeat\.Checked\) \{ return \`$false \}[\s\S]{0,200}\`$selectedLifeSkill = ")) 'True'
+# 2026-08-09 감사: 섹션→마커 매핑을 Get-CustomMarkerFileForSection 단일 함수로 통합
 Assert-Case 'GUI: 생활 전용 마커 경로 (파일은 만들지 않음)' `
   (($guiText.Contains("`$customLifeMarkerFile = Join-Path `$honeyLogDir 'life_custom_done.marker'")) -and
-   ($guiText.Contains("`$script:customMarkerFile = `$(if (`$isLifeCustomStart) { `$customLifeMarkerFile }"))) 'True'
+   ($guiText.Contains("'lifeCustomRepeat' { return `$customLifeMarkerFile }")) -and
+   ($guiText.Contains("`$script:customMarkerFile = Get-CustomMarkerFileForSection -SectionName `$script:customConfigSection"))) 'True'
 Assert-Case 'GUI: 커스텀 화면 카드 높이 26 / 일반 56' `
   ($guiText.Contains("`$lifeCardHeight = `$(if (`$isLifeCustom) { 26 } else { 56 })")) 'True'
 Assert-Case 'GUI: 커스텀 화면에서만 아이콘 제거' `

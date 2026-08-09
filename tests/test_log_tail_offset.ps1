@@ -44,7 +44,44 @@ try {
   Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
 }
 
+# ── 배열 풀림 계약 (2026-08-09 감사) ────────────────────────────────────────
+# 위 케이스들은 전부 테스트가 **스스로 @() 로 감싸** 호출하고 있어, 호출부가 감싸지 않는
+# 계약 위반을 원리상 검출할 수 없었습니다. 실제로 GUI 타이머의 두 호출부가 감싸지 않아
+# 새 줄이 1줄뿐인 틱마다 그 줄이 통째로 사라지고 [완료] 사유 수집도 실패했습니다.
+# 여기서는 (a) 감싸지 않으면 정말 문자열로 풀린다는 것과 (b) GUI 호출부가 감쌌다는 것을
+# 각각 못 박습니다.
+$temp2 = Join-Path ([IO.Path]::GetTempPath()) ("honeynogi_log_unroll_{0}.log" -f [guid]::NewGuid().ToString('N'))
+try {
+  # (1) 1줄 - PS 5.1 파이프라인에서 문자열로 풀립니다 (실사고 지점)
+  [IO.File]::WriteAllText($temp2, "10:00:00 [던전] 한 줄`r`n", $utf8Bom)
+  [long]$off2 = 0
+  $rawOne = Read-NewLogLines -Path $temp2 -Offset ([ref]$off2)
+  Check-Equal '풀림 계약: 1줄 반환은 감싸지 않으면 string' ($rawOne -is [string]) $true
+  Check-Equal '풀림 계약: 감싸지 않은 인덱스는 첫 글자(사고 증상)' ([string]$rawOne[0]) '1'
+  Check-Equal '풀림 계약: @() 로 감싸면 줄 1개' (@($rawOne).Count) 1
+  Check-Equal '풀림 계약: @() 로 감싼 인덱스는 줄 전체' (@($rawOne)[0]) '10:00:00 [던전] 한 줄'
+
+  # (2) 2줄 - 감싸지 않아도 배열 (그래서 이 사고가 1줄 틱에서만 조용히 났습니다)
+  [IO.File]::WriteAllText($temp2, "10:00:00 첫 줄`r`n10:00:01 둘째 줄`r`n", $utf8Bom)
+  [long]$off3 = 0
+  $rawTwo = Read-NewLogLines -Path $temp2 -Offset ([ref]$off3)
+  Check-Equal '풀림 계약: 2줄이면 감싸지 않아도 배열' ($rawTwo -is [object[]]) $true
+
+  # (3) 0줄 - 호출을 직접 감싸면 0개 (변수에 담은 뒤 감싸면 @($null)=1 이 되므로 주의)
+  [long]$off4 = 0
+  Check-Equal '풀림 계약: 새 줄 없으면 감싼 결과 0개' `
+    (@(Read-NewLogLines -Path $temp2 -Offset ([ref]$off3)).Count) 0
+} finally {
+  Remove-Item -LiteralPath $temp2 -Force -ErrorAction SilentlyContinue
+}
+
 $guiRaw = Get-Content -LiteralPath $guiPath -Raw -Encoding UTF8
+# 호출부 계약: 4곳(타이머의 기본/복구 로그 + 종료 마무리의 기본/복구 로그) 전부 @() 로
+# 감싸야 합니다. 감사 당시 종료 마무리 2곳은 이미 감싸져 있었고 타이머 2곳만 빠져 있었습니다.
+Check-Equal 'GUI: Read-NewLogLines 호출 4곳 모두 @() 로 감쌈' `
+  ([regex]::Matches($guiRaw, '@\(Read-NewLogLines ').Count) 4
+Check-Equal 'GUI: 감싸지 않은 Read-NewLogLines 대입 없음' `
+  ([regex]::Matches($guiRaw, '=\s*Read-NewLogLines ').Count) 0
 if ($guiRaw.Contains('\[설정\]|\[준비\]\s*게임 확인:\s*PID')) {
   'OK   회차별 게임 PID는 파일에만 남기고 GUI에서 숨김'
 } else {

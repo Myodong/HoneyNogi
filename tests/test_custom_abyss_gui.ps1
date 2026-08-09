@@ -45,8 +45,10 @@ Check-Pattern '어비스 진행 초기화 활성·전용 섹션 연결' `
 # 2026-08-08 생활 커스텀이 앞에 붙어 첫 분기가 lifeCustomRepeat 로 바뀌었습니다
 Check-Pattern '시작 시 어비스 진행 섹션 선택' `
   '\$script:customConfigSection\s*=\s*\$\(if\s*\(\$isLifeCustomStart\)\s*\{\s*''lifeCustomRepeat''\s*\}[\s\S]{0,160}elseif\s*\(\$rbCatAbyss\.Checked\)\s*\{\s*''abyssCustomRepeat''\s*\}[\s\S]{0,160}else\s*\{\s*''customRepeat''\s*\}\)'
+# 2026-08-09 감사: 섹션→마커 매핑을 Get-CustomMarkerFileForSection 단일 함수로 통합
+# (초기화·랜덤 토글이 전역 $customMarkerFile 을 써서 다른 콘텐츠 마커를 지우던 결함)
 Check-Pattern '던전·어비스 완료 마커 파일 분리' `
-  '\$customAbyssMarkerFile\s*=\s*Join-Path[^\r\n]*abyss_custom_done\.marker[\s\S]+\$script:customMarkerFile\s*=\s*\$\(if\s*\(\$isLifeCustomStart\)'
+  '\$customAbyssMarkerFile\s*=\s*Join-Path[^\r\n]*abyss_custom_done\.marker[\s\S]+''abyssCustomRepeat''\s*\{\s*return\s*\$customAbyssMarkerFile\s*\}'
 Check-Absent '자동화 실행 미지원 표기 제거' '자동화 실행 미지원'
 Check-Absent '어비스 커스텀 시작 차단 제거' '어비스 커스텀 반복은 현재 자동화 실행을 지원하지 않습니다'
 Check-Pattern '상세 설정 제목 통일' '\$grpContentDetail\.Text\s*=\s*''콘텐츠 상세 설정'''

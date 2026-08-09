@@ -130,7 +130,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '2.0.1'
+$appVersion = '2.0.2'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -161,6 +161,66 @@ $customDeepMarkerFile = Join-Path $honeyLogDir 'deep_custom_done.marker'
 $customLifeMarkerFile = Join-Path $honeyLogDir 'life_custom_done.marker'
 $customMarkerFile = $customDungeonMarkerFile
 $redirectScript = Join-Path $scriptRoot 'rdp_redirect_console.ps1'
+
+function Get-CustomMarkerFileForSection {
+  # config 섹션명 → 그 섹션의 완료 마커 경로.
+  # $customMarkerFile 은 '마지막으로 **시작한**' 한 섹션만 가리키는 전역이라, SectionName 을
+  # 파라미터로 받는 함수(진행 초기화·랜덤 토글) 안에서 그 전역을 쓰면 컨텍스트가 갈라집니다.
+  # 실제로 어비스 리스트를 초기화하면 마지막으로 시작했던 던전의 유효 마커가 지워져,
+  # 클리어한 판을 한 번 더 도는 오복구가 가능했습니다 (2026-08-09 감사).
+  # 값 캡처가 아니라 **함수 호출**이어야 합니다 (CLAUDE.md 함정 3 - 함수 안에서 만든
+  # 클로저는 $script: 변수를 $null 로 읽음).
+  param([string]$SectionName)
+  switch ($SectionName) {
+    'lifeCustomRepeat' { return $customLifeMarkerFile }
+    'abyssCustomRepeat' { return $customAbyssMarkerFile }
+    'deepCustomRepeat' { return $customDeepMarkerFile }
+    default { return $customDungeonMarkerFile }   # 'customRepeat'(던전) + 빈 값 안전 기본
+  }
+}
+
+function Get-CustomMarkerStaleFile {
+  # '이 마커는 무효인데 지우지 못했다'는 사실을 남기는 묘비 파일 경로 (마커 옆에 나란히).
+  param([string]$Path)
+  return ($Path + '.stale')
+}
+
+function Clear-CustomMarkerFile {
+  # 완료 마커 무효화의 **단일 계약**: 삭제 → 존재 확인 → 남아 있으면 '{}' 로 소유자 형식 무효화.
+  # 삭제만 하고 SilentlyContinue 로 넘기면, 파일이 잠겼을 때 'progress 는 초기화됐는데 옛
+  # 마커는 살아 있는' 상태가 조용히 만들어집니다. 옛 진행이 1바퀴 0번이었다면 초기화 후
+  # 컨텍스트와 마커 소유자가 그대로 맞아 잘못된 마무리 복구가 일어납니다 (2026-08-09 리뷰).
+  #
+  # 둘 다 실패하면 **묘비 파일(.stale)을 디스크에 남깁니다**. 메모리 플래그는 프로그램을
+  # 껐다 켜면 사라지는데, 그 사이 잠금이 풀리면 옛 마커가 유효 마커로 되살아나기 때문입니다.
+  # 시작 게이트가 이 묘비를 보고 재시도하거나 그 마커를 무시합니다 (Test-CustomMarkerStale).
+  # 반환: 무효화까지 확실히 끝났으면 $true (호출부가 실패를 삼키지 않도록).
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $true }
+  $staleFlagPath = Get-CustomMarkerStaleFile -Path $Path
+  Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  if (-not (Test-Path -LiteralPath $Path)) {
+    # 묘비 제거까지 **확인**해야 $true 입니다. 묘비만 남으면 이번 회차가 새로 기록할
+    # 정상 마커를 나중에 시작 게이트가 '무효'로 보고 지워버립니다 (2026-08-09 리뷰)
+    Remove-Item -LiteralPath $staleFlagPath -Force -ErrorAction SilentlyContinue
+    return (-not (Test-Path -LiteralPath $staleFlagPath))
+  }
+  try {
+    Set-Content -LiteralPath $Path -Value '{}' -Encoding UTF8 -ErrorAction Stop
+    Remove-Item -LiteralPath $staleFlagPath -Force -ErrorAction SilentlyContinue
+    return (-not (Test-Path -LiteralPath $staleFlagPath))
+  } catch { }
+  # 묘비 생성 자체가 실패해도 $false 를 돌려주므로 호출부의 판단(무시/차단)은 안전 쪽입니다
+  try { Set-Content -LiteralPath $staleFlagPath -Value 'stale' -Encoding UTF8 -ErrorAction Stop } catch { }
+  return $false
+}
+
+function Test-CustomMarkerStale {
+  # 지우지 못한 무효 마커가 남아 있는가 (묘비 파일 존재 = 재시작해도 유지되는 사실)
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  return [bool](Test-Path -LiteralPath (Get-CustomMarkerStaleFile -Path $Path))
+}
 
 # ----- 설정 읽기/쓰기 -----
 function Read-Config {
@@ -267,6 +327,9 @@ function Update-ConfigToLatest {
         }
       }
     }
+    # 이번 이전에서 '진행 기록을 실제로 지운' 섹션 목록. 매 호출 초기화합니다 (같은 프로세스에서
+    # 두 번 호출될 수 있고, 앞선 호출의 목록이 남으면 무관한 마커를 지웁니다)
+    $script:customProgressResetSections = @()
     # 2) 값 섹션들: '_' 주석 키를 제외하고, 최신 구조에 존재하는 키만 사용자 값으로 덮어씀
     #    (최신 구조에서 사라진 키는 버리고, 새로 생긴 키는 최신 기본값 유지)
     foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life')) {
@@ -306,6 +369,9 @@ function Update-ConfigToLatest {
       if ($def.customRepeat.PSObject.Properties['progress']) { $def.customRepeat.progress = $null }
       else { $def.customRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = $hadCustomProgress
+      # 어느 섹션의 진행을 실제로 지웠는지 따로 모읍니다 (저장 성공 뒤 그 섹션 마커만 삭제).
+      # 집계 플래그 하나로 4종 마커를 다 지우면 진행이 없던 섹션의 정상 마커까지 파괴됩니다.
+      if ($hadCustomProgress) { $script:customProgressResetSections += 'customRepeat' }
     }
     if ($def.PSObject.Properties['abyssCustomRepeat']) {
       $hadAbyssCustomProgress = $false
@@ -318,6 +384,7 @@ function Update-ConfigToLatest {
       if ($def.abyssCustomRepeat.PSObject.Properties['progress']) { $def.abyssCustomRepeat.progress = $null }
       else { $def.abyssCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = ($script:customProgressReset -or $hadAbyssCustomProgress)
+      if ($hadAbyssCustomProgress) { $script:customProgressResetSections += 'abyssCustomRepeat' }
     }
     if ($def.PSObject.Properties['deepCustomRepeat']) {
       $hadDeepCustomProgress = $false
@@ -330,6 +397,7 @@ function Update-ConfigToLatest {
       if ($def.deepCustomRepeat.PSObject.Properties['progress']) { $def.deepCustomRepeat.progress = $null }
       else { $def.deepCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = ($script:customProgressReset -or $hadDeepCustomProgress)
+      if ($hadDeepCustomProgress) { $script:customProgressResetSections += 'deepCustomRepeat' }
     }
     if ($def.PSObject.Properties['lifeCustomRepeat']) {
       $hadLifeCustomProgress = $false
@@ -342,6 +410,7 @@ function Update-ConfigToLatest {
       if ($def.lifeCustomRepeat.PSObject.Properties['progress']) { $def.lifeCustomRepeat.progress = $null }
       else { $def.lifeCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = ($script:customProgressReset -or $hadLifeCustomProgress)
+      if ($hadLifeCustomProgress) { $script:customProgressResetSections += 'lifeCustomRepeat' }
     }
     # 3) 자동부활 on/off (키 코드/횟수 상한은 최신 기본값 유지)
     if ($usr.PSObject.Properties['revive'] -and $def.PSObject.Properties['revive'] -and
@@ -368,6 +437,25 @@ function Update-ConfigToLatest {
     }
 
     Save-Config $def
+    # 진행 기록을 지운 섹션은 그 섹션의 완료 마커도 함께 버립니다 (2026-08-09 감사).
+    # 마커는 '이 항목까지 클리어했다'는 근거인데 progress 만 0으로 돌아가면 마커가 progress
+    # 보다 앞서 있게 되어, 다음 시작에서 '미완료 마무리 복구'가 잘못 발동해 클리어한 판을
+    # 한 번 더 돌 수 있습니다.
+    # ★ 반드시 **저장 성공 뒤**에 지웁니다. 먼저 지우면 저장이 실패했을 때 GUI 는 '기존
+    #   설정으로 계속'하는데 마커만 사라져, 옛 progress + 마커 없음으로 유료 판을 재입장할
+    #   수 있습니다 (비트랜잭션 - 리뷰 적발).
+    # ★ 집계 플래그 하나로 4종을 다 지우지 않습니다. 던전 progress 때문에 이전하면서
+    #   progress 가 null 인 어비스의 **정상적인** 미완료 마무리 마커까지 파괴하면
+    #   섹션 분리(Get-CustomMarkerFileForSection)의 취지와 정면으로 어긋납니다 (리뷰 적발).
+    # ★ 무효화 실패를 조용히 성공으로 처리하지 않습니다 (리뷰 적발). 실패하면 시작 안내에
+    #   남겨 사용자가 '진행 기록은 처음부터'와 어긋난 복구를 만나도 원인을 알 수 있게 합니다.
+    $script:customMarkerClearFailed = $false
+    foreach ($resetSection in @($script:customProgressResetSections)) {
+      if ([string]::IsNullOrWhiteSpace($resetSection)) { continue }
+      if (-not (Clear-CustomMarkerFile -Path (Get-CustomMarkerFileForSection -SectionName $resetSection))) {
+        $script:customMarkerClearFailed = $true
+      }
+    }
     return $true
   } catch {
     $script:configMigrationError = $_.Exception.Message
@@ -481,8 +569,11 @@ function Convert-WorkerLogLineForGui {
   if ($Line -match '\[설정\]|\[준비\]\s*게임 확인:\s*PID|^\[\d{4}-\d{2}-\d{2}\]\s*자동화 로그\s*\(시작') {
     return $null
   }
-  # 정상 워커 로그는 항상 시각으로 시작합니다. 드물게 파일 교체 경계에서 숫자 하나만 GUI에
-  # 들어온 사례가 있어, 의미 없는 숫자 단독 줄은 화면에서만 버립니다(원본 로그는 변경하지 않음).
+  # 정상 워커 로그는 항상 시각(HH:mm:ss)으로 시작합니다. 숫자 단독 줄은 화면에서만 버립니다.
+  # ※ 과거 이 줄의 주석은 원인을 '파일 교체 경계'로 적어 두었지만 **오진이었습니다**.
+  #   진짜 원인은 타이머의 Read-NewLogLines 반환을 @() 로 감싸지 않아 새 줄이 1줄뿐인 틱에서
+  #   문자열로 풀리고, $lines[0] 이 시각의 첫 자리 숫자만 넘어온 것이었습니다(2026-08-09 감사).
+  #   호출부를 고쳤으므로 이 필터는 이제 방어용으로만 남습니다 - 원본 로그는 변경하지 않습니다.
   if ($Line -match '^\s*\d+\s*$') { return $null }
 
   # 정상 적용 성공은 시작 요약과 최종 검증 로그로 충분합니다. 실패/경고는 이 패턴에 걸리지 않아
@@ -1284,6 +1375,7 @@ $script:crMixLockState = @{
 $script:crSwitching = $false         # 카테고리 전환에 의한 커스텀 라디오 폴백/복원 중 가드 (enabled 보존)
 $script:customEnabledWish = $false   # 커스텀 반복 '선택 의도' - 던전 외 카테고리에서 라디오가 풀려도 보존 (config enabled 와 동기)
 $script:customProgressReset = $false # 업데이트 이전(Update-ConfigToLatest)에서 진행 기록을 초기화했는지 (시작 로그 안내용)
+$script:customProgressResetSections = @() # 그중 실제로 초기화된 섹션들 (그 섹션 마커만 저장 성공 뒤 삭제)
 $script:gatherWaitReset = 0          # '진행 없음' 설정을 기본값으로 되돌렸으면 '되돌리기 전 값' (의미 변경 안내용)
 $script:configMigrationError = $null # 설정 자동 이전 실패 원인 (실패와 '이전 불필요'를 구분해 시작 로그에 표시)
 $script:acrLockUpdating = $false     # 어비스 커스텀 방식·매칭 잠금 적용 중 재진입 가드 (라디오 Checked 변경 → 패널 갱신 → 재호출 방지)
@@ -6322,7 +6414,12 @@ function Save-CustomRandomOrder {
     Add-GuiLog "[경고] 랜덤 진행 설정 저장 실패: $($_.Exception.Message) - 토글을 한 번 더 눌러 다시 시도해 주세요."
     return
   }
-  Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
+  # 전역($customMarkerFile = 마지막으로 시작한 섹션)이 아니라 **이 토글이 속한 섹션**의
+  # 마커만 지웁니다 (2026-08-09 감사 - 다른 콘텐츠의 유효 마커 파괴 방지).
+  # 삭제 실패 시 '{}' 무효화까지 하는 공용 계약을 씁니다 (Clear-CustomMarkerFile).
+  if (-not (Clear-CustomMarkerFile -Path (Get-CustomMarkerFileForSection -SectionName $SectionName))) {
+    Add-GuiLog '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 이미 끝낸 판을 복구하려 할 수 있습니다.'
+  }
   Add-GuiLog $(if ($Enabled) { '[안내] 랜덤 진행 켬 - 매 바퀴 시작 때 리스트 순서를 무작위로 섞습니다 (진행 기록은 처음부터).' }
     else { '[안내] 랜덤 진행 끔 - 등록 순서로 진행합니다 (진행 기록은 처음부터).' })
 }
@@ -6692,7 +6789,11 @@ function Reset-CustomProgress {
   }
   # 완료 마커도 함께 무효화 (랜덤 진행: 초기화 후 우연히 같은 순열이 재현돼 낡은 마커가
   # 일치하는 사고 방지 - 리뷰 조건. 순차 모드에서도 초기화 = 새 출발 의도라 무해)
-  Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
+  # progress 는 위에서 $SectionName 으로 정확히 분기하는데 마커만 전역을 쓰고 있었습니다
+  # (2026-08-09 감사 - 파라미터 컨텍스트와 전역 상태가 한 함수 안에 공존하면 반드시 갈라짐)
+  if (-not (Clear-CustomMarkerFile -Path (Get-CustomMarkerFileForSection -SectionName $SectionName))) {
+    Add-GuiLog '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 이미 끝낸 판을 복구하려 할 수 있습니다.'
+  }
   if ($LogMessage) { Add-GuiLog $LogMessage }
   return $true
 }
@@ -7452,11 +7553,16 @@ function Start-NextCycle {
     # 일반 회차는 이전 마커를 삭제하고 시작합니다. 마무리 복구 회차는 현재 항목이 이미 클리어됐다는
     # 근거이자 GUI 재시작 복구 정보이므로 같은 소유자의 마커를 보존합니다.
     # 일반 회차에서 삭제 실패(파일 잠금 등) 시에는 이번 회차 마커를 무시해 오계상을 막습니다.
+    #
+    # 마커와 묘비(.stale)를 **한 계약**(Clear-CustomMarkerFile)으로 정리합니다. 예전처럼
+    # 마커만 직접 지우면 묘비가 남고, 이번 회차 워커가 같은 경로에 기록한 **정상** 마커를
+    # 나중에 시작 게이트가 묘비만 보고 지워버립니다 → 복구했어야 할 판을 다시 돌아 재화
+    # 이중 소모 (2026-08-09 리뷰 적발). Test-Path 로 감싸지 않는 이유도 같습니다 -
+    # 마커가 이미 없어도 남은 묘비는 여기서 치워야 합니다.
     $script:customMarkerIgnore = $false
-    if ((-not $script:customRecoveryPending) -and (Test-Path -LiteralPath $customMarkerFile)) {
-      Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
-      if (Test-Path -LiteralPath $customMarkerFile) {
-        Add-GuiLog '[경고] 이전 완료 마커 파일을 삭제하지 못했습니다 - 이번 회차는 마커를 무시합니다 (완료 계상은 정상 종료 코드로만).'
+    if (-not $script:customRecoveryPending) {
+      if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
+        Add-GuiLog '[경고] 이전 완료 마커 파일을 정리하지 못했습니다 - 이번 회차는 마커를 무시합니다 (완료 계상은 정상 종료 코드로만).'
         $script:customMarkerIgnore = $true
       }
     }
@@ -7600,27 +7706,31 @@ $timer.Interval = 600
 $timer.Add_Tick({
     # 워커 로그 tail
     if ($script:running) {
-      $lines = Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset)
-      if ($null -ne $lines) {
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-          # 코드 4 상태줄용 실제 사유 수집 (범용 '공물 소진 등' 문구가 실제 이유와 달라
-          # 사용자가 오해한 실사례 - 2026-08-02, 리뷰 승인)
-          if ($lines[$i] -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
-          $displayLine = Convert-WorkerLogLineForGui -Line $lines[$i] -CustomActive $script:customActive
-          if ($null -eq $displayLine) { continue }
-          Add-ColoredLogLine ('  ' + $displayLine)
-        }
+      # @() 는 필수입니다. 함수의 배열 반환은 PS 5.1 파이프라인에서 풀리므로, 새 줄이
+      # **딱 1줄**인 틱에서는 $lines 가 문자열이 됩니다. 그러면 $lines.Count 는 1(스칼라)
+      # 이고 $lines[0] 은 그 줄의 **첫 글자**('1' 같은 시각 첫 자리)라, 그 줄이 통째로
+      # 사라지고 [완료] 사유 수집도 함께 실패했습니다 (2026-08-09 감사 적발).
+      # 인덱스 대신 foreach 로 돌면 같은 계열이 재발해도 문자열 순회로 드러납니다.
+      $lines = @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))
+      foreach ($logLine in $lines) {
+        # 읽기 실패는 $null 반환이고 @($null) 은 원소 1개짜리 배열이라 여기서 걸러냅니다
+        if ($null -eq $logLine) { continue }
+        # 코드 4 상태줄용 실제 사유 수집 (범용 '공물 소진 등' 문구가 실제 이유와 달라
+        # 사용자가 오해한 실사례 - 2026-08-02, 리뷰 승인)
+        if ($logLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
+        $displayLine = Convert-WorkerLogLineForGui -Line $logLine -CustomActive $script:customActive
+        if ($null -eq $displayLine) { continue }
+        Add-ColoredLogLine ('  ' + $displayLine)
       }
       # 기본 로그가 이미 잠긴 상태에서 시작했거나 쓰기 스트림에 장애가 생긴 경우 워커는
       # 복구 로그로 전환합니다. 기본 로그의 마지막 오프셋 이후 내용을 이어서 화면에 표시합니다.
-      $recoveryLines = Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset)
-      if ($null -ne $recoveryLines) {
-        for ($i = 0; $i -lt $recoveryLines.Count; $i++) {
-          if ($recoveryLines[$i] -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
-          $displayLine = Convert-WorkerLogLineForGui -Line $recoveryLines[$i] -CustomActive $script:customActive
-          if ($null -eq $displayLine) { continue }
-          Add-ColoredLogLine ('  ' + $displayLine)
-        }
+      $recoveryLines = @(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))
+      foreach ($recoveryLine in $recoveryLines) {
+        if ($null -eq $recoveryLine) { continue }
+        if ($recoveryLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
+        $displayLine = Convert-WorkerLogLineForGui -Line $recoveryLine -CustomActive $script:customActive
+        if ($null -eq $displayLine) { continue }
+        Add-ColoredLogLine ('  ' + $displayLine)
       }
       if ($txtLog.TextLength -gt 200000) {
         $txtLog.Text = $txtLog.Text.Substring($txtLog.TextLength - 100000)
@@ -7674,10 +7784,10 @@ $timer.Add_Tick({
             return
           }
           $script:customRecoveryPending = $false
-          Remove-Item -LiteralPath $customMarkerFile -Force -ErrorAction SilentlyContinue
-          if (Test-Path -LiteralPath $customMarkerFile) {
-            # 삭제 실패 파일이 다음 수동 시작에서 유효 마커로 복구되지 않도록 소유자 형식을 무효화합니다.
-            try { Set-Content -LiteralPath $customMarkerFile -Value '{}' -Encoding UTF8 -ErrorAction Stop } catch { }
+          # 삭제 실패 파일이 다음 수동 시작에서 유효 마커로 복구되지 않도록 소유자 형식을 무효화합니다.
+          # 실패하면 묘비가 남고, 다음 회차 준비(Clear-CustomMarkerFile)가 다시 정리합니다.
+          if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
+            Add-GuiLog '[경고] 완료 마커 파일을 정리하지 못했습니다 - 다음 회차 시작 때 다시 정리합니다.'
           }
           if ($wasRecovery) {
             Add-GuiLog '[커스텀] 마무리 복구 완료 - 다음 항목으로 진행합니다.'
@@ -7765,6 +7875,14 @@ $timer.Add_Tick({
             Stop-AllRun '조건 정지 판의 커스텀 진행 기록 저장 실패 - 완료 마커를 보존하고 정지'
             $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
             return
+          }
+          # 전진에 성공했으면 이 마커는 소임을 다했습니다. 남겨 두면 나중에 진행 기록이
+          # 초기화될 때(업데이트 이전·진행 초기화 버튼) 마커가 progress 보다 앞선 상태가
+          # 되어 '마무리 복구'가 잘못 발동합니다 (2026-08-09 감사 - 근본 원인 제거).
+          # 삭제 확인 + '{}' 무효화 폴백은 코드 0 경로와 같은 계약입니다 (파일이 잠겨 삭제가
+          # 실패해도 다음 시작에서 유효 마커로 부활하지 않게 함 - 리뷰 조건).
+          if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
+            Add-GuiLog '[경고] 완료 마커 파일을 정리하지 못했습니다 - 다음 시작 때 다시 정리합니다.'
           }
         }
         # 종료 직전 기록된 [완료] 사유를 놓치지 않게 잔여 로그를 한 번 더 수집합니다
@@ -7862,9 +7980,9 @@ function Invoke-StartAutomation {
     # 생활은 완료 마커를 쓰지 않습니다 (사이클 완료 = 종료 코드 0 하나로 확정 - 던전처럼
     # '클리어 후 마무리 중 종료'라는 중간 상태가 없음). 존재하지 않을 전용 경로를 줘서
     # 마커 검사들이 항상 '없음'으로 통과하게 합니다
-    $script:customMarkerFile = $(if ($isLifeCustomStart) { $customLifeMarkerFile }
-      elseif ($rbCatAbyss.Checked) { $customAbyssMarkerFile }
-      elseif ($rbCatDeep.Checked) { $customDeepMarkerFile } else { $customDungeonMarkerFile })
+    # 섹션 → 마커 매핑은 한 곳(Get-CustomMarkerFileForSection)에만 둡니다. 여기와 진행
+    # 초기화·랜덤 토글이 각자 분기하다 갈라진 것이 08-09 감사에서 나온 마커 오삭제입니다.
+    $script:customMarkerFile = Get-CustomMarkerFileForSection -SectionName $script:customConfigSection
     if ($isLifeStart) {
       Add-GuiLog '[안내] 채집 자동화: 캐릭터가 필드에 있으면 어디서든 시작할 수 있습니다 (사이클마다 메뉴부터 다시 진행).'
       if ($isLifeCustomStart) {
@@ -8045,7 +8163,21 @@ function Invoke-StartAutomation {
       Release-StuckInput
     }
     if ($cleanup.Failed -gt 0) { Add-GuiLog "[경고] 기존 자동화 프로세스 $($cleanup.Failed)개를 종료하지 못했습니다 - 새 회차가 '중복 실행'으로 멈추면 작업 관리자에서 powershell.exe 를 직접 종료해 주세요." }
-    if ($script:customActive -and (Test-Path -LiteralPath $customMarkerFile)) {
+    # 진행 기록을 초기화할 때 무효화하지 **못한** 마커가 있으면 여기서 반드시 소비합니다.
+    # 실패를 메모리 플래그로만 들고 있으면 프로그램을 껐다 켜는 순간 사라지고, 그 사이 파일
+    # 잠금이 풀리면 옛 마커가 멀쩡한 유효 마커로 되살아납니다. 특히 옛 진행이 1바퀴 0번이면
+    # 초기화된 위치와 소유자가 **정확히 일치**해 잘못된 마무리 복구가 그대로 발동합니다
+    # (2026-08-09 리뷰 적발). 그래서 실패 사실은 디스크(.stale)에 남기고 여기서 재시도합니다.
+    $markerStaleBlocked = $false
+    if ($script:customActive -and (Test-CustomMarkerStale -Path $customMarkerFile)) {
+      if (Clear-CustomMarkerFile -Path $customMarkerFile) {
+        Add-GuiLog '[안내] 지우지 못했던 이전 완료 기록을 정리했습니다 (진행은 초기화된 위치부터 시작합니다).'
+      } else {
+        $markerStaleBlocked = $true
+        Add-GuiLog '[경고] 이전 완료 기록 파일이 잠겨 있어 이번 시작에서는 무시합니다 - 완료 계상은 정상 종료 코드로만 이뤄집니다.'
+      }
+    }
+    if ($script:customActive -and -not $markerStaleBlocked -and (Test-Path -LiteralPath $customMarkerFile)) {
       # GUI/워커가 클리어 뒤 마무리 중 종료됐어도 구조화 마커의 소유자가 현재 progress 와
       # 정확히 같으면 그 항목을 다시 입장하지 않고 마무리 복구부터 이어갑니다.
       $resumeContext = Get-CustomCurrentContext
@@ -8700,6 +8832,12 @@ if ($script:configMigrated) {
   Add-GuiLog '[안내] 업데이트 감지: 설정을 새 버전 형식으로 이전했습니다 (사용자 설정은 유지, 화면 좌표는 최신으로 갱신)'
   if ($script:customProgressReset) {
     Add-GuiLog '[안내] 업데이트로 커스텀 반복 진행 기록을 초기화했습니다 (리스트는 유지 - 다음 시작은 처음부터)'
+    if ($script:customMarkerClearFailed) {
+      # 마커 무효화 실패를 조용히 넘기면 '처음부터'인데 완료 복구가 뜨는 모순을 사용자가
+      # 이해할 수 없습니다 (2026-08-09 리뷰 - 실패를 성공으로 처리하지 않기).
+      # 실패 사실 자체는 묘비 파일로 디스크에 남아, 시작 버튼을 누를 때 다시 처리됩니다.
+      Add-GuiLog '[경고] 이전 완료 기록 파일을 지우지 못했습니다 (다른 프로그램이 사용 중일 수 있음) - 시작할 때 다시 정리하며, 그때도 안 되면 그 기록은 무시합니다.'
+    }
   }
   if ($script:gatherWaitReset -gt 0) {
     Add-GuiLog "[안내] '진행 없음' 설정의 의미가 바뀌어(사이클 총 시간 → 진행이 멈춘 시간) 기존 값 $($script:gatherWaitReset)초를 기본값 600초로 되돌렸습니다. 이제 채집 수량이 늘어나는 동안은 오래 걸려도 멈추지 않습니다."

@@ -2179,6 +2179,13 @@ function Get-ScaledScreenPoint {
     [int]$ReferenceY
   )
 
+  # 최소화된 창의 GetWindowRect 는 화면 밖 좌표(-32000 부근)를 돌려줍니다. 그대로 쓰면
+  # 클릭은 엉뚱한 곳으로 날아가고, Get-GamePixel 은 게임이 아닌 픽셀을 '카드 상태'로 읽습니다
+  # (2026-08-09 리뷰: 캡처만 막고 이 원시 경로를 열어 두면 회색 비활성 오판으로 이어짐).
+  # 호출부는 이미 크기 throw 를 다루고 있으므로 같은 계약으로 막습니다.
+  if ([HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) {
+    throw '게임 창이 최소화되어 있습니다.'
+  }
   $rect = New-Object HoneyNogiInput+RECT
   if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
     throw '게임 창 좌표를 읽지 못했습니다.'
@@ -2245,6 +2252,87 @@ function Click-GamePoint {
 
   $point = Get-ScaledScreenPoint -Game $Game -ReferenceX $ReferenceX -ReferenceY $ReferenceY
   Click-ScreenPoint -X $point.X -Y $point.Y
+}
+
+function Get-CursorParkPoint {
+  # 커서를 게임 창 밖 어디로 뺄지 고르는 **순수 판정** (진리표 대상 - 창/모니터/커서를 값으로 받음).
+  # 반환: @{ X = ...; Y = ... } 또는 $null (옮길 필요 없음 / 옮길 곳 없음)
+  #
+  # 좌우만 보던 첫 구현은 **권장 크기에서 아무 동작도 하지 않았습니다** (2026-08-09 리뷰 적발).
+  # 1908x1076 창을 1920x1080 화면 (0,0) 에 띄우면 왼쪽 바깥은 화면 밖(-12)이고 오른쪽
+  # 바깥은 여백이 12px 미만(1908~1919)이라, 고정 여백 12 로는 좌우가 모두 탈락합니다.
+  # → 여백은 '고정'이 아니라 **화면 경계로 자른 뒤** 창 밖인지 확인합니다 (1919 채택).
+  # 방향도 좌/우/아래/위 4가지를 보고, 게임이 있는 화면을 먼저 본 뒤 다른 모니터를 봅니다.
+  param(
+    [int]$Left, [int]$Top, [int]$Right, [int]$Bottom,   # 게임 창 (화면 좌표, Right/Bottom 은 배타)
+    [object[]]$Screens,                                  # @{ Left; Top; Right; Bottom } 목록 (전 모니터)
+    [int]$CursorX, [int]$CursorY,
+    [int]$Margin = 12
+  )
+  if ($Right -le $Left -or $Bottom -le $Top) { return $null }
+  # 커서가 이미 창 밖이면 건드리지 않습니다. 가림은 창 안에 있을 때만 생기고, 사용자가
+  # 다른 창에서 마우스를 쓰는 중일 수 있어 끌어오면 안 됩니다 (400ms 폴링에서 특히 중요).
+  if ($CursorX -lt $Left -or $CursorX -ge $Right -or $CursorY -lt $Top -or $CursorY -ge $Bottom) {
+    return $null
+  }
+  $midX = $Left + [int](($Right - $Left) / 2)
+  $midY = $Top + [int](($Bottom - $Top) / 2)
+  foreach ($screen in @($Screens)) {
+    if ($null -eq $screen) { continue }
+    $sl = [int]$screen.Left; $st = [int]$screen.Top
+    $sr = [int]$screen.Right - 1; $sb = [int]$screen.Bottom - 1
+    if ($sr -lt $sl -or $sb -lt $st) { continue }
+    foreach ($raw in @(
+        @{ X = ($Left - $Margin); Y = $midY },      # 왼쪽 바깥
+        @{ X = ($Right + $Margin); Y = $midY },     # 오른쪽 바깥
+        @{ X = $midX; Y = ($Bottom + $Margin) },    # 아래쪽 바깥
+        @{ X = $midX; Y = ($Top - $Margin) })) {    # 위쪽 바깥
+      # 화면 경계로 자른 뒤(=여백이 모자라면 경계에 붙임) 그래도 창 밖인지 확인합니다
+      $px = [Math]::Max($sl, [Math]::Min($sr, [int]$raw.X))
+      $py = [Math]::Max($st, [Math]::Min($sb, [int]$raw.Y))
+      if ($px -ge $Left -and $px -lt $Right -and $py -ge $Top -and $py -lt $Bottom) { continue }
+      return @{ X = $px; Y = $py }
+    }
+  }
+  return $null
+}
+
+function Move-CursorOutsideGame {
+  # 커서를 게임 창 **밖으로** 물립니다 (2026-08-09 제보).
+  #
+  # 왜 필요한가: 이 게임은 커서를 **자기가 직접 그립니다**. 그래서 화면 캡처에 커서가 찍히고,
+  # 클릭한 자리에 커서가 그대로 남으면 **그 버튼 글자를 가려** 다음 판독에서 못 찾습니다.
+  # 실제 제보: 물약 부족 팝업의 '닫기'를 눌러 닫았는데 팝업이 다시 뜨자, 커서가 '닫기' 위에
+  # 남아 글자를 가려 두 번째부터 영영 못 닫음.
+  #
+  # 창 밖으로 빼는 이유: 창 안 어디에 두든 그 자리가 다른 화면에서는 버튼일 수 있고
+  # (절대 규칙 4의 정신), 호버 툴팁이 또 다른 것을 가릴 수 있습니다. 창 밖이면 게임이
+  # 커서를 그리지 않으므로 가림도 호버도 원천적으로 없습니다.
+  # 창이 화면을 꽉 채워 밖이 없으면 그대로 둡니다 (억지로 옮기면 오히려 다른 것을 가림).
+  # 클릭 경로는 매번 SetCursorPos 로 목표에 다시 가져다 놓으므로 이 대피는 방해가 안 됩니다.
+  param([System.Diagnostics.Process]$Game)
+  try {
+    $rect = New-Object HoneyNogiInput+RECT
+    if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) { return }
+    $cursor = New-Object HoneyNogiInput+POINT
+    if (-not [HoneyNogiInput]::GetCursorPos([ref]$cursor)) { return }
+    # 게임이 있는 화면을 먼저, 그다음 나머지 모니터 (옆 모니터에 여유가 있으면 그쪽도 사용)
+    $gameScreen = [System.Windows.Forms.Screen]::FromHandle($Game.MainWindowHandle)
+    $screenList = @()
+    $screenList += , @{ Left = $gameScreen.Bounds.Left; Top = $gameScreen.Bounds.Top
+      Right = $gameScreen.Bounds.Right; Bottom = $gameScreen.Bounds.Bottom }
+    foreach ($other in [System.Windows.Forms.Screen]::AllScreens) {
+      if ($other.DeviceName -eq $gameScreen.DeviceName) { continue }
+      $screenList += , @{ Left = $other.Bounds.Left; Top = $other.Bounds.Top
+        Right = $other.Bounds.Right; Bottom = $other.Bounds.Bottom }
+    }
+    $park = Get-CursorParkPoint -Left $rect.Left -Top $rect.Top -Right $rect.Right -Bottom $rect.Bottom `
+      -Screens $screenList -CursorX $cursor.X -CursorY $cursor.Y
+    if ($null -eq $park) { return }
+    [HoneyNogiInput]::SetCursorPos([int]$park.X, [int]$park.Y) | Out-Null
+  } catch {
+    # 대피 실패는 기능 문제가 아니라 '가림이 남을 수 있음'일 뿐이라 조용히 넘어갑니다
+  }
 }
 
 function Get-GamePixel {
@@ -2341,6 +2429,17 @@ function Get-SessionStationName {
 function Get-CaptureFailInfo {
   # 화면 캡처 실패의 원인을 세션 상태로 구분해, 원인 종류(Cause)와 안내 문구(Message)를 돌려줍니다.
   # Cause 는 복구 시 "어떻게 복구됐는지" 문구를 고르는 데도 사용됩니다.
+  param([string]$GameWindowIssue = '')
+
+  # 게임 창 자체의 문제는 RDP 세션 상태보다 **먼저** 판정합니다. 세션은 멀쩡한데 게임 창만
+  # 최소화된 경우에 'RDP 창을 다시 열어 주세요'라고 안내하면 완전한 오진단이 됩니다
+  # (2026-08-09 감사 - 원인 추가 없이 게이트만 넣으면 안내가 또 틀리게 됨).
+  if ($GameWindowIssue -eq 'minimized') {
+    return @{
+      Cause   = 'gameMinimized'
+      Message = '[경고] 화면 캡처 실패 - 게임 창이 최소화되어 있습니다. 자동으로 복원을 시도하며, 안 되면 게임 창을 다시 열어 주세요.'
+    }
+  }
   $state = Get-SessionConnectState
   if ($state -eq 4) {
     return @{
@@ -2393,6 +2492,9 @@ function Get-CaptureRecoveryMessage {
     }
     'reconnecting' {
       return '[안내] RDP 재접속이 확인되어 화면 캡처가 복구됐습니다. 감지를 계속합니다.'
+    }
+    'gameMinimized' {
+      return '[안내] 게임 창이 다시 열려 화면 캡처가 복구됐습니다. 감지를 계속합니다.'
     }
     default {
       return '[안내] 화면 캡처가 복구되어 감지를 계속합니다.'
@@ -2455,8 +2557,10 @@ function Register-CaptureFailure {
   # 캡처 실패(예외/렌더링 멈춤)를 공용 상태로 기록합니다. 어떤 캡처 경로(영역 OCR,
   # 글자 위치 탐색)든 같은 상태를 공유해야 대기 루프의 '실패 중 시간 동결'이 정확히 동작합니다.
   # 경고는 실패가 '시작'될 때 한 번만 남기되, 원인을 세션 상태로 구분해 안내합니다
-  # (RDP 연결 끊김 / RDP 창 최소화 / 그 외). 실패 도중 원인이 바뀌면 한 번 더 안내합니다.
-  $failInfo = Get-CaptureFailInfo
+  # (RDP 연결 끊김 / RDP 창 최소화 / 게임 창 최소화·과소 / 그 외).
+  # 실패 도중 원인이 바뀌면 한 번 더 안내합니다.
+  param([string]$GameWindowIssue = '')
+  $failInfo = Get-CaptureFailInfo -GameWindowIssue $GameWindowIssue
   # 'RDP 끊김' 실패가 이어지던 중 세션이 다시 RDP 활성으로 바뀌면, 창 최소화가 아니라
   # 사용자가 RDP로 재접속하는 중입니다(끊김에서 RDP 활성으로 가는 경로는 재접속뿐).
   # 재접속 완료 직전 1~2초의 렌더링 공백을 '최소화'로 잘못 안내하지 않도록 구분합니다.
@@ -2539,12 +2643,41 @@ function Get-GameRegionCapture {
 
   # OCR 텍스트/위치/단어 함수가 공통으로 쓰는 캡처·빈 프레임 판정·확대 경로입니다.
   # 성공 시 반환된 Bitmap은 호출자가 반드시 Dispose해야 합니다.
+  #
+  # 창 온전성 검사 (2026-08-09 감사). 최소화된 창은 '검은 화면'으로 오는 게 아니라 **그 화면
+  # 좌표에 있는 다른 창**이 찍힐 수 있습니다. 그러면 아래 빈 프레임 판정을 통과해
+  # Register-CaptureSuccess 가 불리고, 진행 중이던 캡처 실패 플래그까지 거짓으로 풀립니다.
+  #
+  # 실패로만 돌리면 대기 루프들이 영원히 멈춥니다 (캡처 실패 대기 루프는 전부 '같은 캡처를
+  # 다시 시도'만 하고 전면화를 부르지 않기 때문 - 리뷰 적발). 그래서 **여기서 복원까지
+  # 시도**합니다. 이 함수가 모든 판독 경로의 공용 입구라, 어느 대기 루프에 있든 재탐침이
+  # 곧 복원 시도가 됩니다. 무인 운용 중 사용자의 다른 작업을 방해하지 않도록 8초에 한 번만
+  # 시도하고 안내도 한 번만 남깁니다 (최소화 복원은 Test-GameCovered→Focus-Game 과 같은
+  # 기존 인가 경로입니다).
+  if ([HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) {
+    $nowTick = Get-Date
+    if ($null -eq $script:lastMinimizedRestoreAt -or
+        ($nowTick - $script:lastMinimizedRestoreAt).TotalSeconds -ge 8) {
+      $script:lastMinimizedRestoreAt = $nowTick
+      # Focus-Game 을 직접 부르면 focus.onlyWhenUserIdleSeconds 계약을 우회해, 사용자가
+      # 게임을 내려 두고 PC 를 쓰는 중에도 창을 도로 띄우고 포커스를 뺏습니다 (리뷰 적발).
+      # Invoke-AutoRefocus 는 유휴 검사를 거치고, 최소화는 Test-GameCovered 가 이미
+      # '가려짐'으로 보므로 유휴가 되면 복원됩니다. 이 경로에는 캡처 호출이 없어 재귀 없음.
+      try { Invoke-AutoRefocus -Game $Game | Out-Null } catch { }
+    }
+    Register-CaptureFailure -GameWindowIssue 'minimized'
+    return $null
+  }
   $rect = New-Object HoneyNogiInput+RECT
   if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
     if ($ThrowOnWindowRectFailure) { throw 'OCR용 게임 창 좌표를 읽지 못했습니다.' }
     return $null
   }
 
+  # 창 크기 과소는 여기서 막지 않습니다. 자동 복원 수단이 없어 실패로 돌리면 '빠르고 분명한
+  # 실패'가 '조용한 무한 대기'로 바뀝니다. Get-ScaledScreenPoint 가 첫 클릭에서 그대로
+  # throw 하므로(권장 1272x717 / 1908x1076 대비 900x500 미만), 과소 창은 이미 즉시
+  # 오류로 끝납니다 - 캡처 쪽에 게이트를 더하면 그 빠른 실패만 잃습니다 (리뷰 적발).
   $width = $rect.Right - $rect.Left
   $height = $rect.Bottom - $rect.Top
   $cropLeft = $rect.Left + [int][Math]::Round($ReferenceX * $width / $referenceWidth)
@@ -3175,11 +3308,18 @@ function Wait-ForDungeonClearScreen {
     # '닫기'를 찾아 클릭합니다(부하를 줄이려고 2회 폴링마다 확인). 부활 시도 직후에 떴다면
     # 부활 재료(불사의 가루) 부족으로 판단하고 이후 부활은 여신상으로 전환합니다.
     if (($pollCounter % 2) -eq 0 -and -not $script:screenCaptureFailing) {
+      # 탐색 **전**에도 대피시킵니다. 클릭 직후 대피만으로는 부족합니다 - SetCursorPos 가
+      # 한 번 실패하거나 사용자가 커서를 다시 창 안에 두면, 다음 팝업의 '닫기'를 또 가려
+      # 원래 정체가 재현됩니다 (2026-08-09 리뷰). 이미 창 밖이면 무동작이라 비용이 없습니다.
+      Move-CursorOutsideGame -Game $Game
       $popupClosePoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
         -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
       if ($popupClosePoint) {
         Focus-Game -Game $Game
         Click-ScreenPoint -X $popupClosePoint.X -Y $popupClosePoint.Y
+        # 커서가 '닫기' 위에 남으면 팝업이 다시 떴을 때 게임이 그린 커서가 글자를 가려
+        # 두 번째부터 영영 못 닫습니다 (2026-08-09 제보) - 클릭 직후 창 밖으로 물립니다
+        Move-CursorOutsideGame -Game $Game
         # '가루 부족' 해석은 R키 가루 부활 직후에만 (2026-08-01 전수 점검: 여신상/전멸 부활은
         # 가루를 안 쓰므로 그 직후의 임의 구매 팝업(물약 부족 등)을 재료 부족으로 오인해
         # 여신상 전환이 영구 고정되던 문제 - 리뷰 승인. 완료 로그용 pending 은 종류 무관 유지)
@@ -4065,6 +4205,45 @@ function Get-DgTributeCost {
   return $fallbackValue
 }
 
+function Wait-DgTributeCostSettles {
+  # 카드를 방금 클릭했지만 **상태 재판독에 실패한** 경우, 소모량 표시가 따라올 때까지만
+  # 기다립니다. 클릭은 절대 하지 않습니다 (이중 토글 금지 - 절대 규칙 4).
+  #
+  # 왜 오래 기다리는가: 게임은 카드를 끈 뒤에도 입장 버튼의 소모량 표시를 **실측 13초 이상**
+  # 남겨 둡니다 (2026-07-29 01:45). 2.5초 한 번만 보고 판단하면 정상 전환도 '불일치'로 몰려
+  # 커스텀이 헛정지합니다. 이 경로는 '클릭했는데 카드 글자를 못 읽은' 드문 상황에서만
+  # 들어오므로, 표시 지연을 덮을 만큼 기다리는 비용이 헛정지보다 쌉니다 (2026-08-09 리뷰).
+  # 반환: @{ Matched = 예상값과 일치했는가; Value = 마지막 판독값($null 가능) }
+  param(
+    [System.Diagnostics.Process]$Game,
+    [int[]]$ValidCosts,
+    [int]$ExpectedCost,
+    [int]$TimeoutSeconds = 16
+  )
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $lastRead = $null
+  do {
+    Start-Sleep -Milliseconds 2500
+    $lastRead = Get-DgTributeCost -Game $Game -ValidCosts $ValidCosts
+    if ($null -ne $lastRead -and $lastRead -eq $ExpectedCost) {
+      return @{ Matched = $true; Value = $lastRead }
+    }
+    # 캡처 실패 중에는 시간을 동결합니다 (다른 대기 루프와 같은 계약). 화면이 안 그려지는
+    # 동안 흘려보낸 시간을 '표시 지연을 기다렸다'로 세면, 복구된 순간 바로 마감이 되어
+    # 커스텀이 헛정지합니다 (2026-08-09 리뷰). 안전 중지는 이 동안에도 응답합니다.
+    while ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      $lastRead = Get-DgTributeCost -Game $Game -ValidCosts $ValidCosts
+      if ($null -ne $lastRead -and $lastRead -eq $ExpectedCost) {
+        return @{ Matched = $true; Value = $lastRead }
+      }
+      $deadline = (Get-Date).AddSeconds($TimeoutSeconds)   # 복구 시점부터 다시 셉니다
+    }
+  } while ((Get-Date) -lt $deadline)
+  return @{ Matched = $false; Value = $lastRead }
+}
+
 function Find-DgRetryButtonPoint {
   param([System.Diagnostics.Process]$Game)
 
@@ -4352,12 +4531,17 @@ function Invoke-PurchasePopupSweep {
   # 대기 성공으로 오판되지 않게 `if (Invoke-PurchasePopupSweep ...) { return $false }`
   # 계약으로 소비해야 합니다 (리뷰 지적 - PS 5.1 스크립트블록 출력 오염).
   if ($script:screenCaptureFailing) { return $false }
+  # 판독 **전에** 커서를 창 밖으로 물립니다: 직전 회차에 '닫기'를 눌렀다면 커서가 그 자리에
+  # 남아 글자를 가리고, 그러면 팝업이 다시 떠도 못 찾습니다 (2026-08-09 제보).
+  # 게임이 커서를 직접 그리기 때문에 캡처에 그대로 찍힙니다.
+  Move-CursorOutsideGame -Game $Game
   $sweepPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
     -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
   if ($sweepPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $sweepPoint.X -Y $sweepPoint.Y
     Write-RunLog '[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)'
+    Move-CursorOutsideGame -Game $Game
     Start-Sleep -Seconds 1
     return $true
   }
@@ -4405,6 +4589,11 @@ function Invoke-AfterEntryKeys {
     $entryPopupClicks = 0
     $entryPopupRemains = $false
     for ($popupTry = 1; $popupTry -le 4; $popupTry++) {
+      # **판독 전에 커서를 창 밖으로 물립니다.** 이 루프가 2026-08-09 제보의 현장입니다:
+      # 직전 회전에서 '닫기'를 누르면 커서가 그 자리에 남는데, 게임이 커서를 직접 그리므로
+      # 캡처에 찍혀 '닫기' 글자를 가립니다 → 팝업이 아직 있는데 못 찾고 break,
+      # 또는 남은 팝업을 영영 못 닫습니다.
+      Move-CursorOutsideGame -Game $Game
       $entryPopupPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
         -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
       if (-not $entryPopupPoint) { break }
@@ -4793,6 +4982,12 @@ function Set-DgToggleCard {
   # 이번 호출에서 실제 클릭이 있었는지를 호출부에 알립니다 (매 호출 초기화 - 리뷰 계약).
   # '방금 우리가 클릭해서 전환을 확인한' 경우 소모량 교차 검증을 생략하는 판단에 쓰입니다.
   $script:dgToggleClicked = $false
+  # 반환값 $true 는 '설정을 반영했다'는 뜻일 뿐, '상태를 다시 봐서 확인했다'는 뜻이 아닙니다.
+  # 클릭 후 글자를 못 읽으면 아래 '재확인 생략' 경로도 $true 를 반환하기 때문입니다.
+  # 두 뜻을 한 값에 겹쳐 담았더니 호출부의 '재판독으로 확인했으니 교차 검증 생략' 게이트가
+  # **재판독 없이도** 꺼졌습니다(2026-08-09 감사 - 어긋나는 방향이 늘 안전장치를 끄는 쪽).
+  # 그래서 '상태를 실제로 확인함'은 이 별도 플래그로 분리해 호출부가 따로 요구하게 합니다.
+  $script:dgToggleRechecked = $false
   # 판독 영역 목록 (주 → 보조). PS 5.1 배열 풀림 방지로 쉼표 연산자를 씁니다.
   $cardRegions = @()
   $cardRegions += , $Region
@@ -4879,6 +5074,9 @@ function Set-DgToggleCard {
       continue
     }
     if ($isSelected -eq $WantSelected) {
+      # 상태를 실제로 보고 맞춘 유일한 경로입니다 (글자 판독 또는 회색 비활성 픽셀 판정).
+      # 위 '재확인 생략' 경로와 아래 실패 경로는 이 플래그를 $false 로 남깁니다.
+      $script:dgToggleRechecked = $true
       Write-RunLog "$($script:contentTag) $Label = $(if ($WantSelected) { '사용(선택됨)' } else { '미사용(도전)' }) 확인"
       return $true
     }
@@ -5701,6 +5899,8 @@ function Invoke-NormalDungeonCycle {
   }
   $coinToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $effectiveCoin -Label "$dgCurrencyName(소탕)")
   $coinToggleClicked = $script:dgToggleClicked
+  # Ok(설정 반영)과 Rechecked(상태를 실제로 다시 봄)는 다릅니다 - 아래 생략 게이트는 후자를 요구합니다
+  $coinToggleRechecked = $script:dgToggleRechecked
   # 더블 루팅은 소탕(은동전) 전제 기능이라, 소탕을 해제하면 카드 자체가 화면에서 사라집니다.
   # 소탕을 사용할 때만 더블 루팅 상태를 맞추고, 미사용이면 확인을 생략합니다.
   # 심층던전에는 더블 루팅 카드가 없어(소탕 단독) 토글을 건너뜁니다 - 매우 어려움 화면의
@@ -5708,9 +5908,12 @@ function Invoke-NormalDungeonCycle {
   if ($effectiveCoin) {
     $lootToggleOk = $true
     $lootToggleClicked = $false
+    # 심층은 더블 루팅 카드 자체가 없어 '확인할 것이 없음' = 확인됨으로 둡니다
+    $lootToggleRechecked = $true
     if (-not $deepMode) {
       $lootToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $effectiveLoot -Label '더블 루팅')
       $lootToggleClicked = $script:dgToggleClicked
+      $lootToggleRechecked = $script:dgToggleRechecked
     }
 
     # 5-1. '입장하기' 버튼의 공물(은동전) 소모량으로 더블 루팅 설정을 교차 검증합니다.
@@ -5725,8 +5928,13 @@ function Invoke-NormalDungeonCycle {
       # 없는 상태입니다. 커스텀(항목별 명시 설정)은 반대 설정 완료 오계상을 막기 위해 정지
       # (2026-08-01 전수 점검 - 리뷰 조건: 소탕/더블 루팅 어느 카드든 실패 + 소모량 null).
       # 일반 모드는 기존대로 경고 진행 (OCR 약한 환경 헛 정지 방지).
-      if ($script:customMode -and (-not $coinToggleOk -or -not $lootToggleOk)) {
-        Write-RunLog "[완료] 카드 설정을 확인하지 못했고 소모량 판독도 실패했습니다 (소탕 확인: $coinToggleOk, 더블 루팅 확인: $lootToggleOk) - 반대 설정 입장을 막기 위해 정지합니다"
+      # '확인' 은 Rechecked(실제 재판독) 기준입니다. Ok 만 보면 클릭 후 글자를 못 읽어
+      # '재확인 생략'으로 $true 를 받은 경우까지 확인된 것으로 세어, 아무 증거 없이
+      # 반대 설정으로 입장할 수 있습니다 (2026-08-09 리뷰 - 게이트 일관성).
+      $coinConfirmed = ($coinToggleOk -and $coinToggleRechecked)
+      $lootConfirmed = ($lootToggleOk -and $lootToggleRechecked)
+      if ($script:customMode -and (-not $coinConfirmed -or -not $lootConfirmed)) {
+        Write-RunLog "[완료] 카드 설정을 확인하지 못했고 소모량 판독도 실패했습니다 (소탕 확인: $coinConfirmed, 더블 루팅 확인: $lootConfirmed) - 반대 설정 입장을 막기 위해 정지합니다"
         exit 4
       }
       Write-RunLog "[던전] 공물 소모량을 읽지 못해 교차 검증을 건너뜁니다 (예상 ${expectedCost}개)"
@@ -5735,23 +5943,24 @@ function Invoke-NormalDungeonCycle {
     } elseif ((-not $deepMode) -and ($dgValidCosts -contains $actualCost)) {
       # 심층은 더블 루팅이 없어 유효값 불일치(1↔2)를 버튼 클릭으로 정정할 수 없습니다 -
       # 아래 예상 밖 값 분기(커스텀 재확인 후 정지 / 비커스텀 경고 진행)로 흘려보냅니다.
-      if (($coinToggleClicked -or $lootToggleClicked) -and $coinToggleOk -and $lootToggleOk) {
+      if (($coinToggleClicked -or $lootToggleClicked) -and $coinToggleOk -and $lootToggleOk -and
+          $coinToggleRechecked -and $lootToggleRechecked) {
         # 방금 카드를 클릭해 전환을 글자로 확인한 직후의 유효값 불일치 = 소모량 표시 지연
         # 잔상 (2026-07-29 01:45 실측 13초+ 지연, 카드 확정 판독 > 소모량 잔상 증거 우선 계약.
         # 소모량은 두 카드의 합산이라 어느 쪽 클릭이든 지연 영향 - 리뷰 조건. 3차 점검 반영)
         Write-RunLog "[던전] 방금 카드 전환을 확인해 소모량 불일치(예상 ${expectedCost}, 실제 ${actualCost})는 표시 지연으로 판단 - 정정 클릭 생략"
       } elseif ($coinToggleClicked -or $lootToggleClicked) {
         # 방금 클릭했는데 카드 확인은 실패 - 정정 클릭은 이중 토글 위험이라 금지하고 무클릭
-        # 재판독으로만 판정합니다 (리뷰 조건: clicked && !toggleOk 는 재판독 또는 정지)
-        Start-Sleep -Milliseconds 2500
-        $lagRecheck = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
-        if ($null -ne $lagRecheck -and $lagRecheck -eq $expectedCost) {
-          Write-RunLog "[던전] 공물 소모량 ${lagRecheck}개 재확인 (첫 판독 ${actualCost}는 표시 지연으로 판단)"
+        # 재판독으로만 판정합니다 (리뷰 조건: clicked && !toggleOk 는 재판독 또는 정지).
+        # 대기는 실측 표시 지연 13초+ 를 덮습니다 (2.5초 1회로는 정상 전환도 헛정지 - 리뷰)
+        $lagWait = Wait-DgTributeCostSettles -Game $Game -ValidCosts $dgValidCosts -ExpectedCost $expectedCost
+        if ($lagWait.Matched) {
+          Write-RunLog "[던전] 공물 소모량 $($lagWait.Value)개 재확인 (첫 판독 ${actualCost}는 표시 지연으로 판단)"
         } elseif ($script:customMode) {
-          Write-RunLog "[완료] 카드 클릭 후 상태 확인에 실패했고 소모량도 항목 설정과 다릅니다 (예상 ${expectedCost}, 실제 ${actualCost}→'$lagRecheck') - 입장하지 않고 정지합니다"
+          Write-RunLog "[완료] 카드 클릭 후 상태 확인에 실패했고 소모량도 항목 설정과 다릅니다 (예상 ${expectedCost}, 실제 ${actualCost}→'$($lagWait.Value)') - 입장하지 않고 정지합니다"
           exit 4
         } else {
-          Write-RunLog "[경고] 공물 소모량이 여전히 예상(${expectedCost})과 다릅니다 (실제 '$lagRecheck') - 현재 상태로 진행합니다"
+          Write-RunLog "[경고] 공물 소모량이 여전히 예상(${expectedCost})과 다릅니다 (실제 '$($lagWait.Value)') - 현재 상태로 진행합니다"
         }
       } else {
       Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 더블 루팅 버튼을 눌러 정정합니다"
@@ -5782,7 +5991,9 @@ function Invoke-NormalDungeonCycle {
       } elseif ($null -eq $oddRecheck) {
         # 카드 미확인 + 첫 판독 잡음 + 재판독 실패 = 보증 없는 상태 - 커스텀은 정지
         # (2026-08-01 3차 점검: 이 경로가 null 게이트를 우회해 검증 없이 입장했음 - 리뷰 승인)
-        if ($script:customMode -and (-not $coinToggleOk -or -not $lootToggleOk)) {
+        # 위 null 게이트와 같은 '확인' 기준 (Ok 가 아니라 Rechecked - 2026-08-09 리뷰)
+        if ($script:customMode -and
+            (-not ($coinToggleOk -and $coinToggleRechecked) -or -not ($lootToggleOk -and $lootToggleRechecked))) {
           Write-RunLog "[완료] 카드 설정을 확인하지 못했고 소모량 재판독도 실패했습니다 (첫 판독 '${actualCost}') - 반대 설정 입장을 막기 위해 정지합니다"
           exit 4
         }
@@ -5804,7 +6015,10 @@ function Invoke-NormalDungeonCycle {
     # (2026-07-29 01:45 확정 실측: 게임이 카드를 끈 뒤에도 소모량 표시를 13초+ 남겨두는
     # 표시 지연이 정상이라 교차 검증의 정보가치가 없고, 경고 소음+헛대기만 남음. 전환 확인은
     # 카드 자체의 글자 재판독으로 이미 완료 - 클릭 대상 오인 불가. 리뷰 승인).
-    if ($coinToggleClicked -and $coinToggleOk) {
+    # $coinToggleRechecked 는 '글자(또는 회색 비활성)로 상태를 실제 재판독했다'는 뜻입니다.
+    # 클릭 후 판독 실패로 '재확인 생략' 처리된 경우까지 여기서 생략하면, 검증 없이 그냥
+    # 넘어가는 셈이 됩니다 (2026-08-09 감사).
+    if ($coinToggleClicked -and $coinToggleOk -and $coinToggleRechecked) {
       Write-RunLog "[던전] 방금 $dgCurrencyName(소탕) 카드를 도전(미사용)으로 전환 확인 - 소모량 표시 검증 생략 (전환 직후 표시 지연 정상)"
     } else {
     Start-Sleep -Milliseconds 500
@@ -5814,7 +6028,8 @@ function Invoke-NormalDungeonCycle {
     # (2026-08-01 교차 리뷰 - 사용 경로와 대칭. null 은 '소모량 없음(미사용 정상)'과 '일반
     # OCR 실패'가 구분되지 않고, 유효 밖 숫자도 증거가 아님. 유효값(10/20)이 보이면 카드가
     # 켜진 증거라 아래 해제 루프가 처리. IME 팝업 가림도 동일하게 이 게이트에 걸림)
-    if ($script:customMode -and -not $coinToggleOk -and
+    # '카드 미확인'은 Rechecked 기준입니다 (Ok 는 클릭 후 판독 실패도 $true - 2026-08-09 리뷰)
+    if ($script:customMode -and -not ($coinToggleOk -and $coinToggleRechecked) -and
         ($null -eq $offCost -or -not ($dgValidCosts -contains $offCost))) {
       $offGateReason = $(if ($script:dgCostImeBlocked) { '입력기 팝업으로 소모량도 읽을 수 없습니다' }
         elseif ($null -eq $offCost) { '소모량 표시로도 확인할 수 없습니다' }
@@ -5835,7 +6050,11 @@ function Invoke-NormalDungeonCycle {
       # 로직이 있어 루프 반복 호출 금지).
       $offCleared = $false
       $imeOffWaitTotal = 0
-      $offCardConfirmed = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)")
+      # '확정 판독'이어야 아래에서 소모량 잔상을 이길 수 있습니다. 반환 $true 만 보면 클릭 후
+      # 글자를 못 읽은 '재확인 생략'까지 확정으로 세어, 소탕이 켜진 채 미사용 항목에 입장할
+      # 수 있습니다 (2026-08-09 리뷰 - 어긋남의 방향이 늘 안전장치를 끄는 쪽).
+      $offCardConfirmed = ([bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)") -and
+        $script:dgToggleRechecked)
       for ($offTry = 1; $offTry -le 5; $offTry++) {
         Start-Sleep -Milliseconds 2000
         $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
@@ -6488,9 +6707,13 @@ function Invoke-HuntingGroundCycle {
   }
   $coinToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgHtCardButton -AltRegion $rgHtCardButtonAlt -ClickPoint $ptHtCardButton -WantSelected $effectiveCoin -Label '은동전(사냥 임무)')
   $coinToggleClicked = $script:dgToggleClicked
+  # Ok(설정 반영)과 Rechecked(상태를 실제로 다시 봄)는 다릅니다 (던전과 동일 계약)
+  $coinToggleRechecked = $script:dgToggleRechecked
   # 더블 루팅은 소탕(은동전) 전제 기능이라 소탕을 사용할 때만 상태를 맞춥니다 (던전과 동일)
   if ($effectiveCoin) {
-    Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $effectiveLoot -Label '더블 루팅' | Out-Null
+    $lootToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgHtLootButton -AltRegion $rgHtLootButtonAlt -ClickPoint $ptHtLootButton -WantSelected $effectiveLoot -Label '더블 루팅')
+    $lootToggleClicked = $script:dgToggleClicked
+    $lootToggleRechecked = $script:dgToggleRechecked
 
     # 입장 버튼의 공물 소모량(소탕 10 / 더블 루팅 20)으로 교차 검증합니다 (던전과 동일 영역).
     # 사냥터 화면에 소모량 표기가 없으면 읽기 실패로 건너뛰므로 무해합니다.
@@ -6504,6 +6727,33 @@ function Invoke-HuntingGroundCycle {
     } elseif ((-not $deepMode) -and ($dgValidCosts -contains $actualCost)) {
       # 심층은 더블 루팅이 없어 유효값 불일치(1↔2)를 버튼 클릭으로 정정할 수 없습니다 -
       # 아래 예상 밖 값 분기(커스텀 재확인 후 정지 / 비커스텀 경고 진행)로 흘려보냅니다.
+      # ※ 아래 3분기는 던전 정방향(5776~)과 **같은 계약**입니다. 2026-08-09 감사에서
+      #    사냥터 사본에만 07-29 잔상 가드가 빠져 있는 것이 발견됐습니다 - 카드를 방금 눌러
+      #    '더블 루팅 끔'을 글자로 확인했는데도 소모량 표시가 13초+ 늦게 20으로 남아 있으면,
+      #    그 잔상을 불일치로 보고 카드를 **도로 켜서** 회차마다 은동전 10개를 더 썼습니다.
+      #    복제된 판정은 가드도 개수로 세야 갈라지지 않습니다 (tests/test_audit_fixes.ps1).
+      if (($coinToggleClicked -or $lootToggleClicked) -and $coinToggleOk -and $lootToggleOk -and
+          $coinToggleRechecked -and $lootToggleRechecked) {
+        # 방금 카드 전환을 글자로 확인한 직후의 유효값 불일치 = 소모량 표시 지연 잔상.
+        # 카드 확정 판독 > 소모량 잔상 (소모량은 두 카드의 합산이라 어느 쪽 클릭이든 영향).
+        Write-RunLog "[사냥터] 방금 카드 전환을 확인해 소모량 불일치(예상 ${expectedCost}, 실제 ${actualCost})는 표시 지연으로 판단 - 정정 클릭 생략"
+      } elseif ($coinToggleClicked -or $lootToggleClicked) {
+        # 방금 클릭했는데 카드 확인은 실패 - 정정 클릭은 이중 토글 위험이라 금지하고
+        # 무클릭 재판독으로만 판정합니다 (던전과 같은 대기 계약 - 실측 표시 지연 13초+).
+        # ※ $script:customMode 분기는 사냥터에서 현재 도달 불가입니다(커스텀 반복은 던전/
+        #   어비스/심층/생활만). 던전 사본과 **구조를 같게 유지**하려고 남겨 둡니다 -
+        #   이번 감사에서 잡힌 결함이 바로 '두 사본이 갈라진 것'이었습니다 (리뷰 승인).
+        $lagWait = Wait-DgTributeCostSettles -Game $Game -ValidCosts $dgValidCosts -ExpectedCost $expectedCost
+        if ($lagWait.Matched) {
+          Write-RunLog "[사냥터] 공물 소모량 $($lagWait.Value)개 재확인 (첫 판독 ${actualCost}는 표시 지연으로 판단)"
+        } elseif ($script:customMode) {
+          Write-RunLog "[완료] 카드 클릭 후 상태 확인에 실패했고 소모량도 항목 설정과 다릅니다 (예상 ${expectedCost}, 실제 ${actualCost}→'$($lagWait.Value)') - 입장하지 않고 정지합니다"
+          exit 4
+        } else {
+          Write-RunLog "[경고] 공물 소모량이 여전히 예상(${expectedCost})과 다릅니다 (실제 '$($lagWait.Value)') - 현재 상태로 진행합니다"
+        }
+      } else {
+      # 이번 회차에 카드를 한 번도 누르지 않았을 때만 정정 클릭을 허용합니다 (잔상 아님).
       Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 더블 루팅 버튼을 눌러 정정합니다"
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptHtLootButton[0] -ReferenceY $ptHtLootButton[1]
@@ -6514,6 +6764,7 @@ function Invoke-HuntingGroundCycle {
       } else {
         Write-RunLog "[경고] 공물 소모량이 여전히 예상(${expectedCost})과 다릅니다 (실제 '$recheck') - 현재 상태로 진행합니다"
       }
+      }
     } else {
       Write-RunLog "[경고] 공물 소모량이 예상 밖입니다 (예상 ${expectedCost}, 실제 ${actualCost}) - OCR 오류 가능성이 있어 현재 상태로 진행합니다"
     }
@@ -6523,7 +6774,7 @@ function Invoke-HuntingGroundCycle {
     # 사냥터 화면에 소모량 표기가 없으면 읽기 실패($null)로 건너뛰므로 무해합니다.
     # 방금 우리가 클릭해 '도전' 전환을 확인한 경우는 생략 (전환 직후 소모량 표시가 13초+
     # 남는 게임 표시 지연이 정상 - 던전 역방향과 동일 계약, 2026-07-29 01:45 실측)
-    if ($coinToggleClicked -and $coinToggleOk) {
+    if ($coinToggleClicked -and $coinToggleOk -and $coinToggleRechecked) {
       Write-RunLog '[사냥터] 방금 은동전(사냥 임무) 카드를 도전(미사용)으로 전환 확인 - 소모량 표시 검증 생략 (전환 직후 표시 지연 정상)'
     } else {
     Start-Sleep -Milliseconds 500
@@ -6539,7 +6790,9 @@ function Invoke-HuntingGroundCycle {
       # 호출해 카드 상태 기준으로 해제하고, 이후에는 클릭 없이 소모량 사라짐만 재확인한다.
       $offCleared = $false
       $imeOffWaitTotal = 0
-      $offCardConfirmed = [bool](Set-DgToggleCard -Game $Game -Region $rgHtCardButton -AltRegion $rgHtCardButtonAlt -ClickPoint $ptHtCardButton -WantSelected $false -Label '은동전(사냥 임무)')
+      # 던전 역방향과 같은 '확정 판독' 기준 - 반환 $true 만으로는 확정이 아닙니다 (2026-08-09 리뷰)
+      $offCardConfirmed = ([bool](Set-DgToggleCard -Game $Game -Region $rgHtCardButton -AltRegion $rgHtCardButtonAlt -ClickPoint $ptHtCardButton -WantSelected $false -Label '은동전(사냥 임무)') -and
+        $script:dgToggleRechecked)
       for ($offTry = 1; $offTry -le 5; $offTry++) {
         Start-Sleep -Milliseconds 2000
         $offCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
@@ -8112,7 +8365,14 @@ function Test-LifeWindowClosePixels {
 # X 글리프 경계 안이지만 **두 획 사이의 검은 틈**에 떨어져 항상 false 였습니다.
 # 그래서 '어디를 보느냐(고정 Y)'가 아니라 '무엇이 보이느냐(X 두 대각선의 교차)'로 바꿉니다.
 # 좌표 보정이 아니라 형태 탐색이라 제목줄 높이·창 크기·저장 좌표의 ±2px 오차에 전부 면역입니다.
-$rgLifeCloseGlyph = @(1196, 30, 64, 56)   # 우상단 닫기 X 주변 (기준 좌표계. 1272·1908 실측 글리프를 모두 포함하는 폭)
+# 우상단 닫기 X 주변 (기준 좌표계). **높이는 넉넉해야 합니다** — 제목줄이 두꺼운 PC
+# (고배율)일수록 게임 내용이 아래로 밀려 글리프의 기준 Y 가 커지기 때문입니다.
+# 2026-08-09 실측: 제목줄 31px(100%) PC 는 글리프가 기준 Y 65, 39px(125%) PC 는 73.
+# 높이 56 일 때 125% PC 의 여유가 **3px 뿐**이라 150% PC 에서는 밴드를 벗어납니다
+# (= 창 열림 미감지 → C 무시 → 재시도 소진, 08-08 고착과 같은 경로).
+# 84 로 넓히면 같은 자산에서 여유가 3 → 30px 이 되고 오탐은 그대로 0 입니다
+# (열림 11장 / 닫힘 12장 전수 확인). 아래쪽 여유는 원래 19px 이라 시작 Y 는 그대로 둡니다.
+$rgLifeCloseGlyph = @(1196, 30, 64, 84)
 
 function Find-LifeCloseGlyph {
   # 밝기 배열에서 'X 자 교차' 서명을 찾습니다 (순수 - 진리표 대상).

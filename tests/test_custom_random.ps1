@@ -84,8 +84,49 @@ Assert-Case '가드: 워커 NEXT/LIST 는 실행 순서 기준' `
   ([regex]::Matches($guiSource, '\$customContext\.ExecutionItems').Count -ge 3) $true
 Assert-Case '가드: 마커 읽기 v1/v2 인정' `
   ($guiSource -match '@\(1, 2\) -notcontains \[int\]\$owner\.version') $true
-Assert-Case '가드: 진행 초기화 시 마커 무효화' `
-  ($guiSource -match '커스텀 진행 초기화 저장 실패[\s\S]{0,700}Remove-Item -LiteralPath \$customMarkerFile') $true
+# 2026-08-09 감사: 마커 삭제가 전역($customMarkerFile = 마지막으로 시작한 섹션)을 쓰고 있어
+# 다른 콘텐츠의 유효 마커를 파괴했습니다. 이 계약을 '섹션별 마커'로 격상합니다.
+# 무효화는 공용 계약(Clear-CustomMarkerFile: 삭제 → 확인 → '{}')을 거칩니다.
+# 단순 Remove-Item + SilentlyContinue 는 파일이 잠겼을 때 실패를 조용히 삼켜, progress 만
+# 초기화되고 옛 마커는 살아 있는 불일치를 만듭니다 (2026-08-09 리뷰).
+Assert-Case '가드: 진행 초기화 시 그 섹션 마커만 무효화' `
+  ($guiSource -match '커스텀 진행 초기화 저장 실패[\s\S]{0,900}Clear-CustomMarkerFile -Path \(Get-CustomMarkerFileForSection -SectionName \$SectionName\)') $true
+Assert-Case '가드: 랜덤 토글도 그 섹션 마커만 무효화' `
+  ($guiSource -match '랜덤 진행 설정 저장 실패[\s\S]{0,500}Clear-CustomMarkerFile -Path \(Get-CustomMarkerFileForSection -SectionName \$SectionName\)') $true
+Assert-Case '가드: 무효화 계약은 단일 함수' `
+  ([regex]::Matches($guiSource, '(?m)^function Clear-CustomMarkerFile').Count) 1
+Assert-Case '가드: 무효화 실패를 삼키지 않음(호출부가 반환값 확인)' `
+  ([regex]::Matches($guiSource, 'if \(-not \(Clear-CustomMarkerFile -Path').Count -ge 2) $true
+# 전역 $customMarkerFile('마지막으로 시작한 섹션')은 시작/종료 흐름에서만 정당합니다.
+# SectionName 을 파라미터로 받는 함수 안에서는 컨텍스트가 갈라지므로 금지합니다.
+foreach ($sectionScopedFn in @('Reset-CustomProgress', 'Save-CustomRandomOrder')) {
+  $fnBody = [string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') `
+      -Names @($sectionScopedFn))
+  # 주석에서 전역 이름을 '설명하는' 것은 위반이 아니므로 주석 줄은 빼고 검사합니다
+  $fnBody = (($fnBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+  Assert-Case "가드: $sectionScopedFn 은 전역 마커를 참조하지 않음" `
+    ($fnBody -match '\$customMarkerFile') $false
+  Assert-Case "가드: $sectionScopedFn 은 섹션 매핑 함수로 마커를 고름" `
+    ($fnBody -match 'Get-CustomMarkerFileForSection -SectionName \$SectionName') $true
+}
+Assert-Case '가드: 섹션→마커 매핑은 단일 함수' `
+  ([regex]::Matches($guiSource, '(?m)^function Get-CustomMarkerFileForSection').Count) 1
+# 진리표: 섹션 X 를 초기화하면 X 마커만 사라지고 나머지 3종은 보존돼야 합니다
+Invoke-Expression ((Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') `
+    -Names @('Get-CustomMarkerFileForSection')) -join "`n")
+$customDungeonMarkerFile = 'D:\dungeon.marker'
+$customAbyssMarkerFile = 'D:\abyss.marker'
+$customDeepMarkerFile = 'D:\deep.marker'
+$customLifeMarkerFile = 'D:\life.marker'
+foreach ($markerCase in @(
+    @{ Section = 'customRepeat'; Expected = 'D:\dungeon.marker' },
+    @{ Section = 'abyssCustomRepeat'; Expected = 'D:\abyss.marker' },
+    @{ Section = 'deepCustomRepeat'; Expected = 'D:\deep.marker' },
+    @{ Section = 'lifeCustomRepeat'; Expected = 'D:\life.marker' },
+    @{ Section = ''; Expected = 'D:\dungeon.marker' })) {
+  Assert-Case "진리표: 섹션 '$($markerCase.Section)' → 자기 마커" `
+    (Get-CustomMarkerFileForSection -SectionName $markerCase.Section) $markerCase.Expected
+}
 Assert-Case '가드: 정지 시 등록 순서 표기 복원(모든 경로 공용)' `
   ($guiSource -match 'if \(-not \$IsRunning\) \{ Restore-CustomListRegisteredView \}') $true
 Assert-Case '가드: 저장 함수는 Tag 정렬로 등록 순서 보존 4곳(던전/어비스/심층/생활)' `

@@ -42,8 +42,13 @@ Assert-Case '워커: 끄기 후 off 확정 요구 2곳' `
   ([regex]::Matches($workerSource, '\$toggleAfterOff -ne ''off''').Count -ge 4) $true
 
 # ⑤ 커스텀: 카드 설정 실패 + 소모량 null → 정지 (반대 설정 입장 방지)
+# 2026-08-09 리뷰: '확인'의 기준을 Ok(설정 반영)에서 Rechecked(실제 재판독)로 격상.
+# Ok 만 보면 클릭 후 글자를 못 읽어 '재확인 생략'으로 받은 $true 까지 확인으로 세어,
+# 아무 증거 없이 반대 설정으로 입장할 수 있었습니다.
 Assert-Case '워커: 커스텀 카드 미확인+소모량 null 정지' `
-  ($workerSource -match 'customMode -and \(-not \$coinToggleOk -or -not \$lootToggleOk\)[\s\S]{0,300}?exit 4') $true
+  ($workerSource -match 'customMode -and \(-not \$coinConfirmed -or -not \$lootConfirmed\)[\s\S]{0,300}?exit 4') $true
+Assert-Case '워커: 확인 판정이 Rechecked 를 포함' `
+  ($workerSource -match '\$coinConfirmed = \(\$coinToggleOk -and \$coinToggleRechecked\)') $true
 
 # ⑦ 사냥터 재시도 경로도 continueSweepOnly 존중 (10~19개면 더블 루팅만 끄고 재입장)
 Assert-Case '워커: 사냥터 재시도 소탕만 계속 폴백' `
@@ -122,8 +127,46 @@ Assert-Case '3차: 사용 경로 재판독 null 커스텀 정지' `
 Assert-Case '3차: 미사용 게이트가 유효 밖 값도 차단' `
   ($workerSource -match '\(\$null -eq \$offCost -or -not \(\$dgValidCosts -contains \$offCost\)\)') $true
 # 잔상 가드: 방금 카드 클릭 직후의 유효값 불일치는 정정 클릭 금지
-Assert-Case '3차: 정정 클릭 잔상 가드(coin/loot 클릭 공통)' `
-  ($workerSource -match '\(\$coinToggleClicked -or \$lootToggleClicked\) -and \$coinToggleOk -and \$lootToggleOk') $true
+# ※ 존재 여부가 아니라 **개수**로 셉니다. 같은 소모량 교차 검증이 던전 정방향/사냥터 정방향
+#   두 곳에 복제돼 있는데, 2026-07-29 잔상 가드가 던전에만 들어가고 사냥터는 1년 가까이
+#   빠진 채였습니다(08-09 감사 적발 - 회차마다 은동전 10개 손실). 존재 검사는 한 곳만
+#   고쳐도 초록이라 비대칭을 오히려 조장합니다. 복제된 판정은 가드도 개수로 고정합니다.
+Assert-Case '3차: 정정 클릭 잔상 가드(coin/loot 클릭 공통) - 던전+사냥터 2곳' `
+  ([regex]::Matches($workerSource, '\(\$coinToggleClicked -or \$lootToggleClicked\) -and \$coinToggleOk -and \$lootToggleOk').Count) 2
+Assert-Case '3차: 클릭했으나 확인 실패 시 무클릭 재판독 - 던전+사냥터 2곳' `
+  ([regex]::Matches($workerSource, '\} elseif \(\$coinToggleClicked -or \$lootToggleClicked\) \{').Count) 2
+
+# ── 반환값 의미 분리 (2026-08-09 감사) ──────────────────────────────────────
+# Set-DgToggleCard 의 $true 는 '설정 반영'까지만 뜻합니다. 클릭 후 글자를 못 읽어도
+# '재확인 생략'으로 $true 를 돌려주기 때문입니다. 그런데 호출부의 교차 검증 생략 게이트는
+# 주석상 '재판독으로 확인했으니 생략'이라 적혀 있어, 재판독 없이도 안전장치가 꺼졌습니다.
+# → '상태를 실제로 확인함'을 $script:dgToggleRechecked 로 분리하고 4개 게이트가 요구합니다.
+Assert-Case '분리: dgToggleRechecked 초기화 1곳' `
+  ([regex]::Matches($workerSource, '\$script:dgToggleRechecked = \$false').Count) 1
+Assert-Case '분리: dgToggleRechecked 참 설정은 상태 확인 경로 1곳뿐' `
+  ([regex]::Matches($workerSource, '\$script:dgToggleRechecked = \$true').Count) 1
+Assert-Case '분리: 참 설정이 상태 일치 분기 안에 있음' `
+  ($workerSource -match 'if \(\$isSelected -eq \$WantSelected\) \{[\s\S]{0,300}\$script:dgToggleRechecked = \$true') $true
+Assert-Case '분리: 재확인 생략 경로는 참으로 만들지 않음' `
+  ($workerSource -match '재확인 생략[\s\S]{0,80}return \$true') $true
+Assert-Case '분리: 정방향 잔상 게이트가 rechecked 요구 - 던전+사냥터 2곳' `
+  ([regex]::Matches($workerSource, '\$coinToggleRechecked -and \$lootToggleRechecked').Count) 2
+Assert-Case '분리: 역방향 생략 게이트가 rechecked 요구 - 던전+사냥터 2곳' `
+  ([regex]::Matches($workerSource, '\$coinToggleClicked -and \$coinToggleOk -and \$coinToggleRechecked').Count) 2
+Assert-Case '분리: rechecked 없는 옛 역방향 게이트 잔존 없음' `
+  ([regex]::Matches($workerSource, '\$coinToggleClicked -and \$coinToggleOk\)').Count) 0
+Assert-Case '분리: 심층은 더블 루팅 카드가 없어 rechecked 기본 참' `
+  ($workerSource -match '\$lootToggleRechecked = \$true[\s\S]{0,120}if \(-not \$deepMode\)') $true
+
+# 게이트 진리표: '클릭했다'만으로는 교차 검증을 생략할 수 없습니다.
+function Test-SkipCrossCheck {
+  param([bool]$Clicked, [bool]$Ok, [bool]$Rechecked)
+  return [bool]($Clicked -and $Ok -and $Rechecked)
+}
+Assert-Case '진리표: 클릭+반영+재판독 = 생략 허용' (Test-SkipCrossCheck $true $true $true) $true
+Assert-Case '진리표: 클릭+반영이지만 재판독 실패 = 생략 금지' (Test-SkipCrossCheck $true $true $false) $false
+Assert-Case '진리표: 클릭 안 함 = 생략 금지' (Test-SkipCrossCheck $false $true $true) $false
+Assert-Case '진리표: 설정 미반영 = 생략 금지' (Test-SkipCrossCheck $true $false $true) $false
 # 다중 스케일 1~2회전 (첫 회전 화면 전환 대비)
 Assert-Case '3차: 카드 다중 스케일 1~2회전' `
   ($workerSource -match 'if \(\$setTry -le 2\) \{ \$cardScales = @\(5, 3, 4\) \}') $true

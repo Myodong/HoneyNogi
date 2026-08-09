@@ -182,7 +182,10 @@ Assert-Case '탭 확인: 진입 소실 판독은 성공 아님' (Test-DgTabProbe
 $guiSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_gui.ps1') -Raw -Encoding UTF8
 Assert-Case '배선: 심층 카테고리 저장값 deepdungeon' ($guiSource -match "rbCatDeep\.Checked\)\s*\{\s*\`$categoryValue = 'deepdungeon'") $true
 Assert-Case '배선: 커스텀 섹션 3분기(deepCustomRepeat)' ($guiSource -match "rbCatDeep\.Checked\)\s*\{\s*'deepCustomRepeat'") $true
-Assert-Case '배선: 심층 전용 마커 파일 분기' ($guiSource -match 'rbCatDeep\.Checked\)\s*\{\s*\$customDeepMarkerFile') $true
+# 2026-08-09 감사: 섹션→마커 매핑을 Get-CustomMarkerFileForSection 한 곳으로 모았습니다
+# (시작 시 분기와 초기화/랜덤 토글의 분기가 갈라져 다른 콘텐츠 마커를 지우던 결함).
+Assert-Case '배선: 심층 전용 마커 파일 분기' `
+  ($guiSource -match "'deepCustomRepeat' \{ return \`$customDeepMarkerFile \}") $true
 Assert-Case '배선: 셀 편집 디스패처에 심층 리스트 분기' ($guiSource -match 'elseif \(\$clickSender -eq \$lvDcrList\)') $true
 Assert-Case '배선: 셀 편집 적용에 심층 분기' ($guiSource -match 'elseif \(\$applyList -eq \$lvDcrList\)') $true
 Assert-Case '배선: 시작 게이트 층 전환 검사에 deepCustomRepeat 포함' ($guiSource -match "-eq 'customRepeat' -or \`$script:customConfigSection -eq 'deepCustomRepeat'") $true
@@ -312,9 +315,13 @@ Assert-Case '배선(워커): 미사용 역방향 해제 = 상태 기반 1회 + �
 # 2026-07-29 00:58 실기: 카드를 끈 직후 소모량 표시가 갱신되지 않고 남는 잔상 실측(정지 직후
 # 캡처는 버튼 깨끗+카드 도전). 카드 '도전' 확정 판독($offCardConfirmed)이 1차 증거로 이기고
 # 표시 잔존은 경고 진행, 카드 미확인일 때만 정지 유지 (던전+사냥터 2곳, 리뷰 승인)
+# 2026-08-09 리뷰: 이 '확정 판독'이 소모량 잔상을 이기는 근거이므로, 반환 $true 만으로는
+# 부족하고 상태를 실제로 재판독($script:dgToggleRechecked)했어야 합니다.
 Assert-Case '배선(워커): 역방향 카드 확인 우선 계약(잔상 허용) 2곳' `
-  (([regex]::Matches($workerSource, '\$offCardConfirmed = \[bool\]\(Set-DgToggleCard').Count -eq 2) -and
+  (([regex]::Matches($workerSource, '\$offCardConfirmed = \(\[bool\]\(Set-DgToggleCard').Count -eq 2) -and
    ([regex]::Matches($workerSource, 'elseif \(\$offCardConfirmed\)').Count -eq 2)) $true
+Assert-Case '배선(워커): 역방향 확정 판독이 Rechecked 를 요구 2곳' `
+  ([regex]::Matches($workerSource, "Label '?[^\r\n]*'?\)\s*-and\r?\n\s*\`$script:dgToggleRechecked\)").Count) 2
 # 2026-07-28 23:56 실기: 옵션 확정은 선확인 5회 + 클릭 후 재클릭 없는 수동 확인(2초x3) +
 # 최종 재클릭 1회 계약 (재클릭마다 연출이 다시 시작되는 자기 방해 방지 - 리뷰 계약)
 Assert-Case '배선(워커): 옵션 확정 수동 확인 계약(선확인 5회/수동 3회/최종 재클릭 1회)' `

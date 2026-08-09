@@ -162,6 +162,61 @@ foreach ($shot in $blueField) {
   Assert-Case "1273 '$($shot.Name)' 필드는 미검출" ([bool](Get-CaptureGlyphHit -Path $shot.FullName).Found) 'False'
 }
 
+# ── ②b ROI 여유 폭 (2026-08-09 감사) ──
+# '검출되는가'만 보면 여유가 3px 남았는지 30px 남았는지 알 수 없습니다. 실제로 그 상태였고
+# (제목줄 39px = 125% 배율 PC 에서 위 여유 3px), 150% 배율이면 밴드를 벗어나 08-08 고착이
+# 재발할 뻔했습니다. ROI 를 위아래로 밀어 **몇 px 까지 견디는지**를 직접 잽니다.
+function Test-GlyphWithShift {
+  param([string]$Path, [int]$ShiftY)
+  $bmp = [System.Drawing.Bitmap]::FromFile($Path)
+  try {
+    $roiY = $rgLifeCloseGlyph[1] + $ShiftY
+    $cl = [int][Math]::Round($rgLifeCloseGlyph[0] * $bmp.Width / $refWidth)
+    $ct = [int][Math]::Round($roiY * $bmp.Height / $refHeight)
+    $cw = [Math]::Max(1, [int][Math]::Round($rgLifeCloseGlyph[2] * $bmp.Width / $refWidth))
+    $ch = [Math]::Max(1, [int][Math]::Round($rgLifeCloseGlyph[3] * $bmp.Height / $refHeight))
+    if ($ct -lt 0 -or ($ct + $ch) -gt $bmp.Height) { return $false }
+    $src = New-Object System.Drawing.Bitmap $cw, $ch
+    $g1 = [System.Drawing.Graphics]::FromImage($src)
+    $g1.DrawImage($bmp, (New-Object System.Drawing.Rectangle 0, 0, $cw, $ch),
+      (New-Object System.Drawing.Rectangle $cl, $ct, $cw, $ch), [System.Drawing.GraphicsUnit]::Pixel)
+    $g1.Dispose()
+    $sc = New-Object System.Drawing.Bitmap $rgLifeCloseGlyph[2], $rgLifeCloseGlyph[3]
+    $g2 = [System.Drawing.Graphics]::FromImage($sc)
+    $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g2.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $rgLifeCloseGlyph[2], $rgLifeCloseGlyph[3]),
+      (New-Object System.Drawing.Rectangle 0, 0, $cw, $ch), [System.Drawing.GraphicsUnit]::Pixel)
+    $g2.Dispose(); $src.Dispose()
+    $lm = New-Object 'int[][]' $sc.Height
+    for ($y = 0; $y -lt $sc.Height; $y++) {
+      $row = New-Object 'int[]' $sc.Width
+      for ($x = 0; $x -lt $sc.Width; $x++) { $c = $sc.GetPixel($x, $y); $row[$x] = [int](([int]$c.R + [int]$c.G + [int]$c.B) / 3) }
+      $lm[$y] = $row
+    }
+    $sc.Dispose()
+    return [bool](Find-LifeCloseGlyph -Luma $lm).Found
+  } finally { $bmp.Dispose() }
+}
+$marginAssets = @($reportShots) + @($blueShots)
+if ($marginAssets.Count -gt 0) {
+  $worstUp = 99
+  $worstDown = 99
+  foreach ($shot in $marginAssets) {
+    $up = 0
+    while ($up -lt 40 -and (Test-GlyphWithShift -Path $shot.FullName -ShiftY (-($up + 1)))) { $up++ }
+    if ($up -lt $worstUp) { $worstUp = $up }
+    $down = 0
+    while ($down -lt 40 -and (Test-GlyphWithShift -Path $shot.FullName -ShiftY ($down + 1))) { $down++ }
+    if ($down -lt $worstDown) { $worstDown = $down }
+  }
+  # 위 방향(=고배율 PC 방향)이 취약했던 축입니다. 최소 20px 은 확보돼야 합니다
+  # (100% 31px → 125% 39px 이 8px 차이였으므로 150% 까지 덮으려면 그 두 배 이상).
+  Assert-Case "ROI 여유: 제보 자산 위 방향 최소 20px 이상 (실제 $worstUp)" ([bool]($worstUp -ge 20)) 'True'
+  # 아래 방향도 함께 잽니다. 한쪽만 재면 '상하 sweep' 이라는 계약과 실제가 어긋납니다
+  # (반대 방향은 아무도 재 본 적이 없다 - 이번 감사가 지적한 계열 그 자체).
+  Assert-Case "ROI 여유: 제보 자산 아래 방향 최소 15px 이상 (실제 $worstDown)" ([bool]($worstDown -ge 15)) 'True'
+}
+
 # 개발 1272 캡처 전수 - 회귀 확인 (창 열림은 True, 필드/채집 화면은 False)
 $devDir = Join-Path $projectRoot '던전이미지\생활\흐름캡처'
 if (Test-Path $devDir) {

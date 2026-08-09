@@ -353,9 +353,43 @@ Assert-Case '링크: 후보 2개 → null (단일 후보만 클릭)' ($null -eq 
 Assert-Case '링크: 빈 판독 → null' ($null -eq (Select-LifeFindNearestWord -Words @())) 'True'
 
 # ── ② 퀘스트 상태 진리표 (실측 판독 문자열 - 트래커 OCR/HUD 스텁) ──
+# 스텁은 **영역 인지형**입니다 (2026-08-09 감사). 예전 스텁은 ROI 인자를 버리고 항상 같은
+# 문자열을 돌려줘서, 좁은 판독 → 넓은 판독 2단 구조와 전면화 후 재판독이 통째로 삭제되거나
+# 인자가 뒤바뀌어도 회귀가 전부 초록이었습니다. 예상 밖 ROI 는 조용한 기본값 대신 FAIL 을
+# 냅니다 - 배선이 바뀌면 테스트가 먼저 알아야 합니다.
 function Get-GameRegionOcrText {
   param($Game, [int]$ReferenceX, [int]$ReferenceY, [int]$RegionWidth, [int]$RegionHeight, [int]$Scale, $Engine)
-  return [string]$script:mockQuestText
+  # ROI 는 **4튜플 전체**를 비교합니다. X/Y 만 보면 폭·높이가 잘못 넘어가도 통과합니다.
+  $roi = ('{0},{1},{2},{3}' -f $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight)
+  $roiTag = ''
+  if ($roi -eq (($rgQuestTracker -join ','))) { $roiTag = 'narrow' }
+  elseif ($roi -eq (($rgLifeQuestWide -join ','))) { $roiTag = 'wide' }
+  else {
+    "FAIL 퀘스트 OCR 스텁: 예상 밖 ROI ($roi) - 좁은/넓은 판독 배선 확인 필요"
+    $script:fails++
+    return ''
+  }
+  if ($Scale -ne 3) {
+    "FAIL 퀘스트 OCR 스텁: 예상 밖 배율 ($Scale) - 퀘스트 판독은 스케일 3 계약"
+    $script:fails++
+  }
+  $script:questOcrCalls += $roiTag
+  # 게임이 뒤에 있으면 화면에 보이는 건 남의 창입니다 - 어느 영역을 읽어도 그 창 글자가 나옵니다
+  if ((-not $script:mockGameFront) -and -not [string]::IsNullOrEmpty($script:mockCoveredText)) {
+    return [string]$script:mockCoveredText
+  }
+  if ($roiTag -eq 'narrow') { return [string]$script:mockQuestTextNarrow }
+  return [string]$script:mockQuestTextWide
+}
+$script:questOcrCalls = @()
+$script:mockCoveredText = ''
+function Set-MockQuestText {
+  # Wide 를 생략하면 두 영역이 같은 글자를 돌려줍니다 (기존 진리표와 동일한 조건).
+  # '가려짐' 글자는 매번 초기화합니다 (앞 케이스가 뒤 케이스에 새지 않도록).
+  param([string]$Narrow, $Wide = $null)
+  $script:mockQuestTextNarrow = $Narrow
+  $script:mockQuestTextWide = $(if ($null -eq $Wide) { $Narrow } else { [string]$Wide })
+  $script:mockCoveredText = ''
 }
 function Test-HomeEndEscHud { param($Game) return [bool]$script:mockHudVisible }
 # 판독 전 전면 확인/전면화 계약용 스텁 (2026-08-07 - 실기에서는 다른 창이 게임을 덮었는지 확인)
@@ -365,10 +399,11 @@ $script:mockGameFront = $true
 $script:screenCaptureFailing = $false
 
 function Invoke-QuestStateCase {
-  param([string]$Text, [bool]$Hud, [bool]$CaptureFailing = $false)
-  $script:mockQuestText = $Text
+  param([string]$Text, [bool]$Hud, [bool]$CaptureFailing = $false, $WideText = $null)
+  Set-MockQuestText -Narrow $Text -Wide $WideText
   $script:mockHudVisible = $Hud
   $script:screenCaptureFailing = $CaptureFailing
+  $script:questOcrCalls = @()
   $result = Get-LifeQuestState -Game $null
   $script:screenCaptureFailing = $false
   return $result
@@ -390,17 +425,51 @@ Assert-Case "퀘스트: '탐색' 한 조각만 → present 아님" (Invoke-Quest
 Assert-Case '조각: 채집+장소 → true' (Test-LifeQuestFragments -QuestText '•채집 장소 •사과 나부 채집 0/10') 'True'
 Assert-Case '조각: 주간 목표 문구 → false' (Test-LifeQuestFragments -QuestText '표] 모험가 길드의 정기 의뢰 •심층 던전 클리어 0/3') 'False'
 Assert-Case '조각: 빈 문자열 → false' (Test-LifeQuestFragments -QuestText '') 'False'
+# ── ②a 좁은 판독 → 넓은 판독 2단 구조 (2026-08-09 감사 - 이전 스텁으로는 검증 불가였음) ──
+# 실사고: 획득 경험치 배지가 첫 줄(좁은 ROI)을 덮고 퀘스트는 아래로 밀렸는데, 좁은 판독만
+# 보고 '없음'으로 확정해 진행 중인 채집을 완료로 처리했습니다.
+Assert-Case '2단: 좁은 판독은 배지, 넓은 판독에 퀘스트 → present' `
+  (Invoke-QuestStateCase '획득 경험치 +1,250' $true -WideText '•채집 장소 탐색 •사과 나무 채집 3/10') 'present'
+Assert-Case '2단: 넓은 판독까지 없고 HUD 있으면 absent' `
+  (Invoke-QuestStateCase '획득 경험치 +1,250' $true -WideText '표] 모험가 길드의 정기 의뢰') 'absent'
+Assert-Case '2단: 위 present 케이스는 두 영역을 모두 읽었음' `
+  (($script:questOcrCalls -join ',')) 'narrow,wide'
+# 좁은 판독에서 이미 보이면 넓은 판독은 부르지 않습니다 (불필요한 캡처 비용 방지)
+Invoke-QuestStateCase '•채집 장소 탐색 0/10' $true | Out-Null
+Assert-Case '2단: 좁은 판독 성공이면 넓은 판독 생략' (($script:questOcrCalls -join ',')) 'narrow'
+
 # 다른 창이 게임을 덮은 상태: 판독이 남의 창 글자여도 '없음'으로 확정하면 안 됨 (2026-08-07 실사고)
 $script:mockGameFront = $false
-$script:mockQuestText = 'mabinogi_gui.ps1 GroupBox Label CheckBox RadioButton commit origin/main'
+# 게임 안에는 퀘스트가 멀쩡히 있는데(narrow) 화면은 다른 창이 덮은 상태 - 여기서 absent 로
+# 확정하면 남의 채집을 망칩니다 (present 우선 비대칭 계약)
+Set-MockQuestText -Narrow '•채집 장소 탐색 •사과 나무 채집 3/10'
+$script:mockCoveredText = 'mabinogi_gui.ps1 GroupBox Label CheckBox RadioButton commit origin/main'
 $script:mockHudVisible = $true
 Assert-Case '퀘스트: 게임이 뒤에 있고 전면화도 실패 → unknown (완료로 안 셈)' (Get-LifeQuestState -Game $null) 'unknown'
+
+# ②b 전면화 성공 후 재판독 (Focus-Game 이 실제로 전면화에 성공한 경우 - 본체 8178~8183).
+# 예전 스텁은 이 경로를 한 번도 밟지 않아, 재판독 두 줄을 지워도 회귀가 초록이었습니다.
+function Focus-Game { param($Game) $script:mockGameFront = $true }
+$script:mockGameFront = $false
+Set-MockQuestText -Narrow '' -Wide '•채집 장소 탐색 •백금 광맥 채집 2/10'
+$script:mockCoveredText = '설정 저장 빌드 로그 커밋'
+$script:questOcrCalls = @()
+Assert-Case '전면화: 성공 후 재판독에서 퀘스트 발견 → present' (Get-LifeQuestState -Game $null) 'present'
+Assert-Case '전면화: 재판독도 좁은→넓은 순서 (총 4회 판독)' `
+  (($script:questOcrCalls -join ',')) 'narrow,wide,narrow,wide'
+$script:mockGameFront = $false
+Set-MockQuestText -Narrow '' -Wide ''
+$script:mockCoveredText = '설정 저장 빌드 로그 커밋'
+$script:mockHudVisible = $true
+Assert-Case '전면화: 성공했는데 재판독도 비면 HUD 근거로 absent' (Get-LifeQuestState -Game $null) 'absent'
+function Focus-Game { param($Game) }   # 원래 계약(전면화 성공 여부는 mockGameFront 로 제어)으로 복구
 $script:mockGameFront = $true
+$script:mockCoveredText = ''
 
 # ── ③ 카운트 추출 (로그 보조) ──
-$script:mockQuestText = '채집 장소 • 사과 나구 채집 4/10'
+Set-MockQuestText -Narrow '채집 장소 • 사과 나구 채집 4/10'
 Assert-Case '카운트: 실측 4/10' (Get-LifeQuestCountText -Game $null) '4/10'
-$script:mockQuestText = '모험가 길드의 정기 의뢰'
+Set-MockQuestText -Narrow '모험가 길드의 정기 의뢰'
 Assert-Case '카운트: 숫자 없음 → 빈 문자열' (Get-LifeQuestCountText -Game $null) ''
 
 # ── ④ 대상 목록 행 조합 / 다중 스케일 탐색 (단어 OCR 스텁) ──
