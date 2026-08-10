@@ -4,6 +4,28 @@
 #       Set-DcrItemCellValue / Get-DeepTributeTotalPerLap / Get-DeepCustomListCompact /
 #       Get-DeepCustomItemLabel / Get-CustomTransitionIssues(심층 재사용)
 $ErrorActionPreference = 'Stop'
+# ★ 10차 추가: 심층 전용 소모량 영역과 **예비 영역**의 계약.
+#   좁은 영역(978,636,152,44)은 아이콘 오독('7' 접두)을 막으려 만든 것이고, 넓은 예비
+#   (840,636,290,44)는 하단 버튼이 '파티 찾기'+'입장하기' 2버튼일 때 숫자가 좌우로 밀리는
+#   레이아웃을 덮습니다. 9차에 사다리를 넣었는데 테스트가 없어 지워도 통과했습니다.
+$ddRoot = Split-Path -Parent $PSScriptRoot
+$ddWorker = [IO.File]::ReadAllText((Join-Path $ddRoot 'mabinogi_run_once.ps1'))
+$ddFails = 0
+foreach ($ddCase in @(
+    @{ N = '심층: 전용 소모량 영역(아이콘 제외)'; P = '\$rgDgTributeCost = @\(978, 636, 152, 44\)' },
+    @{ N = '심층: 전용 잔량 영역'; P = '\$rgDgCoinBalance = @\(1056, 45, 64, 44\)' },
+    @{ N = '심층: 두 버튼 레이아웃용 예비 영역'; P = '\$rgDgTributeCostAlt = @\(840, 636, 290, 44\)' },
+    @{ N = '심층: 예비는 심층에서만(기본은 null)'; P = '\$rgDgTributeCostAlt = \$null' },
+    @{ N = '판독: 주 → 예비 사다리를 실제로 순회'; P = 'foreach \(\$costRegion in \$costRegions\)' },
+    @{ N = '판독: 예비가 있을 때만 목록에 추가'; P = 'if \(\$rgDgTributeCostAlt\) \{ \$costRegions \+= , \$rgDgTributeCostAlt \}' })) {
+  if ($ddWorker -match $ddCase.P) { "OK   $($ddCase.N)" } else { "FAIL $($ddCase.N)"; $ddFails++ }
+}
+# 심층 전용 값은 넓은 기본 대입 **뒤에** 와야 합니다 (앞에 두면 통째로 덮여 죽습니다 - 8차 사고)
+if ($ddWorker.IndexOf('$rgDgTributeCost = @(978, 636, 152, 44)') -gt
+    $ddWorker.IndexOf("Get-ConfigValue `$config @('ocrRegions', 'dgTributeCost')")) {
+  "OK   심층: 전용 영역이 기본 대입보다 뒤(덮임 방지)"
+} else { "FAIL 심층: 전용 영역이 기본 대입에 덮입니다"; $ddFails++ }
+if ($ddFails -gt 0) { exit $ddFails }
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')

@@ -238,10 +238,16 @@ if (Test-Path $devDir) {
 
 # ── ③ 배선 가드 ──
 $workerText = [IO.File]::ReadAllText($workerPath)
+# 거리 상한(0,900 / 0,2000)으로 순서를 확인하면 주석 몇 줄만 늘어도 깨집니다 - 7차에서
+# 실제로 터졌습니다. 함수 본문만 AST 로 떼어 **순서**로 확인합니다.
+$lifeOpenBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-LifeWindowOpen'))
+$idxGlyph = $lifeOpenBody.IndexOf('$glyphHit = Get-LifeCloseGlyphHit')
+$idxGlyphTrue = $lifeOpenBody.IndexOf('return $true')
+$idxPixel = $lifeOpenBody.IndexOf('Test-LifeWindowClosePixels -CrossA')
 Assert-Case '워커: 글리프 탐색이 창 판정의 1순위' `
-  ([bool]($workerText -match "function Test-LifeWindowOpen[\s\S]{0,900}?\`$glyphHit = Get-LifeCloseGlyphHit[\s\S]{0,200}?return \`$true")) 'True'
+  ([bool]($idxGlyph -ge 0 -and $idxGlyphTrue -gt $idxGlyph)) 'True'
 Assert-Case '워커: 기존 4점 판정도 폴백으로 유지 (1272 무회귀)' `
-  ([bool]($workerText -match "function Test-LifeWindowOpen[\s\S]{0,2000}?Test-LifeWindowClosePixels -CrossA")) 'True'
+  ([bool]($idxPixel -gt $idxGlyph)) 'True'
 Assert-Case '워커: ROI 캡처는 Scale 1 (창 크기 무관 정규화)' `
   ($workerText.Contains('-RegionWidth $rgLifeCloseGlyph[2] -RegionHeight $rgLifeCloseGlyph[3] -Scale 1')) 'True'
 Assert-Case '워커: 캡처 실패 감지가 있는 경로 사용 (Get-GamePixel 원시 경로 아님)' `

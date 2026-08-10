@@ -3,7 +3,10 @@
 $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$guiSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
+$guiPath = Join-Path $projectRoot 'mabinogi_gui.ps1'
+$guiSource = [IO.File]::ReadAllText($guiPath)
+# 함수 본문만 AST 로 떼어내는 공용 헬퍼 (주석 앵커를 코드 앵커로 바꾸는 데 필요 - 8차 점검)
+. (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 
 function Assert-Case {
   param([string]$Name, $Actual, $Expect)
@@ -89,8 +92,18 @@ Assert-Case '가드: 뷰포트 흡수는 직전 열림 상태에서만(3상태 �
   ($guiSource -match 'if \(\$script:logLayoutOpen -eq \$true\) \{ \$script:logViewHeight = \[Math\]::Max\(100, \[int\]\$txtLog\.Height\) \}') $true
 Assert-Case '가드: 배지는 논리 상태(Checked) 기반 - Visible 금지' `
   ($guiSource -match 'if \(-not \$chkTabLog\.Checked\) \{\s+if \(\$severity') $true
-Assert-Case '가드: 접힘 중 ScrollToCaret 생략' `
-  ($guiSource -match 'return   # 접힘 중에는 ScrollToCaret 생략') $true
+# ★ 8차 점검: 이 단언은 **주석 문자열의 존재**만 봤습니다(공백 3칸까지 고정). return 앞에
+#   $txtLog.ScrollToCaret() 를 넣어 계약을 정면으로 깨도 리터럴이 그대로라 통과했고, 반대로
+#   주석 문구나 공백만 손봐도 동작은 그대로인데 FAIL 이 나는 양방향 거짓 안심이었습니다.
+#   → 함수 본문을 AST 로 떼어 **주석을 뺀 코드**로 구조를 확인합니다.
+$coloredBody = [string](Get-SourceFunctionDefinitions -Path $guiPath -Names @('Add-ColoredLogLine'))
+$coloredCode = (($coloredBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+# 낱말이 아니라 **실제 호출**($txtLog.ScrollToCaret())로 셉니다 - 줄 끝 주석은 위 필터
+# ($_ -notmatch '^\s*#')로는 안 지워져서, 낱말로 세면 설명 주석이 호출 하나로 잡힙니다.
+Assert-Case '가드: 접힘 분기는 ScrollToCaret 없이 return' `
+  ([bool]($coloredCode -match '(?s)if \(-not \$chkTabLog\.Checked\) \{(?:(?!\$txtLog\.ScrollToCaret\(\))[\s\S])*?\r?\n    return[^\r\n]*\r?\n  \}')) $true
+Assert-Case '가드: ScrollToCaret 실제 호출은 1곳뿐(접힘 분기 이후)' `
+  ([regex]::Matches($coloredCode, '\$txtLog\.ScrollToCaret\(\)').Count) 1
 Assert-Case '가드: 로그 지우기 시 배지 리셋' `
   ($guiSource -match '\$txtLog\.Clear\(\)[\s\S]{0,400}Reset-LogTabBadge') $true
 Assert-Case '가드: 토글 커스텀 배경색 확실 적용 6곳(설정/로그+랜덤 4)' `

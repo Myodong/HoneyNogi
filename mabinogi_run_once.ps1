@@ -45,6 +45,11 @@ function Resolve-ConfigCoordinateArray {
   if ($valid) {
     foreach ($entry in $values) {
       $number = 0.0
+      # ★ JSON 의 null 은 [double] 캐스트에서 예외 없이 **0** 이 됩니다. 그러면 좌표 한 칸이
+      #   조용히 0 으로 바뀌어, 판독 영역이 화면 왼쪽 위로 밀려도 경고 한 줄 없이 지나갑니다
+      #   (아래 범위 검사도 0 은 유효값이라 통과). 사용자가 config 를 편집하다 값을 지우면
+      #   그대로 발생합니다 - 기본값 복구로 보내는 것이 맞습니다 (2026-08-10 9차 점검).
+      if ($null -eq $entry) { $valid = $false; break }
       if ($entry -is [bool] -or $entry -is [string]) { $valid = $false; break }
       try { $number = [double]$entry } catch { $valid = $false; break }
       if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or
@@ -903,17 +908,10 @@ if ($deepMode) {
   $dgBalanceMax = 15   # 마족공물 보유 상한 (2026-07-28 사용자 제보)
   $dgSelHardX = 78
   $dgOptHardX = 660
-  # 공물 잔량 표시 영역 (옵션 화면 우상단). 재화줄은 골드(950)·은동전(1039)·마족공물(1087)·
-  # 하트토큰(1146) 순서 고정 (2026-07-28 사용자 제보 + 캡처 2장 단어 좌표 실측 - 07-27 실측
-  # (1088,67)과 일치). 이 영역(1056~1120)은 공물만 잡고 은동전/하트토큰은 밖이라 오독 없음.
-  # Get-DgCoinBalance 가 마지막 숫자 그룹을 읽음.
-  $rgDgCoinBalance = @(1056, 45, 64, 44)
-  # 입장 버튼 소모량 판독 영역: 공물 뿔 아이콘을 제외하고 숫자+'입장하기'만 읽습니다
-  # (2026-07-28 22:40 실기: 아이콘이 'V'/'7' 등으로 오독돼 소모량 1이 7로 읽혀 안전 정지 -
-  # 'VI입장하기'/'Space72입장하기' 실측. 아이콘 x953~977, 숫자 x980~ 픽셀 실측으로 경계 확정.
-  # 아이콘 제외 영역은 소탕선택 캡처 21장 중 IME 팝업 오염 2장 제외 전수가 첫 시도에
-  # '1입장하기'/'2입장하기'로 즉시 정확 판독. config 키 값 불변 - coordsVersion 유지)
-  $rgDgTributeCost = @(978, 636, 152, 44)
+  # ※ 재화/소모량 판독 영역은 여기서 정하지 않습니다. 이 블록보다 **뒤에** 있는 최상위
+  #   대입($rgDgCoinBalance / $rgDgTributeCost)이 통째로 덮어써 심층 전용 값이 죽기 때문입니다
+  #   (2026-08-10 8차 점검 - 2026-07-28 뿔 아이콘 오독 수정이 배포 이후 한 번도 적용된 적이
+  #   없었음). 실측 근거와 값은 그 대입 **직후**의 `if ($deepMode)` 블록에 있습니다.
   # 제목 판독은 Read-DgTitleText 의 '좁은 우선 + 심층 조건부 확장' 이중 판독을 사용합니다
   # (폭 420 전역 확장은 밝은 배경 선택 화면에서 판독 전멸 - 2026-07-28 20:53 실기로 철회.
   # 근거 실측은 Read-DgTitleText 주석 참고).
@@ -1197,6 +1195,10 @@ function Find-DgDifficultyPoint {
         -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale $pillScale -Engine $ocrKoreanEngine)
     $refPoint = Select-DgDifficultyWord -Words $words -Key $key -HardX $HardX
     if ($refPoint) {
+      # Get-ScaledScreenPoint 를 직접 부르는 곳도 최소화 복원 계약에 포함해야 합니다.
+      # Click-GamePoint 에만 넣으면 이런 직접 호출자가 그대로 예외를 흘려 회차가 죽습니다
+      # (2026-08-09 5차 점검 - 최소화 스텁으로 실행해 예외 전파 확인).
+      Wait-GameRestoredIfMinimized -Game $Game
       $screenPoint = Get-ScaledScreenPoint -Game $Game -ReferenceX ([int]$refPoint.X) -ReferenceY ([int]$refPoint.Y)
       return [System.Drawing.Point]::new([int]$screenPoint.X, [int]$screenPoint.Y)
     }
@@ -1525,6 +1527,33 @@ $rgDgCoinBalance = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinBalance') @(
 # 하단 버튼이 '파티 찾기'+'입장하기' 2버튼 ↔ 넓은 단일 '입장하기'로 바뀌면 숫자 위치도
 # 좌우로 움직이므로, 두 레이아웃을 모두 덮는 넓은 영역을 씁니다 (두 레이아웃 실측 검증됨)
 $rgDgTributeCost = @(Get-ConfigValue $config @('ocrRegions', 'dgTributeCost') @(840, 636, 290, 44))
+# 예비 판독 영역 (심층 전용 - 아래 블록에서 설정). 일반 던전은 위 넓은 영역 하나로 두 버튼
+# 레이아웃을 모두 덮으므로 예비가 필요 없습니다.
+$rgDgTributeCostAlt = $null
+# ★ 심층 전용 영역은 **여기서** 덮어씁니다. 예전에는 위 `if ($deepMode)` 데이터 치환 블록
+#   (890번대)에서 정했는데, 이 두 줄이 그보다 뒤에 실행되는 최상위 대입이라 심층 값을 통째로
+#   지우고 있었습니다. 즉 2026-07-28 에 만든 아이콘 제외 영역이 배포 이후 한 번도 쓰인 적이
+#   없습니다 (2026-08-10 8차 점검). 두 값 모두 심층 실측 전용이라 config 키를 쓰지 않습니다.
+if ($deepMode) {
+  # 공물 잔량 표시 영역 (옵션 화면 우상단). 재화줄은 골드(950)·은동전(1039)·마족공물(1087)·
+  # 하트토큰(1146) 순서 고정 (2026-07-28 사용자 제보 + 캡처 2장 단어 좌표 실측 - 07-27 실측
+  # (1088,67)과 일치). 이 영역(1056~1120)은 공물만 잡고 은동전/하트토큰은 밖이라 오독 없음.
+  # Get-DgCoinBalance 가 마지막 숫자 그룹을 읽음.
+  $rgDgCoinBalance = @(1056, 45, 64, 44)
+  # 입장 버튼 소모량 판독 영역: 공물 뿔 아이콘을 제외하고 숫자+'입장하기'만 읽습니다
+  # (2026-07-28 22:40 실기: 아이콘이 'V'/'7' 등으로 오독돼 소모량 1이 7로 읽혀 안전 정지 -
+  # 'VI입장하기'/'Space72입장하기' 실측. 아이콘 x953~977, 숫자 x980~ 픽셀 실측으로 경계 확정.
+  # 아이콘 제외 영역은 소탕선택 캡처 21장 중 IME 팝업 오염 2장 제외 전수가 첫 시도에
+  # '1입장하기'/'2입장하기'로 즉시 정확 판독. config 키 값 불변 - coordsVersion 유지)
+  $rgDgTributeCost = @(978, 636, 152, 44)
+  # ★ 좁은 영역의 실측 근거는 **'입장하기' 단일 버튼 레이아웃**(소탕선택 캡처 21장)입니다.
+  #   그런데 넓은 기본 영역(840,636,290,44)이 넓었던 이유는 따로 있습니다 - 하단이
+  #   '파티 찾기'+'입장하기' 2버튼으로 바뀌면 **숫자 위치가 좌우로 밀리기** 때문입니다.
+  #   좁은 영역만 쓰면 그 레이아웃에서 숫자를 놓칩니다. 8차에서 이 영역을 되살리면서
+  #   그 근거를 다시 잃을 뻔했습니다 → 좁은 영역 우선, 못 읽으면 넓은 영역을 예비로 씁니다
+  #   (2026-08-10 9차 점검). 예비는 아이콘을 포함하므로 '7' 접두 이형 처리가 함께 걸립니다.
+  $rgDgTributeCostAlt = @(840, 636, 290, 44)
+}
 
 # 행동불능(사망) 자동 부활: 던전 클리어 대기 중 화면 중앙의 '남은 부활 횟수' 안내가
 # 보이면(=행동불능 상태), 남은 횟수가 있을 때 R키(여기서 부활)를 눌러 전투를 이어갑니다.
@@ -1645,11 +1674,18 @@ $script:contentTag = '[어비스]'
 # 회복될 때 그 사이 억제한 횟수와 함께 한 번 더 안내해 진단 정보는 보존합니다.
 $script:focusWarnActive = $false
 $script:focusWarnSuppressed = 0
-$script:cursorWarnActive = $false
-$script:cursorWarnSuppressed = 0
+# 커서 확인 실패는 **연속 횟수**로 심각도를 나눕니다 (2026-08-10 실기 - 아래 상세).
+# 전면화(focusWarn*)와 달리 '첫 1회 경고' 규칙을 쓰지 않으므로 상태도 따로 둡니다.
+$script:cursorFailureStreak = 0
+# Click-ScreenPoint 가 실제로 클릭을 쐈는지 (커서 확인 실패면 건너뜀). 로그가 '했다'와
+# '건너뛰었다'를 구분해 기록하기 위한 것 - 2026-08-09 실기에서 이 구분이 없어 진단이 늦었음
+$script:lastClickPerformed = $false
 # 커서 대피(Move-CursorOutsideGame) 실패 경고 억제 상태 (2026-08-09 - 무음 catch 금지)
 $script:cursorParkWarnActive = $false
 $script:lastMinimizedRestoreAt = $null
+# 게임 창 핸들이 사라진 상태가 **연속으로** 얼마나 이어졌는지 재는 전용 시계.
+# 캡처 실패 시작 시각과 섞으면 '전환 중 오탐 방지' 유예가 무의미해집니다 (4차 점검)
+$script:gameWindowMissingSince = $null
 $script:runLogWriter = $null
 $script:runLogTargetPath = $null
 $script:runLogUsingRecovery = $false
@@ -2146,6 +2182,41 @@ function Get-RepeatWarnAction {
   return 'none'
 }
 
+function Get-CursorClickWarnAction {
+  # 커서 확인 실패의 **심각도 단계** 판정입니다 (2026-08-10 실기 실사고 - 사용자 반응).
+  #
+  # 왜 위 Get-RepeatWarnAction 을 그대로 못 쓰는가:
+  #   그 규칙은 '첫 실패를 곧바로 [경고]'로 남깁니다. 그런데 사용자가 **안전 중지 버튼을
+  #   누르려고 마우스를 옮긴 것**만으로 이 확인이 실패하고, 그 [경고]를 보고 놀라
+  #   자동화를 즉시 중지했습니다(17:14:45 안전 중지 → 17:14:46 경고 → 17:14:49 즉시 중지).
+  #   클릭을 건너뛴 것은 **의도한 안전 동작**(오클릭 방지)인데 로그가 고장처럼 읽힌 것입니다.
+  #
+  # 그렇다고 첫 실패를 숨기면 안 됩니다 - 이번처럼 사용자가 곧바로 중지하면 진단 흔적이
+  # 통째로 사라집니다. 그래서 **기록은 남기되 첫 줄은 안심시키는 [안내]** 로 두고,
+  # 연속으로 이어질 때만 [경고]로 올립니다 (2026-08-10 교차 리뷰 합의).
+  #
+  # 임계값 3인 이유: 이 함수를 부르는 Click-ScreenPoint 는 **한 번의 호출 안에서 이미
+  # 두 번** 이동·확인합니다. 3회 연속이면 이동·확인 6회가 모두 실패한 것이라, 잠깐의
+  # 마우스 조작과 지속 장애를 가르기에 충분합니다.
+  #
+  # 원인은 단정하지 않습니다 - 물리 마우스 조작과 ClipCursor 같은 커서 제한을 확실히
+  # 나누려면 저수준 훅까지 필요해서 이 문제에 비해 변경 위험이 큽니다(리뷰 판단).
+  # 반환: Action = 'notice'(첫 실패 안내) / 'silent'(억제) / 'warn'(연속 경고) /
+  #       'recover'(경고까지 갔다가 정상화) / 'none', Streak = 갱신된 연속 실패 횟수
+  param([int]$PreviousStreak, [bool]$Failed, [int]$WarnThreshold = 3)
+  if ($Failed) {
+    $streak = $PreviousStreak + 1
+    $action = 'silent'
+    if ($streak -eq 1) { $action = 'notice' }
+    elseif ($streak -eq $WarnThreshold) { $action = 'warn' }
+    return @{ Action = $action; Streak = $streak }
+  }
+  # 회복 안내는 **경고까지 올라갔던 경우에만** 남깁니다. 1~2회 만에 풀린 것은 사용자가
+  # 마우스를 잠깐 쓴 정상 상황이라 조용히 초기화합니다(그 줄까지 남기면 원래 문제 재현).
+  $action = $(if ($PreviousStreak -ge $WarnThreshold) { 'recover' } else { 'none' })
+  return @{ Action = $action; Streak = 0 }
+}
+
 function Focus-Game {
   param([System.Diagnostics.Process]$Game)
 
@@ -2192,22 +2263,16 @@ function Get-ScaledScreenPoint {
   # 클릭은 엉뚱한 곳으로 날아가고, Get-GamePixel 은 게임이 아닌 픽셀을 '카드 상태'로 읽습니다
   # (2026-08-09 리뷰: 캡처만 막고 이 원시 경로를 열어 두면 회색 비활성 오판으로 이어짐).
   #
-  # 다만 최소화는 **복구 가능한 일시 상태**입니다. 그냥 던지면 Click-GamePoint(호출부 80여 곳)
-  # 와 Get-GamePixel 이 이 예외를 잡지 않아 최상위 catch → exit 1 로 회차가 끝납니다.
-  # 판독은 성공했는데 클릭 직전에 창이 내려가는 짧은 경합만으로 무인 운용이 멈추는 셈입니다
-  # (2026-08-09 3차 점검). 캡처 경로와 같은 복원 계약(Invoke-AutoRefocus - 유휴 검사 준수)으로
-  # 잠깐 기다렸다 재확인하고, 그래도 최소화면 그때 명확한 사유로 던집니다.
+  # 최소화는 복구 가능한 일시 상태라 클릭 경로에서는 복원을 기다립니다. 다만 그 대기는
+  # Click-GamePoint(동작 1회에 1번)에 있고 **여기가 아닙니다**.
+  # ★ 여기서는 **기다리지 않고 즉시** 던집니다. 이 함수는 Get-GamePixel 의 공용 입구이고,
+  #   픽셀 판정은 한 번에 표본을 27회씩 찍으면서 `catch { continue }` 로 예외를 삼킵니다
+  #   (예: Test-DifficultySelectedAt). 여기에 몇 초짜리 대기를 두면 그 대기가 표본 수 × 재시도
+  #   횟수만큼 곱해져 **수십 분을 로그 한 줄 없이 태웁니다** (2026-08-09 4차 점검 실측:
+  #   27표본 × 25초 × 5회전 ≈ 56분). 복원 대기는 클릭 1회에 1번만 도는 Click-GamePoint 로
+  #   옮겼습니다 - 대기를 넣을 자리는 '판정의 표본'이 아니라 '동작의 진입점'입니다.
   if ([HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) {
-    $iconRestored = $false
-    for ($restoreTry = 1; $restoreTry -le 12; $restoreTry++) {
-      try { Invoke-AutoRefocus -Game $Game | Out-Null } catch { }
-      Start-Sleep -Milliseconds 1000
-      if (-not [HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) { $iconRestored = $true; break }
-    }
-    if (-not $iconRestored) {
-      throw '게임 창이 최소화된 상태가 계속됩니다. 게임 창을 다시 연 뒤 시작해 주세요.'
-    }
-    Write-RunLog '[안내] 최소화된 게임 창을 복원해 진행합니다.'
+    throw '게임 창이 최소화되어 있습니다.'
   }
   $rect = New-Object HoneyNogiInput+RECT
   if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
@@ -2234,6 +2299,12 @@ function Click-ScreenPoint {
   # 간섭으로 커서가 목표를 벗어난 채 클릭이 강행돼 재화줄을 오클릭 → '보유한 재화' 전체
   # 화면이 열려 클리어 대기가 가려짐. 이 프로젝트는 상태 기반 재확인 구조라 건너뛴 클릭은
   # 다음 감지에서 자연 재시도됨 - 리뷰 승인: 커서 미확인 시 클릭 금지, 좌표 폴백 금지).
+  # 실제로 클릭이 나갔는지를 호출부에 알립니다 (매 호출 초기화).
+  # 없으면 로그가 거짓말을 합니다 - 커서 확인 실패로 클릭을 **건너뛰어도** 호출부는
+  # '닫기 클릭'이라고 기록해, 다음 진단이 "클릭했다는데 왜 안 닫혔지?"로 헛돕니다
+  # (2026-08-09 실기: 이 구분이 없어 원인 판별이 늦어짐). 반환값 대신 스크립트 변수를
+  # 쓰는 것은 PS 5.1 파이프라인 출력 오염을 피하기 위함입니다 (호출부 80여 곳).
+  $script:lastClickPerformed = $false
   $cursorReady = $false
   for ($cursorTry = 1; $cursorTry -le 2; $cursorTry++) {
     [HoneyNogiInput]::SetCursorPos($X, $Y) | Out-Null
@@ -2245,25 +2316,78 @@ function Click-ScreenPoint {
       break
     }
   }
-  # 경고는 연속 실패의 첫 1회만 (전면화 확인과 같은 억제 규칙 - Get-RepeatWarnAction)
-  switch (Get-RepeatWarnAction -WasWarned $script:cursorWarnActive -Failed (-not $cursorReady)) {
+  # 심각도는 **연속 실패 횟수**로 나눕니다 (Get-CursorClickWarnAction 주석에 근거).
+  # 첫 실패는 정상적인 안전 동작이라 [안내], 3회 연속부터 [경고]입니다.
+  # switch 안에서 $_ 를 읽지 않도록 값을 먼저 담습니다 (catch 의 $_ 훼손과 같은 계열 함정).
+  $cursorVerdict = Get-CursorClickWarnAction -PreviousStreak $script:cursorFailureStreak -Failed (-not $cursorReady)
+  # 경고는 **이번 실패까지 포함한** 횟수(=Streak)를, 회복 안내는 **초기화 전** 횟수를 씁니다.
+  # 둘을 뒤바꾸면 '3회 연속'이 2로 나가거나 회복 문구가 0회가 됩니다.
+  $cursorStreakBefore = [int]$script:cursorFailureStreak
+  $cursorStreakNow = [int]$cursorVerdict.Streak
+  $script:cursorFailureStreak = $cursorStreakNow
+  switch ([string]$cursorVerdict.Action) {
+    'notice' {
+      Write-RunLog "[안내] 커서 위치를 확인하지 못해 이번 클릭은 건너뛰었습니다 (다른 마우스 이동과 겹쳤을 수 있습니다). 잘못 눌린 곳은 없으며 다음 감지에서 다시 시도합니다"
+    }
     'warn' {
-      Write-RunLog "[경고] 커서를 목표 위치(${X},${Y})로 두 번 이동했지만 실제 위치를 확인하지 못했습니다 - 오클릭 방지를 위해 이번 클릭을 건너뜁니다 (다음 감지에서 재시도. 연속 실패 중에는 이 경고를 반복하지 않습니다)"
-      $script:cursorWarnActive = $true
-      $script:cursorWarnSuppressed = 0
+      Write-RunLog "[경고] 커서 위치 확인이 ${cursorStreakNow}회 연속 실패해 목표(${X},${Y}) 클릭을 계속 보류하고 있습니다 - 마우스를 조작 중이면 잠시 놓아 주세요 (이후 연속 실패는 기록을 생략합니다)"
     }
     'recover' {
-      Write-RunLog "[안내] 커서 위치 확인이 정상으로 돌아왔습니다 (그 사이 확인 실패 $($script:cursorWarnSuppressed)회는 기록을 생략했습니다)"
-      $script:cursorWarnActive = $false
-      $script:cursorWarnSuppressed = 0
+      Write-RunLog "[안내] 커서 위치 확인이 정상으로 돌아왔습니다 (연속 ${cursorStreakBefore}회 실패 후)"
     }
-    default { if (-not $cursorReady) { $script:cursorWarnSuppressed++ } }
+    default { }
   }
   if (-not $cursorReady) { return }
   Start-Sleep -Milliseconds 250
   [HoneyNogiInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 100
   [HoneyNogiInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  $script:lastClickPerformed = $true
+}
+
+function Wait-GameRestoredIfMinimized {
+  # 최소화된 게임 창의 복원을 **유한 시간** 기다립니다. 클릭 진입점에서만 부릅니다.
+  #
+  # 왜 여기인가: Get-ScaledScreenPoint(클릭·픽셀 공용 입구)에 두면 픽셀 판정의 표본 수만큼
+  # 곱해져 수십 분을 무음으로 태웁니다(4차 점검). 클릭은 동작 1회에 1번이라 곱셈이 없습니다.
+  #
+  # 예산은 횟수가 아니라 시간이고, 유휴 기준(focus.onlyWhenUserIdleSeconds, 기본 15초)을 한 번은
+  # 넘겨야 의미가 있습니다. 우리 입력(클릭·Focus-Game 의 ALT)이 유휴를 0으로 리셋하기 때문에,
+  # '12회 x 1초' 로는 Invoke-AutoRefocus 가 내내 게이트에 막혀 **실제 시도 0회**로 끝났습니다
+  # (실측: 경과 12.0초 / 시도 0회 / throw). 게이트에 막힌 회전은 입력을 주입하지 않으므로
+  # 유휴가 계속 자라 결국 통과합니다. 시도는 3초 간격으로 제한합니다(Focus-Game 1회가 ~2초).
+  #
+  # ★ 캡처 경로의 $script:lastMinimizedRestoreAt(8초 스로틀)을 **공유하면 안 됩니다.**
+  #   캡처가 방금 복원을 시도해 그 시각을 찍어 둔 상태로 여기 들어오면, 이 함수는 그것을
+  #   '이미 충분히 기다린 실패'로 오해해 **17ms 만에 복원 0회로 반환**합니다. 그러면 바로 뒤
+  #   Get-ScaledScreenPoint 가 그대로 throw 해서 회차가 죽습니다 (2026-08-09 5차 점검 실행 확인).
+  #   애초에 여기서는 스로틀이 필요 없습니다 - 끝내 복원되지 않으면 호출부가 예외로 끝나므로
+  #   같은 실패 구간에서 이 함수가 반복 호출될 일이 없습니다.
+  param([System.Diagnostics.Process]$Game)
+  if (-not [HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) { return }
+  $restoreBudget = [Math]::Max(25, [int]$refocusIdleSeconds + 10)
+  Write-RunLog "[안내] 게임 창이 최소화되어 있습니다 - 최대 ${restoreBudget}초 동안 복원을 기다립니다."
+  $restoreDeadline = (Get-Date).AddSeconds($restoreBudget)
+  $lastRestoreTry = $null
+  while ((Get-Date) -lt $restoreDeadline) {
+    if ($null -eq $lastRestoreTry -or ((Get-Date) - $lastRestoreTry).TotalSeconds -ge 3) {
+      $lastRestoreTry = Get-Date
+      try { Invoke-AutoRefocus -Game $Game | Out-Null } catch { }
+    }
+    Start-Sleep -Milliseconds 500
+    if (-not [HoneyNogiInput]::IsIconic($Game.MainWindowHandle)) {
+      Write-RunLog '[안내] 최소화된 게임 창을 복원해 진행합니다.'
+      return
+    }
+  }
+  # 문구는 **이 함수가 아는 사실까지만** 씁니다. 뒷일이 호출부마다 다르기 때문입니다:
+  #  - 클릭 경로(Click-GamePoint / Find-DgDifficultyPoint): 바로 뒤 Get-ScaledScreenPoint 가
+  #    throw 해서 회차가 오류로 끝납니다.
+  #  - 생활 목록 스크롤(Invoke-LifeListScroll): 바로 뒤 Focus-Game 의 ShowWindowAsync(SW_RESTORE)
+  #    가 창을 살려 **그대로 진행될 수 있습니다.**
+  # 5차에서 넣은 '회차를 오류로 마칩니다'는 후자에서 거짓이었습니다 (2026-08-09 6차 점검 -
+  # 4차에서 고친 것과 같은 계열의 실수: 한 호출부만 보고 결과를 단정한 문구).
+  Write-RunLog "[경고] ${restoreBudget}초를 기다렸지만 게임 창이 최소화된 상태입니다 - 복원 대기를 끝냅니다 (클릭 경로면 이어서 회차가 오류로 끝납니다)."
 }
 
 function Click-GamePoint {
@@ -2273,6 +2397,9 @@ function Click-GamePoint {
     [int]$ReferenceY
   )
 
+  # 최소화는 복구 가능한 일시 상태라 여기서만 기다립니다 (곱셈 없는 진입점).
+  # 끝내 복원되지 않으면 Get-ScaledScreenPoint 가 분명한 사유로 던집니다.
+  Wait-GameRestoredIfMinimized -Game $Game
   $point = Get-ScaledScreenPoint -Game $Game -ReferenceX $ReferenceX -ReferenceY $ReferenceY
   Click-ScreenPoint -X $point.X -Y $point.Y
 }
@@ -2326,34 +2453,59 @@ function Move-CursorOutsideGame {
   # 제보: 물약 부족 팝업의 '닫기'를 눌러 닫았는데 팝업이 다시 뜨자 두 번째부터 못 닫음.
   # 클릭 직후 커서가 '닫기' 위에 남아 있는 것이 유일하게 달라진 조건이었습니다.
   #
-  # ⚠ 원인 기전은 **아직 확정되지 않았습니다** (2026-08-09 3차 점검).
-  #   처음 주석에는 "게임이 커서를 직접 그려 캡처에 찍히고 글자를 가린다"고 적었는데,
-  #   실행 중인 실제 게임에 **대조군을 넣어 재실측한 결과 커서 기여분이 0**이었습니다
-  #   (GetCursorInfo flags=1 = OS 하드웨어 커서, 워커의 모든 캡처는 Graphics.CopyFromScreen
-  #   = BitBlt SRCCOPY 라 하드웨어 커서는 원리적으로 안 찍힘). 그 서술과 '지연 0이면 40회 중
-  #   7회' 수치는 근거가 없어 삭제했습니다 - 이 프로젝트에서 오진 주석은 다음 진단을 막습니다.
+  # ★ 원인 기전 **확정** (2026-08-09 실기 측정):
+  #   포인터가 게임 창 위에 오면 게임이 OS 커서를 숨기고(GetCursorInfo **flags=0**) **자기
+  #   커서를 직접 그립니다.** 그건 게임 화면의 일부라 CopyFromScreen 캡처에 그대로 찍혀
+  #   버튼 글자를 덮습니다. 캡처 이미지에 게임이 그린 주황 화살표가 '닫기'의 '기' 위에
+  #   선명하게 있고, 그때 OCR 은 'ESC 거래소0' 만 읽었습니다('닫기' 소멸).
   #
-  # 그럼에도 이 조치를 두는 근거: **포인터가 올라간 자리는 게임이 호버 UI 를 새로 그립니다.**
-  # 그건 캡처에 그대로 찍히고, 이 프로젝트에는 같은 계열의 실사고 전례가 있습니다
-  # (v1.0.7 '발견한전' 절단 - 클릭 지점을 빈 배경으로 옮겨 해결. 이슈 문서 참고).
-  # 창 밖이면 호버 대상이 아예 없으므로 판독 대상 픽셀이 커서 위치에 흔들리지 않습니다.
+  #   실측 4조합 × 6회 (물약 부족 팝업, 창 1272x717):
+  #     전면O + 커서 창밖    flags=1  6/6 (100%)  '(특주이 닫기 거래소0'
+  #     전면O + 커서 닫기위  flags=0  0/6 (  0%)  'ESC 거래소0'
+  #     전면X + 커서 닫기위  flags=0  0/6 (  0%)  'ESC 거래소0'
+  #     전면X + 커서 창밖    flags=1  6/6 (100%)  '(특주이 닫기 거래소0'
+  #   → 결정 변수는 전면 여부가 아니라 **커서가 게임 위에 있는가**.
+  #
+  # ⚠ 이 결론에 **두 번 헛다리를 짚었습니다.** 중간 감사가 "커서 기여분 0, 하드웨어 커서는
+  #   BitBlt 에 원리적으로 안 찍힘"이라며 기각했고 저도 그대로 받아 주석을 지웠는데,
+  #   그 측정들은 **커서가 게임 창 위에 없는 상태(flags=1)** 에서 잰 것이었습니다.
+  #   게임이 자기 커서를 그리는 조건 자체를 만들지 않고 "영향 없음"이라고 결론 낸 셈입니다.
+  #   **이 계열을 측정할 때는 반드시 GetCursorInfo flags 를 함께 확인할 것.**
+  #   flags=1 이면 게임 커서가 안 그려진 상태라 무엇을 재도 '영향 없음'이 나옵니다.
+  #
+  # 창 밖이면 게임이 커서를 그리지 않으므로 가림이 원천적으로 없습니다.
   # 창이 화면을 꽉 채워 밖이 없으면 그대로 둡니다 (억지로 옮기면 오히려 다른 것을 가림).
   # 클릭 경로는 매번 SetCursorPos 로 목표에 다시 가져다 놓으므로 이 대피는 방해가 안 됩니다.
   param([System.Diagnostics.Process]$Game)
-  # 게임이 전면일 때만 커서를 건드립니다.
-  # 없으면 사용자가 게임 위에 올린 브라우저/에디터에서 마우스를 쓰는 동안 **약 2초마다**
-  # (클리어 대기 폴링 1초 × %2) 커서를 화면 가장자리로 뺏어 PC 를 못 쓰게 만듭니다.
-  # 권장 1908x1076 창은 1920x1080 을 거의 덮어 '창 안'이 사실상 '화면 전체'입니다
-  # (2026-08-09 3차 점검에서 하네스로 재현 - v2.0.1 에 없던 UX 회귀).
+  # **커서 밑에 있는 창이 게임일 때만** 건드립니다.
+  #
+  # 왜 이 기준인가 (2026-08-09 실측으로 확정):
+  # - 게임은 포인터가 자기 창 위에 있으면 OS 커서를 숨기고(GetCursorInfo flags=0) 자기 커서를
+  #   그립니다. 그건 게임 화면의 일부라 CopyFromScreen 에 그대로 찍혀 글자를 덮습니다.
+  #   실측 4조합 × 6회: 커서가 '닫기' 위면 **전면이든 아니든 0/6**, 창 밖이면 **6/6**.
+  #   즉 결정 변수는 전면 여부가 아니라 **커서가 게임 위에 있는가**입니다.
+  # - 그래서 'Test-GameForeground' 게이트는 틀렸습니다. 전면이 아닐 때도 커서가 게임 위면
+  #   판독이 깨지는데 대피를 건너뛰어 버그가 그대로 남습니다.
+  # - 그렇다고 무조건 옮기면, 사용자가 게임 위에 **겹쳐 놓은 창**에서 마우스를 쓰는 동안
+  #   약 2초마다 커서를 뺏어 PC 를 못 쓰게 만듭니다(3차 점검에서 재현).
+  # → WindowFromPoint 로 커서 밑 창을 보면 둘 다 해결됩니다. 겹친 남의 창 위면 그 창이
+  #   잡히므로 건드리지 않고, 게임이 보이는 자리면 게임이 잡히므로 대피합니다.
   # ※ 유휴 검사(Get-UserIdleSeconds)는 쓰면 안 됩니다. 우리 클릭(mouse_event)이 유휴를 0으로
-  #   리셋해서, **정작 클릭 직후 대피(제보 시나리오 그 자체)를 항상 막습니다**(실측 확인).
-  #   전면 검사는 클릭 직전에 Focus-Game 이 불리므로 그 경로를 그대로 살립니다.
-  if (-not (Test-GameForeground -Game $Game)) { return }
+  #   리셋해서 **정작 클릭 직후 대피(제보 시나리오 그 자체)를 항상 막습니다**(실측 확인).
   # 실패 사유는 **한 곳에서만** 기록합니다 (예외든 API 실패든 같은 억제 규칙).
   # API 는 예외가 아니라 $false 를 돌려주므로 catch 로는 안 잡힙니다 - 그대로 return 하면
   # 또 무음이 됩니다 (2026-08-09 3차 점검 지적).
   $parkFailReason = ''
   try {
+    $underCursor = New-Object HoneyNogiInput+POINT
+    # ★ 커서 위치를 못 읽으면 조용히 넘어가면 안 됩니다. 예전에는 여기서 그냥 return 해서
+    #   대피가 통째로 무동작이 되는데(= 원인 ① 재발) 로그에는 흔적이 없었습니다. 실패를
+    #   못 보면 다음 진단이 또 '클릭이 안 먹는다' 쪽으로 헛돕니다 (2026-08-09 6차 점검).
+    #   아래 공통 catch 의 '연속 실패 1회만 경고' 규칙으로 보냅니다.
+    if (-not [HoneyNogiInput]::GetCursorPos([ref]$underCursor)) { throw 'GetCursorPos 실패 (커서 밑 창 확인 단계)' }
+    $hitWindow = [HoneyNogiInput]::WindowFromPoint($underCursor)
+    if ($hitWindow -eq [IntPtr]::Zero) { return }
+    if ([HoneyNogiInput]::GetAncestor($hitWindow, 2) -ne $Game.MainWindowHandle) { return }   # GA_ROOT
     $rect = New-Object HoneyNogiInput+RECT
     if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
       $parkFailReason = 'GetWindowRect 실패'
@@ -2377,12 +2529,47 @@ function Move-CursorOutsideGame {
       -Screens $screenList -CursorX $cursor.X -CursorY $cursor.Y
     # $null = 옮길 필요 없음(이미 창 밖) 또는 옮길 곳 없음(창이 전 모니터를 덮음)
     if ($null -eq $park) { return }
-    [HoneyNogiInput]::SetCursorPos([int]$park.X, [int]$park.Y) | Out-Null
+    # 반환값을 버리지 않습니다. 실패해도 예외가 아니라 $false 라 catch 에 안 걸리고,
+    # '대피 성공'으로 넘어가면 판독이 왜 흔들리는지 다시 못 찾습니다 (4차 점검 지적).
+    if (-not [HoneyNogiInput]::SetCursorPos([int]$park.X, [int]$park.Y)) {
+      throw "SetCursorPos 실패 (목표 $($park.X),$($park.Y))"
+    }
     # 실제로 옮겼을 때만 한 프레임 분량을 기다립니다. 호버 UI 가 걷히려면 게임이 새 프레임을
     # 한 장 더 그려야 하는데, 대피 직후 곧바로 캡처하면 호버가 남은 옛 프레임을 읽습니다.
     # (30fps 면 33ms, 60fps 면 17ms - 여유 있게 120ms. 이미 창 밖이라 무동작이면 여기 오지
     # 않으므로 폴링의 정상 비용은 그대로입니다.)
     Start-Sleep -Milliseconds 120
+    # 대기 후 실제로 창 밖에 있는지 확인합니다. SetCursorPos 가 성공했어도 화면 상태를
+    # 보증하려면 확인이 필요합니다 (4차 점검 지적).
+    #
+    # ★ 단, '창 안'이라고 다 우리 실패가 아닙니다. **사용자가 그 사이 마우스를 움직여
+    #   도로 넣은 경우**가 훨씬 흔합니다 (실기 15분에 10회 - 전부 사용자 조작이었음).
+    #   그걸 실패로 기록하면 "대피가 자꾸 실패한다"는 오진을 남깁니다.
+    #   구분 기준: 커서가 **이동 전 자리 그대로**면 SetCursorPos 가 안 먹은 진짜 실패,
+    #   **다른 자리**면 그 사이 누군가(사용자) 옮긴 것이므로 조용히 넘어갑니다.
+    #   어느 쪽이든 다음 판독 전에 다시 대피하므로 동작에는 차이가 없습니다.
+    #
+    # ★ 비교 기준은 **대피 지점($park)이 아니라 이동 전 위치($cursor)** 입니다.
+    #   $park 는 Get-CursorParkPoint 가 '창 밖'인 후보만 돌려주므로 **구조상 항상 창 밖**이라,
+    #   '창 안 && $park±3px' 는 성립할 수 없는 조건이었습니다. 그래서 이 throw 가 죽은 코드가
+    #   되고 진짜 실패(SetCursorPos 무동작·ClipCursor 로 커서가 '닫기' 위에 남음)가 아래
+    #   return 으로 조용히 삼켜졌습니다 (2026-08-09 5차 점검 - 4차 수정이 만든 구멍).
+    #
+    # ★ 확인용 GetCursorPos 가 실패하면 그것도 실패로 기록합니다. 예전에는 -and 로 묶여 있어
+    #   API 실패가 곧 '조건 거짓' → 성공 경로로 떨어졌습니다. 대피가 실제로 됐는지 모른 채
+    #   판독을 이어가면서 로그는 깨끗한, 가장 나쁜 형태였습니다 (2026-08-09 6차 점검).
+    $after = New-Object HoneyNogiInput+POINT
+    if (-not [HoneyNogiInput]::GetCursorPos([ref]$after)) {
+      throw '대피 후 커서 위치를 확인하지 못했습니다 (GetCursorPos 실패)'
+    }
+    if ($after.X -ge $rect.Left -and $after.X -lt $rect.Right -and
+        $after.Y -ge $rect.Top -and $after.Y -lt $rect.Bottom) {
+      if ([Math]::Abs($after.X - [int]$cursor.X) -le 3 -and [Math]::Abs($after.Y - [int]$cursor.Y) -le 3) {
+        throw "SetCursorPos 가 먹지 않음 - 커서가 이동 전 자리($($cursor.X),$($cursor.Y))에 그대로입니다"
+      }
+      # 사용자가 옮긴 것 - 경고하지 않고 그대로 진행 (성공 처리도 하지 않음)
+      return
+    }
   } catch {
     # 대피 실패 자체는 '가림이 남을 수 있음'일 뿐이라 진행을 막지 않습니다. 다만 **무음은
     # 금지**입니다 - 이 catch 가 조용히 삼키는 바람에 어셈블리 미로드로 기능이 통째로 죽어
@@ -2457,10 +2644,31 @@ function Invoke-OcrOnBitmap {
 }
 
 function Await-WinRt {
-  param($Operation, [Type]$ResultType)
+  # WinRT 비동기 작업을 동기로 기다립니다.
+  # ★ 상한이 필요합니다. 예전에는 인자 없는 $task.Wait() 라, OCR 엔진이 어떤 이유로든
+  #   돌아오지 않으면 **워커가 그 자리에서 영원히 멈췄습니다**(무인 운용에서 밤새 정지).
+  #   또 실패 시 예외가 AggregateException 으로 감싸져 로그에 '하나 이상의 오류가
+  #   발생했습니다'만 남고 진짜 사유가 사라졌습니다 (2026-08-10 9차 점검).
+  #   → 유한 대기 + 내부 예외를 그대로 올립니다. 판독 1회는 길어야 수 초입니다.
+  param($Operation, [Type]$ResultType, [int]$TimeoutSeconds = 30)
 
   $task = $asTaskMethod.MakeGenericMethod($ResultType).Invoke($null, @($Operation))
-  $task.Wait()
+  $completed = $false
+  try {
+    $completed = $task.Wait([int]($TimeoutSeconds * 1000))
+  } catch {
+    # ★ 벗기기는 **여기서** 해야 합니다. Task.Wait 는 작업이 실패하면 그 자리에서
+    #   AggregateException 을 던지므로, Wait 뒤에 $task.IsFaulted 를 보는 코드는 애초에
+    #   도달하지 못합니다(9차에 넣은 그 검사는 죽은 코드였습니다 - 10차 점검).
+    #   게다가 PS 5.1 은 .NET 예외를 MethodInvocationException 으로 한 겹 더 감싸므로
+    #   가장 안쪽까지 벗겨야 로그에 진짜 사유가 남습니다.
+    $baseEx = $_.Exception
+    while ($baseEx.InnerException) { $baseEx = $baseEx.InnerException }
+    throw $baseEx
+  }
+  if (-not $completed) {
+    throw "WinRT 작업이 ${TimeoutSeconds}초 안에 끝나지 않았습니다 ($($ResultType.Name))."
+  }
   return $task.Result
 }
 
@@ -2512,6 +2720,14 @@ function Get-CaptureFailInfo {
     return @{
       Cause   = 'gameMinimized'
       Message = '[경고] 화면 캡처 실패 - 게임 창이 최소화되어 있습니다. 자동으로 복원을 시도하며, 안 되면 게임 창을 다시 열어 주세요.'
+    }
+  }
+  # 창 좌표조차 못 읽는 상태 = 창이 사라지는 중이거나 핸들이 무효 (2026-08-10 9차 점검에서
+  # 이 경로가 캡처 실패로 기록조차 안 되고 있던 것을 발견해 사유를 신설했습니다)
+  if ($GameWindowIssue -eq 'rect-failed') {
+    return @{
+      Cause   = 'gameWindowGone'
+      Message = '[경고] 화면 캡처 실패 - 게임 창 좌표를 읽지 못했습니다 (창이 닫히는 중이거나 핸들이 바뀌는 중). 게임 창 상태를 확인해 주세요.'
     }
   }
   $state = Get-SessionConnectState
@@ -2569,6 +2785,9 @@ function Get-CaptureRecoveryMessage {
     }
     'gameMinimized' {
       return '[안내] 게임 창이 다시 열려 화면 캡처가 복구됐습니다. 감지를 계속합니다.'
+    }
+    'gameWindowGone' {
+      return '[안내] 게임 창 좌표를 다시 읽을 수 있게 되어 화면 캡처가 복구됐습니다. 감지를 계속합니다.'
     }
     default {
       return '[안내] 화면 캡처가 복구되어 감지를 계속합니다.'
@@ -2631,7 +2850,7 @@ function Register-CaptureFailure {
   # 캡처 실패(예외/렌더링 멈춤)를 공용 상태로 기록합니다. 어떤 캡처 경로(영역 OCR,
   # 글자 위치 탐색)든 같은 상태를 공유해야 대기 루프의 '실패 중 시간 동결'이 정확히 동작합니다.
   # 경고는 실패가 '시작'될 때 한 번만 남기되, 원인을 세션 상태로 구분해 안내합니다
-  # (RDP 연결 끊김 / RDP 창 최소화 / 게임 창 최소화·과소 / 그 외).
+  # (RDP 연결 끊김 / RDP 창 최소화 / 게임 창 최소화 / 그 외 - 과소 게이트는 철회함).
   # 실패 도중 원인이 바뀌면 한 번 더 안내합니다.
   param([string]$GameWindowIssue = '')
   $failInfo = Get-CaptureFailInfo -GameWindowIssue $GameWindowIssue
@@ -2662,6 +2881,12 @@ function Register-CaptureSuccess {
   # 정상 캡처 성공을 공용 상태로 기록합니다. 실패 중이었다면 복구 로그를 남기고,
   # 세션 연결 이름을 추적해 끊김 없는 전환(RDP 재접속/본체 전환)도 한 줄 안내합니다.
   # (빈 화면으로 인한 헛복구/로그 반복을 막기 위해, 실제 정상 화면을 받은 경로에서만 호출)
+  # 화면이 정상으로 돌아왔으면 '창 핸들 소실' 시계도 함께 풀어야 합니다.
+  # 이 시계는 동결 루프(Test-SafeStopDuringCaptureFail) 안에서만 초기화되는데, 캡처가 복구되면
+  # 그 루프를 더 이상 돌지 않으므로 **옛 시각이 그대로 남습니다**. 나중에 핸들이 잠깐 0이 되면
+  # 그 과거 시각 기준으로 '60초 지속'이 즉시 참이 되어 회차가 바로 정지합니다
+  # (2026-08-09 5차 점검 실행 확인: captureFailing=False 인데 시계가 age=300 으로 살아 있었음).
+  $script:gameWindowMissingSince = $null
   $justRecovered = $false
   if ($script:screenCaptureFailing) {
     $script:screenCaptureFailing = $false
@@ -2702,16 +2927,30 @@ function Test-SafeStopDuringCaptureFail {
     $gameGone = $false
     try { $script:gameProcess.Refresh(); $gameGone = [bool]$script:gameProcess.HasExited }
     catch { $gameGone = $true }   # 핸들 접근 자체가 실패 = 이미 사라진 것
+    # 코드 1(오류)이 아니라 4(조건부 정상 정지)로 마칩니다. 게임이 죽은 것은 **자동 복구가
+    # 불가능한 조건**이라 재시도할 이유가 없는데, 코드 1 이면 GUI 가 커스텀 모드에서 같은
+    # 항목을 2회 더 띄워 죽은 게임에 워커를 세 번 붙였다 죽습니다. 게다가 함수 안의 exit 는
+    # 최상위 catch 를 건너뛰어 오류 세트(error_*.png/log)도 안 남으므로 코드 1 의 이점이
+    # 하나도 없습니다 (2026-08-09 4차 점검). 코드 4 는 사유가 상태줄에 그대로 뜹니다.
     if ($gameGone) {
-      Write-RunLog '[오류] 게임 프로세스가 종료되어 화면 캡처가 복구될 수 없습니다 - 대기를 멈추고 마칩니다. 게임을 다시 실행한 뒤 시작해 주세요.'
-      exit 1
+      Write-RunLog '[완료] 게임 프로세스가 종료되어 화면 캡처가 복구될 수 없습니다 - 대기를 멈추고 마칩니다. 게임을 다시 실행한 뒤 시작해 주세요.'
+      exit 4
     }
     # 프로세스는 살아 있는데 창 핸들이 사라진 경우(창만 닫힘/재생성 중)는 전환 중일 수 있어
-    # 바로 끊지 않고, 캡처 실패가 60초 이상 이어질 때만 마칩니다.
-    if ($script:gameProcess.MainWindowHandle -eq [IntPtr]::Zero -and $script:captureFailingSince -and
-        ((Get-Date) - $script:captureFailingSince).TotalSeconds -ge 60) {
-      Write-RunLog '[오류] 게임 창을 찾을 수 없는 상태가 60초 이상 이어졌습니다 - 대기를 멈추고 마칩니다. 게임 창을 다시 연 뒤 시작해 주세요.'
-      exit 1
+    # 바로 끊지 않고, **핸들이 사라진 상태 자체가** 60초 이어질 때만 마칩니다.
+    # ★ 이 시계는 반드시 전용이어야 합니다. 처음에는 $script:captureFailingSince(= 캡처 실패가
+    #   시작된 시각)를 썼는데, 그러면 RDP 단절 등으로 캡처 실패가 이미 60초를 넘긴 뒤에
+    #   핸들이 **한 번만 깜빡여도** 즉시 종료합니다. 주석이 약속한 '전환 중 오탐 방지' 유예가
+    #   그 상황에서 통째로 사라집니다 (2026-08-09 4차 점검 지적 - 잘못된 시계를 쟀음).
+    if ($script:gameProcess.MainWindowHandle -eq [IntPtr]::Zero) {
+      if (-not $script:gameWindowMissingSince) { $script:gameWindowMissingSince = Get-Date }
+      if (((Get-Date) - $script:gameWindowMissingSince).TotalSeconds -ge 60) {
+        Write-RunLog '[완료] 게임 창을 찾을 수 없는 상태가 60초 이상 이어졌습니다 - 대기를 멈추고 마칩니다. 게임 창을 다시 연 뒤 시작해 주세요.'
+        exit 4
+      }
+    } else {
+      # 핸들이 돌아왔으면 유예 시계를 처음으로 되돌립니다 (연속 60초여야 함)
+      $script:gameWindowMissingSince = $null
     }
   }
   if (-not (Test-Path -LiteralPath $safeStopFlagPath)) { return }
@@ -2765,6 +3004,13 @@ function Get-GameRegionCapture {
   }
   $rect = New-Object HoneyNogiInput+RECT
   if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) {
+    # ★ 이 분기만 캡처 실패로 기록하지 않고 있었습니다. 그러면 창이 사라지는 중이라
+    #   좌표조차 못 읽는 상태가 '판독 결과 없음'으로 둔갑해, 대기 루프가 **화면 문제인 줄
+    #   모른 채** 한도까지 돌고 $script:screenCaptureFailing 도 안 서서 동결 계약(공통
+    #   진입점 = 게임 사망/F9 감지)이 통째로 비껴갑니다. 바로 위 minimized 분기는 이미
+    #   Register-CaptureFailure 를 부르고 있어 두 형제가 갈라져 있던 자리입니다
+    #   (2026-08-10 9차 점검). throw 경로는 호출부가 사유를 그대로 받으므로 기록 뒤에 던집니다.
+    Register-CaptureFailure -GameWindowIssue 'rect-failed'
     if ($ThrowOnWindowRectFailure) { throw 'OCR용 게임 창 좌표를 읽지 못했습니다.' }
     return $null
   }
@@ -3334,7 +3580,7 @@ function Wait-ForDungeonClearScreen {
       if ($script:screenCaptureFailing) {
         # 캡처 실패 중에는 연장 판독이 불가 - throw 하지 않고 아래 캡처 실패 처리(시간 동결)에
         # 맡깁니다 (리뷰 조건: 실패 중 마감 도달을 오류로 확정하지 않음)
-      } elseif ((Get-Date) -lt $extendLimit -and (Test-InDungeonQuest -Game $Game)) {
+      } elseif ((Get-Date) -lt $extendLimit -and (Test-CombatStillRunning -Game $Game)) {
         if (-not $extendLogged) {
           Write-RunLog "$($script:contentTag) 클리어 대기 한도(${TimeoutSeconds}초)를 넘겼지만 전투가 아직 진행 중 - 끝날 때까지 연장 대기합니다"
           $extendLogged = $true
@@ -3412,18 +3658,33 @@ function Wait-ForDungeonClearScreen {
       if ($popupClosePoint) {
         Focus-Game -Game $Game
         Click-ScreenPoint -X $popupClosePoint.X -Y $popupClosePoint.Y
-        # 커서가 '닫기' 위에 남으면 팝업이 다시 떴을 때 게임이 그린 커서가 글자를 가려
-        # 두 번째부터 영영 못 닫습니다 (2026-08-09 제보) - 클릭 직후 창 밖으로 물립니다
-        Move-CursorOutsideGame -Game $Game
+        # ★ 클릭 **직후**에는 커서를 옮기지 않습니다 (2026-08-09 실기 실사고).
+        #   Click-ScreenPoint 는 mouse UP 뒤 지연 없이 반환하는데, 여기서 곧바로 커서를 빼면
+        #   게임이 프레임 루프에서 클릭을 처리할 때(16~33ms 뒤) 포인터가 이미 버튼 밖이라
+        #   **클릭이 무효화**됩니다. 실기 로그에서 4초 간격으로 '닫기 클릭'만 7회 반복되고
+        #   팝업이 끝내 안 닫혔습니다("커서는 가는데 클릭이 안 먹는다" - 사용자 관측).
+        #   가림 방지는 **탐색 전 대피**(위 Move-CursorOutsideGame)가 이미 담당하므로
+        #   클릭 직후 대피는 없어도 되고, 있으면 해롭습니다.
         # '가루 부족' 해석은 R키 가루 부활 직후에만 (2026-08-01 전수 점검: 여신상/전멸 부활은
         # 가루를 안 쓰므로 그 직후의 임의 구매 팝업(물약 부족 등)을 재료 부족으로 오인해
         # 여신상 전환이 영구 고정되던 문제 - 리뷰 승인. 완료 로그용 pending 은 종류 무관 유지)
         if ($reviveConfirmPending -and $revivePendingKind -eq '가루 부활') {
           $useStatueRevive = $true
           $reviveConfirmPending = $false
-          Write-RunLog "$($script:contentTag) 부활 직후 구매 팝업(재료 부족 추정) - 닫고 이후 부활은 여신상으로 전환"
-        } else {
+          # 이 분기도 '닫았다'를 실제 클릭 여부로 구분합니다 (형제 두 분기와 같은 계약 -
+          # 5차 점검에서 여기만 빠져 있었음). 여신상 전환 판정 자체는 팝업이 뜬 사실만으로
+          # 성립하므로 클릭 성패와 무관하게 그대로 둡니다.
+          if ($script:lastClickPerformed) {
+            Write-RunLog "$($script:contentTag) 부활 직후 구매 팝업(재료 부족 추정) - 닫고 이후 부활은 여신상으로 전환"
+          } else {
+            Write-RunLog "$($script:contentTag) 부활 직후 구매 팝업(재료 부족 추정) - 커서 확인 실패로 닫기 클릭을 건너뜀 (이후 부활은 여신상으로 전환)"
+          }
+        } elseif ($script:lastClickPerformed) {
           Write-RunLog "$($script:contentTag) 구매 팝업 감지 - 닫기 클릭"
+        } else {
+          # 커서 확인 실패로 클릭을 건너뛴 경우. 예전에는 이것도 '닫기 클릭'으로 기록해
+          # 진단이 헛돌았습니다 (2026-08-09) - 실제로 무엇을 했는지 그대로 씁니다.
+          Write-RunLog "$($script:contentTag) 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (다음 감지에서 재시도)"
         }
         Start-Sleep -Seconds 1
         continue
@@ -3458,15 +3719,19 @@ function Wait-ForDungeonClearScreen {
             $reviveBlockedLogged = $true
           }
         } else {
-          # 이중 확인: 우하단에서 '여신' 버튼 글자를 실제로 찾은 뒤에만 클릭합니다
+          # 이중 확인: 우하단에서 거점 부활 버튼 글자를 실제로 찾은 뒤에만 클릭합니다
           # (중앙 문구 오탐 방어 + 상태 기반 클릭 정책. 실측: '여신상에서' 중심 (986,670))
+          # ★ 2026-08-11: '여신'만 찾다가 **캠프파이어만 있는 전멸 화면**(사용자 전수 캡처
+          #   00:06 실측 '으캠프파이어에서부활성장가이드')에서 버튼을 못 찾았습니다.
+          #   캠프파이어 우선으로 둘 다 찾습니다 (Find-ReviveAnchorPoint).
           $wipeClicked = $false
-          $wipeStatuePoint = Find-GameTextPoint -Game $Game -ReferenceX $rgReviveButtons[0] -ReferenceY $rgReviveButtons[1] `
-            -RegionWidth $rgReviveButtons[2] -RegionHeight $rgReviveButtons[3] -SearchText '여신'
-          if ($wipeStatuePoint) {
+          $wipeAnchorName = '여신상'
+          $wipeAnchorHit = Find-ReviveAnchorPoint -Game $Game
+          if ($wipeAnchorHit) {
             $wipeButtonMisses = 0
+            $wipeAnchorName = $wipeAnchorHit.Name
             Focus-Game -Game $Game
-            Click-ScreenPoint -X $wipeStatuePoint.X -Y $wipeStatuePoint.Y
+            Click-ScreenPoint -X $wipeAnchorHit.Point.X -Y $wipeAnchorHit.Point.Y
             $wipeClicked = $true
           } else {
             $wipeButtonMisses++
@@ -3476,7 +3741,7 @@ function Wait-ForDungeonClearScreen {
               $wipeButtonMisses = 0
               $wipeRecheck = Get-DeathScreenInfo -Game $Game
               if ($wipeRecheck.Wiped) {
-                Write-RunLog '[경고] 전멸 화면에서 여신상 부활 버튼 글자를 찾지 못해 예비 좌표를 클릭합니다'
+                Write-RunLog '[경고] 전멸 화면에서 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다'
                 Focus-Game -Game $Game
                 Click-GamePoint -Game $Game -ReferenceX $ptWipeStatueRevive[0] -ReferenceY $ptWipeStatueRevive[1]
                 $wipeClicked = $true
@@ -3485,7 +3750,7 @@ function Wait-ForDungeonClearScreen {
           }
           if ($wipeClicked) {
             $reviveCount++
-            Write-RunLog "$($script:contentTag) 전멸 감지 - 여신상에서 부활 클릭 (세이브 지점부터 재도전)"
+            Write-RunLog "$($script:contentTag) 전멸 감지 - ${wipeAnchorName}에서 부활 클릭 (세이브 지점부터 재도전)"
             $revivePendingKind = '전멸 재도전'
             $reviveConfirmPending = $true
             Start-Sleep -Seconds 3
@@ -3503,17 +3768,18 @@ function Wait-ForDungeonClearScreen {
         } elseif ($useStatueRevive -or ($null -ne $death.Remaining -and $death.Remaining -le 0)) {
           $reviveCount++
           $statueReason = if ($useStatueRevive) { '부활 재료 부족' } else { '남은 부활 횟수 없음' }
-          Write-RunLog "$($script:contentTag) 행동불능($statueReason) - 여신상에서 부활 클릭"
-          $revivePendingKind = '여신상 부활'
           Focus-Game -Game $Game
           # 부활 버튼 배치는 남은 횟수 유무에 따라 달라지므로(0회면 버튼들이 한 줄로 재배치됨),
-          # 고정 좌표 대신 '여신상' 글자를 OCR로 찾아 실제 버튼 위치를 클릭합니다.
-          $statuePoint = Find-GameTextPoint -Game $Game -ReferenceX $rgReviveButtons[0] -ReferenceY $rgReviveButtons[1] `
-            -RegionWidth $rgReviveButtons[2] -RegionHeight $rgReviveButtons[3] -SearchText '여신'
-          if ($statuePoint) {
-            Click-ScreenPoint -X $statuePoint.X -Y $statuePoint.Y
+          # 고정 좌표 대신 글자를 OCR로 찾아 실제 버튼 위치를 클릭합니다.
+          # 캠프파이어 우선 - 여신상은 던전 처음부터라 손실이 큽니다 (Find-ReviveAnchorPoint 주석).
+          $anchorHit = Find-ReviveAnchorPoint -Game $Game
+          if ($anchorHit) {
+            Write-RunLog "$($script:contentTag) 행동불능($statueReason) - $($anchorHit.Name)에서 부활 클릭"
+            $revivePendingKind = "$($anchorHit.Name) 부활"
+            Click-ScreenPoint -X $anchorHit.Point.X -Y $anchorHit.Point.Y
           } else {
-            Write-RunLog '[경고] 여신상 부활 버튼 글자를 찾지 못해 예비 좌표를 클릭합니다'
+            Write-RunLog "[경고] 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다"
+            $revivePendingKind = '여신상 부활'
             Click-GamePoint -Game $Game -ReferenceX $ptStatueRevive[0] -ReferenceY $ptStatueRevive[1]
           }
           $reviveConfirmPending = $true
@@ -3610,7 +3876,16 @@ function Wait-ForDungeonClearScreen {
       if ($skipScenePoint) {
         Focus-Game -Game $Game
         Click-ScreenPoint -X $skipScenePoint.X -Y $skipScenePoint.Y
-        Write-RunLog "$($script:contentTag) 컷신 - 장면 넘기기 클릭"
+        # 실제로 클릭이 나갔을 때만 '클릭'이라고 씁니다. Click-ScreenPoint 는 커서 확인
+        # 실패 시 클릭을 건너뛰는데, 그걸 눌렀다고 기록하면 로그가 거짓이 됩니다
+        # (2026-08-10 실기: 커서 확인 실패 [경고] **바로 다음 줄**에 '장면 넘기기 클릭'이
+        #  찍혀, 저조차 '재시도해서 성공했다'고 잘못 읽었습니다. 팝업 닫기·카드 토글·생활
+        #  정리는 5~8차에 이 구분을 넣었는데 컷신 2곳만 빠져 있었습니다).
+        if ($script:lastClickPerformed) {
+          Write-RunLog "$($script:contentTag) 컷신 - 장면 넘기기 클릭"
+        } else {
+          Write-RunLog "$($script:contentTag) 컷신 - 커서 확인 실패로 장면 넘기기 클릭을 건너뜀 (다음 감지에서 재시도)"
+        }
         Start-Sleep -Seconds 2
       }
     }
@@ -3717,6 +3992,34 @@ function Get-DeathInfoFromText {
   # 실측 판독('처치완벽한전주권장전투력재도전보너스…')과 겹쳐 오탐이라 제외 (설계 합의.
   # 전멸 화면 실측은 '재도전하시겠…'라 '재도전하'로 잡힘). 실제 클릭은 호출부가 우하단에서
   # '여신' 버튼을 실제로 찾은 뒤에만 수행하는 이중 확인 구조입니다.
+  #
+  # ★ 2026-08-11 [타 PC 제보 + 사용자 전수 캡처] **사망 안내가 두 종류**였습니다.
+  #   위 설명은 '부활 제한 구역'(어비스 등)만 상정한 것이고, 부활 제한이 없는 구역
+  #   (심층던전·일반 던전 실측)에서는 **'남은 부활 횟수' 줄 자체가 없습니다**:
+  #     제한형   : '행동불능 / 부활 제한 구역입니다 / 남은 부활 횟수 3/3'
+  #                (파티면 '파티의 남은 부활 횟수 4/6')
+  #     무제한형 : '행동불능 / 당신은 이 세계에서 죽지 않습니다 / 다만 지금은 움직일 수 없을 뿐입니다'
+  #   무제한형에는 기존 조각이 하나도 없어 **Dead 로 안 잡혔고**, 자동 부활이 통째로 죽어
+  #   클리어 대기 600초를 그대로 태운 뒤 회차가 실패했습니다(제보: 03:23 입장 → 03:33 초과,
+  #   그 사이 부활 시도 로그 0건. 재시작해도 죽은 화면이라 '던전 화면이 아닙니다'로 연쇄 정지).
+  #
+  #   실측 7장(제한 개인/제한 파티/무제한 심층/무제한 던전×2/전멸 여신상/전멸 캠프파이어),
+  #   같은 ROI·s3·ko:
+  #     무제한 던전  '6H도-느당신은미세기ICⅡ서죽지않습니다.다만天l금은딥식일수없을뿐입니다.'
+  #     무제한 던전  '6H도-느00百0당신은미세계에서죽지않습니다.다만치금은딥식일수없을뿐입니다.'
+  #     무제한 심층  '6H도-느「팀&크미국지뇨'亡LI다.다인치二'      ← 중앙이 통째로 깨진 사례
+  #     제한 개인    '6H도-느00百0부할제한구역입니다.남은부활횟수3/3'
+  #     제한 파티    '6H도~느00百0부활제한구역입니다.üEl의남은부활횟수4/6'
+  #
+  #   ※ **'행동불능' 조각은 사실상 죽은 코드였습니다** - 7장 전부, 배율 2~6 전부에서
+  #     '6H도-느' 로 깨집니다(빨간 장식 폰트). 그 깨짐이 오히려 일관적이라 **정확한 별칭**으로
+  #     추가합니다. 중앙이 통째로 깨진 심층 사례는 이 별칭으로만 잡힙니다.
+  #     별칭은 '6H도' 처럼 줄이지 않습니다 - 짧을수록 오탐 여지가 커집니다(리뷰 조건).
+  #   ※ 버튼 글자('도움 요청 그만두기' 등)는 판정에 쓰지 않습니다. 중앙만 읽는 지금 구조에
+  #     OCR 을 하나 더 붙여야 하고, '나가기' 같은 어휘는 다른 화면 판정과 겹칩니다(리뷰 지적).
+  #   오탐 검증: 저장소 게임 화면 **162장 전수**(던전/심층던전/어비스/생활, 같은 ROI·s3·ko)에서
+  #     최종 판정식 적중 **0건**, 개별 조각 적중도 0건.
+  #
   # 반환: @{ Dead; Remaining(파싱 실패 시 $null); Wiped }
   $normalized = ([string]$Text) -replace '\s', ''
   $wiped = (
@@ -3727,7 +4030,14 @@ function Get-DeathInfoFromText {
   $dead = (
     $normalized.Contains('남은부활') -or
     $normalized.Contains('부활횟수') -or
-    $normalized.Contains('행동불능')
+    $normalized.Contains('행동불능') -or
+    # 무제한형(부활 제한이 없는 구역) - 두 낱말 조합으로만 인정합니다. '죽지'/'않습니다'
+    # 단독은 다른 안내에도 흔합니다.
+    ($normalized.Contains('죽지') -and $normalized.Contains('않습니다')) -or
+    ($normalized.Contains('수없') -and $normalized.Contains('뿐입니다')) -or
+    # '행동불능'의 실측 깨짐 별칭 (7장 × 배율 2~6 공통). 중앙 문구가 통째로 깨진 화면은
+    # 이것만 남습니다.
+    $normalized.Contains('6H도-느')
   )
   $remaining = $null
   if ($dead) {
@@ -3735,6 +4045,33 @@ function Get-DeathInfoFromText {
     if ($match.Success) { $remaining = [int]$match.Groups[1].Value }
   }
   return @{ Dead = $dead; Remaining = $remaining; Wiped = $wiped }
+}
+
+function Find-ReviveAnchorPoint {
+  param([System.Diagnostics.Process]$Game)
+
+  # '거점 부활' 버튼을 찾습니다. 부활 수단은 손실이 적은 순서가 있습니다
+  # (2026-08-11 사용자 확정 스펙):
+  #   1. 여기서 부활(부활 깃털) - 손실 0, 그 자리에서 재개  ← 호출부가 R키로 먼저 시도
+  #   2. 캠프파이어             - 중간 세이브 지점부터
+  #   3. 여신상                 - 던전 처음부터 (가장 손해)
+  # 그래서 거점이 필요할 때도 **캠프파이어를 먼저** 찾습니다.
+  #
+  # ★ 2026-08-11 실측: 화면마다 제공되는 버튼이 다릅니다. 사용자 전수 캡처의 전멸 화면 2장이
+  #   각각 '여신상에서 부활'(23:56)과 '캠프파이어에서 부활'(00:06) 하나씩만 갖고 있었고,
+  #   무제한형 사망 화면(00:13)에는 '캠프파이어에서 부활' + '여기서 부활'이 함께 있었습니다.
+  #   기존에는 '여신' 하나만 찾아서, 캠프파이어만 있는 화면에서는 버튼을 못 찾고 예비 좌표로
+  #   떨어졌습니다(그 좌표는 여신상 배치 기준이라 엉뚱한 곳을 누를 수 있음).
+  #
+  # Find-GameTextPoint 의 SearchText 는 단일 문자열이라 순차로 두 번 찾습니다.
+  # 공통 조각 '부활'은 쓰지 않습니다 - '여기서 부활'까지 잡아 거점 대신 깃털 버튼을 누릅니다.
+  # 반환: @{ Point; Name } 또는 $null
+  foreach ($anchor in @(@{ Text = '캠프'; Name = '캠프파이어' }, @{ Text = '여신'; Name = '여신상' })) {
+    $anchorPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgReviveButtons[0] -ReferenceY $rgReviveButtons[1] `
+      -RegionWidth $rgReviveButtons[2] -RegionHeight $rgReviveButtons[3] -SearchText $anchor.Text
+    if ($anchorPoint) { return @{ Point = $anchorPoint; Name = $anchor.Name } }
+  }
+  return $null
 }
 
 function Get-DeathScreenInfo {
@@ -3937,6 +4274,30 @@ function Test-InDungeonQuest {
     if ($normalized.Contains($titleKeyword)) { return $true }
   }
   return $false
+}
+
+function Test-CombatStillRunning {
+  # '한도가 지났는데 아직 전투 중인가' - 클리어 대기 연장의 **유일한 근거**입니다.
+  #
+  # 콘텐츠마다 퀘스트 추적기 문구가 다릅니다 (전부 이 파일에 실측 근거가 있는 키워드):
+  #   어비스   : '<던전명> 클리어'        → $allDungeonKeywords (Test-InDungeonQuest 주석)
+  #   던전/심층 : 'N층 M구역 클리어'       → '구역' ('던전'은 필드 주간 퀘스트와 겹쳐 못 씀)
+  #   사냥터   : '몬스터 소탕 N회'/'구역 정찰' → '소탕' 또는 '정찰'
+  #
+  # ★ 예전에는 어비스 전용 Test-InDungeonQuest 하나만 썼습니다. 그래서 2026-07-17 에 넣은
+  #   '한도가 다 돼도 전투 중이면 60초씩 연장' 안전망이 4개 콘텐츠 중 **어비스에서만** 살아
+  #   있었고, 던전·심층·사냥터는 한도를 넘기는 순간 그대로 throw 했습니다 (긴 판 = 회차 오류).
+  #   조용히 죽어 있던 안전망이라 로그에도 흔적이 없었습니다 (2026-08-10 8차 점검).
+  #   연장은 $extendLimit(= max(한도x3, 1800초)) 로 여전히 유한합니다.
+  param([System.Diagnostics.Process]$Game)
+  $tag = [string]$script:contentTag
+  if ($tag -eq '[던전]' -or $tag -eq '[심층]' -or $tag -eq '[사냥터]') {
+    $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+      -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    if ($tag -eq '[사냥터]') { return [bool]($questText.Contains('소탕') -or $questText.Contains('정찰')) }
+    return [bool]$questText.Contains('구역')
+  }
+  return [bool](Test-InDungeonQuest -Game $Game)
 }
 
 function Read-DgTitleText {
@@ -4275,27 +4636,47 @@ function Get-DgTributeCost {
     $script:dgCostImeBlocked = $true
     return $null
   }
+  # ★ 엔진별로 **예비값 자격**을 다르게 둡니다 (2026-08-10 실기 실측).
+  #   영어 엔진은 버튼의 '입장하기' 글자를 `otn6Pl` / `otm6Dl` 로 오독해 **없는 숫자 6을
+  #   만들어냅니다.** 한국어 엔진은 같은 화면을 '입장하기' 로 정확히 읽고 숫자를 안 냅니다.
+  #   그런데 유효값(10/20 또는 심층 1/2)이 아니어도 '마지막 숫자 그룹'을 예비값으로 돌려주던
+  #   탓에, 그 가짜 6이 호출부까지 올라가 **소모량 표시가 아예 없는 화면에서 '유효 밖 값'으로
+  #   회차가 정지**했습니다(심층 실기 재현).
+  #   → 영어 엔진 결과는 **유효값일 때만** 채택하고 예비값으로는 쓰지 않습니다. 영어 엔진을
+  #     아예 빼지 않는 이유는, 숫자가 실제로 있는 화면에서 한국어가 깨질 때의 구제 경로이기
+  #     때문입니다(그 경우엔 유효값으로 잡혀 정상 채택됩니다).
   $attempts = @(
-    @{ Scale = 3; Engine = $ocrKoreanEngine },
-    @{ Scale = 5; Engine = $ocrKoreanEngine },
-    @{ Scale = 3; Engine = $ocrEnglishEngine },
-    @{ Scale = 5; Engine = $ocrEnglishEngine }
+    @{ Scale = 3; Engine = $ocrKoreanEngine; AllowFallback = $true },
+    @{ Scale = 5; Engine = $ocrKoreanEngine; AllowFallback = $true },
+    @{ Scale = 3; Engine = $ocrEnglishEngine; AllowFallback = $false },
+    @{ Scale = 5; Engine = $ocrEnglishEngine; AllowFallback = $false }
   )
+  # 판독 영역 목록 (주 → 예비). PS 5.1 배열 풀림 방지로 쉼표 연산자를 씁니다.
+  # 심층은 주=아이콘 제외 좁은 영역 / 예비=두 버튼 레이아웃까지 덮는 넓은 영역입니다
+  # (일반 던전은 넓은 영역 하나로 두 레이아웃을 다 덮으므로 예비가 없습니다 - 9차 점검).
+  $costRegions = @()
+  $costRegions += , $rgDgTributeCost
+  if ($rgDgTributeCostAlt) { $costRegions += , $rgDgTributeCostAlt }
   $fallbackValue = $null
   foreach ($attempt in $attempts) {
-    $text = Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTributeCost[0] -ReferenceY $rgDgTributeCost[1] `
-      -RegionWidth $rgDgTributeCost[2] -RegionHeight $rgDgTributeCost[3] -Scale $attempt.Scale -Engine $attempt.Engine
-    $numberGroups = [regex]::Matches($text, '\d+')
-    if ($numberGroups.Count -eq 0) { continue }
-    foreach ($grp in $numberGroups) {
-      $n = [int]$grp.Value
-      if ($ValidCosts -contains $n) { return $n }   # 던전 10/20, 심층 1/2 (호출부 주입)
-      # 공물 뿔 아이콘이 '7'로 읽혀 숫자 앞에 붙는 이형 (2026-07-28 23:40 실기 '71' - 아이콘
-      # 제외 영역에서도 렌더링 순간에 드물게 발생): 앞의 7을 떼서 유효값이면 그 값을 채택
-      if ($grp.Value -match '^7(\d+)$' -and $ValidCosts -contains [int]$Matches[1]) { return [int]$Matches[1] }
+    foreach ($costRegion in $costRegions) {
+      $text = Get-GameRegionOcrText -Game $Game -ReferenceX $costRegion[0] -ReferenceY $costRegion[1] `
+        -RegionWidth $costRegion[2] -RegionHeight $costRegion[3] -Scale $attempt.Scale -Engine $attempt.Engine
+      $numberGroups = [regex]::Matches($text, '\d+')
+      if ($numberGroups.Count -eq 0) { continue }
+      foreach ($grp in $numberGroups) {
+        $n = [int]$grp.Value
+        if ($ValidCosts -contains $n) { return $n }   # 던전 10/20, 심층 1/2 (호출부 주입)
+        # 공물 뿔 아이콘이 '7'로 읽혀 숫자 앞에 붙는 이형 (2026-07-28 23:40 실기 '71' - 아이콘
+        # 제외 영역에서도 렌더링 순간에 드물게 발생): 앞의 7을 떼서 유효값이면 그 값을 채택
+        if ($grp.Value -match '^7(\d+)$' -and $ValidCosts -contains [int]$Matches[1]) { return [int]$Matches[1] }
+      }
+      # 유효값(10/20)은 아니지만 숫자는 읽힌 경우: 첫 성공 읽기를 예비로 보관.
+      # 단 **영어 엔진 결과는 예비로 쓰지 않습니다** - 위 주석의 '입장하기'→6 오독 때문입니다.
+      if ($attempt.AllowFallback -and $null -eq $fallbackValue) {
+        $fallbackValue = [int]$numberGroups[$numberGroups.Count - 1].Value
+      }
     }
-    # 유효값(10/20)은 아니지만 숫자는 읽힌 경우: 첫 성공 읽기를 예비로 보관
-    if ($null -eq $fallbackValue) { $fallbackValue = [int]$numberGroups[$numberGroups.Count - 1].Value }
   }
   return $fallbackValue
 }
@@ -4627,16 +5008,20 @@ function Invoke-PurchasePopupSweep {
   # 계약으로 소비해야 합니다 (리뷰 지적 - PS 5.1 스크립트블록 출력 오염).
   if ($script:screenCaptureFailing) { return $false }
   # 판독 **전에** 커서를 창 밖으로 물립니다: 직전 회차에 '닫기'를 눌렀다면 커서가 그 자리에
-  # 남아 글자를 가리고, 그러면 팝업이 다시 떠도 못 찾습니다 (2026-08-09 제보).
-  # 게임이 커서를 직접 그리기 때문에 캡처에 그대로 찍힙니다.
+  # 남고, 그러면 팝업이 다시 떠도 못 찾는 제보가 있었습니다 (2026-08-09).
+  # 기전 확정: 커서가 게임 창 위에 오면 게임이 자기 커서를 그리고 그게 캡처에 찍혀 글자를
+  # 덮습니다 (실측: 커서 위 0/6 vs 창 밖 6/6). 자세한 근거는 Move-CursorOutsideGame 주석.
   Move-CursorOutsideGame -Game $Game
   $sweepPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
     -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
   if ($sweepPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $sweepPoint.X -Y $sweepPoint.Y
-    Write-RunLog '[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)'
-    Move-CursorOutsideGame -Game $Game
+    if ($script:lastClickPerformed) { Write-RunLog '[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)' }
+    else { Write-RunLog '[안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (입장 대기 중, 다음 감지에서 재시도)' }
+    # ★ 클릭 직후 대피 금지 (2026-08-09 실기 실사고 - 클리어 대기 루프와 같은 이유).
+    #   mouse UP 뒤 지연 없이 커서를 빼면 게임이 프레임 루프에서 클릭을 처리할 때 포인터가
+    #   이미 버튼 밖이라 클릭이 무효화됩니다. 가림 방지는 위 '탐색 전 대피'가 담당합니다.
     Start-Sleep -Seconds 1
     return $true
   }
@@ -4682,25 +5067,75 @@ function Invoke-AfterEntryKeys {
   # B 재입력은 음식 중복 소모 위험 (상태 확인 없는 재입력 금지 정책).
   if (-not $script:screenCaptureFailing) {
     $entryPopupClicks = 0
+    # '봤다'와 '닫았다'는 **다른 사실**입니다. 예전에는 클릭 횟수 하나로 둘 다 대신했는데,
+    # 팝업을 찾고도 커서 확인 실패로 클릭을 건너뛰면 횟수가 0이라 아래 연쇄 재확인이
+    # 통째로 생략됐습니다. 그러면 팝업이 화면에 그대로인 채 B(음식) 키가 나가 제보 증상이
+    # 다시 재현됩니다 (2026-08-09 6차 점검). 재확인 여부는 '봤는가'로 판단합니다.
+    $entryPopupSeen = $false
     $entryPopupRemains = $false
     for ($popupTry = 1; $popupTry -le 4; $popupTry++) {
       # **판독 전에 커서를 창 밖으로 물립니다.** 이 루프가 2026-08-09 제보의 현장입니다:
-      # 직전 회전에서 '닫기'를 누르면 커서가 그 자리에 남는데, 게임이 커서를 직접 그리므로
-      # 캡처에 찍혀 '닫기' 글자를 가립니다 → 팝업이 아직 있는데 못 찾고 break,
-      # 또는 남은 팝업을 영영 못 닫습니다.
+      # 직전 회전에서 '닫기'를 누르면 커서가 그 자리에 남고, 그때부터 '닫기'를 못 찾아
+      # 팝업이 아직 있는데 break 하거나 남은 팝업을 영영 못 닫습니다.
+      # 기전 확정: 커서가 게임 창 위에 오면 게임이 자기 커서를 그리고 그게 캡처에 찍혀 글자를
+  # 덮습니다 (실측: 커서 위 0/6 vs 창 밖 6/6). 자세한 근거는 Move-CursorOutsideGame 주석.
       Move-CursorOutsideGame -Game $Game
       $entryPopupPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
         -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
-      if (-not $entryPopupPoint) { break }
+      if (-not $entryPopupPoint) {
+        # ★ 2026-08-09 실측으로 확정된 제보 증상의 원인.
+        #   이 팝업은 **연쇄로** 뜹니다. 하나를 닫으면 다음이 조금 뒤에 뜨는데, 그 간격이
+        #   화면 관찰에서 **1.020 / 1.471 / 1.752초** 였습니다. 위 클릭 뒤 대기는 1초뿐이라
+        #   판독 시점에는 화면이 비어 있고, 여기서 그냥 break 하면 **직후에 뜨는 팝업을
+        #   영영 못 닫습니다.** 그러면 바로 아래 키 입력(B=음식)을 그 팝업이 먹습니다
+        #   - 제보 그대로입니다("닫기 하고 팝업이 또뜨면 안닫아").
+        #   ※ 커서 가림(원인 ①)과는 **별개의 원인**입니다. 둘 다 실기로 확정됐고 둘 다
+        #   고쳤습니다 - 가림은 판독 전 커서 대피로, 이 타이밍은 재확인으로 막습니다.
+        #
+        #   비용은 '이미 한 번이라도 닫은 경우'에만 냅니다. 팝업이 처음부터 없는 정상 경로는
+        #   추가 OCR·대기가 **0** 이라 설계 합의(무팝업이면 OCR 1회만 추가)를 그대로 지킵니다.
+        if (-not $entryPopupSeen) { break }
+        Start-Sleep -Milliseconds 1200   # 1초(위) + 1.2초 = 2.2초 > 실측 최대 1.75초
+        # ★ 재확인 **전에도 반드시 대피**합니다. 방금 '닫기'를 클릭했으니 커서가 그 자리에
+        #   그대로 있고, 게임이 그린 커서가 다음 팝업의 '닫기'를 덮어 판독이 **0%** 가 됩니다
+        #   (2026-08-09 실측: 커서 위 0/6 vs 창 밖 6/6). 이 한 줄이 빠져 있으면 연쇄 재확인이
+        #   거의 항상 실패해 수정 자체가 무의미해집니다.
+        Move-CursorOutsideGame -Game $Game
+        $entryPopupPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgPopupClose[0] -ReferenceY $rgPopupClose[1] `
+          -RegionWidth $rgPopupClose[2] -RegionHeight $rgPopupClose[3] -SearchText '닫기'
+        if (-not $entryPopupPoint) { break }
+        # '한 번 더 닫습니다' 는 **정말 닫을 때만** 남깁니다. 상한 회전(4회전)에서는 아래에서
+        # 클릭 없이 이탈하므로, 여기서 안내를 남기면 곧바로 '닫히지 않습니다' 경고가 이어져
+        # "한 번 더 닫았는데도 안 닫혔다"는 모순 로그가 됩니다 - 다음 진단이 또 '클릭이 안
+        # 먹는다' 쪽으로 헛돌게 만듭니다 (2026-08-09 5차 점검, 이번 커밋이 없애려던 오해 계열).
+        if ($popupTry -lt 4) {
+          Write-RunLog '[안내] 팝업이 연달아 떠 한 번 더 닫습니다 (닫은 뒤 늦게 뜨는 팝업)'
+        }
+      }
+      # 여기 도달 = 이번 회전에서 '닫기'를 **실제로 찾았다**. 클릭 성패와 무관한 사실이므로
+      # 클릭 계상($entryPopupClicks)과 분리해 기록합니다.
+      $entryPopupSeen = $true
       if ($popupTry -ge 4) { $entryPopupRemains = $true; break }   # 3회 닫고도 남아 있음
       Focus-Game -Game $Game
       Click-ScreenPoint -X $entryPopupPoint.X -Y $entryPopupPoint.Y
-      $entryPopupClicks++
+      # 클릭이 **실제로 나갔을 때만** 셉니다. Click-ScreenPoint 는 커서 확인 실패 시 클릭을
+      # 건너뛰는데, 그것까지 세면 '닫았다'로 계상돼 로그가 거짓이 되고 재확인 분기도 잘못
+      # 열립니다 (2026-08-09 5차 점검 - lastClickPerformed 를 정작 이 핵심 루프가 안 썼음).
+      if ($script:lastClickPerformed) { $entryPopupClicks++ }
       Start-Sleep -Seconds 1
     }
-    if ($entryPopupClicks -gt 0) {
-      if ($entryPopupRemains) {
-        Write-RunLog "[경고] 구매 팝업이 닫히지 않습니다 - 키 입력을 진행하고 클리어 대기 중 다시 닫기를 시도합니다"
+    # 잔존은 **클릭을 한 번도 못 보낸 경우에도** 알려야 합니다. 예전 조건($entryPopupClicks -gt 0)
+    # 은 '봤지만 전부 건너뜀'을 침묵으로 넘겨, 팝업이 남은 채 키가 나가는데도 로그가
+    # 깨끗했습니다 (2026-08-09 6차 점검).
+    if ($entryPopupClicks -gt 0 -or $entryPopupRemains) {
+      if ($entryPopupRemains -and $entryPopupClicks -eq 0) {
+        Write-RunLog "[경고] 구매 팝업을 찾았지만 닫기 클릭을 한 번도 보내지 못했습니다(커서 확인) - 키 입력을 진행하고 클리어 대기 중 다시 닫기를 시도합니다"
+      } elseif ($entryPopupRemains) {
+        # 닫은 횟수를 함께 적습니다. 3회 전부 성공했는데도 남았다면 그건 **클릭 불량이 아니라
+        # 연쇄가 길었던 것**인데, 예전 문구는 둘을 구분하지 못해 다음 진단이 또 '클릭이 안
+        # 먹는다' 쪽으로 향했습니다 (2026-08-09 7차 점검). 변수 뒤에 한글이 붙으므로
+        # ${} 필수 - PS 5.1 은 '$entryPopupClicks회' 를 변수명으로 읽습니다.
+        Write-RunLog "[경고] 닫기 클릭 ${entryPopupClicks}회 뒤에도 구매 팝업이 남아 있습니다 (연쇄 팝업이거나 클릭이 먹지 않음) - 키 입력을 진행하고 클리어 대기 중 다시 닫기를 시도합니다"
       } else {
         Write-RunLog "$LogPrefix 구매 팝업 감지 - 닫은 뒤 키 입력 진행"
       }
@@ -4747,7 +5182,12 @@ function Wait-ForResultScreen {
     if ($skipScene) {
       Focus-Game -Game $Game
       Click-ScreenPoint -X $skipScene.X -Y $skipScene.Y
-      Write-RunLog "$($script:contentTag) 컷신 - 장면 넘기기 클릭"
+      # 클리어 대기 쪽과 같은 계약 - 실제 클릭일 때만 '클릭'이라고 기록합니다 (2026-08-10)
+      if ($script:lastClickPerformed) {
+        Write-RunLog "$($script:contentTag) 컷신 - 장면 넘기기 클릭"
+      } else {
+        Write-RunLog "$($script:contentTag) 컷신 - 커서 확인 실패로 장면 넘기기 클릭을 건너뜀 (다음 감지에서 재시도)"
+      }
       Start-Sleep -Seconds 2
       continue
     }
@@ -4868,6 +5308,23 @@ function Test-DifficultySelectedAt {
   if ($width -le 0 -or $height -le 0) { return $false }
   $refX = [int][Math]::Round(($ScreenPoint.X - $rect.Left) * $referenceWidth / $width)
   $refY = [int][Math]::Round(($ScreenPoint.Y - $rect.Top) * $referenceHeight / $height)
+  # 표본을 찍기 **전**에 커서를 게임 밖으로 대피시킵니다 (2026-08-10 실기 실측).
+  #   여기는 판독 실패가 아니라 **거짓 확인**이 나는 자리라 카드 OCR 가림보다 위험합니다.
+  #   게임이 그리는 커서의 노란 몸통이 '밝고 채도 높은' 히트 조건을 그대로 만족해,
+  #   비선택 알약에 히트를 얹어 임계값 3을 채웁니다 → 선택하지도 않은 난이도를
+  #   '선택됨'으로 확인하고 그대로 입장합니다.
+  #   실측(1908x1076, 화면 고정·커서만 이동):
+  #     '어려움'(선택됨)     커서 치움 12/27 → 선택됨   커서 위 10/27 → 선택됨
+  #     '매우 어려움'(비선택) 커서 치움  0/27 → 비선택   커서 위  3/27 → **선택됨(뒤집힘)**
+  #   커서 핫스팟 픽셀 자체는 회색(136,139,145)이라 히트가 아니고, 히트를 만드는 것은
+  #   화살표의 노란 몸통입니다.
+  # 임계값(3)은 **올리지 않습니다**: 이번 오탐만 겨우 피할 뿐 커서 위치·창 배율이 달라지면
+  #   4 이상도 나오고, 정상 선택이 2/18 까지 떨어졌던 이력(위 5189~5194)을 깨 선확인 실패·
+  #   불필요한 재클릭·Strict 정지를 부릅니다. 원인은 판정식이 아니라 화면에 섞인 외부
+  #   그래픽이므로 원인만 제거합니다 (2026-08-10 교차 리뷰 합의).
+  # 클릭 무효화(3618) 위험 없음: 호출부 5곳(5235/5288/5302/5311)이 전부 클릭 전이거나
+  #   클릭 후 900~1200ms 대기 뒤에 부릅니다. 이 함수 안에는 클릭이 없습니다.
+  Move-CursorOutsideGame -Game $Game
   $hits = 0
   $probeRows = @()
   # dy 그물 확대 (2026-07-29 21:28 계측으로 원인 확정 - 리뷰 승인): OCR 단어 박스의 Y 중심이
@@ -4893,8 +5350,11 @@ function Test-DifficultySelectedAt {
   }
   # 판정 실패의 실측 계측 (2026-07-29 - 5회 재발한 '캡처는 정상인데 런타임만 실패' 원인
   # 추적용): 실패 순간 실제로 읽힌 픽셀 요약을 남겨 다음 재발 때 원인을 확정한다 (리뷰 승인).
-  # 형식: 히트수/18 + dy행별 '최대밝기/최대채도' (기준점 포함)
-  $script:lastPillProbe = ('기준({0},{1}) {2}/18 [{3}]' -f $refX, $refY, $hits, ($probeRows -join ' '))
+  # 형식: 히트수/27 + dy행별 '최대밝기/최대채도' (기준점 포함)
+  # 분모는 실제 표본 수입니다 - dy 9행 × dx 3열 = 27. 그물을 넓힐 때(2026-07-29) 문자열만
+  # 옛 18 로 남아 제보 로그의 히트율을 실제보다 높게 보이게 했습니다 (2026-08-10 교차 리뷰).
+  # 위 5189~5194 주석의 '2/18' 등은 그물 확대 **전**의 과거 계측이라 그대로 둡니다.
+  $script:lastPillProbe = ('기준({0},{1}) {2}/27 [{3}]' -f $refX, $refY, $hits, ($probeRows -join ' '))
   return ($hits -ge 3)
 }
 
@@ -5117,6 +5577,24 @@ function Set-DgToggleCard {
       $cardScales = @(5, 3, 4)
       $clickedRecheckDone = $true
     }
+    # 판독 **직전**에 커서를 게임 밖으로 대피시킵니다 (2026-08-10 실기 실사고).
+    #   증상: 심층 커스텀 반복 2회차에서 카드를 끈 직후 재확인이 6/6 실패 →
+    #         '재확인 생략' → 호출부의 커스텀 게이트가 반대 설정 입장을 막으려 exit 4.
+    #   원인: 클릭 지점이 버튼 **중심**($ptDgCoinButton=463,313)이라 클릭 후 커서가 글자 위에
+    #         남는데, 게임은 포인터가 자기 창 위면 자기 커서를 그리므로 그 그래픽이
+    #         CopyFromScreen 에 찍혀 '도전'을 덮습니다 (Move-CursorOutsideGame 주석 참고).
+    #   실측: 화면은 한 픽셀도 바꾸지 않고 **커서 위치만** 옮겨 같은 영역을 판독 -
+    #         커서가 버튼 위면 주/보조 × 배율 5·3·4 = 0/6, 90px 아래로 치우면 6/6 '도전'.
+    #         클릭 후 100ms 간격 15프레임(1.4초)에서도 계속 빈 값이라 전환 지연이 아닙니다.
+    # 위치가 **판독 직전**인 이유 (2026-08-10 교차 리뷰):
+    #   ① 클릭 직후 대피는 금지입니다 - mouse UP 뒤 곧바로 커서를 빼면 게임이 프레임 루프에서
+    #      클릭을 처리할 때 포인터가 버튼 밖이라 **클릭이 무효화**됩니다 (3618 실사고).
+    #      여기는 클릭(아래 5495)과 1100ms 대기를 지나 다음 회전에 오므로 그 위험이 없습니다.
+    #   ② 5484 의 '클릭 전 판독 실패 → 800ms 후 continue' 경로는 클릭·대기를 건너뛰므로,
+    #      대피를 대기 뒤에 두면 그 회전들이 계속 가려진 채 실패합니다.
+    #   ③ 첫 회전에도 걸려서 이전 단계(구역 카드 클릭 등)가 남긴 가림까지 함께 풀립니다.
+    #   ④ 이미 창 밖이면 무동작이라 비용이 없습니다.
+    Move-CursorOutsideGame -Game $Game
     $isSelected = $false
     $isChallenge = $false
     foreach ($cardScale in $cardScales) {
@@ -5177,18 +5655,37 @@ function Set-DgToggleCard {
     }
     Focus-Game -Game $Game
     Click-GamePoint -Game $Game -ReferenceX $ClickPoint[0] -ReferenceY $ClickPoint[1]
-    Write-RunLog "$($script:contentTag) $Label 버튼 클릭 → $(if ($WantSelected) { '사용' } else { '미사용' })으로 변경"
-    $clicked = $true
-    $script:dgToggleClicked = $true
-    # 마지막 회전에서 클릭했다면 재확인용으로 1회전만 연장합니다 (2026-08-02 실사고 - 재확인
-    # 없이 종료돼 게이트 정지. 연장 회전에서도 반대 상태로 읽히면 성공 처리 없이 기존
-    # 경고/$false 경로로 갑니다 - 리뷰 조건)
+    # 클릭이 **실제로 나갔을 때만** '눌렀다'로 표시합니다. Click-ScreenPoint 는 커서 확인
+    # 실패 시 클릭을 건너뛰는데, 그걸 눌렀다고 기록하면 ①로그가 거짓이 되고 ②이 상태를
+    # 쓰는 소모량 잔상 판정($script:dgToggleClicked)이 '방금 전환했으니 잔상'이라며
+    # 교차 검증을 건너뜁니다 - 누르지도 않았는데 말입니다 (2026-08-09 5차 점검).
+    if ($script:lastClickPerformed) {
+      Write-RunLog "$($script:contentTag) $Label 버튼 클릭 → $(if ($WantSelected) { '사용' } else { '미사용' })으로 변경"
+      $clicked = $true
+      $script:dgToggleClicked = $true
+    } else {
+      Write-RunLog "$($script:contentTag) $Label 버튼 클릭을 건너뜀 (커서 확인 실패) - 다음 회전에서 재시도"
+    }
+    # 마지막 회전까지 왔는데 아직 '클릭 직후 재확인'을 못 썼다면 1회전만 연장합니다
+    # (2026-08-02 실사고 - 재확인 없이 종료돼 게이트 정지. 연장 회전에서도 반대 상태로
+    # 읽히면 성공 처리 없이 기존 경고/$false 경로로 갑니다 - 리뷰 조건)
+    #
+    # $clickedRecheckDone 은 **클릭에 성공한 뒤**에만 켜지므로, 6회 모두 커서 확인으로
+    # 건너뛴 경우에도 연장이 열립니다. 의도한 대로입니다 - 그때는 '재확인'이 아니라 '클릭
+    # 기회 한 번'이 되고, 7회전에서 처음 클릭에 성공하면 재확인 없이 $false 로 끝나
+    # 호출부가 교차 검증을 하게 됩니다(안전한 방향). 조건을 클릭 성공으로 좁히면 오히려
+    # 그 마지막 기회가 사라집니다 (2026-08-09 6차 점검에서 확인).
     if ($setTry -eq $setTryMax -and $setTryMax -eq 6 -and -not $clickedRecheckDone) { $setTryMax = 7 }
     Start-Sleep -Milliseconds 1100
   }
   # 여기 도달: 클릭했는데도 계속 반대 상태로 읽히거나(설정이 안 먹힘), 클릭 전부터 계속 판별 불가
   $lastTextLog = $(if ($lastText) { $lastText } else { '(판독 없음)' })
-  Write-RunLog "[경고] $Label 상태를 설정값에 맞추지 못했습니다 (버튼 OCR: '$lastTextLog') - 현재 상태로 진행합니다"
+  # 문구는 **이 함수가 아는 사실까지만** 씁니다. '현재 상태로 진행합니다'는 커스텀 모드에서
+  # 거짓이었습니다 - 호출부(6247/6259/6334/6369/7085 등)가 소모량 교차 검증에 실패하면
+  # 반대 설정 입장을 막으려 곧바로 exit 4 로 정지합니다. 그러면 제보 로그가
+  # '진행한다더니 왜 멈췄지?'가 되어 다음 진단이 헛돕니다 (2026-08-09 7차 점검 -
+  # Wait-GameRestoredIfMinimized 와 같은 계열의 '한 호출부만 보고 결과를 단정한 문구').
+  Write-RunLog "[경고] $Label 상태를 설정값에 맞추지 못했습니다 (버튼 OCR: '$lastTextLog') - 이 상태 그대로 호출부가 판단합니다 (커스텀 항목이면 입장하지 않고 정지할 수 있습니다)"
   return $false
 }
 
@@ -6495,6 +6992,7 @@ function Invoke-NormalDungeonCycle {
       Start-Sleep -Seconds 2
       if ($script:screenCaptureFailing) {
         Test-SafeStopDuringCaptureFail
+        [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림 - 2026-08-09 7차 점검)
         $fieldDeadline = (Get-Date).AddSeconds(40)
         continue
       }
@@ -6616,6 +7114,7 @@ function Invoke-NormalDungeonCycle {
           Start-Sleep -Seconds 2
           if ($script:screenCaptureFailing) {
             Test-SafeStopDuringCaptureFail
+            [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림 - 2026-08-09 7차 점검)
             $floorDeadline = (Get-Date).AddSeconds(40)
             continue
           }
@@ -6684,6 +7183,7 @@ function Invoke-NormalDungeonCycle {
     Start-Sleep -Seconds 2
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
+      [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림 - 2026-08-09 7차 점검)
       $optionsDeadline = (Get-Date).AddSeconds(40)
       continue
     }
@@ -7118,6 +7618,7 @@ function Invoke-HuntingGroundCycle {
     Start-Sleep -Seconds 2
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
+      [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림 - 2026-08-09 7차 점검)
       $returnDeadline = (Get-Date).AddSeconds(40)
       continue
     }
@@ -7213,6 +7714,20 @@ function Invoke-AbyssPartyMemberCycle {
       while ($true) {
         if ((Get-Date) -ge $memberDeadline) {
           throw "파티장의 입장 시작을 기다리다 시간을 초과했습니다 (${memberWaitSeconds}초) - 파티 상태와 파티장 쪽 자동화를 확인해 주세요."
+        }
+        # 캡처가 끊긴 동안은 판독이 무의미하고, 그대로 돌면 게임이 죽어도 못 알아챈 채
+        # 최대 30분을 태운 뒤 코드 1로 끝납니다. 다른 대기 루프와 같은 동결 계약을 씁니다
+        # (공통 진입점 → 복구 탐침 → 다음 회전. 2026-08-10 10차 점검에서 누락 발견).
+        if ($script:screenCaptureFailing) {
+          Test-SafeStopDuringCaptureFail
+          [void](Test-CaptureRecovered -Game $Game)
+          # 이 프로젝트의 공통 계약은 '캡처 실패 중에는 제한 시간이 흐르지 않는다' 입니다
+          # (화면 복구 후 이어서 감지 - 플래그 선언부 주석). 10차에서 가드만 넣고 이 부분을
+          # 빠뜨려, 30분 화면 정지가 '파티장 대기 초과'라는 **엉뚱한 사유**로 코드 1이 됐습니다
+          # (2026-08-10 11차 점검). 다른 대기 루프처럼 한도를 다시 잽니다.
+          $memberDeadline = (Get-Date).AddSeconds($memberWaitSeconds)
+          Start-Sleep -Seconds 2
+          continue
         }
         [void](Invoke-PurchasePopupSweep -Game $Game)
         if (Test-InDungeonQuest -Game $Game) { break }
@@ -7828,12 +8343,37 @@ function Get-LifeTitleStripRegion {
 
 function Get-LifeProgressValue {
   # 채집 수량 표기('6/10')에서 '모은 개수'를 뽑습니다 (순수 - 진리표 대상). 못 읽으면 -1.
-  # 판독이 '0/0', '2/1' 처럼 튀는 일이 잦아(실측) 분모는 신뢰하지 않고 분자만 씁니다.
+  #
+  # 분모는 **목표값으로 곧바로 믿지 않습니다** - '0/0', '2/1' 처럼 튀는 일이 잦아 목표는
+  # 표를 쌓아 합의로 정합니다(Get-LifeQuestGoalConsensus). 다만 양수로 읽힌 분모는
+  # **그 프레임 자체의 모순**('분자 > 분모')을 걸러내는 데는 쓸 수 있습니다.
+  #
+  # ★ 2026-08-10 실기 실사고: 나무 베기(목표 10) 두 번째 판독이 `41/10` 으로 나왔습니다.
+  #   분자에 아무 교차 검사가 없어 41이 $progressMaxCount 에 박혔고, 그 하나로 두 곳이 깨졌습니다.
+  #   ① 진행 없음 타이머가 리셋 불가 - 이후 2,3,4… 가 41을 못 넘어 deadline 이 고정됩니다.
+  #      이번엔 3분 만에 다 캐서 피했지만, 느린 대상(젖소·광맥·뾰족 나무)이면 그대로
+  #      '[완료] 채집 진행이 N초 동안 없었습니다' 로 조건부 정지합니다.
+  #   ② 완료 로그가 틀린 수량 - 목표 합의값은 10으로 정확했는데 `10 -ge 41` 이 거짓이라
+  #      폴백으로 떨어져 '(마지막 판독 41개) 완료' 가 찍혔습니다(사용자가 즉시 지적).
+  #
+  #   실측 20건: 1/10, 41/10, 1/10, 2/10, 2/1, 2/10, 2/1, 3/10, 3/0, 3/10,
+  #              3/1, 3/10, 4/10, 5/10, 6/1, 6/10, 4/10, 7/10, 8/10, 9/10
+  #   → 분모는 /1, /0 으로 5회 깨졌고 분자는 41 한 번 위로, 6→4 한 번 아래로 흔들렸습니다.
+  #   아래로 흔들리는 것은 호출부가 최댓값만 취해 이미 무해합니다. **위로 튀는 것만 위험**합니다.
+  #
+  # 왜 이 방법인가 (2026-08-10 교차 리뷰에서 대안 2개를 접었습니다):
+  #   - 목표 합의값과 비교: 사고가 난 시점이 **두 번째 판독**이라 표가 아직 비어 늦습니다.
+  #   - 이전 최댓값 대비 급등 제한: '3초 폴링 사이에 몇 개까지 캘 수 있나' 라는 별도 가정을
+  #     들여옵니다. 아래 검사는 **그 프레임 안의 모순**만 보므로 시간·이전 상태에 안 기댑니다.
+  # 분모가 0이면(예: '3/0') 검사할 수 없으므로 분자를 그대로 씁니다 - 실측에서 분모만
+  # 깨져도 분자는 주변 정상 판독과 일치했고, 여기서 버리면 멀쩡한 신호를 잃습니다.
   param([string]$CountText)
   $normalized = ([string]$CountText) -replace '\s', ''
   if ($normalized -notmatch '(\d{1,3})/(\d{1,3})') { return -1 }
   $collected = [int]$Matches[1]
+  $goal = [int]$Matches[2]
   if ($collected -lt 0 -or $collected -gt 999) { return -1 }
+  if ($goal -ge 1 -and $collected -gt $goal) { return -1 }
   return $collected
 }
 
@@ -8108,8 +8648,11 @@ function Test-CaptureRecovered {
   # 실기에서 늦게 드러났을 사고)
   $probeCapture = Get-GameRegionCapture -Game $Game -ReferenceX 0 -ReferenceY 0 `
     -RegionWidth 40 -RegionHeight 40 -Scale 1
-  # 캡처가 $null 이면 실패입니다. GetWindowRect 실패 경로는 플래그를 세우지 않고 $null 만
-  # 돌려주므로, 플래그만 보면 '정상'으로 통과합니다 (리뷰 지적 - 클릭 직전 게이트가 뚫림)
+  # 캡처가 $null 이면 실패입니다. 반환값을 직접 보는 이유는 예전에 GetWindowRect 실패 경로가
+  # 플래그를 세우지 않고 $null 만 돌려줘, 플래그만 보면 '정상'으로 통과했기 때문입니다
+  # (리뷰 지적 - 클릭 직전 게이트가 뚫림). 2026-08-10 9차 점검에서 그 경로도
+  # Register-CaptureFailure 를 부르게 고쳤지만, **반환값 검사는 그대로 둡니다** -
+  # 플래그 하나에만 기대면 새 실패 원인이 생길 때마다 같은 구멍이 다시 열립니다.
   if (-not $probeCapture) { return $false }
   $probeCapture.Bitmap.Dispose()
   return (-not $script:screenCaptureFailing)
@@ -8312,6 +8855,9 @@ function Invoke-LifeListScroll {
   # 게임 전면 + 커서 확인 후에만 입력하고, 실제 드래그 수행 여부를 반환합니다.
   param([System.Diagnostics.Process]$Game, [int]$Steps)
   if ($Steps -eq 0) { return $false }
+  # 이 함수도 아래에서 Get-ScaledScreenPoint 를 직접 부르므로 최소화 복원 계약에 포함합니다
+  # (Click-GamePoint 에만 넣으면 여기서 예외가 그대로 나가 채집 회차가 죽습니다 - 5차 점검).
+  Wait-GameRestoredIfMinimized -Game $Game
   if (-not (Test-GameForeground -Game $Game)) {
     Focus-Game -Game $Game
     Start-Sleep -Milliseconds 400
@@ -8435,12 +8981,37 @@ function Get-LifeQuestState {
 }
 
 function Get-LifeQuestCountText {
-  # 로그 표시용 N/10 (상태 전이에는 사용하지 않음 - 사용자 합의)
+  # 퀘스트 추적기 첫 줄의 채집 수량('6/10')을 읽습니다.
+  #
+  # ※ 이 값은 로그 표시뿐 아니라 **진행 타이머 판정에도 쓰입니다**(Invoke-LifeGatherCycle 의
+  #   $progressMaxCount/$progressDeadline). 예전 주석은 '로그 표시용, 상태 전이에는 사용하지
+  #   않음' 이었는데, 2026-08-08 에 한도를 '총 시간'에서 '진행이 멈춘 시간'으로 바꾸면서
+  #   판정 경로로 들어왔고 주석만 남아 있었습니다 (2026-08-10 교차 리뷰에서 적발).
+  #
+  # ★ **마지막** 매치를 취합니다 (2026-08-10 실기 실측).
+  #   제목 '채집 장소 탐색' 이 깨지면서 판독문 **앞부분**에 숫자 조각이 생깁니다. 첫 매치를
+  #   취하면 그 노이즈가 진짜 수량을 밀어냅니다 - 실기에서 `41/10`(실제 1), `40/10`(실제 0),
+  #   `1146/10`(실제 5)가 나왔습니다. 진짜 수량은 제목 뒤에 오므로 **항상 판독문 맨 뒤**입니다.
+  #
+  #   같은 캡처(실제 4/10)를 배율만 바꿔 판독한 실측 - 앞 조각이 매번 다르게 생깁니다:
+  #     s2 '채집장소타색•f41/:;:')•로!결결§치재테4/10'   s3 '수해집장소다색쥐T11/`,Qb'')…4/10'
+  #     s5 '+해집장소타색4d국t」蜃최처寸4/10'            s6 '채집장소타색?한曇긔卍빈4/10'
+  #
+  #   회귀 위험 없음: 저장소 흐름 캡처 11장을 배율 3·5로 전수 판독한 결과 **매치가 있는 12건
+  #   모두 매치 1개뿐**이라 첫/마지막이 동일했습니다. 즉 정상 화면에서는 동작이 안 바뀌고,
+  #   노이즈가 섞인 화면에서만 개선됩니다.
+  #
+  #   이 함수가 안전한 전제는 $rgQuestTracker 가 **추적기 첫 줄만** 덮는다는 계약입니다
+  #   (정의부 주석 참고). 영역 높이를 넓히면 다음 퀘스트의 'N/N' 이 뒤에 붙어 마지막 매치가
+  #   오히려 틀려집니다 - 넓히려면 이 함수를 함께 재설계할 것.
   param([System.Diagnostics.Process]$Game)
   $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
       -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
-  $countMatch = [regex]::Match([string]$questText, '(\d+)\s*/\s*(\d+)')
-  if ($countMatch.Success) { return ('{0}/{1}' -f $countMatch.Groups[1].Value, $countMatch.Groups[2].Value) }
+  $countMatches = [regex]::Matches([string]$questText, '(\d+)\s*/\s*(\d+)')
+  if ($countMatches.Count -gt 0) {
+    $countMatch = $countMatches[$countMatches.Count - 1]
+    return ('{0}/{1}' -f $countMatch.Groups[1].Value, $countMatch.Groups[2].Value)
+  }
   return ''
 }
 
@@ -8594,6 +9165,14 @@ function Test-LifeWindowOpen {
   # - 탐지와 클릭이 같은 환산을 왕복해야 '판정은 고쳤는데 클릭이 빗나가는' 다음 사고를 막습니다.
   param([System.Diagnostics.Process]$Game)
   if ($script:screenCaptureFailing) { return $false }
+  # ★ 판독 전 커서 대피. 이 판정은 **클릭 지점이 곧 판정 영역**이라 가림에 가장 취약합니다:
+  #   Invoke-LifeWindowCloseClick 이 글리프 중심(= X 의 정중앙)을 누르면 커서가 거기 남고,
+  #   1.2초 뒤 이 함수가 같은 자리를 다시 봅니다. 게임이 그린 커서가 X 를 덮으면 글리프 서명이
+  #   무너지고 4점 폴백도 커서 윤곽 때문에 탈락해 **'닫혔다'는 거짓 음성**이 됩니다.
+  #   그러면 08-08 제보 핫픽스로 넣은 'C 입력 보류' 가드가 사실상 죽습니다 (7차 점검).
+  #   대피는 전투 4곳에만 배선돼 있었고 생활은 빠져 있었습니다. 이미 창 밖이면 무동작이라
+  #   비용이 없고, 클릭 '직후'가 아니라 '판독 직전' 대피라 클릭 무효화 규칙과도 무관합니다.
+  Move-CursorOutsideGame -Game $Game
   $glyphHit = Get-LifeCloseGlyphHit -Game $Game
   if ($glyphHit.Found) {
     $script:lifeCloseGlyphHit = $glyphHit
@@ -8638,6 +9217,13 @@ function Close-LifeBlockingDialog {
   # 반환: 'disconnected' / 'material' / 'closed' / 'none'
   param([System.Diagnostics.Process]$Game)
   if ($script:screenCaptureFailing) { return 'none' }
+  # ★ 첫 판독에도 대피가 필요합니다. 7차에서 재판독 2곳에만 넣었더니 비교의 **기준값**이
+  #   여전히 커서에 가려질 수 있었습니다: 첫 판독이 깨지면 ①강한 조합 검사가 통째로 실패해
+  #   '연결 끊김'/'준비물 부족'을 아예 못 잡고 'none' 으로 빠지거나 ②아래 `-eq` 비교에서
+  #   팝업이 남아 있는데도 문자열이 달라 '닫았습니다'(closed)가 나갑니다. 7차 주석이 막으려던
+  #   거짓 성공을 반대 방향으로 남겨 둔 셈이었습니다 (2026-08-10 8차 점검).
+  #   이 함수 진입 시점에는 직전 입력이 이미 처리된 뒤라 '클릭 직후 대피 금지'와 무관합니다.
+  Move-CursorOutsideGame -Game $Game
   # 판정은 팝업 본문이 있는 '중앙 한 영역'만 씁니다 - 서로 다른 위치의 낱말을 이어붙이면
   # 정상 화면의 '실패'/'연결' 같은 단어가 조합돼 오판합니다 (리뷰 조건)
   $dialogText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
@@ -8688,11 +9274,18 @@ function Close-LifeBlockingDialog {
   }
   # 오류 팝업은 '실제로 사라졌는지' 확인한 뒤에만 처리됐다고 봅니다 (리뷰 조건).
   # 안 닫혔으면 남은 예비 버튼 위치로 한 번 더 시도합니다 (확인/취소 위치가 팝업마다 다름)
+  # ★ 재판독 전 커서 대피 (7차 점검). 방금 누른 닫기 좌표 (636,618)/(636,453) 가 이 판독
+  #   영역(380,300)~(900,500) 안이거나 그 언저리라, 커서가 남으면 본문 글자가 덮여 문자열이
+  #   달라집니다. 그러면 `$afterText -ne $dialogText` 가 성립해 **안 닫혔는데 '닫았습니다'**
+  #   로 기록되고, 뒤이은 C 입력이 남은 모달에 막혀도 로그는 깨끗합니다.
+  #   앞에 2초 대기가 있어 클릭은 이미 처리된 뒤라 '클릭 직후 대피 금지'와 무관합니다.
+  Move-CursorOutsideGame -Game $Game
   $afterText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
       -RegionWidth 520 -RegionHeight 200 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if ($afterText -eq $dialogText) {
     Click-GamePoint -Game $Game -ReferenceX 636 -ReferenceY 453
     Start-Sleep -Seconds 2
+    Move-CursorOutsideGame -Game $Game
     $afterText = (Get-GameRegionOcrText -Game $Game -ReferenceX 380 -ReferenceY 300 `
         -RegionWidth 520 -RegionHeight 200 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   }
@@ -8773,7 +9366,15 @@ function Close-LifeOpenWindows {
     if (-not ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game))) { break }
     Focus-Game -Game $Game
     Invoke-LifeWindowCloseClick -Game $Game
-    Write-RunLog "[생활] 시작 정리: 정보/스킬 창 닫기(X) - $closeTry 회차"
+    # 클릭이 **실제로 나갔을 때만** '눌렀다'로 씁니다. Click-ScreenPoint 는 커서 확인 실패 시
+    # 클릭을 건너뛰는데, 그것까지 '닫기(X)'로 기록하면 뒤이은 '아직 안 닫힘' 로그와 겹쳐
+    # "클릭은 나갔는데 게임이 안 먹었다"는 오진을 남깁니다. 5~7차가 전투 쪽에서 없앤 계약이
+    # 생활에만 빠져 있었습니다 (2026-08-10 8차 점검).
+    if ($script:lastClickPerformed) {
+      Write-RunLog "[생활] 시작 정리: 정보/스킬 창 닫기(X) - $closeTry 회차"
+    } else {
+      Write-RunLog "[생활] 시작 정리: 커서 확인이 안 돼 창 닫기(X) 클릭을 건너뜀 - $closeTry 회차"
+    }
     Start-Sleep -Milliseconds 1200
     $closed = $true
   }
@@ -8808,13 +9409,18 @@ function Invoke-LifeMenuSequence {
     if (Test-LifeWindowOpen -Game $Game) {
       Focus-Game -Game $Game
       Invoke-LifeWindowCloseClick -Game $Game
-      Write-RunLog '[생활] 잔존 창 감지 - X로 닫고 내 정보를 새로 엽니다'
+      # 실제 클릭일 때만 '닫고'라고 씁니다 (위 시작 정리와 같은 계약 - 8차 점검)
+      if ($script:lastClickPerformed) {
+        Write-RunLog '[생활] 잔존 창 감지 - X로 닫고 내 정보를 새로 엽니다'
+      } else {
+        Write-RunLog '[생활] 잔존 창 감지 - 커서 확인이 안 돼 X 클릭을 건너뜀 (닫힘 확인에서 판단)'
+      }
       Start-Sleep -Milliseconds 1200
       # 닫힘을 확인하고 나서 C 를 누릅니다. 아직 열려 있는데 C 를 보내면 무시돼 재시도 1회를
       # 통째로 버립니다 (위 실측). 닫힘 확인 실패는 사이클 실패로 돌려 다음 회차가 다시
       # 시도하게 둡니다 - 여기서 억지로 C 를 눌러 봐야 같은 자리에서 소진될 뿐입니다.
       if (Test-LifeWindowOpen -Game $Game) {
-        Write-RunLog '[생활] 창이 아직 닫히지 않아 C 입력을 보류합니다 - 재시도'
+        Write-RunLog '[생활] 창이 아직 닫히지 않아 C 입력을 보류합니다 - 이번 회전 중단(남은 회전이 있으면 재시도)'
         Write-LifeDiagnostics -Game $Game -Context '창 닫기 확인 실패'
         return $false
       }
@@ -8826,7 +9432,7 @@ function Invoke-LifeMenuSequence {
       if (Test-LifeInfoScreen -Game $Game) { $infoSeen = $true; break }
     }
     if (-not $infoSeen) {
-      Write-RunLog '[생활] 내 정보 화면이 열리지 않았습니다 - 재시도'
+      Write-RunLog '[생활] 내 정보 화면이 열리지 않았습니다 - 이번 회전 중단(남은 회전이 있으면 재시도)'
       Write-LifeDiagnostics -Game $Game -Context '내 정보 열림 실패'
       return $false
     }
@@ -8848,7 +9454,7 @@ function Invoke-LifeMenuSequence {
     if (-not $infoStillVisible) { $menuMoved = $true; break }
   }
   if (-not $menuMoved) {
-    Write-RunLog "[생활] '생활 스킬' 화면 전환을 확인하지 못했습니다 - 재시도"
+    Write-RunLog "[생활] '생활 스킬' 화면 전환을 확인하지 못했습니다 - 이번 회전 중단(남은 회전이 있으면 재시도)"
     Write-LifeDiagnostics -Game $Game -Context '생활 스킬 전환 실패'
     return $false
   }
@@ -8873,7 +9479,7 @@ function Invoke-LifeMenuSequence {
     Start-Sleep -Milliseconds 900
   }
   if (-not $skillVerified) {
-    Write-RunLog "[생활] '$([string]$SkillEntry.Name)' 선택을 확인하지 못했습니다 (대상 목록 미검증) - 재시도"
+    Write-RunLog "[생활] '$([string]$SkillEntry.Name)' 선택을 확인하지 못했습니다 (대상 목록 미검증) - 이번 회전 중단(남은 회전이 있으면 재시도)"
     Write-LifeDiagnostics -Game $Game -Context '스킬 선택 검증 실패'
     return $false
   }
@@ -8921,11 +9527,33 @@ function Invoke-LifeMenuSequence {
       # 판독에 성공한 회차만 예산(12회)을 소모합니다 - 캡처 플래핑으로 회차가 깎이면
       # 화면이 멀쩡할 때도 정렬을 다 못 하고 넘어갑니다 (2026-08-07 리뷰 지적)
       $topTries = 0
+      $topScrollFails = 0
       while ($topTries -lt 12) {
         # 최상단 정렬도 사이클 한도 안에서만 (드래그 1회 약 2초 - 12회면 한도를 넘길 수 있음)
         if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 목록 정렬 중단'; return $false }
         if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline $Deadline -Context '목록 정렬')) { return $false }
-        if (-not (Invoke-LifeListScroll -Game $Game -Steps 1)) { break }
+        if (-not (Invoke-LifeListScroll -Game $Game -Steps 1)) {
+          # ★ 드래그 '전송 실패'는 목록이 끝났다는 뜻이 아니라 **일시 실패**입니다(전면화 실패
+          #   또는 커서 확인 실패). 그런데 예전에는 곧바로 break 해서 정렬을 포기한 채 아래로만
+          #   훑는 탐색으로 넘어갔고, 그 탐색은 '최상단에서 시작'이 전제라 현재 화면보다 위에
+          #   있는 대상은 끝까지 못 찾아 '[오류] 목록에서 찾지 못했습니다' + exit 4 로 무인
+          #   반복 전체가 멈췄습니다. 사용자가 마우스를 잠깐 움직이는 것만으로도 트리거됩니다.
+          #   아래 탐색 루프는 같은 $false 를 '다음 회차에서 재시도'로 다루고 있어(9293 부근)
+          #   계약이 여기서만 어긋나 있었습니다 (2026-08-10 8차 점검).
+          $topScrollFails++
+          if ($topScrollFails -ge 3) {
+            # ★ 여기서 break 해서 '정렬 없이' 진행하면, 8차가 없애려던 미발견 exit 4 경로가
+            #   그대로 남습니다 - 아래 탐색은 **최상단에서 시작**이 전제라 위쪽 대상을 끝까지
+            #   못 찾습니다. 정렬이 안 되면 이번 회전을 접고 **다음 회전에서 다시** 시도하는
+            #   것이 맞습니다(메뉴 시퀀스 3회전 계약). 그래야 실패 사유도 정확히 남습니다
+            #   (2026-08-10 9차 점검 - 8차 G 가 완화만 하고 남겨 둔 부분).
+            Write-RunLog '[생활] 목록 정렬 드래그를 3회 연속 보내지 못했습니다 - 이번 회전 중단(남은 회전이 있으면 재시도)'
+            return $false
+          }
+          Start-Sleep -Milliseconds 600
+          continue
+        }
+        $topScrollFails = 0
         $topRows = @(Get-LifeTargetRows -Game $Game -Scale 4)
         # 캡처가 끊겨 0행이면 '목록이 사라진 것'이 아니라 화면이 안 그려진 것입니다 (2026-08-07 감사)
         if ($topRows.Count -eq 0 -and $script:screenCaptureFailing) { continue }
@@ -9042,7 +9670,7 @@ function Invoke-LifeMenuSequence {
     if ($detailMatched) { $detailOk = $true; break }
     if ($detailWrongCount -ge 2) {
       # 두 스케일 모두 '정상 판독인데 다른 대상' = 오클릭 확정 (호출부가 정리 후 재시도)
-      Write-RunLog "[생활] 다른 대상의 상세 팝업입니다 (판독 '$detailText', 목표 '$TargetName') - 재시도"
+      Write-RunLog "[생활] 다른 대상의 상세 팝업입니다 (판독 '$detailText', 목표 '$TargetName') - 이번 회전 중단(남은 회전이 있으면 재시도)"
       return $false
     }
     if ($detailUnreadableCount -ge 2) {
@@ -9052,7 +9680,7 @@ function Invoke-LifeMenuSequence {
       # 추론이 빗나갔을 때 다른 대상을 채집하게 됨 (리뷰 블로커)
       if ($targetRowSource -eq 'order') {
         # 앵커 2개짜리 약한 추론은 이름 근거가 없어 통과시키지 않습니다 (다른 대상 채집 방지)
-        Write-RunLog "[생활] 추정 행의 상세 제목을 확인하지 못했습니다 (판독 '$detailText') - 재시도"
+        Write-RunLog "[생활] 추정 행의 상세 제목을 확인하지 못했습니다 (판독 '$detailText') - 이번 회전 중단(남은 회전이 있으면 재시도)"
         return $false
       }
       if ($targetRowSource -eq 'order-strong') {
@@ -9071,7 +9699,7 @@ function Invoke-LifeMenuSequence {
           $detailOk = $true
           break
         }
-        Write-RunLog "[생활] 순서로 찾은 행의 상세를 확인하지 못했습니다 (판독 '$detailText') - 재시도"
+        Write-RunLog "[생활] 순서로 찾은 행의 상세를 확인하지 못했습니다 (판독 '$detailText') - 이번 회전 중단(남은 회전이 있으면 재시도)"
         return $false
       }
       Write-RunLog "[생활] 상세 제목 판독이 깨졌지만(판독 '$detailText') 대상 행 일치 근거로 진행합니다"
@@ -9081,7 +9709,7 @@ function Invoke-LifeMenuSequence {
     Start-Sleep -Milliseconds 900
   }
   if (-not $detailOk) {
-    Write-RunLog "[생활] 대상 상세 팝업을 확인하지 못했습니다 - 재시도"
+    Write-RunLog "[생활] 대상 상세 팝업을 확인하지 못했습니다 - 이번 회전 중단(남은 회전이 있으면 재시도)"
     Write-LifeDiagnostics -Game $Game -Context '상세 팝업 확인 실패'
     return $false
   }
@@ -9105,7 +9733,7 @@ function Invoke-LifeMenuSequence {
       -RegionWidth $rgLifeFindLink[2] -RegionHeight $rgLifeFindLink[3] -Scale 3 -Engine $ocrKoreanEngine)
   $linkWord = Select-LifeFindNearestWord -Words $linkWords
   if ($null -eq $linkWord) {
-    Write-RunLog "[생활] '가까운 위치 찾기' 링크를 찾지 못했습니다 - 재시도"
+    Write-RunLog "[생활] '가까운 위치 찾기' 링크를 찾지 못했습니다 - 이번 회전 중단(남은 회전이 있으면 재시도)"
     Write-LifeDiagnostics -Game $Game -Context '위치 찾기 링크 미발견'
     return $false
   }
@@ -9173,19 +9801,19 @@ function Invoke-LifeMenuSequence {
         -RegionWidth $rgLifeFindLink[2] -RegionHeight $rgLifeFindLink[3] -Scale 3 -Engine $ocrKoreanEngine)
     $linkWord = Select-LifeFindNearestWord -Words $linkWords
     if ($null -eq $linkWord) {
-      Write-RunLog "[생활] 재확인 후 '가까운 위치 찾기' 링크를 다시 찾지 못했습니다 - 재시도"
+      Write-RunLog "[생활] 재확인 후 '가까운 위치 찾기' 링크를 다시 찾지 못했습니다 - 이번 회전 중단(남은 회전이 있으면 재시도)"
       return $false
     }
     # 같은 팝업 판정: 링크 판독의 제목과 링크 Y 가 첫 프레임과 같아야 합니다. 제목이 안 읽히는
     # 대상은 양쪽 다 빈 문자열이라 링크 Y 가 근거가 됩니다 (대상마다 링크 Y 가 다름).
     $finalFrameTitle = Get-LifeDetailTitleFromWords -Words $linkWords
     if (($finalFrameTitle -ne $firstFrameTitle) -or ([Math]::Abs([int]$linkWord.Y - $firstFrameLinkY) -gt 6)) {
-      Write-RunLog "[생활] 재확인 중에 팝업이 바뀌었습니다 (제목 '$firstFrameTitle' → '$finalFrameTitle') - 재시도"
+      Write-RunLog "[생활] 재확인 중에 팝업이 바뀌었습니다 (제목 '$firstFrameTitle' → '$finalFrameTitle') - 이번 회전 중단(남은 회전이 있으면 재시도)"
       return $false
     }
   }
   if ($linkVerdict -eq 'other') {
-    Write-RunLog "[생활] 클릭 직전 재확인에서 다른 대상의 팝업입니다 (제목 '$linkTitle', 목표 '$TargetName') - 재시도"
+    Write-RunLog "[생활] 클릭 직전 재확인에서 다른 대상의 팝업입니다 (제목 '$linkTitle', 목표 '$TargetName') - 이번 회전 중단(남은 회전이 있으면 재시도)"
     Write-LifeDiagnostics -Game $Game -Context '클릭 직전 대상 불일치'
     return $false
   }
@@ -9199,7 +9827,13 @@ function Invoke-LifeMenuSequence {
 
 function Invoke-LifeGatherCycle {
   # 생활(채집) 1사이클: 메뉴 사이클 → 퀘스트 생성 확인 → 존재 대기 → 소멸 = 완료 (exit 0).
-  # 전체 deadline = life.gatherWaitSeconds (이동+전투+채집 포함 - 기본 600초)
+  # 한도는 **단계마다 다릅니다** (2026-08-08 에 gatherWaitSeconds 의 의미가 '총 시간'에서
+  # '진행이 멈춘 시간'으로 바뀐 뒤로 그렇습니다 - 이 주석은 그 이전 서술이었습니다):
+  #  - 메뉴/퀘스트 생성 단계: $cycleDeadline = life.gatherWaitSeconds (기본 600초)
+  #  - 채집 대기 단계: 수량이 늘 때마다 되감기는 $progressDeadline
+  #                   + 절대 상한 $lifeGatherHardCapSeconds (3600초)
+  # 즉 1사이클 최악 소요는 600초가 아니라 약 600+3600초입니다. '한 사이클 = 600초'로 가정하고
+  # GUI 타이머·회차 계상·중지 대기를 설계하면 실제와 크게 어긋납니다 (2026-08-10 11차 점검).
   param([System.Diagnostics.Process]$Game)
   # 커스텀 항목 토큰이 깨진 채로는 시작하지 않습니다 - config 의 슬라이더 값으로 대신 돌면
   # 사용자가 리스트에 넣지 않은 대상을 캐게 되고, 그 사이 남의 채집을 밀어낼 수 있습니다
@@ -9218,7 +9852,9 @@ function Invoke-LifeGatherCycle {
   Write-RunLog "[생활] 자동화 시작: $([string]$skillEntry.Name) - $lifeTargetName (진행이 ${lifeGatherWait}초 없으면 정지 / 절대 상한 ${lifeGatherHardCapSeconds}초)"
   $questSeen = $false
   $absentStreak = 0
-  $lastCountText = ''
+  # 진행 로그는 $progressMaxCount 갱신에 묶여 있습니다 (2026-08-10) - 별도 '마지막 판독
+  # 문자열' 변수는 쓰지 않습니다. 문자열 비교는 분모/분자가 흔들릴 때마다 같은 진행을
+  # 여러 줄로 남겼습니다.
   # 메뉴 사이클이 확정한 상세의 요구 레벨 @{ Target; Level } (실패 안내용 - 매 사이클 초기화)
   $script:lifeLastDetail = $null
   # 시작 상태 복구 (준비 단계): 열린 생활 창 정리 → 출석/이벤트 화면 정리 → 기존 퀘스트 확인.
@@ -9252,6 +9888,12 @@ function Invoke-LifeGatherCycle {
   while ($initialProbes -lt 20) {
     if ((Get-Date) -gt $cycleDeadline) { break }
     if ($script:screenCaptureFailing) {
+      # ★ 동결 구간의 **공통 진입점**을 반드시 거칩니다 (7차 점검에서 누락 적발).
+      #   3차 점검이 세운 계약은 "캡처 실패로 도는 모든 자리는 여기를 지난다" 인데,
+      #   `while ($script:screenCaptureFailing)` 형태 7곳만 배선하고 이 `if … continue`
+      #   형태 2곳(초기 확인 / 다른 대상 대기)이 빠져 있었습니다. 그 사이에는 F9 안전 중지가
+      #   소비되지 않고 게임이 죽어도 못 알아채, 채집 한도(권장 1200초)까지 조용히 돕니다.
+      Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 3
       [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침이 없으면 화면이 돌아와도 못 알아챔
       # 캡처 실패는 판독 시도를 소모하지 않습니다 - 소모하면 잠깐의 화면 정지가 20회를 다 태우고
@@ -9344,21 +9986,30 @@ function Invoke-LifeGatherCycle {
       # (2026-08-07 사용자 실기 관찰: 5초 만에 끝났다고 판정하고 다른 대상을 누름)
       $otherQuestGone = $false
       $otherGoneStreak = 0
-      $otherLastCount = ''
+      # 이전 채집의 진행 로그도 최댓값 갱신에만 남깁니다 (아래 주석 참고). -1 로 시작해야
+      # 첫 판독이 0개('0/10')여도 한 줄이 남습니다.
+      $otherProgressMax = -1
       $otherWaitProbes = 0
       while ($otherWaitProbes -lt 60) {        # 3초 간격 - 상한은 약 3분 (사이클 한도 안에서)
         if ((Get-Date) -gt $cycleDeadline) { break }
         Start-Sleep -Seconds 3
         if ($script:screenCaptureFailing) {
+          # 위 초기 확인 루프와 같은 이유로 공통 진입점을 거칩니다 (7차 점검)
+          Test-SafeStopDuringCaptureFail
           [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림)
           continue      # 캡처 실패 회차는 예산을 소모하지 않습니다 (3분 정전이 exit 4 가 되던 문제)
         }
         $otherWaitProbes++
         # 남은 수량을 보여 줍니다 - 9/10 이면 곧 끝난다는 걸 로그로 알 수 있게 (사용자 요청)
+        # 내 채집 로그(아래 present 분기)와 **같은 게이트**입니다 - 최댓값이 갱신될 때만
+        # 남깁니다. 문자열 비교였을 때는 분모가 흔들릴 때마다('9/10'→'9/1'→'9/10') 같은
+        # 진행이 여러 줄로 찍혔습니다 (2026-08-10 사용자 요청).
+        # 여기는 판정에 쓰이지 않으므로 전용 변수만 쓰고 타이머와는 연결하지 않습니다.
         $otherCount = Get-LifeQuestCountText -Game $Game
-        if ($otherCount -and $otherCount -ne $otherLastCount) {
-          Write-RunLog "[생활] 이전 채집 진행 중: $otherCount"
-          $otherLastCount = $otherCount
+        $otherCountValue = Get-LifeProgressValue -CountText $otherCount
+        if ($otherCountValue -gt $otherProgressMax) {
+          $otherProgressMax = $otherCountValue
+          if ($otherCount) { Write-RunLog "[생활] 이전 채집 진행 중: $otherCount" }
         }
         # 'absent'(게임플레이 HUD 가 보이는데 퀘스트가 없음) 일 때만 소멸로 셉니다.
         # 맵 이동 로딩 화면에서는 퀘스트도 HUD 도 사라져 'unknown' 이 되는데, 이걸 소멸로
@@ -9438,7 +10089,7 @@ function Invoke-LifeGatherCycle {
           $menuOk = $true
           break
         }
-        Write-RunLog '[생활] 채집 퀘스트가 생성되지 않았습니다 - 화면 정리 후 재시도'
+        Write-RunLog '[생활] 채집 퀘스트가 생성되지 않았습니다 - 화면 정리 (남은 회전이 있으면 재시도)'
         # 링크를 눌렀는데 퀘스트가 안 생기는 원인은 화면에만 남습니다 (첫 회차만 캡처)
         if ($menuTry -eq 1) { Write-LifeDiagnostics -Game $Game -Context '퀘스트 생성 실패' }
         # 다른 대상의 채집 퀘스트가 아직 진행 중이면 새 퀘스트를 만들 수 없습니다
@@ -9550,20 +10201,35 @@ function Invoke-LifeGatherCycle {
         Write-RunLog '[완료] 게임 서버 연결이 끊어졌습니다 - 재접속 후 다시 시작해 주세요 (조건부 정지)'
         exit 4
       }
+      # ★ 준비물 부족은 '처리했으니 계속'이 아니라 **더 진행할 수 없음**입니다. 채집 도중
+      #   빈 병/채집망이 떨어지면 수량이 더는 늘지 않으므로, 여기서 continue 하면 진행 없음
+      #   한도(권장 1200초)를 통째로 태운 뒤 "진행이 없었습니다 … '채집 대기'를 늘려 주세요"
+      #   라는 **정반대 안내**로 끝납니다. 같은 함수의 다른 두 호출부(메뉴 진입 전 $dialogState /
+      #   퀘스트 생성 실패 후 $questFailDialog)는 이미 즉시 exit 4 + 품목 안내로 처리하고 있어
+      #   여기만 계약이 어긋나 있었습니다
+      #   (주석에 절대 줄 번호를 적으면 편집마다 밀려 엉뚱한 코드를 가리킵니다 - 11차 점검)
+      #   (2026-08-10 8차 점검).
+      if ($waitDialogState -eq 'material') {
+        Write-RunLog "[완료] '$lifeTargetName' 채집 중에 준비물이 떨어졌습니다$(Format-LifeMissingItemNotice -ItemText ([string]$script:lifeMissingItemText)) - 조건부 정지"
+        exit 4
+      }
       if ($waitDialogState -ne 'none') { continue }
     }
     if ($questState -eq 'present') {
       $absentStreak = 0
       $countText = Get-LifeQuestCountText -Game $Game
-      if ($countText -and $countText -ne $lastCountText) {
-        Write-RunLog "[생활] 채집 진행: $countText"
-        $lastCountText = $countText
-      }
-      # 모은 개수가 '지금까지 본 최댓값'을 넘었을 때만 진행으로 인정하고 한도를 다시 잽니다
+      # 모은 개수가 '지금까지 본 최댓값'을 넘었을 때만 진행으로 인정하고 한도를 다시 잽니다.
+      # ★ 로그도 **같은 게이트**를 씁니다 (2026-08-10 사용자 요청 - "9/10 이면 한 번만").
+      #   예전에는 판독 **문자열 전체**를 이전 줄과 비교해서, 실제 진행은 그대로인데
+      #   분모만 흔들려도('9/10' → '9/1' → '9/10') 새 줄이 세 번 찍혔습니다. 분자가 아래로
+      #   흔들리는 경우('6/10' → '4/10' → '6/10')도 마찬가지였습니다.
+      #   진행은 단조 증가하므로 **최댓값이 갱신될 때만** 남기면 한 개당 정확히 한 줄이 되고,
+      #   모순 프레임(Get-LifeProgressValue = -1)은 게이트를 못 넘어 로그에서도 사라집니다.
       $countValue = Get-LifeProgressValue -CountText $countText
       if ($countValue -gt $progressMaxCount) {
         $progressMaxCount = $countValue
         $progressDeadline = (Get-Date).AddSeconds($lifeGatherWait)
+        if ($countText) { Write-RunLog "[생활] 채집 진행: $countText" }
       }
       # 목표 개수(분모)도 모읍니다 - 완료 로그에 '마지막으로 본 수량'이 아니라 '목표'를
       # 적기 위함입니다 (아래 완료 지점 주석 참고). 한 회차 판독은 못 믿으므로 표를 쌓습니다.
@@ -9789,7 +10455,14 @@ try {
   # 던전 안/클리어·결과 화면이면 해당 판은 목록 항목으로 계상하지 않고 선택 화면까지만 정리한
   # 뒤 코드 10으로 본 항목을 다시 시작합니다. 오류 재시작은 정상적으로 현재 항목에 계상합니다.
   $startClearDetected = Test-DungeonClearPrompt -Game $game
-  $startInsideDetected = Test-DungeonEntered -Game $game
+  # ★ '어비스 안'을 HUD 하나로 판정하면 **필드도 안으로 오판**합니다. Test-DungeonEntered 는
+  #   Test-HomeEndEscHud 그 자체인데(3392~3399), 그 HUD 는 게임플레이 화면이면 필드에서도
+  #   보입니다. 그래서 복구 전용 회차가 필드에서 시작하면 아래 가드가 걸려 무조건 오류로
+  #   끝나고(코드 1), 정작 바로 아래에 이미 구현돼 있는 필드 복구 경로에는 영영 못 갑니다.
+  #   같은 판정의 던전 사본(5890 부근)은 HUD + 퀘스트 추적기 '구역' 을 함께 봐서 필드와
+  #   내부를 정확히 구분합니다 - 두 사본이 갈라져 있던 자리입니다 (2026-08-10 8차 점검).
+  #   어비스는 추적기에 '<던전명> 클리어' 가 뜨므로 Test-InDungeonQuest 가 같은 역할입니다.
+  $startInsideDetected = (Test-DungeonEntered -Game $game) -and (Test-InDungeonQuest -Game $game)
   if ($script:customMode -and $contentCategory -eq 'abyss') {
     $script:customCleanupOnly = Test-CustomCleanupOnly -CustomMode $true -Restart $script:customRestart `
       -InsideAlready $startInsideDetected -OnResultScreen ($startExitDetected -or $startClearDetected)
@@ -9867,7 +10540,30 @@ try {
   # 게임플레이 화면(HUD 표시) 중 '필드(던전 밖)'에 서 있는 상태면, 카드 클릭을 시도하기 전에
   # 먼저 ESC → 어비스 메뉴를 통해 어비스 선택 화면으로 이동합니다 (매크로 시작 기본 동선).
   # 던전 안이면 이 분기를 건너뛰고 아래의 '던전 입장 상태' 재개 흐름을 그대로 탑니다.
-  if ((Test-HomeEndEscHud -Game $game) -and -not (Test-InDungeonQuest -Game $game)) {
+  # ★ 여기서 읽는 신호는 위 $startInsideDetected 와 **같은 두 가지**(HUD + 추적기)이지만
+  #   **다른 시점의 별개 판독**입니다 - 그 사이 ESC 메뉴 정리·클리어/보상 분기가 들어가
+  #   화면이 바뀔 수 있어 다시 읽어야 합니다.
+  #
+  #   9차에서는 여기서 $startInsideDetected 만 덮어썼는데, 그 값을 **이미 소비한**
+  #   커스텀 가드 두 개(customCleanupOnly / recoveryOnly 안전 중단)는 그대로 남았습니다.
+  #   그러면 첫 판독이 OCR 플레이크로 '밖'이었다가 여기서 '안'으로 읽히는 순간,
+  #   **사용자가 손으로 돌던 판이 자동 회차로 계상**되고(수동 진행분 오계상 방지 장치가
+  #   통째로 무력화) 복구 전용 회차도 안전 중단을 건너뜁니다 (2026-08-10 10차 점검).
+  #   → 값이 바뀌면 그 값에 매달린 판단을 **함께 다시 내립니다.**
+  $fieldHudNow = Test-HomeEndEscHud -Game $game
+  $fieldQuestNow = $(if ($fieldHudNow) { Test-InDungeonQuest -Game $game } else { $false })
+  if ($fieldHudNow -and $fieldQuestNow -and -not $startInsideDetected) {
+    $startInsideDetected = $true
+    Write-RunLog '[어비스] 시작: 재판독에서 던전 안으로 확인 - 시작 상태 판단을 다시 내립니다'
+    if ($script:customMode -and $contentCategory -eq 'abyss') {
+      $script:customCleanupOnly = Test-CustomCleanupOnly -CustomMode $true -Restart $script:customRestart `
+        -InsideAlready $startInsideDetected -OnResultScreen ($startExitDetected -or $startClearDetected)
+      if ($script:customRecoveryOnly -and -not ($startExitDetected -or $startClearDetected)) {
+        throw '완료 항목 마무리 복구 중 어비스 내부 화면이 감지됐습니다 - 항목을 다시 실행하지 않고 안전하게 중단합니다.'
+      }
+    }
+  }
+  if ($fieldHudNow -and -not $fieldQuestNow) {
     Write-RunLog '[어비스] 시작: 필드 상태 감지 - ESC → 어비스로 선택 화면 이동'
     # 복귀 도중 안전 중지는 복구 완료 이전이므로 recoveryOnly 여도 10 (교차 리뷰 지적 -
     # 0이면 선택 화면 복구 전에 완료 마커·진행 위치가 전진함. 복구 완료의 exit 0 은 아래 줄)

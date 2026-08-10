@@ -30,7 +30,12 @@ Assert-Case '계약: 캡처 실패 가드' ($functionText -match 'if \(-not \$sc
 
 # 키 입력 루프는 1개 그대로 (재입력 금지 - B 이중 입력은 음식 중복 소모 위험)
 Assert-Case '계약: Press-KeyOnce 는 1곳뿐' ([regex]::Matches($functionText, 'Press-KeyOnce').Count) 1
-Assert-Case '계약: 잔존 시 경고 후 진행' ($functionText -match '\[경고\] 구매 팝업이 닫히지 않습니다') $true
+# 7차: 잔존 경고에 **실제 닫은 횟수**를 함께 적습니다. 3회 전부 성공했는데도 남았다면 그건
+# 클릭 불량이 아니라 연쇄가 길었던 것인데, 옛 문구는 둘을 구분하지 못해 진단이 헛돌았습니다.
+Assert-Case '계약: 잔존 시 경고 후 진행' ($functionText -match '\[경고\] 닫기 클릭 .*뒤에도 구매 팝업이 남아 있습니다') $true
+Assert-Case '계약: 잔존 경고에 실제 클릭 횟수를 적는다' ($functionText -match '\$\{entryPopupClicks\}회 뒤에도') $true
+# 클릭을 한 번도 못 보낸 잔존은 사유를 구분해 남깁니다 (예전엔 그 경우가 통째로 침묵이었음)
+Assert-Case '계약: 클릭 0회 잔존도 알린다' ($functionText -match '닫기 클릭을 한 번도 보내지 못했습니다') $true
 
 # ── 협동 미션 완료 전체 화면 자동 닫기 (2026-07-30 캡처 실측) ──────────────────
 # 제목('협동 미션 완료')은 OCR이 '협동1/四완로'로 깨져 사용 불가 → 이 화면 전용 부제 조각

@@ -290,13 +290,153 @@ Assert-Case '제목띠: 라벨 y240(제목 y213) 도 따라 이동' `
 Assert-Case '제목띠: 라벨 없으면 null (재확인 생략)' `
   ([bool]($null -eq (Get-LifeTitleStripRegion -Words @(@{ Text = '가까운'; X = 490; Y = 411 })))) 'True'
 # ── 진행 값 추출 (2026-08-08 설계 변경: 한도를 '총 시간'이 아니라 '진행이 멈춘 시간'으로) ──
-# 분모는 '0/0','2/1' 처럼 튀는 실측이 있어 신뢰하지 않고 분자(모은 개수)만 씁니다.
+# 분모는 목표값으로 **곧바로 믿지 않습니다**('0/0','2/1' 실측) - 목표는 아래 합의로 정합니다.
+# 다만 양수로 읽힌 분모는 **그 프레임 자체의 모순**('분자 > 분모')을 걸러내는 데 씁니다.
+#
+# ★ 2026-08-10 실기 실사고 (나무 베기, 목표 10): 두 번째 판독이 '41/10' 으로 나왔는데
+#   교차 검사가 없어 41이 $progressMaxCount 에 박혔습니다. 그 하나로 ①진행 없음 타이머가
+#   영영 리셋되지 않고(느린 대상이면 조건부 정지) ②완료 로그가 '(마지막 판독 41개)' 로
+#   나갔습니다(목표 합의값 10은 정확했지만 `10 -ge 41` 이 거짓이라 폴백으로 떨어짐).
 Assert-Case '진행값: 6/10 → 6' (Get-LifeProgressValue -CountText '6/10') 6
 Assert-Case '진행값: 공백 포함 표기' (Get-LifeProgressValue -CountText ' 3 / 10 ') 3
-Assert-Case '진행값: 0/0 (분모 깨짐) 도 분자 사용' (Get-LifeProgressValue -CountText '0/0') 0
-Assert-Case '진행값: 2/1 (분모 깨짐) 도 분자 사용' (Get-LifeProgressValue -CountText '2/1') 2
+Assert-Case '진행값: 10/10 (경계 - 같으면 유효)' (Get-LifeProgressValue -CountText '10/10') 10
+Assert-Case '진행값: 0/0 (분모 0 - 검사 불가) 도 분자 사용' (Get-LifeProgressValue -CountText '0/0') 0
+Assert-Case '진행값: 3/0 (분모만 깨짐) 도 분자 사용 - 실측' (Get-LifeProgressValue -CountText '3/0') 3
+# ↓ 2026-08-10 이전에는 '2/1 → 2' 였습니다. 분자만 보면 맞는 값이지만, 같은 규칙이
+#   '41/10' 도 통과시켜 실사고가 났습니다. 모순 프레임은 방향을 가리지 않고 버립니다
+#   (실측에서 2/1 직후 2/10 이 오므로 잃는 것이 없었습니다).
+Assert-Case '진행값: 2/1 (분자>분모 모순) → -1' (Get-LifeProgressValue -CountText '2/1') -1
+Assert-Case '진행값: 41/10 (실사고 원문) → -1' (Get-LifeProgressValue -CountText '41/10') -1
+Assert-Case '진행값: 6/1 (실측 모순) → -1' (Get-LifeProgressValue -CountText '6/1') -1
 Assert-Case '진행값: 판독 없음 → -1' (Get-LifeProgressValue -CountText '') -1
 Assert-Case '진행값: 수량 아님 → -1' (Get-LifeProgressValue -CountText '채집 장소 탐색') -1
+
+# ── 실측 시퀀스 전체를 흘려 보기 (2026-08-10 20:51~20:54 로그 원문 20건, 목표 10) ──
+# 개별 진리표만으로는 '오염된 최댓값이 타이머를 얼려 버린다'는 사고를 재현하지 못합니다.
+# 호출부(mabinogi_run_once.ps1 10099~)의 최댓값·리셋 규칙을 그대로 흉내 내 단언합니다.
+$measuredReads = @('1/10', '41/10', '1/10', '2/10', '2/1', '2/10', '2/1', '3/10', '3/0', '3/10',
+                   '3/1', '3/10', '4/10', '5/10', '6/1', '6/10', '4/10', '7/10', '8/10', '9/10')
+$simMax = -1
+$simResets = 0
+$simGoalCounts = @{}
+foreach ($read in $measuredReads) {
+  $v = Get-LifeProgressValue -CountText $read
+  if ($v -gt $simMax) { $simMax = $v; $simResets++ }      # 호출부: 최댓값 갱신 시에만 deadline 재설정
+  $g = Get-LifeQuestGoalValue -CountText $read
+  if ($g -gt 0) {
+    if (-not $simGoalCounts.ContainsKey($g)) { $simGoalCounts[$g] = 0 }
+    $simGoalCounts[$g] = [int]$simGoalCounts[$g] + 1
+  }
+}
+Assert-Case '실측 시퀀스: 최종 최댓값이 9 (41에 오염되지 않음)' $simMax 9
+Assert-Case '실측 시퀀스: 진행으로 인한 타이머 리셋 9회' $simResets 9
+Assert-Case '실측 시퀀스: 목표 합의는 10' (Get-LifeQuestGoalConsensus -GoalCounts $simGoalCounts) 10
+# 완료 로그 게이트(본체 10141~)를 그대로 재현 - 이 게이트 자체는 옳고, 분자 오염만 문제였습니다
+$simGoal = Get-LifeQuestGoalConsensus -GoalCounts $simGoalCounts
+$simDone = $(if ($simGoal -gt 0 -and $simGoal -ge $simMax) { "${simGoal}개" } else { "(마지막 판독 ${simMax}개)" })
+Assert-Case '실측 시퀀스: 완료 로그가 목표 개수를 쓴다' $simDone '10개'
+# 수정 전 재현 - 분자 교차 검사가 없으면 41이 박혀 완료 로그가 뒤집힙니다
+$brokenMax = -1
+foreach ($read in $measuredReads) {
+  if ($read -match '(\d{1,3})/(\d{1,3})') { $n = [int]$Matches[1]; if ($n -gt $brokenMax) { $brokenMax = $n } }
+}
+Assert-Case '수정 전 재현: 교차 검사가 없으면 최댓값이 41' $brokenMax 41
+Assert-Case '수정 전 재현: 그때 완료 로그는 41개로 나갔다' `
+  ($(if ($simGoal -gt 0 -and $simGoal -ge $brokenMax) { "${simGoal}개" } else { "(마지막 판독 ${brokenMax}개)" })) '(마지막 판독 41개)'
+
+# ── 수량 추출: **마지막** 매치를 취한다 (2026-08-10 실기) ──────────────────────
+# 제목 '채집 장소 탐색' 이 깨지면서 판독문 **앞부분**에 숫자 조각이 생깁니다. 첫 매치를
+# 취하면 그 노이즈가 진짜 수량을 밀어냅니다 - 실기에서 41/10(실제 1), 40/10(실제 0),
+# 1146/10(실제 5)이 나왔습니다. 진짜 수량은 제목 뒤라 **항상 맨 뒤**입니다.
+# 본체는 OCR 을 타므로 여기서는 같은 규칙을 순수 함수로 재현해 진리표를 고정합니다.
+function Get-CountTextFromRead {
+  param([string]$QuestText)
+  $m = [regex]::Matches([string]$QuestText, '(\d+)\s*/\s*(\d+)')
+  if ($m.Count -gt 0) {
+    $last = $m[$m.Count - 1]
+    return ('{0}/{1}' -f $last.Groups[1].Value, $last.Groups[2].Value)
+  }
+  return ''
+}
+# 오늘 실측한 배율별 판독 원문 (같은 캡처, 실제 4/10) - 앞 조각이 매번 다르게 생깁니다
+Assert-Case '추출 s2 실측: 앞의 41/ 을 넘기고 4/10' `
+  (Get-CountTextFromRead -QuestText "채집장소타색•f41/:;:')•로!결결§치재테4/10") '4/10'
+Assert-Case '추출 s3 실측: 앞의 11/ 을 넘기고 4/10' `
+  (Get-CountTextFromRead -QuestText "수해집장소다색쥐T11/``,Qb'')•기구!람전믕치채寸4/10") '4/10'
+Assert-Case '추출 s5 실측: 4/10' `
+  (Get-CountTextFromRead -QuestText '+해집장소타색4d국t」蜃최처寸4/10') '4/10'
+Assert-Case '추출 s6 실측: 4/10' `
+  (Get-CountTextFromRead -QuestText '채집장소타색?한曇긔卍빈4/10') '4/10'
+# 실사고 원문 형태 - 노이즈가 온전한 N/N 이면 첫 매치는 그걸 잡습니다
+Assert-Case '추출: 앞 노이즈가 41/10 이어도 뒤의 1/10 채택' `
+  (Get-CountTextFromRead -QuestText '채집장소탐색41/10거미줄뭉치채집1/10') '1/10'
+Assert-Case '추출: 1146/10 노이즈도 뒤의 5/10 채택' `
+  (Get-CountTextFromRead -QuestText '채집장소탐색1146/10나무채집5/10') '5/10'
+# 정상 화면은 매치가 하나뿐이라 첫/마지막이 같습니다 (저장소 흐름 캡처 12건 전수 확인)
+Assert-Case '추출: 매치 1개면 그대로' (Get-CountTextFromRead -QuestText '채집장소탐색나무채집7/10') '7/10'
+Assert-Case '추출: 공백 포함' (Get-CountTextFromRead -QuestText '나무 채집 3 / 10') '3/10'
+Assert-Case '추출: 수량 없으면 빈 문자열' (Get-CountTextFromRead -QuestText '채집장소탐색') ''
+# 수량 뒤에 시간 표기가 붙어도 N/N 이 아니면 영향 없음
+Assert-Case '추출: 뒤에 시간 문구가 붙어도 안전' `
+  (Get-CountTextFromRead -QuestText '나무채집4/10ⓒ7시간남음') '4/10'
+
+# ── 진행 로그 게이트: 최댓값 갱신 시에만 남긴다 (2026-08-10 사용자 요청) ───────
+# "9/10 이면 1번만 제대로 나왔으면 좋겠다" - 예전에는 판독 문자열 전체를 비교해서
+# 분모만 흔들려도('9/10'→'9/1'→'9/10') 세 줄이 찍혔습니다. 분자가 아래로 흔들리는
+# 경우('6/10'→'4/10'→'6/10')도 마찬가지였습니다.
+function Get-ProgressLogLines {
+  param([string[]]$Reads)
+  $max = -1
+  $lines = @()
+  foreach ($r in $Reads) {
+    $v = Get-LifeProgressValue -CountText $r
+    if ($v -gt $max) { $max = $v; if ($r) { $lines += $r } }
+  }
+  if ($lines.Count -eq 0) { return '(로그 없음)' }
+  return ($lines -join ' | ')
+}
+Assert-Case '로그: 9/10 → 9/1 → 9/10 은 한 줄 (사용자 요청 그 케이스)' `
+  (Get-ProgressLogLines -Reads @('9/10', '9/1', '9/10')) '9/10'
+Assert-Case '로그: 3/10 → 3/0 → 3/10 도 한 줄' `
+  (Get-ProgressLogLines -Reads @('3/10', '3/0', '3/10')) '3/10'
+Assert-Case '로그: 분자 하락 노이즈도 한 줄로 흡수' `
+  (Get-ProgressLogLines -Reads @('6/10', '4/10', '6/10', '7/10')) '6/10 | 7/10'
+Assert-Case '로그: 모순 프레임은 아예 안 찍힌다' `
+  (Get-ProgressLogLines -Reads @('41/10', '1/10')) '1/10'
+Assert-Case '로그: 진행 한 개당 정확히 한 줄' `
+  (Get-ProgressLogLines -Reads @('0/10', '0/1', '1/10', '1/10', '2/10')) '0/10 | 1/10 | 2/10'
+# 오늘 실측 20건을 그대로 흘리면 0~9 열 줄만 남아야 합니다(41 은 걸러짐)
+Assert-Case '로그: 실측 20건 → 진행 값이 바뀐 만큼만' `
+  ((Get-ProgressLogLines -Reads $measuredReads) -split ' \| ').Count 9
+
+# ── 배선 가드: 위 진리표는 **사본 함수**라 본체를 안 봅니다 ────────────────────
+# ★ 2026-08-10 변이 검증에서 이 구멍이 드러났습니다. 본체를 '첫 매치'로 되돌리고 로그
+#   게이트를 -ne 로 바꿔도 위 단언들은 전부 초록이었습니다(사본만 검사하므로).
+#   `Get-LifeQuestCountText` 는 OCR 을 타서 단독 실행이 안 되므로 소스로 못 박습니다.
+$countBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-LifeQuestCountText'))
+$countCode = (($countBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '배선: 추출이 Matches(전체)를 쓴다' `
+  ([bool]($countCode -match '\[regex\]::Matches\(\[string\]\$questText')) 'True'
+Assert-Case '배선: 추출이 **마지막** 매치를 취한다' `
+  ([bool]($countCode -match '\$countMatches\[\$countMatches\.Count - 1\]')) 'True'
+Assert-Case '배선: 첫 매치(Match/인덱스 0)로 되돌아가지 않는다' `
+  ([bool](($countCode -match '\[regex\]::Match\(\[string\]\$questText') -or
+          ($countCode -match '\$countMatches\[0\]'))) 'False'
+# 로그 두 곳이 '최댓값 갱신' 게이트 안에 있는지 (문자열 비교로 되돌아가면 실사고 재발)
+$workerRaw = [IO.File]::ReadAllText($workerPath)
+Assert-Case '배선: 내 채집 로그가 최댓값 갱신 블록 안' `
+  ([bool]($workerRaw -match '(?s)if \(\$countValue -gt \$progressMaxCount\) \{[^}]{0,400}Write-RunLog "\[생활\] 채집 진행: \$countText"')) 'True'
+Assert-Case '배선: 이전 채집 로그도 최댓값 갱신 블록 안' `
+  ([bool]($workerRaw -match '(?s)if \(\$otherCountValue -gt \$otherProgressMax\) \{[^}]{0,300}Write-RunLog "\[생활\] 이전 채집 진행 중: \$otherCount"')) 'True'
+# 옛 '마지막 판독 문자열' 비교 방식으로 되돌아가지 않는지
+Assert-Case '배선: 문자열 비교 중복 제거를 되살리지 않는다' `
+  ([bool](($workerRaw -match '\$countText -ne \$lastCountText') -or
+          ($workerRaw -match '\$otherCount -ne \$otherLastCount'))) 'False'
+# 초기값이 -1 이어야 첫 판독(0개)도 한 줄 남습니다 - 0 으로 두면 '0/10' 이 사라집니다
+Assert-Case '배선: 진행 최댓값 초기값 -1' `
+  ([bool]($workerRaw -match '(?m)^\s*\$progressMaxCount = -1\s*$')) 'True'
+Assert-Case '배선: 이전 채집 최댓값 초기값 -1' `
+  ([bool]($workerRaw -match '(?m)^\s*\$otherProgressMax = -1\s*$')) 'True'
 # ── 목표 개수(분모) 추출/합의 (2026-08-08 사용자 제보: 완료 로그가 '9개' 로 나옴) ──
 # 마지막 개를 채우는 순간 트래커가 사라져 3초 폴링이 그 프레임을 놓칩니다. 그래서 완료
 # 로그에는 '마지막으로 본 수량'이 아니라 '목표 개수'를 적습니다.
@@ -827,8 +967,13 @@ Assert-Case '배선: 절대 상한 3600초 백스톱' ([bool]($workerText -match
 Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($workerText.Contains('화면 캡처 실패가 지속돼 사이클 한도')) 'True'
 # 캡처 실패 중 대기하는 지점은 전부 복구 탐침을 돌려야 합니다 (초기 확인 / 이전 퀘스트 대기 /
 # 메뉴 캡처 대기 / 채집 대기 4곳). 하나라도 빠지면 그 경로는 복구를 영영 감지 못 합니다
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 5곳 (사이클 4 + Wait-LifeCaptureAlive 1)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '5'
+# 9곳 = 생활 5곳(사이클 4 + Wait-LifeCaptureAlive 1) + 던전·사냥터 4곳.
+# ★ 뒤의 4곳은 2026-08-09 7차 점검에서 발견한 **기존 자기 잠금**입니다. 전부 회전을
+#   Start-Sleep 으로 시작해 캡처 실패 시 continue 하는데, 그러면 그 회전에 캡처 시도가 0이라
+#   플래그가 영영 안 풀리고 바로 다음 줄이 한도를 40초로 되돌려 무한 회전이었습니다
+#   (채집에서 2026-08-07 에 고친 것과 같은 형태가 던전/사냥터에 남아 있었음).
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 10곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '10'
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `
@@ -912,9 +1057,17 @@ Assert-Case '배선: 훑기 판독 1벌 공유(찾기+행 증거) + 목록 순�
 Assert-Case '배선: 목록 스크롤은 드래그 (휠 mouse_event 0x0800 미사용)' `
   (($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,4000}mouse_event\(0x0002[\s\S]{0,1500}mouse_event\(0x0004') -and
    (-not ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,4000}mouse_event\(0x0800'))) 'True'
+# ★ 8차 점검: 두 번째 조건 '플링(관성) 방지'는 소스의 **줄 끝 주석에만** 있었습니다.
+#   즉 '정지 후 떼기'(mouse-up 전 250ms 정지) 절반은 어떤 테스트도 지키지 않았고, 그게
+#   빠지면 관성 스크롤이나 같은 자리 down-up 이 되어 대상 목록에서 **항목 클릭 오인**이
+#   납니다(그 주석이 명시한 위험). 주석이 아니라 **코드 순서**로 못 박습니다.
+$dragBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-LifeListScroll'))
+$dragCode = (($dragBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '배선: 드래그는 중간 단계 이동 + 정지 후 떼기 (클릭 오인/관성 방지)' `
-  (($workerText -match 'foreach \(\$moveStep in 1\.\.16\)[\s\S]{0,400}SetCursorPos\(\$stepX, \$stepY\)') -and
-   ($workerText -match '플링\(관성\) 방지')) 'True'
+  ([bool]($dragCode -match '(?s)foreach \(\$moveStep in 1\.\.16\)[\s\S]{0,400}SetCursorPos\(\$stepX, \$stepY\)[\s\S]{0,200}\}\s*\r?\n\s*Start-Sleep -Milliseconds 250')) 'True'
+Assert-Case '배선: 정지 후에 버튼을 뗀다(mouse-up 이 정지보다 뒤)' `
+  ([bool]($dragCode.IndexOf('Start-Sleep -Milliseconds 250') -ge 0 -and
+          $dragCode.IndexOf('mouse_event(0x0004') -gt $dragCode.IndexOf('Start-Sleep -Milliseconds 250'))) 'True'
 # 4종 전부 목록 순서 데이터 보유 (격자 추론 전제)
 foreach ($orderKey in @('daily', 'wood', 'mining', 'herb')) {
   Assert-Case "테이블: $orderKey Order 목록 보유" (@($lifeSkillMenuTable[$orderKey].Order).Count -ge 8) 'True'
@@ -969,7 +1122,7 @@ Assert-Case '배선: 메뉴 시퀀스가 Deadline 을 받아 내부 검사 4곳+
    (([regex]::Matches($workerText, '\(Get-Date\) -gt \$Deadline')).Count -ge 4)) 'True'
 Assert-Case "배선: '가까운 위치 찾기' 링크는 글자 탐색으로만 클릭 (고정 좌표 폴백 금지)" `
   (($workerText -match 'Select-LifeFindNearestWord -Words \$linkWords') -and
-   ($workerText -match "링크를 찾지 못했습니다 - 재시도") -and
+   ($workerText -match "링크를 찾지 못했습니다 - 이번 회전 중단") -and
    (-not $workerText.Contains('ptLifeFindNearest'))) 'True'
 Assert-Case '배선: 링크 클릭 직전 deadline 재검사 (OCR/전면화 시간 반영)' `
   ($workerText -match 'Select-LifeFindNearestWord[\s\S]{0,6000}\(Get-Date\) -gt \$Deadline[\s\S]{0,300}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') 'True'
@@ -983,6 +1136,13 @@ Assert-Case '배선: 모달 닫기 실패 시 예비 좌표 2곳 시도 + 닫힘
   (($workerText -match '닫기 버튼 글자를 못 읽어 실측 좌표로') -and
    ($workerText -match 'Click-GamePoint -Game \$Game -ReferenceX 636 -ReferenceY 453')) 'True'
 # 다른 대상 퀘스트가 남아 새 퀘스트 생성이 막히는 게임 제약 (라운드 7 실측)
+# ★ 10차: 8차에서 고친 '채집 **도중** 준비물 소진 → 즉시 exit 4' 계약에 테스트가 없어
+#   되돌려도 전부 통과했습니다. 되돌리면 수량이 안 늘어나는 채로 진행 없음 한도(권장 1200초)를
+#   태운 뒤 "'채집 대기'를 늘려 주세요"라는 **정반대 안내**로 끝납니다.
+Assert-Case '배선: 채집 대기 중 준비물 소진은 즉시 조건 정지(품목 안내 포함)' `
+  ([bool]($workerText -match "(?s)\`$waitDialogState -eq 'material'[\s\S]{0,400}?채집 중에 준비물이 떨어졌습니다[\s\S]{0,200}?Format-LifeMissingItemNotice[\s\S]{0,120}?exit 4")) 'True'
+Assert-Case '배선: 준비물 소진을 continue 로 흘려보내지 않는다' `
+  ([bool]($workerText -match "(?s)\`$waitDialogState -eq 'material'[\s\S]{0,400}?exit 4[\s\S]{0,200}?\`$waitDialogState -ne 'none'")) 'True'
 Assert-Case '배선: 잔여 타 대상 퀘스트면 재시도 대신 안내 정지' `
   ($workerText -match '\$leftoverIsOther[\s\S]{0,300}다른 채집 퀘스트가 진행 중이라[\s\S]{0,120}exit 4') 'True'
 # 시작 시점에 다른 대상 채집이 진행 중이면 메뉴를 아예 열지 않는다 (사용자 실기 관찰:
@@ -990,7 +1150,12 @@ Assert-Case '배선: 잔여 타 대상 퀘스트면 재시도 대신 안내 정�
 # 트래커가 잠깐 가려져 '없음'으로 오판하면 남의 채집을 방해 (2026-08-07 사용자 지적)
 Assert-Case '배선: 초기 퀘스트 확인은 전면화 + 확정될 때까지 판독 (present 우선, 로딩 대기)' `
   (($workerText -match 'Focus-Game -Game \$Game\s*\r?\n\s*Start-Sleep -Milliseconds 700\s*\r?\n\s*\$initialState') -and
-   ($workerText -match 'while \(\$initialProbes -lt 20\)[\s\S]{0,1600}if \(\$probeState -eq ''present''\) \{ \$initialState = ''present''; break \}') -and
+   # 거리 상한 대신 **순서**로 봅니다. 주석이 늘 때마다 숫자를 올려야 하는 단언은 결국
+   # 느슨해지고(7차에 실제로 터짐), 여기서 지키려는 계약은 '같은 루프 안에서 present 를
+   # 확정한다' 이지 '몇 글자 안에' 가 아닙니다.
+   ($workerText.IndexOf('while ($initialProbes -lt 20)') -ge 0 -and
+    $workerText.IndexOf("if (`$probeState -eq 'present') { `$initialState = 'present'; break }") -gt
+      $workerText.IndexOf('while ($initialProbes -lt 20)')) -and
    ($workerText -match '맵 이동/로딩 추정')) 'True'
 # 캡처 실패·팝업 정리 회차는 판독 예산(20회)을 소모하면 안 됩니다 - 소모하면 잠깐의 화면 정지가
 # 예산을 다 태우고 'unknown' 인 채 메뉴를 열어 진행 중인 채집을 방해합니다 (2026-08-07 감사)

@@ -1,5 +1,30 @@
 ﻿# OCR 세 진입점이 캡처·확대·해제 공통 헬퍼 하나를 공유하는지 검사합니다.
 $ErrorActionPreference = 'Stop'
+# ★ 10차 추가 계약: 캡처 진입점의 **모든 실패 원인**이 Register-CaptureFailure 를 거쳐야 합니다.
+#   9차까지 GetWindowRect 실패만 기록 없이 $null 을 돌려줘, 창이 사라지는 중인 상태가
+#   '판독 결과 없음'으로 둔갑하고 동결 계약(게임 사망/F9 감지)이 통째로 비껴갔습니다.
+#   (이 블록은 아래 본문보다 먼저 두어, 나머지 검사가 실패해도 이 계약은 반드시 평가됩니다.)
+$capProjectRoot = Split-Path -Parent $PSScriptRoot
+$capWorkerPath = Join-Path $capProjectRoot 'mabinogi_run_once.ps1'
+. (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
+$capBody = [string](Get-SourceFunctionDefinitions -Path $capWorkerPath -Names @('Get-GameRegionCapture'))
+$capCode = (($capBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+$capFails = 0
+if ($capCode -match "GetWindowRect\(\`$Game\.MainWindowHandle, \[ref\]\`$rect\)\) \{[\s\S]{0,400}?Register-CaptureFailure -GameWindowIssue 'rect-failed'") {
+  "OK   캡처: 창 좌표 실패도 캡처 실패로 등록"
+} else { "FAIL 캡처: 창 좌표 실패가 캡처 실패로 등록되지 않습니다"; $capFails++ }
+if ($capCode -match "IsIconic\(\`$Game\.MainWindowHandle\)\) \{[\s\S]{0,900}?Register-CaptureFailure -GameWindowIssue 'minimized'") {
+  "OK   캡처: 최소화도 캡처 실패로 등록(형제 계약 유지)"
+} else { "FAIL 캡처: 최소화 등록이 사라졌습니다"; $capFails++ }
+$failInfoBody = [string](Get-SourceFunctionDefinitions -Path $capWorkerPath -Names @('Get-CaptureFailInfo'))
+$recoverBody = [string](Get-SourceFunctionDefinitions -Path $capWorkerPath -Names @('Get-CaptureRecoveryMessage'))
+if (($failInfoBody -match "GameWindowIssue -eq 'rect-failed'") -and ($failInfoBody -match "Cause\s*=\s*'gameWindowGone'")) {
+  "OK   캡처: 창 좌표 실패 전용 사유(gameWindowGone) 존재"
+} else { "FAIL 캡처: 창 좌표 실패 전용 사유가 없습니다"; $capFails++ }
+if ($recoverBody -match "'gameWindowGone'") {
+  "OK   캡처: 그 사유의 복구 안내도 존재"
+} else { "FAIL 캡처: gameWindowGone 복구 안내가 없습니다"; $capFails++ }
+if ($capFails -gt 0) { exit $capFails }
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 $workerPath = Join-Path $root 'mabinogi_run_once.ps1'
@@ -50,12 +75,13 @@ Check-NoPattern '캡처: 과소 창 게이트는 두지 않음(빠른 실패 보
 # 원시 좌표 경로(클릭/픽셀)도 최소화를 막아야 합니다. 캡처만 막으면 최소화된 창 뒤의 다른
 # 창 픽셀을 '회색 비활성 카드'로 오판해 상태 확인이 통과됩니다 (리뷰 적발).
 $scaledPoint = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-ScaledScreenPoint'))
-# 2026-08-09 3차 점검: 여기서 **즉시** throw 하면 Click-GamePoint(호출부 80여 곳)와
-# Get-GamePixel 이 잡지 않아 최상위 catch → exit 1 로 회차가 끝납니다. 판독 성공 직후
-# 클릭 직전에 창이 내려가는 짧은 경합만으로 무인 운용이 멈추므로, 복원을 기다렸다 재확인하고
-# 그때 던집니다. 상세 계약은 tests\test_stall_guards.ps1 이 담당합니다.
-Check-Pattern '좌표: 최소화 창은 복원 대기 후 throw (클릭·픽셀 공용 입구)' $scaledPoint `
-  '(?s)IsIconic.*Invoke-AutoRefocus.*최소화된 상태가 계속됩니다'
+# 2026-08-09 4차 점검: 이 함수는 Get-GamePixel 의 공용 입구라 **여기서는 기다리지 않습니다**.
+# 픽셀 판정은 표본을 27회씩 찍으면서 catch { continue } 로 예외를 삼키므로, 여기에 대기를 두면
+# 표본 수 × 재시도 횟수만큼 곱해져 수십 분을 무음으로 태웁니다(실측 ≈ 56분).
+# 복원 대기는 클릭 1회에 1번만 도는 Click-GamePoint 로 옮겼습니다.
+# 상세 계약은 tests\test_stall_guards.ps1 이 담당합니다.
+Check-Pattern '좌표: 최소화 창은 즉시 throw (대기는 클릭 진입점에서)' $scaledPoint `
+  "IsIconic\(\`$Game\.MainWindowHandle\)\)\s*\{\s*\r?\n\s*throw '게임 창이 최소화"
 Check-Pattern '좌표: 기존 과소 창 throw 유지' $scaledPoint '게임 창 크기가 너무 작습니다'
 
 # 원인 안내가 함께 추가되지 않으면 게이트만 넣은 셈이라 'RDP 창을 다시 열어 주세요' 라는

@@ -183,8 +183,13 @@ switch ($Scenario) {
   }
   'goal-unknown' {
     # 분모를 한 번도 못 읽으면(전부 깨짐) 목표를 단정하지 않고 '마지막 판독'임을 밝힙니다
+    # ※ 2026-08-10: 가운데 판독이 '2/1' 이었는데, '분자 > 분모' 모순 프레임을 버리도록
+    #   고치면서 그 값이 -1 이 되어 시나리오 의도(분자 2가 남는다)가 깨졌습니다.
+    #   분모를 **0으로** 깨뜨리면 교차 검사가 성립하지 않아 분자가 그대로 채택되므로,
+    #   '분모만 못 읽는 상황'을 정확히 표현하면서 새 정책('/0 이면 분자를 믿는다')도
+    #   시뮬레이터에서 함께 확인됩니다.
     $script:menuResults = @($true)
-    $script:countSeq = @('0/0', '2/1', '0/0')
+    $script:countSeq = @('0/0', '2/0', '0/0')
     $script:stateSeq = @('absent', 'absent', 'absent') + @('present', 'present') +
       @('present', 'present', 'present') + @('absent', 'absent', 'absent')
     $script:stateTail = 'absent'

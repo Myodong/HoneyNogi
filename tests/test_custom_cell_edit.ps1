@@ -109,8 +109,12 @@ Assert-Case '오버레이: 리스트 분기는 전부 명시 (어비스 폴백 �
    (-not ($guiSource -match '\} else \{\s*\r?\n\s*Invoke-AcrCellEdit'))) $true
 Assert-Case '오버레이: 어비스 이벤트 연결은 리스트 생성 뒤 (시작 크래시 방지 - 리뷰 지적)' `
   ($guiSource.IndexOf('$lvAcrList = New-Object') -lt $guiSource.IndexOf('$lvAcrList.Add_MouseUp($cellEditMouseUp)')) $true
-Assert-Case '오버레이: 예약 콜백은 세션을 클로저로 캡처' `
-  ([regex]::Matches($guiSource, 'GetNewClosure').Count -ge 2) $true
+# ★ 9차 점검: 예전 단언은 낱말 'GetNewClosure' 를 세어 **주석 3건만으로 충족**됐습니다.
+#   실제 클로저 두 개를 통째로 지워도 52종이 전부 통과했습니다. 주석을 뺀 코드에서
+#   **실제 호출**만 세고 개수를 정확히 고정합니다.
+$guiCodeOnly = (($guiSource -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '오버레이: 예약 콜백은 세션을 클로저로 캡처 (실제 호출 2곳)' `
+  ([regex]::Matches($guiCodeOnly, '\.GetNewClosure\(\)').Count) 2
 Assert-Case '오버레이: 실행 시작 시 커밋된 편집은 완료, 미커밋만 폐기' `
   ($guiSource -match "pendingCellEdit[\s\S]{0,200}Applied[\s\S]{0,120}Invoke-CellEditApply") $true
 Assert-Case '오버레이: 커밋은 SelectionChangeCommitted + BeginInvoke 예약' `

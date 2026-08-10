@@ -10,6 +10,18 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
   Invoke-Expression $definition
 }
 
+# ★ 10차 추가 계약: 어비스 시작 상태를 **재판독으로 뒤집을 때는 그 값에 매달린 판단도
+#   함께 다시 내려야 합니다.** $startInsideDetected 만 덮어쓰고 customCleanupOnly /
+#   recoveryOnly 가드를 그대로 두면, 첫 판독이 OCR 플레이크로 '밖'이었다가 재판독에서
+#   '안'으로 읽히는 순간 **사용자가 손으로 돌던 판이 자동 회차로 계상**됩니다
+#   (수동 진행분 오계상 방지 장치가 통째로 무력화 - 9차 수정이 만든 구멍을 10차에서 발견).
+$abyssWorkerText = [IO.File]::ReadAllText($workerPath)
+if ($abyssWorkerText -match '(?s)if \(\$fieldHudNow -and \$fieldQuestNow -and -not \$startInsideDetected\) \{[\s\S]{0,900}?\$script:customCleanupOnly = Test-CustomCleanupOnly[\s\S]{0,400}?customRecoveryOnly[\s\S]{0,200}?throw ') {
+  "OK   배선: 재판독으로 '던전 안'이 되면 커스텀 판단을 다시 내린다"
+} else {
+  "FAIL 배선: 재판독 후 customCleanupOnly/recoveryOnly 재계산이 없습니다"; $fails++
+}
+
 function Assert-Case {
   param([string]$Name, $Actual, $Expect)
   if ("$Actual" -eq "$Expect") { "OK   {0}: {1}" -f $Name, $Actual }

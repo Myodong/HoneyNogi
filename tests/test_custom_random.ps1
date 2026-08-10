@@ -148,7 +148,9 @@ Assert-Case '가드: 회차 시작 시 섞인 순서 표시 배선' `
 
 # config.json 기본 키
 $configJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-Case 'config: schema 7' ([int]$configJson.configSchemaVersion) 7   # v2.0.0: life 신설(5) → '채집 대기' 의미 변경(6) → 가방/도구 옵션 제거(7)
+# 스키마는 **새 설정 키를 추가할 때마다** 올려야 합니다. 안 올리면 기존 사용자는 이전 게이트에
+# 걸려 새 키를 영영 못 받습니다 (2026-08-10 실기에서 repeat.mode/untilTime 으로 적발).
+Assert-Case 'config: schema 8' ([int]$configJson.configSchemaVersion) 8   # v2.0.0: life 신설(5) → '채집 대기' 의미 변경(6) → 가방/도구 옵션 제거(7) → 반복 모드 저장(8)
 Assert-Case 'config: randomOrder 기본 false 4섹션' `
   (($configJson.customRepeat.randomOrder -eq $false) -and ($configJson.deepCustomRepeat.randomOrder -eq $false) -and ($configJson.abyssCustomRepeat.randomOrder -eq $false) -and ($configJson.lifeCustomRepeat.randomOrder -eq $false)) $true
 

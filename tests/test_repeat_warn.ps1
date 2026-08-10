@@ -44,11 +44,24 @@ Check-Equal '회복 후 재실패 → 경고 재발행' (Invoke-WarnSequence -Fa
 
 # --- 호출부 계약: 두 확인(전면화·커서)이 서로 다른 상태 변수를 쓰는지 소스로 확인 ---
 $workerText = Get-Content -LiteralPath $workerPath -Raw
-foreach ($stateVar in @('focusWarnActive', 'focusWarnSuppressed', 'cursorWarnActive', 'cursorWarnSuppressed')) {
+foreach ($stateVar in @('focusWarnActive', 'focusWarnSuppressed')) {
   Check-Equal "상태 변수 선언: $stateVar" ($workerText -match ('\$script:{0}\s*=' -f $stateVar)) $true
 }
 # 억제 중에는 생략 횟수를 세고, 회복 안내에서 그 횟수를 알려야 진단 정보가 남습니다
 Check-Equal '전면화: 회복 안내에 생략 횟수 포함' ($workerText -match '전면화 확인이 정상으로 돌아왔습니다[^"]*focusWarnSuppressed') $true
-Check-Equal '커서: 회복 안내에 생략 횟수 포함' ($workerText -match '커서 위치 확인이 정상으로 돌아왔습니다[^"]*cursorWarnSuppressed') $true
+
+# ★ 커서 확인은 2026-08-10 부터 **이 규칙을 쓰지 않습니다.**
+#   첫 실패를 곧바로 [경고]로 남기는 것이 문제였습니다 - 사용자가 안전 중지 버튼을 누르려고
+#   마우스를 옮긴 것만으로 실패가 나고, 그 경고를 보고 놀라 자동화를 즉시 중지했습니다.
+#   그래서 커서만 연속 횟수 기반 2단계([안내] → 3회 연속 [경고])로 분리했습니다.
+#   진리표와 배선은 tests\test_cursor_click_warn.ps1 이 담당합니다.
+#   여기서는 **두 정책이 다시 섞이지 않는지**만 지킵니다 (섞이면 한쪽이 다른 쪽 억제를 풀어
+#   버리고, 첫 실패 경고가 되살아나 이번 실사고가 그대로 재발합니다).
+Check-Equal '커서: 전용 연속 카운터를 쓴다' ($workerText -match '\$script:cursorFailureStreak\s*=') $true
+Check-Equal '커서: 옛 전면화식 억제 상태를 되살리지 않는다' `
+  ($workerText -match '\$script:cursorWarn(Active|Suppressed)') $false
+$clickBodyText = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Click-ScreenPoint'))
+Check-Equal '커서: Click-ScreenPoint 가 이 규칙을 쓰지 않는다' `
+  ($clickBodyText -match 'Get-RepeatWarnAction') $false
 
 exit $fails

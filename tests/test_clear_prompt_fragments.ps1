@@ -1,6 +1,38 @@
 ﻿# 클리어 문구('화면을 터치해 주세요') 감지 판정 진리표
 # 본체: mabinogi_run_once.ps1 Test-DungeonClearPrompt (조각 조합 - 실측 깨짐 사례 기반)
+#
+# ★ 2026-08-10 9차 점검: 아래 진리표는 판정식을 **테스트 안에 사본으로 다시 박아 둔 것**이라,
+#   본체에서 조각 조합을 지워도 그대로 통과했습니다(실사고 대응 조각 2개를 지우고 확인).
+#   진리표는 '어떤 깨짐을 잡아야 하는가'를 문서로 남기는 값이 있으므로 유지하되, **본체가
+#   그 조합을 실제로 갖고 있는지**를 소스에서 함께 확인합니다. 둘 중 하나만 있으면
+#   '통과하지만 아무것도 지키지 않는' 상태가 됩니다.
 $fails = 0
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
+. (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
+$promptBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-DungeonClearPrompt'))
+$promptCode = (($promptBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+# 변수 이름은 홑따옴표 + 이어붙이기로 씁니다 - 겹따옴표 안에서 이스케이프하려다 백슬래시가
+# 문자열에 그대로 남아 5종이 통째로 '누락'으로 나온 적이 있습니다(작성 중 실제로 밟음).
+$nv = '$normalized.Contains'
+$requiredCombos = @(
+  "Contains('화면을') -and $nv('터')",
+  "Contains('화면을') -and $nv('주세요')",
+  "Contains('치해') -and $nv('면')",
+  "Contains('화면') -and $nv('치')",
+  "Contains('터치해') -or $nv('터치하')"
+)
+$missingCombos = @()
+foreach ($combo in $requiredCombos) {
+  if (-not $promptCode.Contains($combo)) { $missingCombos += $combo }
+}
+if ($missingCombos.Count -gt 0) { $missingCombos | ForEach-Object { "     └ 본체에 없음: $_" } }
+if ($missingCombos.Count -eq 0) { "OK   본체: 실측 깨짐 대응 조각 조합 5종 전부 존재" }
+else { "FAIL 본체: 실측 깨짐 대응 조각 조합 누락 $($missingCombos.Count)종"; $fails++ }
+$sv = '$scoreText.Contains'
+if ($promptCode.Contains("Contains('처치') -and ($sv('완벽') -or $sv('보너스'))")) {
+  "OK   본체: 보조 신호(점수표) 조합 존재"
+} else { "FAIL 본체: 보조 신호(점수표) 조합이 없습니다"; $fails++ }
 $cases = @(
   @{ T = '화면을터치해주세요'; E = $true },   # 정상
   @{ T = '화면을터夫6주'; E = $true },        # 2026-07-16: '치' 깨짐

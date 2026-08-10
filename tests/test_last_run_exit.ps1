@@ -61,8 +61,12 @@ Assert-Case 'GUI: 비커스텀은 시간 지정 아님 + 횟수 모드 조건 �
   ($guiSource -match "HONEYNOGI_LAST_RUN = \`$\(if \(\(\`$null -eq \`$script:targetTime\) -and \(\`$script:targetCycles -gt 0\)") $true
 Assert-Case '워커: 신호는 문자열 1 비교로 해석' `
   ($workerSource.Contains("`$script:dgLastRun = ([string]`$env:HONEYNOGI_LAST_RUN -eq '1')")) $true
+# ★ 10차: 두 앵커가 **주석 문구**라 주석 한 단어만 바꿔도 실패하고, 반대로 코드 순서를
+#   바꿔도 주석이 그대로면 통과했습니다. 코드 사본에서 **실행문**으로 순서를 봅니다.
+$workerCodeOnly = (($workerSource -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '워커: 마지막 판 나가기는 은동전 잔량 검사(14-1)보다 앞' `
-  ($workerSource.IndexOf('마지막 판 완료') -lt $workerSource.IndexOf('다음 판의 은동전 잔량')) $true
+  ([bool]($workerCodeOnly.IndexOf('$script:dgLastRun') -ge 0 -and
+          $workerCodeOnly.IndexOf('$ptDgResultExit[0]') -gt $workerCodeOnly.IndexOf('$script:dgLastRun'))) $true
 Assert-Case '워커: 수동 정리 모드는 나가기 제외' `
   ($workerSource -match "if \(\`$script:dgLastRun -and -not \`$script:customCleanupOnly\)") $true
 Assert-Case '워커: 필드 확정은 HUD + 퀘스트 추적기 구역 부재 이중 확인' `
@@ -73,8 +77,10 @@ Assert-Case '워커: 필드 미확인 시 진단 저장 후 정상 종료 (오�
   ($workerSource -match "마지막 판 나가기 후 필드 미확인[\s\S]{0,600}exit 0") $true
 Assert-Case '워커: 필드 확정은 연속 2회 증거 요구 (단발 OCR 오판 방지)' `
   ($workerSource.Contains('$fieldStreak -ge 2')) $true
+# ★ 10차: 이 단언도 **주석 문구**에만 걸려 있었습니다. 가드를 통째로 지워도 통과합니다.
+#   계약은 '판독 중 실패가 누적되면 그 회전의 판독분을 버린다'이므로 코드로 못 박습니다.
 Assert-Case '워커: 판독 도중 캡처 실패 시 그 판독분 폐기' `
-  ($workerSource.Contains('판독 도중 캡처 실패')) $true
+  ([bool]($workerCodeOnly -match '(?s)\$probeFailed = \$false.{0,900}?if \(\$probeFailed\) \{ continue \}')) $true
 Assert-Case '워커: 마지막 판 복구는 필드 상태를 복구 완료로 인정' `
   ($workerSource -match "customRecoveryOnly[\s\S]{0,1500}dgLastRun[\s\S]{0,1600}재입장 없이 복구 완료") $true
 

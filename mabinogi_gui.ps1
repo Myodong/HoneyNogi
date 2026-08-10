@@ -98,8 +98,12 @@ function Release-StuckInput {
   # (Kill 시점이 키 '누름-뗌' 사이면 그 키가 눌린 채 남기 때문. 키업만 보내므로
   #  이미 떼어져 있는 키에는 아무 효과가 없는 안전한 호출입니다.)
   try {
-    # 기본 해제 목록: ALT(Focus-Game), Space(자동출발/부활 재개), B(음식), R(부활)
-    $releaseKeys = @(0x12, 32, 66, 82)
+    # 기본 해제 목록: ALT(Focus-Game), Space(자동출발/부활 재개), B(음식), R(부활),
+    # ESC(메뉴/뒤로), C(내 정보 - 생활), H(어시스트 토글).
+    # ★ 뒤 세 개가 빠져 있었습니다 (2026-08-10 10차 점검). 워커를 강제 종료한 순간이
+    #   그 키의 '누름-뗌' 사이였다면 게임에 눌린 채로 남아, 다음 회차의 입력이 엉킵니다.
+    #   키업만 보내므로 이미 떼어져 있으면 아무 효과가 없는 안전한 추가입니다.
+    $releaseKeys = @(0x12, 32, 66, 82, 27, 67, 72)
     # config에 사용자 지정 키(afterEntry.keys / revive)가 있으면 그 키들도 포함합니다
     try {
       $cfgNow = Read-Config
@@ -1390,6 +1394,11 @@ $script:approvalDeniedSeen = $false  # 이 세션에서 '유효 명단에 부재
                                      # 실패해도 세션 내에서는 이후 조회 실패가 유예로 되살아나지 않게 함 (리뷰 #4)
 $script:approvalPs = $null           # 진행 중 명단 조회 러닝스페이스 (null = 조회 없음, single-flight 가드)
 $script:approvalAsync = $null
+# 조회 시작 시각. GUI 쪽 상한의 기준입니다 - 러닝스페이스가 끝내 반환하지 않으면 폴링
+# 타이머가 영원히 돌고, [시작] 버튼을 되살리는 유일한 경로(Complete-ApprovalCheck)에
+# 도달하지 못해 **시작 버튼과 F9 가 영구 잠깁니다** (2026-08-10 8차 점검).
+$script:approvalStartedAt = $null
+$approvalFetchTimeoutSeconds = 25    # 내부 -TimeoutSec 10 + 리다이렉트/DNS 여유
 
 function Start-ApprovalCheck {
   # 명단 비동기 조회 시작. 진행 중이면 새로 만들지 않고 합류합니다 (single-flight -
@@ -1412,6 +1421,7 @@ function Start-ApprovalCheck {
         } catch { return '' }
       }).AddArgument($whitelistUrl)
     $script:approvalAsync = $script:approvalPs.BeginInvoke()
+    $script:approvalStartedAt = Get-Date
     if ($script:approvalTimer) { $script:approvalTimer.Start() }
   } catch {
     # 조회 기동 자체가 실패하면(러닝스페이스 생성 불가 등) '조회 실패'로 즉시 판정합니다 -
@@ -1701,13 +1711,36 @@ $form.Controls.Add($btnManual)
 $btnManual.Add_Click({
     # 생활 대분류: 숨겨진 전투 라디오 상태보다 mainCategory 를 먼저 검사 (리뷰 조건 G)
     if ($script:mainCategory -eq 'life') {
-      $lifeManualText = "생활 자동화는 준비 중입니다.`n`n" +
-      "[현재 상태]`n" +
-      " - 화면 구성(채집 스킬/대상 선택)까지 준비된 단계입니다.`n" +
-      " - 채집 자동화가 완성되면 이 설명서에 사용법이 추가됩니다.`n`n" +
-      "[예정 기능]`n" +
-      " - 채집: 스킬/대상을 고르고 캐릭터를 채집 지점 앞에 세워 두면 반복 채집`n" +
-      " - 가공: 추후 지원"
+      # v2.0.0 에서 채집 8종이 실제로 배포됐는데 이 안내만 '준비 중'으로 남아 있었습니다
+      # (2026-08-10 10차 점검). 사용자가 기능을 안 쓰거나 사용법을 못 찾게 만드는 문구입니다.
+      $lifeManualText = "채집 자동화 사용법`n`n" +
+      "[지원 범위]`n" +
+      " - 채집 8종: 일상 채집 / 나무 베기 / 광석 캐기 / 약초 채집 / 양털 깎기 /`n" +
+      "   추수 / 호미질 / 곤충 채집`n" +
+      " - 낚시와 가공은 아직 지원하지 않습니다 (고르면 시작 전에 안내로 막습니다)`n`n" +
+      "[사용법]`n" +
+      " 1. 대분류에서 [생활]을 고릅니다.`n" +
+      " 2. 채집 스킬과 대상을 고릅니다 (좌우 화살표로 넘김).`n" +
+      " 3. 캐릭터는 아무 데나 서 있어도 됩니다 - 매크로가 '가까운 위치 찾기'로`n" +
+      "    퀘스트를 만들고 자동 이동까지 맡깁니다.`n" +
+      " 4. [시작]을 누릅니다.`n`n" +
+      "[한 사이클 흐름]`n" +
+      " 퀘스트 확인 → C(내 정보) → 생활 스킬 → 대상 선택 → 가까운 위치 찾기`n" +
+      " → 자동 이동 → 채집 → 퀘스트 소멸 확인 = 1회 완료`n`n" +
+      "[설정]`n" +
+      " - 채집 대기: 한 대상을 채집하는 데 기다릴 시간. 권장 1200초.`n" +
+      "   젖소·광맥·뾰족한 나무처럼 이동이 먼 대상은 900초로는 모자랍니다.`n" +
+      " - 진행 없음 한도: 수량이 늘지 않는 채로 견디는 시간입니다.`n" +
+      "   총 시간 제한이 아니므로, 먼 대상에서 멈추면 이 값을 늘리면 됩니다.`n`n" +
+      "[커스텀 반복]`n" +
+      " 채집 스킬을 섞어 리스트를 짜고 항목마다 반복 횟수를 정할 수 있습니다.`n" +
+      " 진행 위치는 저장되어 다시 켜도 이어집니다.`n`n" +
+      "[알아 둘 점]`n" +
+      " - 요구 스킬 레벨이 모자란 대상은 게임이 퀘스트를 만들어 주지 않아`n" +
+      "   자동화로 통과할 수 없습니다 (실패 안내에 요구 레벨을 적어 둡니다).`n" +
+      " - 가방 가득 / 도구 내구도 소진은 아직 감지하지 못합니다.`n" +
+      "   그 경우 게임이 스스로 멈추고 매크로는 '진행 없음' 한도로 정지합니다.`n" +
+      " - 다른 대상의 채집이 진행 중이면 방해하지 않고 최대 3분 기다립니다."
       [System.Windows.Forms.MessageBox]::Show($lifeManualText, '생활 설명서',
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
       return
@@ -3933,7 +3966,14 @@ function Update-LifeSliders {
       if ($itemIndex -lt $sliderNames.Count) {
         $slotCard.Text = $sliderNames[$itemIndex]
         $slotCard.Tag = $itemIndex
-        $slotCard.Enabled = $true
+        # ★ 실행 중에는 잠금을 유지합니다. Set-UiRunning 이 시작할 때 상세 패널을 통째로
+        #   잠그는데, 설정/로그 탭 토글은 (실행 중에도 써야 해서) 잠그지 않고 그 핸들러가
+        #   이 함수를 다시 부릅니다. 그때 무조건 $true 로 되돌려 **카드만 다시 눌리는 것처럼
+        #   보이는** 상태 불일치가 생겼습니다. 실제 값 변경은 클릭 핸들러의 running 가드가
+        #   막고 있지만, 잠금 계약과 화면이 갈라져 있으면 다음 사람이 그 가드를 믿지 못합니다
+        #   (화살표는 아래 canNavigate 게이트로 이미 제대로 잠겨 있어 대비가 더 뚜렷했습니다.
+        #   2026-08-10 8차 점검).
+        $slotCard.Enabled = (-not $script:running)
         $slotCard.Image = $(if ($null -ne $sliderSet.Icons) { $sliderSet.Icons[$itemIndex] } else { $null })
         $slotCard.FlatStyle = 'Flat'
         if ($itemIndex -eq [int]$sliderSet.Selected) {
@@ -3992,7 +4032,15 @@ $script:lifeSlideWidth = 0
 $script:lifeSlideDurationMs = 320.0   # 사용자 확정 속도
 $script:lifeSlideTimer = New-Object System.Windows.Forms.Timer
 $script:lifeSlideTimer.Interval = 15
-$script:lifeSlideTimer.Add_Tick({ Invoke-LifeSlideTick })
+# 다른 타이머 핸들러와 같은 계약: 예외를 밖으로 흘리면 PS 5.1 WinForms 가 모달 오류 창을
+# 띄워 메시지 루프가 멈춥니다 (무인 운용에서 아무도 못 닫음 - 2026-08-10 10차 점검)
+$script:lifeSlideTimer.Add_Tick({
+    try {
+      Invoke-LifeSlideTick
+    } catch {
+      try { Add-GuiLog "[오류] 내부 타이머(생활 슬라이드) 처리 중 예외 - 자동화는 계속 시도합니다: $($_.Exception.Message)" } catch { }
+    }
+  })
 
 function Stop-LifeSlideNow {
   # 애니메이션 즉시 종료 + 전체 정리 (이미 반영된 새 페이지로 스냅). 어떤 중단 경로에서도
@@ -4647,9 +4695,16 @@ function Add-ColoredLogLine {
 
   # 내용에 따라 색을 입혀 로그창에 한 줄 추가합니다. 색과 접힘 배지가 같은 심각도 판정을
   # 공유합니다 (2026-08-04 탭 토글 - 리뷰 계약).
+  # ★ **태그를 먼저** 봅니다. 예전에는 '실패' 라는 낱말을 태그보다 앞서 검사해서, 워커의
+  #   정상 로그가 빨강 오류로 뜨고 접힘 배지에도 오류로 계상됐습니다. 예를 들어
+  #   `[안내] 커서 위치 확인이 정상으로 돌아왔습니다 (… 확인 실패 3회는 기록을 생략했습니다)`,
+  #   `[완료] 화면 캡처 실패가 2분 이상 지속 - …`, 그리고 이번에 정직성을 높이며 새로 넣은
+  #   `구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀` 같은 줄이 전부 걸렸습니다.
+  #   **로그를 정직하게 만들수록 오류 배지가 부푸는** 구조였습니다 (2026-08-09 5차 점검).
+  #   태그가 붙은 줄은 태그가 정본이고, '실패' 휴리스틱은 태그 없는 줄에만 적용합니다.
   $severity = ''
   $lineColor = [System.Drawing.Color]::Gainsboro                                  # 기본(회백색)
-  if ($Text -match '\[오류\]|오류 종료|실패') {
+  if ($Text -match '\[오류\]') {
     $lineColor = [System.Drawing.Color]::FromArgb(255, 110, 110)                  # 오류 = 빨강
     $severity = 'error'
   } elseif ($Text -match '\[경고\]') {
@@ -4661,6 +4716,21 @@ function Add-ColoredLogLine {
     $lineColor = [System.Drawing.Color]::LightGreen                               # 완료 = 초록
   } elseif ($Text -match '\[준비\]') {
     $lineColor = [System.Drawing.Color]::MediumPurple                             # 준비 = 보라
+  } elseif ($Text -match '\[(던전|어비스|심층|사냥터|생활|커스텀|파티원|설정)\]') {
+    # 콘텐츠(도메인) 태그도 **태그가 붙은 줄**입니다. 워커의 계약은 '심각도는 [오류]/[경고]
+    # 로만 표시한다' 이므로, 도메인 태그만 달린 줄은 정상 진행 기록입니다.
+    # 5차에서 '태그 우선'으로 고쳤지만 심각도 태그 7종만 앞세웠고 도메인 태그는 빠져 있어,
+    # 6차 AST 전수 스캔에서 **7줄**이 여전히 빨강 + 오류 배지로 새는 것을 확인했습니다:
+    #   `[던전] 템플릿 좌표의 카드 픽셀 확인 실패 - 좌표는 실측 매핑이라 그대로 시도합니다`,
+    #   `[생활] 목록 스크롤: 게임 전면화 실패로 건너뜀`,
+    #   `[던전] 공물 소모량 재판독 실패 - 교차 검증을 건너뜁니다` 등 전부 정상 폴백입니다.
+    # 낱말 하나씩 고쳐 봐야 새 로그가 생길 때마다 재발하므로 분류 규칙에서 닫습니다
+    # (2026-08-09 6차 점검. 태그 목록의 완전성은 tests\test_log_severity.ps1 이 감시합니다).
+    $lineColor = [System.Drawing.Color]::Gainsboro
+  } elseif ($Text -match '오류 종료|실패') {
+    # 태그가 전혀 없는 줄(GUI 자체 메시지 등)에만 낱말로 판정합니다
+    $lineColor = [System.Drawing.Color]::FromArgb(255, 110, 110)
+    $severity = 'error'
   }
   $txtLog.SelectionStart = $txtLog.TextLength
   $txtLog.SelectionLength = 0
@@ -4838,6 +4908,35 @@ function Test-CustomMarkerOwnerMatchesContext {
   } catch {
     return $false
   }
+}
+
+function Test-CustomMarkerValidForCurrent {
+  # 완료 마커가 **지금 항목의 유효한 마커인가**. 파일 존재만 보면 안 됩니다.
+  #
+  # Clear-CustomMarkerFile 은 파일이 잠겨 삭제가 막히면 내용을 '{}' 로 덮어 **소유자 형식을
+  # 무효화**하고 성공으로 끝냅니다(그게 그 폴백의 목적). 그런데 종료 코드 처리부가
+  # Test-Path 만 보면 그 '{}' 를 '이번 판 클리어 확정'으로 읽어, **돌지도 않은 항목을 완료로
+  # 계상하고 건너뜁니다** (2026-08-09 6차 점검). 이어가기 복구가 쓰는 판정과 같은 것을
+  # 쓰게 해서 두 경로가 같은 사실을 보게 만듭니다 - 한쪽만 인정하면 계상과 복구가 어긋납니다.
+  if (-not (Test-Path -LiteralPath $customMarkerFile)) { return $false }
+  $owner = Read-CustomMarkerOwner
+  # 소유자 형식이 아니면 무조건 거절합니다 - '{}' 무효화 잔존, 구버전 타임스탬프 마커,
+  # 깨진 파일이 전부 여기서 걸립니다. 6차에서 닫으려던 구멍이 바로 이것입니다.
+  if (-not $owner) { return $false }
+  $context = Get-CustomCurrentContext
+  if (-not $context) {
+    # ★ '컨텍스트를 못 읽음'은 **'마커가 틀렸다'가 아니라 '판단 불가'** 입니다.
+    #   Get-CustomCurrentContext 는 부를 때마다 Read-Config 로 **디스크를 다시 읽습니다.**
+    #   그 읽기가 한 번 실패하면(백신 스캔·외부 점유 등 일시 공유 위반) $null 이 되는데,
+    #   이걸 '무효'로 처리하면 **정당하게 끝낸 판을 안 세고 그 항목을 한 번 더 돌립니다**
+    #   = 은동전/마족공물 이중 소모. 이 프로젝트에서 가장 나쁜 결과입니다.
+    #   6차 수정(파일 존재 → 소유자 대조)이 새로 만든 위험이라 7차에서 막습니다.
+    #   소유자 형식은 위에서 이미 확인했으므로 '{}' 잔존은 이 경로로 새지 않습니다.
+    #   판단 불가일 때만 예전 계약(존재하면 인정)으로 되돌아가고, 사실을 로그로 남깁니다.
+    Add-GuiLog '[경고] 커스텀 진행 정보를 읽지 못해 완료 마커를 소유자 형식만으로 인정합니다 (설정 파일 접근 실패 - 다음 회차에 다시 확인합니다).'
+    return $true
+  }
+  return [bool](Test-CustomMarkerOwnerMatchesContext -Owner $owner -Context $context)
 }
 
 function Get-CustomNextProgress {
@@ -7178,6 +7277,42 @@ function Load-SettingsToUi {
   } catch { $cboDifficulty.SelectedIndex = 0 }
   try { $numClearWait.Value = [int]$cfg.timeoutsSeconds.dungeonClear } catch { }
   try { $numCount.Value = [int]$cfg.repeat.defaultCount } catch { }
+  # 반복 모드/종료 시각 복원 (숫자만 복원하면 화면과 실제 동작이 어긋납니다 - 10차 점검).
+  # 시간 지정은 **오늘 그 시각**으로 되살리되, 이미 지난 시각이면 무한으로 되돌리고 알립니다
+  # (그대로 두면 시작하자마자 '지정 시간 도달'로 멈춰 이유를 알기 어렵습니다).
+  try {
+    $savedUntil = [string]$cfg.repeat.untilTime
+    if ($savedUntil -match '^\d{1,2}:\d{2}$') {
+      $parsedUntil = [datetime]::ParseExact($savedUntil, 'H:mm', $null)
+      $dtpUntil.Value = (Get-Date).Date.AddHours($parsedUntil.Hour).AddMinutes($parsedUntil.Minute)
+    }
+  } catch { }
+  # ★★ [커스텀 반복] 라디오도 **같은 GroupBox($grpRepeat) 소속**이라, 여기서 무한/횟수/시간
+  #   중 하나를 켜면 WinForms 자동 배타로 **커스텀 선택이 풀립니다.** 게다가 그
+  #   CheckedChanged 가 $script:customEnabledWish 까지 $false 로 덮어 복구 경로마저 끊고,
+  #   이후 저장이 config 의 customRepeat.enabled=false 를 디스크에 굳힙니다.
+  #   그러면 커스텀 반복을 켜 둔 사용자가 컨트롤 패널을 껐다 켤 때마다 **조용히 단일 콘텐츠
+  #   무한 반복으로 돌아갑니다** - 리스트가 통째로 무시되는 배포 차단급 회귀입니다.
+  #   (2026-08-10 11차 점검. 10차에 넣은 이 복원이 만든 것이고, 실제 WinForms 하네스로
+  #    4가지 저장값 전부에서 재현했습니다. 프로젝트가 8590 부근에서 같은 배타 문제를 이미
+  #    crSwitching 가드로 다루고 있었는데 새 코드가 그 교훈을 비껴갔습니다.)
+  #   → 커스텀이 선택돼 있으면 상단 모드 복원을 **건너뜁니다.** 커스텀 반복 자체가 이 그룹의
+  #     네 번째 모드이므로, 그때는 복원할 '상단 모드'가 없는 것이 맞습니다.
+  if (-not $rbCustomRepeat.Checked) {
+    try {
+      switch ([string]$cfg.repeat.mode) {
+        'count' { $rbCount.Checked = $true }
+        'time' {
+          if ($dtpUntil.Value -gt (Get-Date)) { $rbTime.Checked = $true }
+          else {
+            $rbInfinite.Checked = $true
+            Add-GuiLog "[안내] 저장된 종료 시각($($dtpUntil.Value.ToString('HH:mm')))이 이미 지나 '무한 반복'으로 되돌렸습니다 - 필요하면 다시 지정해 주세요."
+          }
+        }
+        default { $rbInfinite.Checked = $true }
+      }
+    } catch { }
+  }
   try { $numFontSize.Value = [int]$cfg.ui.logFontSize } catch { }
   # 탭 토글 상태 복원 (2026-08-04 시안 - 기본 둘 다 접힘. JSON 불리언만 인정 - 리뷰 조건.
   # 프로그램적 체크 변경의 CheckedChanged 저장은 uiReady 가드가 막음)
@@ -7188,8 +7323,13 @@ function Load-SettingsToUi {
 function Save-SettingsFromUi {
   $cfg = Read-Config
   if (-not $cfg) {
+    # 복구 방법까지 알려 줍니다. 파일이 깨지면 런처는 '파일이 있으니 정상'으로 보고 기본
+    # config 를 다시 추출하지 않고, 저장도 읽기가 선행이라 계속 실패합니다. 그러면 [시작]을
+    # 눌러도 로그 한 줄만 남고 영영 시작되지 않는데 화면 어디에도 복구 안내가 없었습니다
+    # (2026-08-10 8차 점검). 파일을 지우면 다음 실행에서 기본값으로 다시 만들어집니다.
     $causeText = $(if ($script:configReadError) { " (원인: $($script:configReadError))" } else { '' })
     Add-GuiLog "[오류] config.json 을 읽지 못해 저장할 수 없습니다.$causeText"
+    Add-GuiLog "[안내] 복구 방법: 컨트롤 패널을 끄고 '$configPath' 파일을 지운 뒤 다시 실행하면 기본 설정으로 새로 만들어집니다 (설정은 초기화됩니다)."
     return $false
   }
   $spaceEntry = Get-KeyEntry $cfg 32
@@ -7255,6 +7395,22 @@ function Save-SettingsFromUi {
   if (-not $cfg.PSObject.Properties['repeat']) { $cfg | Add-Member -NotePropertyName 'repeat' -NotePropertyValue ([pscustomobject]@{}) }
   if ($cfg.repeat.PSObject.Properties['defaultCount']) { $cfg.repeat.defaultCount = [int]$numCount.Value }
   else { $cfg.repeat | Add-Member -NotePropertyName 'defaultCount' -NotePropertyValue ([int]$numCount.Value) }
+  # ★ 숫자만 저장하고 **모드(무한/횟수/시간)** 는 저장하지 않던 것을 함께 저장합니다.
+  #   그러면 다시 켰을 때 칸에는 '50' 이 그대로 보이는데 실제로는 무한 반복이라,
+  #   사용자가 '50회로 맞춰 뒀다'고 믿은 채 밤새 도는 상태가 됩니다 (2026-08-10 10차 점검).
+  # 커스텀 반복이 선택된 동안에는 상단 모드가 전부 꺼져 있습니다(같은 라디오 그룹).
+  # 그때 'infinite' 로 덮어쓰면 사용자가 커스텀을 껐을 때 원래 쓰던 '횟수 50' 이 사라집니다.
+  # → 커스텀 중에는 **마지막 비커스텀 모드를 그대로 보존**합니다 (2026-08-10 11차 점검).
+  if (-not $rbCustomRepeat.Checked) {
+    $repeatMode = $(if ($rbCount.Checked) { 'count' } elseif ($rbTime.Checked) { 'time' } else { 'infinite' })
+    if ($cfg.repeat.PSObject.Properties['mode']) { $cfg.repeat.mode = $repeatMode }
+    else { $cfg.repeat | Add-Member -NotePropertyName 'mode' -NotePropertyValue $repeatMode }
+  } elseif (-not $cfg.repeat.PSObject.Properties['mode']) {
+    $cfg.repeat | Add-Member -NotePropertyName 'mode' -NotePropertyValue 'infinite'
+  }
+  $repeatUntil = $dtpUntil.Value.ToString('HH:mm')
+  if ($cfg.repeat.PSObject.Properties['untilTime']) { $cfg.repeat.untilTime = $repeatUntil }
+  else { $cfg.repeat | Add-Member -NotePropertyName 'untilTime' -NotePropertyValue $repeatUntil }
 
   # 선택된 던전을 config 에 기록 (워커가 이 값으로 카드 클릭 대상을 정함)
   $dungeonName = '허상의 정박지'
@@ -7512,7 +7668,7 @@ function Start-NextCycle {
     if (-not $customContext) {
       # 실행 중에는 리스트 편집이 비활성이라 정상 경로에선 없지만, config 읽기 실패 등 방어
       Add-GuiLog '[오류] 커스텀 반복 정보를 config 에서 읽지 못해 정지합니다.'
-      Stop-AllRun '커스텀 반복 정보 읽기 실패'
+      Stop-AllRun -IsError '커스텀 반복 정보 읽기 실패'
       return
     }
   }
@@ -7598,7 +7754,7 @@ function Start-NextCycle {
   }
   if (-not $script:worker) {
     Add-GuiLog '[경고] 자동화 프로세스를 시작하지 못했습니다 - 실행 상태를 되돌립니다. 잠시 후 다시 시작해 주세요.'
-    Stop-AllRun -Reason '워커 시작 실패'
+    Stop-AllRun -IsError -Reason '워커 시작 실패'
     return
   }
   if ($customContext) {
@@ -7629,7 +7785,14 @@ function Start-NextCycle {
 }
 
 function Stop-AllRun {
-  param([string]$Reason)
+  # IsError: 이 정지가 **오류**인지(빨강 + 오류 배지) 정상/사용자 정지인지.
+  # ★ 예전에는 사유를 태그 없이 `"중지: $Reason"` 으로만 남겼습니다. 그러면 심각도가
+  #   '실패' 라는 낱말로 정해져, **정상 조건 정지(코드 4)의 사유에 '실패'가 들어가면
+  #   빨강 오류로 뜨고** 반대로 진짜 오류 정지의 사유에 그 낱말이 없으면 회백색이 됐습니다.
+  #   5~7차가 워커 로그에서 없앤 '정직하게 쓸수록 오류 배지가 부푸는' 구조가 GUI 자기
+  #   메시지 쪽에 그대로 남아 있던 것입니다 (2026-08-10 8차 점검).
+  #   → 호출부가 아는 사실(오류인가)로 태그를 정합니다. 기본은 정상 정지입니다.
+  param([string]$Reason, [switch]$IsError)
   $wasCustom = $script:customActive
   $workerToDispose = $script:worker
   if ($workerToDispose) {
@@ -7703,13 +7866,14 @@ function Stop-AllRun {
     $lblStatus.Text = "중지됨 - $Reason (완료: $($script:completedCycles)회)"
   }
   $lblStatus.ForeColor = [System.Drawing.Color]::DimGray
-  Add-GuiLog "중지: $Reason"
+  Add-GuiLog "$(if ($IsError) { '[오류]' } else { '[중단]' }) 중지: $Reason"
 }
 
 # --- 타이머: 워커 상태 + 로그 tail ---
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 600
 $timer.Add_Tick({
+    try {
     # 워커 로그 tail
     if ($script:running) {
       # @() 는 필수입니다. 함수의 배열 반환은 PS 5.1 파이프라인에서 풀리므로, 새 줄이
@@ -7785,7 +7949,7 @@ $timer.Add_Tick({
             # 복구해 은동전 판을 다시 돌지 않게 합니다.
             $script:customRecoveryPending = $true
             $script:customRestart = $true
-            Stop-AllRun '커스텀 진행 기록 저장 실패 - 중복 실행 방지를 위해 정지'
+            Stop-AllRun -IsError '커스텀 진행 기록 저장 실패 - 중복 실행 방지를 위해 정지'
             $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
             return
           }
@@ -7813,7 +7977,7 @@ $timer.Add_Tick({
               Stop-AllRun '지정 바퀴 완료'
             } else {
               # 전진된 lap>N 진행은 디스크에 남아 다음 시작 게이트가 다시 초기화를 시도합니다.
-              Stop-AllRun '지정 바퀴 완료 후 진행 초기화 저장 실패'
+              Stop-AllRun -IsError '지정 바퀴 완료 후 진행 초기화 저장 실패'
               $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
             }
           } else {
@@ -7849,7 +8013,7 @@ $timer.Add_Tick({
           Stop-AllRun '안전 중지'
         } elseif ($script:preparedStreak -ge 3) {
           # 화면 오판 등으로 준비 실행만 반복되는 무한 루프 방지 (레거시 컨트롤러와 동일한 상한)
-          Stop-AllRun '준비 실행(화면 복귀)이 3회 연속 반복 - 게임 화면 상태를 확인해 주세요'
+          Stop-AllRun -IsError '준비 실행(화면 복귀)이 3회 연속 반복 - 게임 화면 상태를 확인해 주세요'
           $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
         } elseif (-not (Test-TimeAllowsNextCycle)) {
           $targetText = $script:targetTime.ToString('HH:mm')
@@ -7859,7 +8023,7 @@ $timer.Add_Tick({
         }
       } elseif ($exitCode -eq 2) {
         # 다른 인스턴스가 이미 실행 중(뮤텍스 충돌): 이중 조작을 피하기 위해 이 GUI는 멈춥니다
-        Stop-AllRun '다른 자동화 인스턴스가 이미 실행 중 (중복 실행 방지) - 작업 관리자에서 powershell.exe 를 종료한 뒤 다시 시작해 주세요'
+        Stop-AllRun -IsError '다른 자동화 인스턴스가 이미 실행 중 (중복 실행 방지) - 작업 관리자에서 powershell.exe 를 종료한 뒤 다시 시작해 주세요'
         $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
       } elseif ($exitCode -eq 3) {
         # 미개발 구간 도달: 구현된 데까지 완료하고 정상 정지 (오류 아님, 상세는 로그 참고)
@@ -7867,7 +8031,9 @@ $timer.Add_Tick({
         $lblStatus.ForeColor = [System.Drawing.Color]::SteelBlue
       } elseif ($exitCode -eq 4) {
         # 조건 충족에 의한 정상 정지 (예: 은동전 소진 + '소진 시 계속' 옵션 꺼짐)
-        if ($script:customActive -and -not $script:customMarkerIgnore -and (Test-Path -LiteralPath $customMarkerFile)) {
+        # 파일 존재가 아니라 **지금 항목의 유효한 소유자 마커**인지로 판단합니다
+        # (무효화된 '{}' 잔존 파일을 완료로 오계상하던 구멍 - 2026-08-09 6차 점검)
+        if ($script:customActive -and -not $script:customMarkerIgnore -and (Test-CustomMarkerValidForCurrent)) {
           # 커스텀 + 완료 마커: 클리어 확정(결과 화면 도달) 후 마무리 단계에서 조건 정지된 판이므로
           # 완료로 계상하고 전진한 '뒤' 정지합니다 (전진 없이 정지하면 다음 시작 때 같은 은동전 판을
           # 한 번 더 돌아 이중 소모 - 요청사항 확정 스펙)
@@ -7878,7 +8044,7 @@ $timer.Add_Tick({
           if ($finishedContext) { $script:customPrevItem = Format-CustomItemToken -Item $finishedContext.Item }
           $stoppedProgress = Step-CustomProgress
           if (-not $stoppedProgress) {
-            Stop-AllRun '조건 정지 판의 커스텀 진행 기록 저장 실패 - 완료 마커를 보존하고 정지'
+            Stop-AllRun -IsError '조건 정지 판의 커스텀 진행 기록 저장 실패 - 완료 마커를 보존하고 정지'
             $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
             return
           }
@@ -7925,7 +8091,7 @@ $timer.Add_Tick({
           # 복구합니다. 복구 워커가 코드 0으로 끝난 뒤 위 정상 분기에서 딱 한 번 전진합니다.
           # 마커가 없으면 같은 항목 전체를 2회까지 자동 재시작합니다.
           $markerExists = ($script:customRecoveryPending -or
-            ((-not $script:customMarkerIgnore) -and (Test-Path -LiteralPath $customMarkerFile)))
+            ((-not $script:customMarkerIgnore) -and (Test-CustomMarkerValidForCurrent)))
           $errorAction = Get-CustomErrorAction -MarkerExists $markerExists -ErrorStreak $script:customErrorStreak
           if ($errorAction -eq 'recover') {
             $script:customErrorStreak++
@@ -7947,18 +8113,29 @@ $timer.Add_Tick({
             if ($script:stopRequested) {
               Stop-AllRun '안전 중지'
             } else {
-              Add-GuiLog "[안내] 오류 종료(코드 1) - 같은 항목을 자동 재시작합니다 (재시도 $($script:customErrorStreak)/2)"
+              # ★ 태그는 [안내]가 아니라 [경고]입니다. 6차에서 '태그 우선'으로 바꾼 뒤로는
+              #   태그가 정본이라, [안내]로 두면 '오류 종료'라는 낱말이 있어도 심각도가 0이 되어
+              #   **로그 탭을 접어 둔 무인 운용에서 오류 배지가 0인 채로 워커가 계속 죽었다
+              #   살아납니다.** 실제로 워커가 코드 1로 죽은 사실이므로 경고가 맞습니다
+              #   (2026-08-10 8차 점검).
+              Add-GuiLog "[경고] 오류 종료(코드 1) - 같은 항목을 자동 재시작합니다 (재시도 $($script:customErrorStreak)/2)"
               Start-NextCycle
             }
           } else {
-            Stop-AllRun '오류 종료(코드 1) - 같은 항목 3회 연속 실패 (로그 확인)'
+            Stop-AllRun -IsError '오류 종료(코드 1) - 같은 항목 3회 연속 실패 (로그 확인)'
             $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
           }
         } else {
-          Stop-AllRun "오류 종료(코드 $exitCode) - 로그 확인"
+          Stop-AllRun -IsError "오류 종료(코드 $exitCode) - 로그 확인"
           $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
         }
       }
+    }
+    } catch {
+      # 타이머 핸들러의 예외는 반드시 여기서 멈춰야 합니다 - 밖으로 나가면 PS 5.1 WinForms 가
+      # 모달 오류 창을 띄워 메시지 루프가 정지하고, 무인 운용에서는 아무도 그 창을 못 닫습니다
+      # (2026-08-10 10차 점검 - 실행으로 확인). 사유는 로그로 남기고 다음 틱에서 이어갑니다.
+      try { Add-GuiLog "[오류] 내부 타이머(워커 감시) 처리 중 예외 - 자동화는 계속 시도합니다: $($_.Exception.Message)" } catch { }
     }
   })
 
@@ -8186,8 +8363,27 @@ function Invoke-StartAutomation {
     if ($script:customActive -and -not $markerStaleBlocked -and (Test-Path -LiteralPath $customMarkerFile)) {
       # GUI/워커가 클리어 뒤 마무리 중 종료됐어도 구조화 마커의 소유자가 현재 progress 와
       # 정확히 같으면 그 항목을 다시 입장하지 않고 마무리 복구부터 이어갑니다.
+      # ★ '컨텍스트를 못 읽음'은 **'마커가 틀렸다'가 아니라 '판단 불가'** 입니다.
+      #   Get-CustomCurrentContext 는 부를 때마다 Read-Config 로 디스크를 다시 읽습니다.
+      #   그 읽기가 한 번 실패하면 $null 인데, 여기서 $null 을 '불일치'로 처리하면 아래
+      #   else 가 **정당한 완료 마커를 디스크에서 지웁니다.** 그러면 이미 클리어가 확정된 판의
+      #   마무리 복구가 영영 불가능해져 그 항목을 처음부터 다시 돌립니다 = 재화 이중 소모.
+      #   종료 코드 경로(2026-08-09 7차)는 계상만 건너뛰고 마커는 보존하는데, 이쪽은
+      #   **되돌릴 수 없어 더 파괴적**입니다 (2026-08-10 8차 점검 - 7차가 만든 계약 비대칭).
+      #   → 먼저 짧게 재시도하고(일시 공유 위반이 대부분), 그래도 못 읽으면 **아무것도 지우지
+      #     않고 시작 자체를 멈춥니다.** 여기서 그냥 진행하면 바로 뒤 Start-NextCycle 의
+      #     마커 정리가 같은 파일을 지워 버리므로 '보존 후 무시'는 성립하지 않습니다.
       $resumeContext = Get-CustomCurrentContext
+      for ($ctxTry = 1; $ctxTry -le 3 -and -not $resumeContext; $ctxTry++) {
+        Start-Sleep -Milliseconds 200
+        $resumeContext = Get-CustomCurrentContext
+      }
       $markerOwner = Read-CustomMarkerOwner
+      if ($markerOwner -and -not $resumeContext) {
+        Add-GuiLog '[오류] 설정 파일을 읽지 못해 이전 완료 기록의 주인을 확인할 수 없습니다 - 완료 기록을 지우지 않고 시작을 멈춥니다. 잠시 뒤 다시 시작해 주세요 (계속 반복되면 config.json 을 확인해 주세요).'
+        $script:customActive = $false
+        return
+      }
       if (Test-CustomMarkerOwnerMatchesContext -Owner $markerOwner -Context $resumeContext) {
         $script:customRecoveryPending = $true
         $script:customRestart = $true
@@ -8249,7 +8445,10 @@ $btnStart.Add_Click({
     # 생활 대분류 지원 범위 게이트 (가공/미지원 스킬 차단. F9 도 PerformClick 경유라 함께 검사)
     if (Test-LifeStartBlocked) { return }
     # 사용 승인 게이트 (새 자동화 시작 시 검사 - 스펙): 미승인 상태는 즉시 거부하고,
-    # 승인 상태여도 명단을 한 번 더 비동기 조회한 뒤(최대 10초) 시작합니다.
+    # 승인 상태여도 명단을 한 번 더 비동기 조회한 뒤 시작합니다.
+  # 상한은 GUI 쪽 $approvalFetchTimeoutSeconds(25초)입니다 - 러닝스페이스 안의 -TimeoutSec 10 은
+  # 응답 헤더까지만 덮으므로 그것만으로는 시작 버튼이 영영 안 풀릴 수 있었습니다(8차 점검).
+  # ('최대 10초'라고 적혀 있던 옛 문구를 11차에서 실제 상한으로 정정)
     # 조회 실패 시에는 7일 유예 캐시가 판정을 대신합니다 (무인 운용 보호).
     if (-not (Test-ApprovalAllowsStart)) {
       Add-GuiLog '[안내] 사용 승인이 확인되지 않아 시작할 수 없습니다 - 화면의 기기 코드를 개발자에게 보내 승인을 받아 주세요.'
@@ -8775,6 +8974,7 @@ $hotkeyTimer.Interval = 100
 $script:f9WasDown = $false
 $script:f10WasDown = $false
 $hotkeyTimer.Add_Tick({
+    try {
     $f9Down = ([Win32.HotkeyPoll]::GetAsyncKeyState(0x78) -band 0x8000) -ne 0   # F9
     $f10Down = ([Win32.HotkeyPoll]::GetAsyncKeyState(0x79) -band 0x8000) -ne 0  # F10
     # 에지 판정을 먼저 래치하고 나서 동작 실행 (v2.0.0 리뷰 지적: PerformClick 이 모달
@@ -8800,6 +9000,12 @@ $hotkeyTimer.Add_Tick({
         $btnKill.PerformClick()
       }
     }
+    } catch {
+      # 타이머 핸들러의 예외는 반드시 여기서 멈춰야 합니다 - 밖으로 나가면 PS 5.1 WinForms 가
+      # 모달 오류 창을 띄워 메시지 루프가 정지하고, 무인 운용에서는 아무도 그 창을 못 닫습니다
+      # (2026-08-10 10차 점검 - 실행으로 확인). 사유는 로그로 남기고 다음 틱에서 이어갑니다.
+      try { Add-GuiLog "[오류] 내부 타이머(단축키 감시) 처리 중 예외 - 자동화는 계속 시도합니다: $($_.Exception.Message)" } catch { }
+    }
   })
 
 $script:uiReady = $true
@@ -8818,8 +9024,41 @@ $script:cleanupLogLines = @()
 $script:approvalTimer = New-Object System.Windows.Forms.Timer
 $script:approvalTimer.Interval = 500
 $script:approvalTimer.Add_Tick({
-    if (-not $script:approvalAsync -or -not $script:approvalAsync.IsCompleted) { return }
+    try {
+    if (-not $script:approvalAsync) { return }
+    if (-not $script:approvalAsync.IsCompleted) {
+      # ★ GUI 쪽 상한. 러닝스페이스 안의 -TimeoutSec 10 은 Invoke-WebRequest 에만 걸리고,
+      #   그 밖의 이유로 조회가 끝나지 않으면 여기가 영원히 돕니다. 그동안 btnStart 는
+      #   비활성이고 F9 는 PerformClick 이 무동작이라 컨트롤 패널을 껐다 켜는 것 말고는
+      #   회복 경로가 없습니다. 상한을 넘기면 조회 실패로 확정해 기존 실패 경로로 보냅니다
+      #   (캐시 유예 판정이 그대로 적용되므로 승인된 사용자는 그대로 시작됩니다).
+      if ($script:approvalStartedAt -and
+          ((Get-Date) - $script:approvalStartedAt).TotalSeconds -ge $approvalFetchTimeoutSeconds) {
+        $script:approvalTimer.Stop()
+        # ★★ 여기서 Stop()/Dispose() 를 **동기로 부르면 안 됩니다.** 둘 다 실행 중 파이프라인이
+        #   끝날 때까지 UI 스레드를 잡습니다 (PS 5.1 실측: 12초 슬립에 Stop 11.5초 /
+        #   10초 슬립에 Dispose 9.5초 블로킹). 그런데 이 상한이 발동하는 전제 자체가
+        #   '조회가 끝나지 않는 상태'이고, Invoke-WebRequest 의 -TimeoutSec 10 은 응답 헤더까지만
+        #   덮어 본문 읽기는 ReadWriteTimeout(기본 300초)이 지배합니다. 즉 동기 정지는
+        #   **상한이 구하려던 바로 그 상황에서 컨트롤 패널을 통째로 얼립니다** - 창 이동·닫기도
+        #   안 되고 F9/F10 핫키와 워커 감시 타이머까지 함께 멈춰, 원래 있던 '껐다 켜기' 회복
+        #   경로마저 사라집니다. 8차에서 넣은 이 수정이 오히려 상황을 악화시켰습니다
+        #   (2026-08-10 9차 점검, 실측으로 확인).
+        #   → 참조만 끊고 정지 요청은 **비동기(BeginStop)** 로 던집니다. Dispose 는 하지
+        #     않습니다(그것도 블로킹). 러닝스페이스는 웹 요청이 끝나면 스스로 정리되고,
+        #     최악이라도 조회 1건 분량이 남을 뿐입니다 - UI 를 얼리는 것보다 훨씬 낫습니다.
+        $abandonedPs = $script:approvalPs
+        $script:approvalPs = $null
+        $script:approvalAsync = $null
+        $script:approvalStartedAt = $null
+        if ($abandonedPs) { try { [void]$abandonedPs.BeginStop($null, $null) } catch { } }
+        Add-GuiLog "[경고] 사용 승인 명단 조회가 ${approvalFetchTimeoutSeconds}초 안에 끝나지 않아 조회를 중단했습니다 (저장된 승인 기록으로 판정합니다)."
+        Complete-ApprovalCheck -ResponseText ''
+      }
+      return
+    }
     $script:approvalTimer.Stop()
+    $script:approvalStartedAt = $null
     $responseText = ''
     try {
       $fetchResult = $script:approvalPs.EndInvoke($script:approvalAsync)
@@ -8829,6 +9068,12 @@ $script:approvalTimer.Add_Tick({
     $script:approvalPs = $null
     $script:approvalAsync = $null
     Complete-ApprovalCheck -ResponseText $responseText
+    } catch {
+      # 타이머 핸들러의 예외는 반드시 여기서 멈춰야 합니다 - 밖으로 나가면 PS 5.1 WinForms 가
+      # 모달 오류 창을 띄워 메시지 루프가 정지하고, 무인 운용에서는 아무도 그 창을 못 닫습니다
+      # (2026-08-10 10차 점검 - 실행으로 확인). 사유는 로그로 남기고 다음 틱에서 이어갑니다.
+      try { Add-GuiLog "[오류] 내부 타이머(승인 조회) 처리 중 예외 - 자동화는 계속 시도합니다: $($_.Exception.Message)" } catch { }
+    }
   })
 $initialCache = Get-ConfigApprovalCache
 $script:approvalState = Get-ApprovalDecision -FetchOk:$false -Codes @() -DeviceCode $script:deviceCode `
@@ -8927,6 +9172,7 @@ $script:updateCheckAsync = $script:updateCheckPs.BeginInvoke()
 $script:updateTimer = New-Object System.Windows.Forms.Timer
 $script:updateTimer.Interval = 1000
 $script:updateTimer.Add_Tick({
+    try {
     if (-not $script:updateCheckAsync.IsCompleted) { return }
     $script:updateTimer.Stop()
     $tag = ''
@@ -8956,6 +9202,12 @@ $script:updateTimer.Add_Tick({
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
     }
+    } catch {
+      # 타이머 핸들러의 예외는 반드시 여기서 멈춰야 합니다 - 밖으로 나가면 PS 5.1 WinForms 가
+      # 모달 오류 창을 띄워 메시지 루프가 정지하고, 무인 운용에서는 아무도 그 창을 못 닫습니다
+      # (2026-08-10 10차 점검 - 실행으로 확인). 사유는 로그로 남기고 다음 틱에서 이어갑니다.
+      try { Add-GuiLog "[오류] 내부 타이머(업데이트 확인) 처리 중 예외 - 자동화는 계속 시도합니다: $($_.Exception.Message)" } catch { }
+    }
   })
 $script:updateTimer.Start()
 
@@ -8970,22 +9222,24 @@ try {
       try { $uiTimer.Dispose() } catch { }
     }
   }
-  if ($script:updateCheckPs) {
-    try {
-      if ($script:updateCheckAsync -and -not $script:updateCheckAsync.IsCompleted) {
-        $script:updateCheckPs.Stop()
-      }
-    } catch { }
-    try { $script:updateCheckPs.Dispose() } catch { }
-  }
-  if ($script:approvalPs) {
-    # 승인 명단 조회 러닝스페이스도 명시적으로 정리 (업데이트 확인과 동일 규약)
-    try {
-      if ($script:approvalAsync -and -not $script:approvalAsync.IsCompleted) {
-        $script:approvalPs.Stop()
-      }
-    } catch { }
-    try { $script:approvalPs.Dispose() } catch { }
+  # ★ 아직 **끝나지 않은** 조회에는 동기 Stop()/Dispose() 를 부르면 안 됩니다. 둘 다 실행 중
+  #   파이프라인이 끝날 때까지 블로킹합니다(PS 5.1 실측: 12초 슬립에 Stop 11.5초). 여기는
+  #   폼 종료 경로라, 그 몇 분 동안 **프로세스가 살아 있는 채 Global 뮤텍스를 쥐고 있어**
+  #   사용자가 컨트롤 패널을 다시 켜면 '이미 실행 중'으로 차단됩니다. 창은 이미 닫혔는데
+  #   다시 열리지도 않는, 사용자 눈에는 완전한 고장입니다 (2026-08-10 10차 점검 -
+  #   9차에서 타이머 쪽만 걷어내고 이 종료 경로는 그대로 남아 있었습니다).
+  #   → 끝난 것만 정리하고, 진행 중인 것은 **비동기 정지 요청만** 던지고 버립니다.
+  #     프로세스가 곧 끝나므로 러닝스페이스도 함께 사라집니다.
+  foreach ($pendingPs in @(
+      @{ Ps = $script:updateCheckPs; Async = $script:updateCheckAsync },
+      @{ Ps = $script:approvalPs;    Async = $script:approvalAsync })) {
+    if (-not $pendingPs.Ps) { continue }
+    $stillRunning = ($pendingPs.Async -and -not $pendingPs.Async.IsCompleted)
+    if ($stillRunning) {
+      try { [void]$pendingPs.Ps.BeginStop($null, $null) } catch { }
+      continue   # Dispose 도 블로킹이므로 부르지 않습니다
+    }
+    try { $pendingPs.Ps.Dispose() } catch { }
   }
   # 진행 중 슬라이드 정리 (스트립 Bitmap 등 - PictureBox.Dispose 는 Image 를 해제하지 않음.
   # 폼 종료 경로라 UI 복원 생략 - 리뷰 조건)

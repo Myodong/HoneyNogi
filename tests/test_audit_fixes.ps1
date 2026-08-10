@@ -3,7 +3,10 @@
 $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$workerSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
+$workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
+$workerSource = [IO.File]::ReadAllText($workerPath)
+# 함수 본문만 AST 로 떼어내는 공용 헬퍼 (주석 앵커를 코드 앵커로 바꾸는 데 필요 - 8차 점검)
+. (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $guiSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
 $buildSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'build\build_exe.ps1'))
 $launcherSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'build\launcher.cs'))
@@ -20,10 +23,49 @@ Assert-Case '워커: 복귀 성공 후 onSelectionScreen 확정 3곳' `
   ([regex]::Matches($workerSource, '\$onSelectionScreen = \$true\s+#?\s*').Count -ge 3) $true
 
 # ② 클리어 대기 - 마감/연장 판정이 본문 최상단 (continue 가 건너뛰지 못함)
-Assert-Case '워커: 클리어 대기 while($true) + 최상단 마감/연장 판정' `
-  ($workerSource -match 'while \(\$true\) \{\s+# 마감/전투 연장 판정 \(본문 최상단[\s\S]{0,2800}?\$pollCounter\+\+') $true
-Assert-Case '워커: 연장 판독 중 캡처 실패도 throw 제외' `
-  ($workerSource -match '\} elseif \(\$script:screenCaptureFailing\) \{\s+# 연장 판독\(Test-InDungeonQuest\) 도중') $true
+# ★ 8차 점검: 아래 두 단언은 **주석에만** 걸려 있었습니다. 앵커가 '# 마감/전투 연장 판정
+#   (본문 최상단' / '# 연장 판독(Test-InDungeonQuest) 도중' 이라는 설명 주석이었고, 정작
+#   계약인 `if ((Get-Date) -ge $deadline)` 조건과 '이 분기에서는 던지지 않는다'는 본문은
+#   패턴 어디에도 없었습니다. 그래서 시간 상한을 통째로 죽이거나 그 분기에 throw 를 넣어도
+#   52종이 전부 통과했습니다(변이 실측). 주석은 언제든 정리되므로 계약을 걸어 둘 자리가
+#   아닙니다 - **주석을 뺀 코드 사본**으로 실제 구조를 확인합니다.
+$clearBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Wait-ForDungeonClearScreen'))
+$clearCode = (($clearBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '워커: 클리어 대기 while($true) + 최상단 마감 판정' `
+  ([bool]($clearCode -match 'while \(\$true\) \{\s*\r?\n\s*if \(\(Get-Date\) -ge \$deadline\) \{')) $true
+Assert-Case '워커: 마감 도달의 최종 결말은 throw (무한 대기 금지)' `
+  ([bool]($clearCode -match '(?s)if \(\(Get-Date\) -ge \$deadline\) \{.*throw ''던전 클리어 화면 감지 대기 시간이 초과됐습니다\.''')) $true
+Assert-Case '워커: 마감 판정이 폴링 카운터보다 앞(continue 가 건너뛰지 못함)' `
+  ([bool]($clearCode.IndexOf('if ((Get-Date) -ge $deadline) {') -lt $clearCode.IndexOf('$pollCounter++') -and
+          $clearCode.IndexOf('$pollCounter++') -ge 0)) $true
+# 캡처 실패 분기는 **던지지 않는 것**이 계약입니다 (죽은 화면에 워커를 재투입하지 않기 위함).
+# 마감 처리 안에는 이런 분기가 3개 있습니다: 진입부 `if (…) {` 1개 + `} elseif (…) {` 2개.
+# ★ 변이 실측: 처음엔 elseif 2개만 검사해서, **진입부 if 분기에 throw 를 넣어도 통과**했습니다.
+#   세 개를 모두 세고 각 본문에 throw 가 없음을 확인합니다.
+# 닫는 중괄호는 `} elseif` 뿐 아니라 `} else` 로도 이어지므로 **같은 들여쓰기의 닫는
+# 중괄호**까지만 봅니다 (앞 형태만 앵커로 쓰면 마지막 분기가 else 블록까지 삼켜 그 안의
+# throw 를 자기 것으로 착각합니다 - 첫 작성 때 실제로 그렇게 빗나갔음).
+$deadlineBlock = [regex]::Match($clearCode, '(?s)if \(\(Get-Date\) -ge \$deadline\) \{(.*?)\r?\n    \}')
+Assert-Case '워커: 마감 처리 블록을 찾음' ([bool]$deadlineBlock.Success) $true
+$captureFailBranches = @([regex]::Matches($deadlineBlock.Groups[1].Value,
+  '(?s)(?:if|\} elseif) \(\$script:screenCaptureFailing\) \{(.*?)\r?\n      \}'))
+Assert-Case '워커: 마감 처리의 캡처 실패 분기 3곳' $captureFailBranches.Count 3
+$throwInCaptureFail = 0
+foreach ($m in $captureFailBranches) { if ($m.Groups[1].Value -match 'throw') { $throwInCaptureFail++ } }
+Assert-Case '워커: 캡처 실패 분기에서는 던지지 않는다' $throwInCaptureFail 0
+# ★ 연장 판정은 **콘텐츠별**이어야 합니다. 어비스 전용 Test-InDungeonQuest 하나만 쓰면
+#   퀘스트 추적기 문구가 다른 던전·심층·사냥터에서는 절대 매칭되지 않아, 2026-07-17 에 넣은
+#   '전투 중이면 60초씩 연장' 안전망이 4개 콘텐츠 중 1개에서만 살아 있게 됩니다
+#   (2026-08-10 8차 점검에서 발견 - 조용히 죽어 있어 로그에도 흔적이 없었음).
+Assert-Case '워커: 연장 판정은 콘텐츠별 판정을 쓴다' `
+  ([bool]($clearCode -match '-lt \$extendLimit -and \(Test-CombatStillRunning -Game \$Game\)')) $true
+$combatBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-CombatStillRunning'))
+Assert-Case '워커: 연장 판정이 던전/심층/사냥터 키워드를 덮는다' `
+  ([bool](($combatBody -match "'\[던전\]'") -and ($combatBody -match "'\[심층\]'") -and
+          ($combatBody -match "'\[사냥터\]'") -and ($combatBody -match "Contains\('구역'\)") -and
+          ($combatBody -match "Contains\('소탕'\)") -and ($combatBody -match "Contains\('정찰'\)"))) $true
+Assert-Case '워커: 어비스는 기존 판정을 그대로 위임' `
+  ([bool]($combatBody -match 'return \[bool\]\(Test-InDungeonQuest -Game \$Game\)')) $true
 Assert-Case '워커: 클리어 대기 바닥 연장 블록 제거(연장 판정 1곳뿐)' `
   ([regex]::Matches($workerSource, '클리어 대기 한도\(\$\{TimeoutSeconds\}초\)를 넘겼지만').Count) 1
 
@@ -188,8 +230,14 @@ Assert-Case '폴백: 사냥터 공짜 재시도는 확인된 경우에만' `
 Assert-Case '3차: 카드 다중 스케일 1~2회전' `
   ($workerSource -match 'if \(\$setTry -le 2\) \{ \$cardScales = @\(5, 3, 4\) \}') $true
 # 복귀 함수: 선택 화면 return 직전 안전 중지 소비
-Assert-Case '3차: 선택 화면 복귀 직전 안전 중지 소비' `
-  ($workerSource -match 'Test-AbyssSelectionScreen -Game \$Game\) \{\s+# 선택 화면 도달 직전의 안전 중지[\s\S]{0,700}exit \$SafeStopExitCode') $true
+# ★ 8차 점검: 이 단언도 주석 앵커였습니다. 계약의 핵심은 '**예약 파일을 실제로 소비(삭제)한
+#   뒤** 종료한다' 인데, 소비 게이트(`Test-Path $safeStopFlagPath`)와 삭제가 패턴에 없어서
+#   게이트를 항상 거짓으로 만들어도 통과했습니다. 그러면 예약이 다음 실행으로 새어 나가
+#   헛 조기 종료가 됩니다(3차 점검이 고친 회귀 그대로). 코드 사본으로 3요소를 함께 봅니다.
+$abyssBackBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection'))
+$abyssBackCode = (($abyssBackBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '3차: 선택 화면 복귀 직전 안전 중지 소비(게이트+삭제+종료)' `
+  ([bool]($abyssBackCode -match '(?s)Test-AbyssSelectionScreen -Game \$Game\) \{.{0,600}?Test-Path -LiteralPath \$safeStopFlagPath.{0,400}?Remove-Item -LiteralPath \$safeStopFlagPath.{0,400}?exit \$SafeStopExitCode')) $true
 # GUI: 혼합 잠금 이전 상태 저장/복원 왕복
 Assert-Case '3차: 혼합 잠금 진입 시 이전 상태 저장' `
   ($guiSource -match '\$mixState\.PrevInfinite = -not \[bool\]\$RbCount\.Checked[\s\S]{0,60}\$mixState\.PrevLaps') $true
@@ -220,8 +268,13 @@ Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
   ($guiSource -match '\$script:lastWorkerDoneReason = ''''[\s\S]{0,400}Start-Process -FilePath ''powershell\.exe''') $true
 
 # ── v1.2.1: 오클릭 사고(08-02 22:02 - 커서 간섭 클릭이 재화줄을 눌러 화면 가림) ──
+# ★ 앵커를 **로그 문구에서 코드 구조로** 격상했습니다 (2026-08-10). 원래는 경고 문구
+#   '오클릭 방지를 위해 이번 클릭을 건너뜁니다' 를 앵커로 삼았는데, 문구를 [안내]/[경고]
+#   2단계로 바꾸자 이 단언이 깨졌습니다. 이 단언이 지키려는 것은 문구가 아니라 **안전 게이트**
+#   (커서를 확인 못 하면 클릭을 쏘지 않는다)이므로, 문구가 어떻게 바뀌든 살아남게 고칩니다.
+#   판정 → 게이트 → mouse_event 순서가 유지되는지를 봅니다.
 Assert-Case '워커: 커서 미확인 시 클릭 건너뜀(강행 제거)' `
-  ($workerSource -match '오클릭 방지를 위해 이번 클릭을 건너뜁니다[\s\S]{0,700}if \(-not \$cursorReady\) \{ return \}') $true
+  ($workerSource -match 'Get-CursorClickWarnAction[\s\S]{0,1500}if \(-not \$cursorReady\) \{ return \}[\s\S]{0,300}mouse_event\(0x0002') $true
 Assert-Case '워커: 보유한 재화 화면 감지 조각(유한/보유+재화)' `
   ($workerSource -match "Contains\('보유'\) -or \`$ccTitle\.Contains\('유한'\)\) -and \`$ccTitle\.Contains\('재화'\)") $true
 Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 대기)' `
@@ -301,8 +354,8 @@ Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life allowlist' `
   (($guiSource -match "if \(\`$usr\.PSObject\.Properties\['mainCategory'\]\) \{ \`$def\.mainCategory = \`$usr\.mainCategory \}") -and
    ($guiSource -match "'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life'\)")) $true
 $auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-Case 'config: 스키마 7 + mainCategory 기본 battle + life 섹션' `
-  (([int]$auditConfigJson.configSchemaVersion -eq 7) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
+Assert-Case 'config: 스키마 8 + mainCategory 기본 battle + life 섹션' `
+  (([int]$auditConfigJson.configSchemaVersion -eq 8) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
    ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily')) $true
 # 버전 번호를 고정값으로 박으면 올릴 때마다 이 테스트가 깨집니다 (2026-08-09 v2.0.1 에서 발생).
 # 여기서 지켜야 할 계약은 '어떤 번호인가'가 아니라 **$appVersion 이 GUI 에 단일 선언으로
@@ -364,8 +417,19 @@ Assert-Case 'GUI: 생활 카드 크기 134×56 (스킬+대상 2곳)' `
 # 슬라이더 애니메이션 (2026-08-05 사용자 확정 320ms - 리뷰 조건: 잠금 게이트/Stop 계약/종료 정리)
 Assert-Case 'GUI: 슬라이드 320ms 상수' `
   ($guiSource -match '\$script:lifeSlideDurationMs = 320') $true
+# 계약의 뜻은 '틱 본문을 인라인 클로저로 쓰지 말고 **명명 함수 한 줄 호출**로 두라'입니다.
+# 10차에서 예외 가드(try/catch)를 두르면서 형태가 한 줄에서 여러 줄로 바뀌었으므로,
+# '한 줄 리터럴' 대신 **명명 함수 호출 + 다른 로직 없음**으로 확인합니다.
+$slideTickBlock = [regex]::Match($guiSource, '(?s)\$script:lifeSlideTimer\.Add_Tick\(\{(.*?)\r?\n  \}\)')
+Assert-Case 'GUI: 슬라이드 틱 블록을 찾음' ([bool]$slideTickBlock.Success) $true
+$slideTickCode = (($slideTickBlock.Groups[1].Value -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case 'GUI: 슬라이드 틱 = 명명 함수(클로저 금지 계약)' `
-  ($guiSource -match '\$script:lifeSlideTimer\.Add_Tick\(\{ Invoke-LifeSlideTick \}\)') $true
+  ([bool]($slideTickCode -match '(?m)^\s*Invoke-LifeSlideTick\s*$')) $true
+Assert-Case 'GUI: 슬라이드 틱 본문에 다른 로직 없음(가드 + 호출뿐)' `
+  ([bool]($slideTickCode -notmatch 'lifeSlide(Active|From|To|Start)')) $true
+# 무인 운용 보호: 틱 예외가 밖으로 나가면 모달 오류 창이 떠 메시지 루프가 멈춥니다 (10차 실측)
+Assert-Case 'GUI: 슬라이드 틱도 예외 가드' `
+  ([bool]($slideTickCode -match '(?s)try \{.*\} catch \{')) $true
 Assert-Case 'GUI: 화살표 4곳 Start-LifeSlide 경유' `
   ([regex]::Matches($guiSource, 'Start-LifeSlide -Slider ''(skill|target)'' -Direction -?1').Count) 4
 Assert-Case 'GUI: 슬라이드 잠금 가드(카드 2곳+Start 서두)' `

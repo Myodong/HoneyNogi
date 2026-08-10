@@ -152,6 +152,37 @@ try {
   Assert-Case '4→5: mainCategory 기본 battle 보충' $resultV5.mainCategory 'battle'
   Assert-Case '4→5: life 기본 섹션 보충' $resultV5.life.skill 'daily'
   Assert-Case '4→5: contentCategory 보존' $resultV5.contentCategory 'deepdungeon'
+  # ★ 실배포 config 로 '새 키가 실제로 들어오는가'를 확인합니다 (2026-08-10 실기에서 적발).
+  #   config.json 에 repeat.mode / untilTime 을 추가하면서 **configSchemaVersion 을 올리지
+  #   않아**, 기존 사용자(스키마가 같음)는 마이그레이션 게이트(`usrSchema -ge $defSchema`)에
+  #   걸려 새 키를 영영 못 받았습니다. 값은 첫 저장 때 Add-Member 로 들어가지만 `_설명` 키는
+  #   끝내 안 들어가고, 그 사이 화면과 실제 동작이 어긋납니다.
+  #   → 저장소의 **실제** config.json 을 기본값으로 놓고, 그보다 한 단계 낮은 사용자 config 가
+  #     새 키를 받아 오는지 확인합니다. 새 키를 넣고 버전을 안 올리면 여기서 잡힙니다.
+  $realDefault = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $realSchema = [int]$realDefault.configSchemaVersion
+  [System.IO.File]::WriteAllText($defaultPath, ($realDefault | ConvertTo-Json -Depth 20), $utf8Bom)
+  $oldUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json   # 깊은 복사
+  $oldUser.configSchemaVersion = $realSchema - 1
+  $oldUser.repeat.PSObject.Properties.Remove('mode')
+  $oldUser.repeat.PSObject.Properties.Remove('untilTime')
+  $oldUser.repeat.PSObject.Properties.Remove('_mode')
+  $oldUser.repeat.PSObject.Properties.Remove('_untilTime')
+  $oldUser.repeat.defaultCount = 42          # 사용자가 바꾼 값 - 보존돼야 함
+  [System.IO.File]::WriteAllText($configPath, ($oldUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedReal = Update-ConfigToLatest
+  $resultReal = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '실배포: 한 단계 낮은 스키마는 이전이 실행됨' $migratedReal $true
+  Assert-Case '실배포: 스키마가 최신으로' $resultReal.configSchemaVersion $realSchema
+  Assert-Case '실배포: 새 키(mode)가 들어옴' ([bool]$resultReal.repeat.PSObject.Properties['mode']) $true
+  Assert-Case '실배포: 새 키(untilTime)가 들어옴' ([bool]$resultReal.repeat.PSObject.Properties['untilTime']) $true
+  Assert-Case '실배포: 설명 키(_mode)도 들어옴' ([bool]$resultReal.repeat.PSObject.Properties['_mode']) $true
+  Assert-Case '실배포: 사용자가 바꾼 값은 보존' $resultReal.repeat.defaultCount 42
+  # 같은 스키마면 이전을 하지 않는 것도 계약입니다 (매 실행 재작성 방지)
+  $sameUser = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  [System.IO.File]::WriteAllText($configPath, ($sameUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  Assert-Case '실배포: 같은 스키마면 이전하지 않음' (Update-ConfigToLatest) $false
+
   $userConfigV4Life = [pscustomobject]@{
     configSchemaVersion = 4
     coordsVersion = 6

@@ -53,17 +53,21 @@ foreach ($cmd in $ast.FindAll({ param($n)
     try { Add-Type -AssemblyName $Matches[1] } catch { }
   }
 }
-# ② 인라인 C# 타입 정의(HoneyNogiInput 등)도 그대로 컴파일
+# ② 인라인 C# 타입 정의(HoneyNogiInput 등)도 그대로 컴파일 - **조건부는 제외**(①과 같은 규칙)
 foreach ($cmd in $ast.FindAll({ param($n)
       $n -is [System.Management.Automation.Language.CommandAst] -and
       $n.GetCommandName() -eq 'Add-Type' -and $n.Extent.Text -notmatch '-AssemblyName' }, $true)) {
+  if (Test-AstConditional -Node $cmd) { continue }
   try { Invoke-Expression $cmd.Extent.Text } catch { }
 }
-# ③ WinRT 타입 사전 로드 줄(ContentType=WindowsRuntime)도 그대로 실행
-foreach ($line in ($src -split "`r?`n")) {
-  if ($line -match 'ContentType=WindowsRuntime\]\s*\|\s*Out-Null') {
-    try { Invoke-Expression $line.Trim() } catch { }
-  }
+# ③ WinRT 타입 사전 로드(ContentType=WindowsRuntime)도 **조건부는 제외**.
+#    줄 단위 정규식으로 긁으면 조건문 안에 넣어도 검사가 실행해 버립니다 (4차 점검 지적 -
+#    M16 계열이 ①에서만 닫히고 ②③에 남아 있었음).
+foreach ($node in $ast.FindAll({ param($n)
+      $n -is [System.Management.Automation.Language.PipelineAst] -and
+      $n.Extent.Text -match 'ContentType=WindowsRuntime\]\s*\|\s*Out-Null' }, $true)) {
+  if (Test-AstConditional -Node $node) { continue }
+  try { Invoke-Expression $node.Extent.Text } catch { }
 }
 
 # ④ AST 에서 타입 리터럴 수집 ([Foo]::Bar 의 [Foo], [Foo]$x 의 [Foo], param 의 [Foo])
