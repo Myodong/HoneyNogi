@@ -300,7 +300,7 @@ Assert-Case '워커: 결과 대기 타임아웃 시 클리어 잔존 재판정 +
 # 협동 미션 전체 창: 순수 판정 소함수('협동' AND ('미션' OR '미선')) - 진리표는 test_weekly_coop_popup
 Assert-Case '워커: 협동 창 제목 판정 소함수(미선 이형 포함)' `
   ($workerSource -match "function Test-CoopMissionBoardTitle[\s\S]{0,900}Contains\('협동'\) -and \(\`$t\.Contains\('미션'\) -or \`$t\.Contains\('미선'\)\)") $true
-# 제목 ROI 판독은 s3→s4 사다리 - '판정 참'만 조기 종료 (1810 창 s3 '미선' 깨짐 실사고, KJM PC)
+# 제목 ROI 판독은 s3→s4 사다리 - '판정 참'만 조기 종료 (1810 창 s3 '미선' 깨짐 실사고, 타 PC 1810 창)
 Assert-Case '워커: 협동 창 판독 사다리 @(3,4)' `
   ($workerSource -match 'foreach \(\$boardScale in @\(3, 4\)\)') $true
 # 닫기 함수: 감지 + Focus 후 재확인(스테일 방지) 두 번 모두 같은 판독 함수 사용
@@ -447,7 +447,7 @@ Assert-Case 'GUI: 종료 타이머 정리 목록에 슬라이드 타이머 포�
 Assert-Case 'GUI: 폼 Dispose 전 슬라이드 정리' `
   ($guiSource -match 'Stop-LifeSlideNow -SkipUiRefresh \} catch \{ \}\s+try \{ \$form\.Dispose\(\)') $true
 
-# ── v1.2.1: 08-01 KJM PC 네트워크 불안정 팝업 실사고 (클리어 대기 600초 소진 + 3연속 정지) ──
+# ── v1.2.1: 08-01 타 PC(1810 창) 네트워크 불안정 팝업 실사고 (클리어 대기 600초 소진 + 3연속 정지) ──
 # 순수 선택 소함수: '도하기' 조각 + 위치 게이트 (진리표는 test_weekly_coop_popup)
 Assert-Case '워커: 네트워크 재시도 버튼 선택 게이트(X>=640, Y 585~655)' `
   ($workerSource -match 'if \(\$wordX -ge 640 -and \$wordY -ge 585 -and \$wordY -le 655\)') $true

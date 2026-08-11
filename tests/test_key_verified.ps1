@@ -1,6 +1,6 @@
 ﻿# Press-KeyVerified (검증 키 입력) 동작 진리표 + 배선 가드 (2026-08-11 ④)
 # 본체: mabinogi_run_once.ps1 Press-KeyVerified - 전면 확인 후에만 키를 정확히 1회 전송.
-# 관측 근거: 2026-08-08 hyodong 제보(전면 아닌 게임에 C 키 무시 - 전역 입력이 다른 창으로 샘).
+# 관측 근거: 2026-08-08 타 PC 제보(1908 창)(전면 아닌 게임에 C 키 무시 - 전역 입력이 다른 창으로 샘).
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')

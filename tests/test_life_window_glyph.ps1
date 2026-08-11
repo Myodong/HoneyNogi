@@ -1,4 +1,4 @@
-﻿# 생활 창 우상단 X '글리프 서명' 판정 진리표 + 실측 캡처 재현 (2026-08-08 hyodong 제보)
+﻿# 생활 창 우상단 X '글리프 서명' 판정 진리표 + 실측 캡처 재현 (2026-08-08 타 PC 제보(1908 창))
 #
 # 왜 이 테스트가 필요한가:
 #   기준 좌표계(1272x717)는 **제목줄을 포함**하는데 제목줄 높이는 창 크기에 비례하지 않는다
@@ -131,7 +131,7 @@ function Get-CaptureGlyphHit {
 # 에서는 **건너뜁니다**(스킵 = 실패 아님. test_life_ocr_offline.ps1 과 같은 규약).
 # 위 ① 형태 진리표와 아래 ③ 배선 가드는 자산 없이도 항상 돕니다.
 $reportDir = Join-Path $projectRoot '던전이미지\생활\1908캡처'
-$reportShots = @(Get-ChildItem $reportDir -Filter 'hyodong_1908_error_*.png' -ErrorAction SilentlyContinue)
+$reportShots = @(Get-ChildItem $reportDir -Filter 'report_1908_error_*.png' -ErrorAction SilentlyContinue)
 if ($reportShots.Count -lt 1) {
   "SKIP 제보 1908 캡처가 없어 재현 검증을 건너뜁니다: $reportDir"
 }
@@ -148,16 +148,16 @@ if ($reportShots.Count -gt 0) {
   Assert-Case '1908 글리프 중심이 옛 4점과 어긋난 폭 5px 이상' ([bool]((67 - $reportRefY) -ge 5)) 'True'
 }
 
-# chyui 제보 1273x718 (2026-08-09). 02:32:49 는 **생활 스킬 그리드(파란 배경)** 라
+# 타 PC 제보 1273x718 (2026-08-09). 02:32:49 는 **생활 스킬 그리드(파란 배경)** 라
 # 절대 임계 방식이 여기서 깨졌습니다 - 상대 대비로 바꾼 뒤의 회귀 자산입니다.
 $blueDir = Join-Path $projectRoot '던전이미지\생활\1273캡처'
-$blueShots = @(Get-ChildItem $blueDir -Filter 'chyui_1273_error_*.png' -ErrorAction SilentlyContinue)
-if ($blueShots.Count -lt 1) { "SKIP chyui 1273 캡처가 없어 재현 검증을 건너뜁니다: $blueDir" }
+$blueShots = @(Get-ChildItem $blueDir -Filter 'report_1273_error_*.png' -ErrorAction SilentlyContinue)
+if ($blueShots.Count -lt 1) { "SKIP 1273 제보 캡처가 없어 재현 검증을 건너뜁니다: $blueDir" }
 foreach ($shot in $blueShots) {
   Assert-Case "1273 '$($shot.Name)' 창 열림 감지" ([bool](Get-CaptureGlyphHit -Path $shot.FullName).Found) 'True'
 }
 # 같은 세션의 필드 프레임은 반드시 미검출이어야 합니다 (오탐 0 확인)
-$blueField = @(Get-ChildItem $blueDir -Filter 'chyui_1273_field_*.png' -ErrorAction SilentlyContinue)
+$blueField = @(Get-ChildItem $blueDir -Filter 'report_1273_field_*.png' -ErrorAction SilentlyContinue)
 foreach ($shot in $blueField) {
   Assert-Case "1273 '$($shot.Name)' 필드는 미검출" ([bool](Get-CaptureGlyphHit -Path $shot.FullName).Found) 'False'
 }

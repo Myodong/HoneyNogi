@@ -218,11 +218,16 @@ $workerSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_run_o
 Assert-Case '배선(워커): 심층 커스텀 강제 규칙(어려움 고정)' ($workerSource -match "if \(\`$deepMode\) \{[\s\S]{0,400}\`$ndDifficulty = '어려움'") $true
 Assert-Case '배선(워커): 심층 재화 테이블 치환(1/2개)' ($workerSource -match '\$dgValidCosts = @\(1, 2\)') $true
 # 2026-07-28 실기 2건(상반): 심층 옵션 제목은 폭 250에서 '구역' 잘림(20:20) / 밝은 배경
-# 선택 화면은 폭 420 판독 전멸(20:53) → Read-DgTitleText 이중 판독(좁은 우선 + 심층 조건부 확장)
-Assert-Case '배선(워커): 제목 이중 판독 함수 존재(심층 조건부 확장)' `
-  ($workerSource -match 'function Read-DgTitleText[\s\S]{0,2200}-RegionWidth 420') $true
-Assert-Case '배선(워커): 이중 판독은 심층 외 무접촉(좁은 1회)' `
-  ($workerSource -match 'if \(-not \$deepMode\) \{ return \$narrowText \}') $true
+# 선택 화면은 폭 420 판독 전멸(20:53) → Read-DgTitleText 이중 판독(좁은 우선 + 조건부 확장).
+# 2026-08-11 23:29 실사고(타 PC 1908 창)로 확장을 **일반 던전에도** 개방 - 좁은 판독
+# '로다0'(구역/층 소실)이 옵션 화면을 선택 화면으로 오판시켰고, 같은 캡처 폭 420은 3장
+# 전부 '로다2증2구역'('구역' 생존). 채택은 '구역' 보일 때만이라 07-28 반례는 그대로 안전.
+Assert-Case '배선(워커): 제목 이중 판독 함수 존재(조건부 확장)' `
+  ($workerSource -match 'function Read-DgTitleText[\s\S]{0,2600}-RegionWidth 420') $true
+Assert-Case '배선(워커): 확장이 심층 전용 게이트 없이 전 모드 적용 (2026-08-11)' `
+  ($workerSource -notmatch 'if \(-not \$deepMode\) \{ return \$narrowText \}') $true
+Assert-Case '배선(워커): 확장 채택은 구역이 보일 때만 (전멸 반례 안전 계약)' `
+  ($workerSource -match "(?s)function Read-DgTitleText[\s\S]{0,2600}\`$wideText\.Contains\('구역'\)\) \{ return \`$wideText \}\s*\r?\n\s*return \`$narrowText") $true
 Assert-Case '배선(워커): 폭 420 전역 오버라이드 철회됨' `
   ($workerSource -notmatch '\$rgDgTitle = @\(\$rgDgTitle\[0\], \$rgDgTitle\[1\], 420') $true
 # 2026-07-28 실기 2차: 주간 구역 채택이 '매우 어려움' 클릭 전 버튼을 읽어 어려움 상태 구역을

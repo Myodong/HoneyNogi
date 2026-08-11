@@ -1094,13 +1094,13 @@ Assert-Case '배선: 라벨 조각에 실측 깨짐 포함' `
 Assert-Case '배선: 라벨 탐색이 가장 앞 조각 채택' `
   ($workerText -match "function Get-LifeDetailLabelIndex[\s\S]{0,600}?\`$found -lt \`$best") 'True'
 # 판정: 깨진 라벨에서도 제목부가 잘리고 대상이 확정돼야 한다 (제보 원문)
-$chyuiDetail = '문철광맥채집묻광석개기레豊30이상문철이섞인단단한드무더기.곡생OI로문철광석을수있다.[人}는,;테센마이평원가까운위치찾기41수'
+$reportDetail = '문철광맥채집묻광석개기레豊30이상문철이섞인단단한드무더기.곡생OI로문철광석을수있다.[人}는,;테센마이평원가까운위치찾기41수'
 Assert-Case "라벨: '채집묻' 깨짐에서도 제목부 절단" `
-  (Get-LifeTitleFromDetailText -DetailText $chyuiDetail) '문철광맥채'
+  (Get-LifeTitleFromDetailText -DetailText $reportDetail) '문철광맥채'
 Assert-Case "라벨: '채집묻' 깨짐에서도 대상 확정 (제보 재현)" `
-  (Get-LifeTitleVerdictFromDetail -DetailText $chyuiDetail -TargetName '운철 광맥') 'mine'
+  (Get-LifeTitleVerdictFromDetail -DetailText $reportDetail -TargetName '운철 광맥') 'mine'
 Assert-Case "라벨: '레벨'이 '레豊'로 깨져도 요구 레벨 판독" `
-  (Get-LifeRequiredLevel -DetailText $chyuiDetail) '30'
+  (Get-LifeRequiredLevel -DetailText $reportDetail) '30'
 Assert-Case '라벨: 라벨이 아예 없으면 -1 (팝업 아님)' `
   (Get-LifeDetailLabelIndex -Text '아무의미없는문자열') '-1'
 # 아래 3건은 2026-08-09 교차 리뷰가 제시한 반례입니다. 전부 '조용히 엉뚱한 값을 확정'하는
