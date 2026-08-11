@@ -184,8 +184,11 @@ Assert-Case '배선: Click-GamePoint 직후에도 대피하지 않는다' `
 #   기준값인 첫 판독**이 남아 있던 것이 8차 결함입니다. 첫 판독이 커서에 가려지면
 #   ①'연결 끊김'/'준비물 부족'을 아예 못 잡거나 ②안 닫혔는데 '닫았습니다'가 됩니다.
 # 10곳 = 위 8곳 + **전투 판정 2곳**(카드 토글 버튼 OCR / 난이도 알약 픽셀 - 2026-08-10 실기).
-Assert-Case '배선: 대피는 판독 직전에만 정확히 10곳' `
-  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$Game\s*$').Count) 10
+# 12곳 = 위 10곳 + **옵션 지도 2곳**(보조 판정 지도 라벨 / 구역 카드 글자 탐색 -
+#   2026-08-11 23:55 실사고: 예비 좌표 클릭 커서가 지도 2-1 라벨 위에 남아 오류 캡처
+#   재현에서 커서 위 2-1 만 'IL?-1결'로 깨짐. 커서 없는 2-2/2-3 은 배율 6 정상).
+Assert-Case '배선: 대피는 판독 직전에만 정확히 12곳' `
+  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$Game\s*$').Count) 12
 # 생활의 네 자리를 이름으로도 고정합니다 (개수만 맞추고 엉뚱한 데 넣는 것을 막음)
 Assert-Case '배선: 생활 창 열림 판정이 판독 전에 대피' `
   ([bool]([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-LifeWindowOpen')) -match
@@ -195,6 +198,14 @@ Assert-Case '배선: 생활 팝업 첫 판독도 판독 전에 대피(비교 기
   ([bool]($dialogBody -match 'Move-CursorOutsideGame -Game \$Game\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*\$dialogText = ')) 'True'
 Assert-Case '배선: 생활 팝업 닫힘 재판독 2곳이 판독 전에 대피' `
   ([regex]::Matches($dialogBody, 'Move-CursorOutsideGame -Game \$Game\r?\n\s*\$afterText = ').Count) 2
+# 옵션 지도 2곳도 위치로 고정합니다 (2026-08-11 23:55 - 개수만 맞추고 엉뚱한 데 넣는 것 방지.
+# 대피가 판독/탐색보다 **앞**이어야 커서가 라벨을 덮은 채 읽는 사고가 안 남습니다)
+Assert-Case '배선: 옵션 지도 보조 판정이 판독 전에 대피' `
+  ([bool]([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-DgOptObservedStage')) -match
+    'Move-CursorOutsideGame -Game \$Game\r?\n\s*\$mapTexts = @\(\)')) 'True'
+Assert-Case '배선: 옵션 구역 카드 글자 탐색이 탐색 전에 대피' `
+  ([bool]([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-DgOptStageCardPoint')) -match
+    'Move-CursorOutsideGame -Game \$Game\r?\n\s*foreach \(\$labelScale in 4, 6, 8\)')) 'True'
 
 # ── ⑭ 전투 판정 2곳의 커서 가림 (2026-08-10 심층 커스텀 반복 실기 실사고) ────
 # 클릭 지점이 **판정 대상의 한가운데**인 위젯들입니다. 클릭하면 커서가 바로 그 위에 남아

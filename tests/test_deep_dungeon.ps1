@@ -222,12 +222,22 @@ Assert-Case '배선(워커): 심층 재화 테이블 치환(1/2개)' ($workerSou
 # 2026-08-11 23:29 실사고(타 PC 1908 창)로 확장을 **일반 던전에도** 개방 - 좁은 판독
 # '로다0'(구역/층 소실)이 옵션 화면을 선택 화면으로 오판시켰고, 같은 캡처 폭 420은 3장
 # 전부 '로다2증2구역'('구역' 생존). 채택은 '구역' 보일 때만이라 07-28 반례는 그대로 안전.
+# 2026-08-11 23:55 실사고(같은 PC)로 넓은 판독에 **배율 3→4 사다리** 추가 - 넓은 s3 가
+# '로다2증1구°'('역'→'°' 깨짐)로 8회 전부 채택 탈락해 다 된 2-1 전환을 두고 정지.
+# 같은 캡처 s4 는 '로다2증1구역' 정상(스테이지 매칭 통과). 로컬 보관 87장 전수 재생 -
+# s4 가 반환값을 바꾸는 캡처 0건. (단언은 주석 뺀 사본 기준 - Extent.Text 는 주석 포함)
+$titleCode = ((([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
+    -Names @('Read-DgTitleText'))) -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '배선(워커): 제목 이중 판독 함수 존재(조건부 확장)' `
-  ($workerSource -match 'function Read-DgTitleText[\s\S]{0,2600}-RegionWidth 420') $true
+  ($titleCode -match '-RegionWidth 420') $true
 Assert-Case '배선(워커): 확장이 심층 전용 게이트 없이 전 모드 적용 (2026-08-11)' `
-  ($workerSource -notmatch 'if \(-not \$deepMode\) \{ return \$narrowText \}') $true
-Assert-Case '배선(워커): 확장 채택은 구역이 보일 때만 (전멸 반례 안전 계약)' `
-  ($workerSource -match "(?s)function Read-DgTitleText[\s\S]{0,2600}\`$wideText\.Contains\('구역'\)\) \{ return \`$wideText \}\s*\r?\n\s*return \`$narrowText") $true
+  ($titleCode -notmatch 'if \(-not \$deepMode\) \{ return \$narrowText \}') $true
+Assert-Case '배선(워커): 넓은 판독은 배율 3→4 사다리 (2026-08-11 23:55)' `
+  ($titleCode -match 'foreach \(\$wideScale in 3, 4\)') $true
+Assert-Case '배선(워커): 넓은 판독이 사다리 변수 배율을 실제로 사용 (-Scale 고정값 퇴행 방지)' `
+  ($titleCode -match '-Scale \$wideScale') $true
+Assert-Case '배선(워커): 확장 채택은 구역이 보일 때만 + 전부 실패 시 좁은 결과 유지 (전멸 반례 안전 계약)' `
+  ($titleCode -match "(?s)\`$wideText\.Contains\('구역'\)\) \{ return \`$wideText \}\s*\r?\n\s*\}\s*\r?\n\s*return \`$narrowText") $true
 Assert-Case '배선(워커): 폭 420 전역 오버라이드 철회됨' `
   ($workerSource -notmatch '\$rgDgTitle = @\(\$rgDgTitle\[0\], \$rgDgTitle\[1\], 420') $true
 # 2026-07-28 실기 2차: 주간 구역 채택이 '매우 어려움' 클릭 전 버튼을 읽어 어려움 상태 구역을

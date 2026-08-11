@@ -123,6 +123,21 @@ $result = Set-DgOptionStage -Game $null -Stage '1-2' -ReadTitle $readTitle -LogT
 Assert-Case '이미 목표(명확): 성공' $result.Ok $true
 Assert-Case '이미 목표(명확): 클릭 없음' $script:clickCount 0
 
+# 10. 2026-08-11 23:55 실사고 재현(타 PC 1908 창): 시작 제목 '훈다0'(구역 소실 - 불명)
+#     → 첫 클릭 허용으로 예비 좌표 클릭(전환은 실제 성공) → 제목 배율 사다리(s4)가 복구한
+#     '로다2증1구역'이 매치 = 성공. 수정 전에는 재판독 8회 전부 '훈다0'이라 Ok=false 로
+#     다 된 화면을 두고 exit 4 였음 (케이스 4가 그 구버전 경로의 진리표).
+Reset-Mock -Title '훈다0' -AfterClickTitle '로다2증1구역' -CardPoint @{ Reference = @(918, 238) }
+$result = Set-DgOptionStage -Game $null -Stage '2-1' -ReadTitle $readTitle -LogTag '[커스텀]' -AssumeMismatchFirst
+Assert-Case '08-11 실사고 재현: 성공(사다리 복구 제목 매치)' $result.Ok $true
+Assert-Case '08-11 실사고 재현: 클릭 1회' $script:clickCount 1
+
+# ---- 실측 문자열 진리표 (2026-08-11 23:55 오류 캡처 재현 판독문 그대로) ----
+Assert-Case '실측: 넓은 s4 정상 판독은 매치' (Test-CustomTitleStageMatch -TitleText '로다2증1구역' -Stage '2-1') 'match'
+Assert-Case '실측: 넓은 s3 역 깨짐은 불명(채택 탈락과 일관)' (Test-CustomTitleStageMatch -TitleText '로다2증1구°' -Stage '2-1') 'unclear'
+Assert-Case '실측: 좁은 s3 구역 소실은 불명' (Test-CustomTitleStageMatch -TitleText '훈다0' -Stage '2-1') 'unclear'
+Assert-Case '실측: 전환 전 제목은 목표와 mismatch(전환 필요 판정)' (Test-CustomTitleStageMatch -TitleText '로다2증2구역' -Stage '2-1') 'mismatch'
+
 # ---- 소스 계약 검사 ----
 $workerSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Raw -Encoding UTF8
 Assert-Case '보조 판정 지도 판독은 배율 3·4·6 (피오드 옵션1층은 4·6만으로 표 부족 - 07-26 실측)' `

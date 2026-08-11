@@ -1329,6 +1329,11 @@ function Get-DgOptStageCardPoint {
       $labelCandidates += ('0' + $Stage)
     }
   }
+  # ★ 라벨 탐색 직전 커서 대피 (2026-08-11 23:55 실사고와 같은 기전 - Get-DgOptObservedStage
+  #   주석 참고): 직전 클릭 커서가 지도 라벨 위에 남으면 그 라벨만 깨져('2-1'→'IL?-1결'
+  #   캡처 재현) 글자 탐색이 목표 카드를 못 찾고 예비 좌표로 빠지거나 실패합니다.
+  #   여기도 판독 직전 위치라 클릭 무효화 계약과 충돌 없고, 창 밖이면 무동작입니다.
+  Move-CursorOutsideGame -Game $Game
   foreach ($labelScale in 4, 6, 8) {
     foreach ($labelCandidate in $labelCandidates) {
       $cardPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
@@ -1416,6 +1421,13 @@ function Get-DgOptObservedStage {
   # 옵션 지도 라벨을 세 배율로 읽어 보조 판정 순수부에 넘깁니다 (같은 라벨이 두 배율에서
   # 읽히면 표 2개 = 배율 합의로 인정). 배율 3 포함 - 2026-07-26 실사고: 피오드 옵션1층은
   # S4=1개/S6=0개인데 S3는 소카드까지 읽혀서(진단 덤프 실측) 4·6만으로는 표가 부족했음.
+  # ★ 판독 직전 커서 대피 (2026-08-11 23:55 실사고 - 타 PC 1908 창): 구역 카드를 예비
+  #   좌표로 클릭한 커서가 지도 2-1 라벨 위에 남았고, 오류 캡처 재현에서 커서 없는
+  #   2-2/2-3 은 배율 6 정상 판독되는데 **커서 위 2-1 만 'IL?-1결'로 깨졌습니다**.
+  #   게임이 포인터 밑에 자기 커서를 그려 캡처에 찍히는 확정 기전(Move-CursorOutsideGame
+  #   주석의 2026-08-09 실측 4조합×6회)이 지도 라벨을 오염시킨 실측 사례. 여기는 클릭
+  #   직후가 아니라 판독 직전이라 클릭 무효화 계약과 충돌 없고, 창 밖이면 무동작입니다.
+  Move-CursorOutsideGame -Game $Game
   $mapTexts = @()
   foreach ($mapScale in 3, 4, 6) {
     $mapWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
@@ -4351,7 +4363,8 @@ function Test-CombatStillRunning {
 function Read-DgTitleText {
   param([System.Diagnostics.Process]$Game)
 
-  # 좌상단 던전 제목 판독 - 좁은 기본 영역(config 폭 250) 우선, 심층에서만 조건부 확장.
+  # 좌상단 던전 제목 판독 - 좁은 기본 영역(config 폭 250) 우선, 조건부 확장(전 모드,
+  # 폭 420 + 배율 3→4 사다리. '구역'이 보일 때만 채택).
   # 실측 근거 (2026-07-28, 같은 날 상반된 두 사고):
   #  - 심층 옵션 제목('던전명+심층+N층 M구역')은 길어서 폭 250이면 끝 '구역'이 잘림
   #    (20:20 오류: '〈북쪽폐61심층2층3국'. 폭 420은 심층 옵션 캡처 21장 전수 '구역' 포함)
@@ -4368,12 +4381,23 @@ function Read-DgTitleText {
   #   살아 옵션 화면 정상 판정 → stay-adjust 로 정상 진행됐을 상황입니다.
   #   확장 채택은 '구역'이 보일 때만이라 07-28의 반례(밝은 배경 선택 화면, 폭 420 전멸)도
   #   그대로 안전 - 전멸하면 '구역' 없음 → 좁은 판독 유지 = 기존과 동일 (구조 검증 그대로).
+  #
+  # ★ 2026-08-11 23:55 실사고(같은 타 PC 1908 창)로 넓은 판독에 **배율 3→4 사다리**를
+  #   더합니다. 구역 2-1 전환이 실제로는 성공했는데(캡처: 제목 '룬다 2층 1구역', 2-1 선택
+  #   강조) 확인 재판독 8회 전부 실패해 다 된 화면을 두고 exit 4. 오류 캡처 재현:
+  #   좁은 s3 '훈다0'(실사고 로그와 동일), 넓은 s3 '로다2증1구°'('역'→'°' 깨짐으로 채택
+  #   탈락), **넓은 s4 '로다2증1구역'**(정상 - 스테이지 매칭까지 통과). s2/s5 는 실패라
+  #   s4 만 더합니다. 로컬 보관 캡처 87장 전수 재생: 이 사다리가 반환값을 바꾸는 캡처 0건
+  #   (s4 추가 채택 없음) - 기존 판정 전부 그대로, 활성화 사례는 이 사고 캡처뿐.
+  #   비용은 좁은·넓은 s3 둘 다 '구역'이 없을 때만 OCR 1회 추가.
   $narrowText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
     -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if ($narrowText.Contains('구역')) { return $narrowText }
-  $wideText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
-    -RegionWidth 420 -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-  if ($wideText.Contains('구역')) { return $wideText }
+  foreach ($wideScale in 3, 4) {
+    $wideText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
+      -RegionWidth 420 -RegionHeight $rgDgTitle[3] -Scale $wideScale -Engine $ocrKoreanEngine) -replace '\s', ''
+    if ($wideText.Contains('구역')) { return $wideText }
+  }
   return $narrowText
 }
 
