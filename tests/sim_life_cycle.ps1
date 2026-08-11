@@ -10,7 +10,11 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
     -Names @('Invoke-LifeGatherCycle', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeRequiredLevel', 'Get-LifeNormalizedName',
-      'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus')) {
+      'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus',
+      # 지정 시간(시간 지정 모드) 검사는 스텁이 아니라 **본체**를 씁니다 (2026-08-11 실측 ① 대응
+      # 수정) - 시나리오가 env 를 안 주면 파싱이 $null 이라 무동작 = 기존 시나리오 영향 없음.
+      # 시간 도달 시나리오는 HONEYNOGI_UNTIL_TIME 을 지난 시각으로 넣어 exit 4 를 확인합니다.
+      'Get-LifeUntilDeadline', 'Test-LifeUntilReached')) {
   Invoke-Expression $definition
 }
 # 소유 판정이 쓰는 실제 데이터 (이형 표 / 공통 치환 쌍) - 스텁이 아니라 본체 값을 그대로 씁니다
@@ -235,6 +239,24 @@ switch ($Scenario) {
     $lifeSkillId = 'insect'
     $lifeSkillMenuTable = @{ insect = @{ Name = '곤충 채집'; Cell = @(1143, 205); Sig = @('빛무리') } }
     $lifeTargetName = '일렁이는 빛 무리'
+  }
+  'until-expired' {
+    # 지정 시간(시간 지정 모드)이 이미 지난 채 시작 - 클릭/메뉴 진입 없이 즉시 exit 4.
+    # (2026-08-11 실측 ① 대응. 파싱·검사 모두 본체 함수 - env 만 과거 시각으로)
+    $env:HONEYNOGI_UNTIL_TIME = '2020-01-01 00:00'
+    $script:stateSeq = @('present')
+    $script:stateTail = 'present'
+  }
+  'until-mid-wait' {
+    # 채집 대기 **중에** 지정 시간 도달 - 진행 한도(600초)는 아직 멀었어도 지정 시간이
+    # 먼저 걸려야 하고, 사유도 '지정 시간 도달'이어야 합니다 (사유 우선 계약).
+    # 가상 시계 시작이 2026-08-07 00:00:00 이므로 목표를 1분 뒤로 두면 대기 몇 회전 안에
+    # 도달합니다 (회전당 가상 3초).
+    $script:useVirtualClock = $true
+    $env:HONEYNOGI_UNTIL_TIME = '2026-08-07 00:01'
+    $lifeGatherWait = 600
+    $script:stateSeq = @('present')
+    $script:stateTail = 'present'
   }
   'deadline' {
     # 진행이 없는 채로 한도 초과 (exit 4). 수량 판독이 계속 빈 값이라 진행이 인정되지 않습니다.

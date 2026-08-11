@@ -9425,6 +9425,9 @@ function Invoke-LifeMenuSequence {
         return $false
       }
     }
+    # C 입력 직전 재검사 - 진입 검사(함수 첫 줄) 뒤 전면 확인·판독으로 수 초가 지났을 수
+    # 있습니다 (2026-08-11 교차 리뷰: 입력 직전 검사가 빠진 두 곳 중 하나)
+    if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
     if (-not (Press-LifeMenuKey -Game $Game)) { return $false }
     $infoSeen = $false
     foreach ($infoTry in 1..5) {
@@ -9462,6 +9465,9 @@ function Invoke-LifeMenuSequence {
   #    전환 확인 직후는 화면이 아직 그려지는 중일 수 있어(1차 실기 22:45:24 시그니처 실패
   #    의심 원인) 안정 대기 후 클릭하고, 검증도 3회 x 3스케일로 여유를 둡니다
   Start-Sleep -Milliseconds 800
+  # 셀 클릭 직전 재검사 - 직전 검사(생활 스킬 클릭 전) 뒤 전환 확인 루프로 최대 4초쯤 지났을
+  # 수 있습니다 (2026-08-11 교차 리뷰: 입력 직전 검사가 빠진 두 곳 중 하나)
+  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
   Focus-Game -Game $Game
   Click-GamePoint -Game $Game -ReferenceX ([int]$SkillEntry.Cell[0]) -ReferenceY ([int]$SkillEntry.Cell[1])
   Start-Sleep -Milliseconds 1200
@@ -9825,6 +9831,45 @@ function Invoke-LifeMenuSequence {
   return $true
 }
 
+function Get-LifeUntilDeadline {
+  # 시간 지정 모드의 목표 시각 파싱 (진리표 대상 - 형식이 맞을 때만 DateTime).
+  # GUI 가 **생활 + 시간 지정**일 때만 HONEYNOGI_UNTIL_TIME 에 전체 타임스탬프
+  # (yyyy-MM-dd HH:mm)를 넣습니다 - HH:mm 만 주고받으면 자정 넘김(23:50 에 00:30 지정)이
+  # 모호해집니다. 빈 값 = 제한 없음($null). 형식 오류는 fail-open($null = 현행 유지)하되
+  # 1회 경고를 남깁니다 - 조용히 무시하면 "왜 안 끊겼지"를 추적할 수 없습니다 (설계 합의).
+  param([string]$Raw)
+  if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
+  $parsedUntil = [datetime]::MinValue
+  if ([datetime]::TryParseExact($Raw.Trim(), 'yyyy-MM-dd HH:mm',
+      [System.Globalization.CultureInfo]::InvariantCulture,
+      [System.Globalization.DateTimeStyles]::None, [ref]$parsedUntil)) {
+    return $parsedUntil
+  }
+  Write-RunLog "[경고] 지정 시간 값을 해석하지 못했습니다 ('$Raw') - 시간 제한 없이 진행합니다"
+  return $null
+}
+
+function Test-LifeUntilReached {
+  # 지정 시간 도달 검사 - 도달(같은 시각 포함 = -ge) 시 그 자리에서 조건부 정지 (exit 4).
+  #
+  # 2026-08-11 실측 ①: GUI 는 사이클이 **끝나야** 시간을 다시 봐서, 목표 10:46 을 2분 24초
+  # 넘긴 10:48:24 에야 정지했습니다 (사이클 길이는 이동 거리 때문에 예측 불가 - 같은 대상인데
+  # 이동이 95초/185초로 갈림). 그래서 워커가 목표 시각을 직접 알고 생활의 모든 장기 대기
+  # 루프에서 이 검사를 돌립니다.
+  #
+  # 채집은 게임이 스스로 계속하므로(자동 이동·자동 채집) 관찰만 멈추면 안전합니다 - 클릭이
+  # 필요 없는 종료라 **캡처 실패 중이어도 즉시** 적용합니다 (벽시계 약속은 동결 계약의 대상이
+  # 아님 - 설계 합의). 끊긴 채집은 다음 시작의 '진행 중 퀘스트 감지' 경로가 이어받습니다.
+  # exit 4 = 조건부 정상 정지 - GUI 가 회차로 세지 않고 자동화를 멈춥니다 (기존 계약).
+  # ※ 전투에는 이 검사가 없습니다 - 판 중간 정지는 불가(재화 소모·복귀 경로 없음)하고
+  #   전투의 목표 초과는 미실측입니다 (이슈_개선점_목록.md ① 참고).
+  if ($null -eq $script:lifeUntilDeadline) { return }
+  if ((Get-Date) -ge $script:lifeUntilDeadline) {
+    Write-RunLog ("[완료] 지정 시간({0}) 도달 - 진행 중인 채집은 게임에 맡기고 자동화만 마칩니다 (이번 사이클은 회차로 세지 않음)" -f $script:lifeUntilDeadline.ToString('HH:mm'))
+    exit 4
+  }
+}
+
 function Invoke-LifeGatherCycle {
   # 생활(채집) 1사이클: 메뉴 사이클 → 퀘스트 생성 확인 → 존재 대기 → 소멸 = 완료 (exit 0).
   # 한도는 **단계마다 다릅니다** (2026-08-08 에 gatherWaitSeconds 의 의미가 '총 시간'에서
@@ -9865,6 +9910,21 @@ function Invoke-LifeGatherCycle {
   # 사이클 한도(deadline)는 '준비 정리 완료 시점'부터 잽니다 (설계 합의 계약 - 위 정리
   # 함수들의 내부 캡처 실패 대기는 이 한도 밖. 이후의 모든 내부 대기는 이 한도가 상한).
   $cycleDeadline = (Get-Date).AddSeconds($lifeGatherWait)
+  # 시간 지정 모드: 목표 시각을 워커도 알고 사이클 **중에** 스스로 끊습니다 (실측 ① 대응 -
+  # Test-LifeUntilReached 주석 참고). 파싱 실패/빈 값 = 제한 없음.
+  $script:lifeUntilDeadline = Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME)
+  if ($script:lifeUntilDeadline) {
+    Write-RunLog ("[생활] 지정 시간 {0} 까지 - 도달하면 사이클 중에도 자동화를 마칩니다" -f $script:lifeUntilDeadline.ToString('HH:mm'))
+    Test-LifeUntilReached   # 시작 시점에 이미 지났으면(경계 상황) 클릭 없이 즉시 종료
+  }
+  # 메뉴 시퀀스에 넘길 한도 = 사이클 한도와 지정 시간 중 이른 쪽. 시퀀스 내부의 입력 직전
+  # 검사들이 이 값을 보므로, 지정 시간이 지나면 '가까운 위치 찾기' 등 새 입력이 나가지
+  # 않습니다 (시퀀스가 $false 로 나오면 호출부 루프 상단의 Test-LifeUntilReached 가
+  # 올바른 사유("지정 시간 도달")로 정지 - 사유 우선 순서 계약).
+  $lifeMenuDeadline = $cycleDeadline
+  if ($script:lifeUntilDeadline -and $script:lifeUntilDeadline -lt $lifeMenuDeadline) {
+    $lifeMenuDeadline = $script:lifeUntilDeadline
+  }
   # 시작 시점에 서버 연결이 끊겨 있으면 무엇도 진행되지 않습니다 - 퀘스트 판정보다 먼저
   # 확인합니다 (리뷰 조건: 초기 present 면 메뉴 루프를 건너뛰어 감지를 놓침)
   if ((Close-LifeBlockingDialog -Game $Game) -eq 'disconnected') {
@@ -9886,6 +9946,7 @@ function Invoke-LifeGatherCycle {
   $initialProbes = 0
   $initialPopupRounds = 0
   while ($initialProbes -lt 20) {
+    Test-LifeUntilReached   # 지정 시간은 사이클 한도보다 우선 (사유 정확성)
     if ((Get-Date) -gt $cycleDeadline) { break }
     if ($script:screenCaptureFailing) {
       # ★ 동결 구간의 **공통 진입점**을 반드시 거칩니다 (7차 점검에서 누락 적발).
@@ -9991,6 +10052,7 @@ function Invoke-LifeGatherCycle {
       $otherProgressMax = -1
       $otherWaitProbes = 0
       while ($otherWaitProbes -lt 60) {        # 3초 간격 - 상한은 약 3분 (사이클 한도 안에서)
+        Test-LifeUntilReached   # 지정 시간은 사이클 한도보다 우선 (사유 정확성)
         if ((Get-Date) -gt $cycleDeadline) { break }
         Start-Sleep -Seconds 3
         if ($script:screenCaptureFailing) {
@@ -10042,6 +10104,7 @@ function Invoke-LifeGatherCycle {
   if (-not $questSeen) {
     $menuOk = $false
     foreach ($menuTry in 1..3) {
+      Test-LifeUntilReached   # 지정 시간 도달이면 이번 회전의 어떤 클릭도 시작하지 않음
       # 팝업 방어 (구매/보상/협동/네트워크 + 주간 리셋 + 공지 게시판)
       if (Invoke-PurchasePopupSweep -Game $Game) { Start-Sleep -Milliseconds 1200 }
       if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { Start-Sleep -Milliseconds 1200 }
@@ -10062,6 +10125,7 @@ function Invoke-LifeGatherCycle {
         exit 4
       }
       while ($script:screenCaptureFailing) {
+        Test-LifeUntilReached   # 캡처 실패 중에도 지정 시간은 흐릅니다 (벽시계 약속 - 동결 제외)
         # 영구 캡처 실패도 사이클 한도를 넘기면 정지합니다 (deadline 계약 - 리뷰 지적)
         if ((Get-Date) -gt $cycleDeadline) {
           Write-RunLog "[완료] 화면 캡처 실패가 지속돼 사이클 한도(${lifeGatherWait}초)를 넘겼습니다 - 조건부 정지"
@@ -10071,11 +10135,14 @@ function Invoke-LifeGatherCycle {
         Start-Sleep -Seconds 2
         [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 한도까지 여기 갇힘)
       }
-      if (Invoke-LifeMenuSequence -Game $Game -SkillEntry $skillEntry -TargetName $lifeTargetName -Deadline $cycleDeadline) {
+      if (Invoke-LifeMenuSequence -Game $Game -SkillEntry $skillEntry -TargetName $lifeTargetName -Deadline $lifeMenuDeadline) {
         # 퀘스트 생성 확인: 약 12초(1.5초 x 8회 + OCR 시간) 안에 present 2회 (리뷰 조건).
-        # 사이클 한도는 이 확인 루프에도 우선합니다 (하드 상한 계약)
+        # 사이클 한도는 이 확인 루프에도 우선합니다 (하드 상한 계약).
+        # 지정 시간 도달은 여기서도 즉시 종료 - 생성 확인을 기다리지 않습니다 (링크 클릭이
+        # 이미 나갔어도 다음 시작의 '진행 중 퀘스트 감지'가 이어받으므로 안전 - 설계 합의)
         $presentCount = 0
         foreach ($confirmTry in 1..8) {
+          Test-LifeUntilReached
           if ((Get-Date) -gt $cycleDeadline) { break }
           Start-Sleep -Milliseconds 1500
           if ((Get-LifeQuestState -Game $Game) -eq 'present') {
@@ -10154,6 +10221,9 @@ function Invoke-LifeGatherCycle {
   $progressDeadline = (Get-Date).AddSeconds($lifeGatherWait)
   $hardDeadline = (Get-Date).AddSeconds($lifeGatherHardCapSeconds)
   while ($true) {
+    # 지정 시간을 절대 상한·진행 한도보다 **먼저** 봅니다 - 동시에 걸리면 사용자가 지정한
+    # 약속("HH:mm 까지")이 사유로 남아야 합니다 (설계 합의 - 사유 우선 순서)
+    Test-LifeUntilReached
     if ((Get-Date) -gt $hardDeadline) {
       Write-RunLog "[완료] 채집이 절대 상한(${lifeGatherHardCapSeconds}초)을 넘겼습니다 - 조건부 정지 (수량은 늘고 있었지만 끝나지 않았습니다)"
       exit 4

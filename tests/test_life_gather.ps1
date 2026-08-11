@@ -437,6 +437,74 @@ Assert-Case '배선: 진행 최댓값 초기값 -1' `
   ([bool]($workerRaw -match '(?m)^\s*\$progressMaxCount = -1\s*$')) 'True'
 Assert-Case '배선: 이전 채집 최댓값 초기값 -1' `
   ([bool]($workerRaw -match '(?m)^\s*\$otherProgressMax = -1\s*$')) 'True'
+
+# ── 시간 지정 모드: 워커가 목표 시각에 사이클 중에도 끊는다 (2026-08-11 실측 ① 대응) ──
+# 실측: GUI 는 사이클이 끝나야 시간을 봐서 목표 10:46 을 2분 24초 넘김(10:48:24 완료).
+# 수정: GUI 가 생활+시간 지정일 때만 HONEYNOGI_UNTIL_TIME(yyyy-MM-dd HH:mm)을 전달하고,
+# 워커의 생활 장기 대기 루프들이 Test-LifeUntilReached 로 도달 즉시 exit 4.
+
+# (a) 파싱 진리표 - Get-LifeUntilDeadline 은 순수(경고 로그 제외)
+if (-not (Get-Command Write-RunLog -ErrorAction SilentlyContinue)) { function Write-RunLog { param($m) } }
+foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-LifeUntilDeadline')) {
+  . ([scriptblock]::Create($definition))
+}
+Assert-Case '지정시간 파싱: 정상 전체 타임스탬프' `
+  ((Get-LifeUntilDeadline -Raw '2026-08-11 10:46').ToString('yyyy-MM-dd HH:mm')) '2026-08-11 10:46'
+Assert-Case '지정시간 파싱: 자정 넘김(다음날 날짜)도 그대로' `
+  ((Get-LifeUntilDeadline -Raw '2026-08-12 00:30').ToString('yyyy-MM-dd HH:mm')) '2026-08-12 00:30'
+Assert-Case '지정시간 파싱: 빈 값은 제한 없음' ($null -eq (Get-LifeUntilDeadline -Raw '')) $true
+Assert-Case '지정시간 파싱: 공백만도 제한 없음' ($null -eq (Get-LifeUntilDeadline -Raw '   ')) $true
+Assert-Case '지정시간 파싱: HH:mm 만은 형식 오류 - fail-open' `
+  ($null -eq (Get-LifeUntilDeadline -Raw '10:46')) $true
+Assert-Case '지정시간 파싱: 쓰레기 값도 fail-open' `
+  ($null -eq (Get-LifeUntilDeadline -Raw 'abc')) $true
+Assert-Case '지정시간 파싱: 앞뒤 공백 허용' `
+  ((Get-LifeUntilDeadline -Raw ' 2026-08-11 10:46 ').ToString('HH:mm')) '10:46'
+
+# (b) 워커 배선 - 검사 함수 계약과 호출 지점
+$untilBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-LifeUntilReached'))
+$untilCode = (($untilBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '배선(지정시간): 도달 판정은 -ge (같은 시각 포함)' `
+  ([bool]($untilCode -match '-ge \$script:lifeUntilDeadline')) 'True'
+Assert-Case '배선(지정시간): 도달 시 exit 4 (사이클 미계상)' `
+  ([bool]($untilCode -match 'exit 4')) 'True'
+Assert-Case '배선(지정시간): 사유 문구에 지정 시간 표기' `
+  ([bool]($untilCode -match '지정 시간\(\{0\}\) 도달')) 'True'
+# 호출 지점: 시작 직후 1 + 초기 확인 + 이전 채집 대기 + 메뉴 재시도 + 캡처 대기 + 생성 확인
+# + 메인 대기 = 7곳 (정확 개수 - 줄이면 그 대기에서 목표를 넘김)
+Assert-Case '배선(지정시간): 검사 호출 7곳' `
+  (@([regex]::Matches($workerRaw, '(?m)^\s*Test-LifeUntilReached')).Count) 7
+# 메인 대기 루프에서 until 검사가 절대 상한 검사보다 앞 (사유 우선 계약)
+Assert-Case '배선(지정시간): 메인 루프에서 지정 시간이 절대 상한보다 먼저' `
+  ([bool]($workerRaw -match '(?s)while \(\$true\) \{[^}]{0,400}Test-LifeUntilReached[^}]{0,400}-gt \$hardDeadline')) 'True'
+# 메뉴 시퀀스에는 사이클 한도와 지정 시간 중 이른 쪽을 넘긴다 (내부 입력 직전 검사가 이 값을 봄)
+Assert-Case '배선(지정시간): 메뉴 한도 = min(사이클, 지정시간) 계산' `
+  ([bool]($workerRaw -match '\$lifeMenuDeadline = \$script:lifeUntilDeadline')) 'True'
+Assert-Case '배선(지정시간): 메뉴 호출이 clamp 된 한도를 사용' `
+  ([bool]($workerRaw -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline \$lifeMenuDeadline')) 'True'
+Assert-Case '배선(지정시간): 옛 사이클 한도 직접 전달이 남아 있지 않다' `
+  ([bool]($workerRaw -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline \$cycleDeadline')) 'False'
+# 메뉴 시퀀스 입력 직전 가드 (교차 리뷰 - C 입력/스킬 셀 클릭 앞)
+Assert-Case '배선(지정시간): C 입력 직전 한도 재검사' `
+  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n\s*if \(-not \(Press-LifeMenuKey')) 'True'
+Assert-Case '배선(지정시간): 스킬 셀 클릭 직전 한도 재검사' `
+  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n\s*Focus-Game -Game \$Game\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
+
+# (c) GUI 배선 - env 전달 조건과 초 정규화
+$guiRaw = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
+Assert-Case '배선(지정시간 GUI): 매 회차 env 먼저 초기화' `
+  ([bool]($guiRaw -match "(?m)^\s*\`$env:HONEYNOGI_UNTIL_TIME = ''")) 'True'
+Assert-Case '배선(지정시간 GUI): 생활 + 시간 지정일 때만 설정' `
+  ([bool]($guiRaw -match "targetTime\) -and \(\`$script:mainCategory -eq 'life'\)")) 'True'
+Assert-Case '배선(지정시간 GUI): 전체 타임스탬프 형식으로 전달' `
+  ([bool]($guiRaw -match "HONEYNOGI_UNTIL_TIME = \`$script:targetTime\.ToString\('yyyy-MM-dd HH:mm'\)")) 'True'
+Assert-Case '배선(지정시간 GUI): DateTimePicker 숨은 초 정규화' `
+  ([bool]($guiRaw -match 'AddHours\(\$untilTod\.Hours\)\.AddMinutes\(\$untilTod\.Minutes\)')) 'True'
+Assert-Case '배선(지정시간 GUI): 옛 TimeOfDay 직접 덧셈이 남아 있지 않다' `
+  ([bool]($guiRaw -match '\(Get-Date\)\.Date\.Add\(\$dtpUntil\.Value\.TimeOfDay\)')) 'False'
+# 시간 지정과 커스텀은 상호 배타 - 이 불변식이 깨지면 커스텀 완료 마커 계상 경로와 충돌 (리뷰)
+Assert-Case '배선(지정시간 GUI): 커스텀 활성 시 targetTime 강제 해제 유지' `
+  ([bool]($guiRaw -match 'customActive\) \{ \$script:targetCycles = 0; \$script:targetTime = \$null \}')) 'True'
 # ── 목표 개수(분모) 추출/합의 (2026-08-08 사용자 제보: 완료 로그가 '9개' 로 나옴) ──
 # 마지막 개를 채우는 순간 트래커가 사라져 3초 폴링이 그 프레임을 놓칩니다. 그래서 완료
 # 로그에는 '마지막으로 본 수량'이 아니라 '목표 개수'를 적습니다.
@@ -838,6 +906,15 @@ $sim = Invoke-CycleSim 'capture-recover'
 Assert-Case '사이클: 캡처 실패 후 복구되면 이어서 완료 → exit 0' $sim.Exit '0'
 Assert-Case '사이클: 복구까지 캡처 탐침 정확히 2회 (일회성 장애)' `
   (@($sim.Out | Where-Object { "$_" -match '^PROBE#' }).Count) '2'
+# 지정 시간(시간 지정 모드) 동작 시나리오 (2026-08-11 실측 ① 대응 - 배선 가드는 위 별도 섹션)
+$sim = Invoke-CycleSim 'until-expired'
+Assert-Case '사이클: 지정 시간이 이미 지나면 즉시 exit 4, 메뉴 미진입' ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m0'
+Assert-Case '사이클: 지정 시간 사유 로그 (시작 즉시)' `
+  ([bool](@($sim.Out | Where-Object { "$_" -match '지정 시간\(00:00\) 도달' }).Count -ge 1)) 'True'
+$sim = Invoke-CycleSim 'until-mid-wait'
+Assert-Case '사이클: 채집 대기 중 지정 시간 도달 → exit 4' ($sim.Exit) '4'
+Assert-Case '사이클: 대기 중 도달 사유가 한도가 아니라 지정 시간' `
+  ([bool](@($sim.Out | Where-Object { "$_" -match '지정 시간\(00:01\) 도달' }).Count -ge 1)) 'True'
 
 # ── ⑥ 스킬 테이블/이형 데이터 가드 ──
 $expectedSkillKeys = @('daily', 'wood', 'mining', 'herb', 'wool', 'harvest', 'hoe', 'insect')
@@ -1047,7 +1124,7 @@ Assert-Case "배선: '생활 스킬' 클릭 후 화면 전환 확인 게이트" 
 Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,700}Test-GameForeground -Game \$Game') 'True'
 # 2차 리뷰 반영 계약 (리뷰): deadline 하드 상한 + 캡처 실패 판독 무효 + 휠 증거
 Assert-Case '배선: deadline 은 준비 정리(이벤트 스킵) 뒤에 생성' ($workerText -match '\[void\]\(Clear-EventOverlay -Game \$Game\)[\s\S]{0,500}\$cycleDeadline = \(Get-Date\)\.AddSeconds') 'True'
-Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*if \(\(Get-Date\) -gt \$cycleDeadline\) \{ break \}') 'True'
+Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*Test-LifeUntilReached\s*\r?\n\s*if \(\(Get-Date\) -gt \$cycleDeadline\) \{ break \}') 'True'
 Assert-Case '배선: C 입력 전 판독 후 캡처 플래그 재확인' ($workerText -match '\$infoAlreadyOpen = Test-LifeInfoScreen -Game \$Game\s*\r?\n\s*if \(\$script:screenCaptureFailing\) \{ return \$false \}') 'True'
 Assert-Case '배선: 전환 확인 판독 후 캡처 플래그 재확인' ($workerText -match '\$infoStillVisible = Test-LifeInfoScreen -Game \$Game[\s\S]{0,400}if \(\$script:screenCaptureFailing\) \{ continue \}') 'True'
 Assert-Case '배선: 훑기 판독 1벌 공유(찾기+행 증거) + 목록 순서 전달' `
@@ -1118,7 +1195,7 @@ Assert-Case '배선: 탐색 마지막 회차 휠 생략' ($workerText -match 'if
 Assert-Case '배선: 상세 wrong 확정은 두 스케일 합의 (wrongCount 2)' ($workerText -match 'if \(\$detailWrongCount -ge 2\)') 'True'
 # 메뉴 시퀀스 내부 deadline (3차 교차 리뷰: 한도 초과 후 클릭 진행 금지 - 특히 찾기 입력)
 Assert-Case '배선: 메뉴 시퀀스가 Deadline 을 받아 내부 검사 4곳+' `
-  (($workerText -match 'Invoke-LifeMenuSequence -Game \$Game -SkillEntry \$skillEntry -TargetName \$lifeTargetName -Deadline \$cycleDeadline') -and
+  (($workerText -match 'Invoke-LifeMenuSequence -Game \$Game -SkillEntry \$skillEntry -TargetName \$lifeTargetName -Deadline \$lifeMenuDeadline') -and
    (([regex]::Matches($workerText, '\(Get-Date\) -gt \$Deadline')).Count -ge 4)) 'True'
 Assert-Case "배선: '가까운 위치 찾기' 링크는 글자 탐색으로만 클릭 (고정 좌표 폴백 금지)" `
   (($workerText -match 'Select-LifeFindNearestWord -Words \$linkWords') -and

@@ -134,7 +134,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '2.0.2'
+$appVersion = '2.0.3'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -7742,6 +7742,17 @@ function Start-NextCycle {
     $env:HONEYNOGI_LAST_RUN = $(if (($null -eq $script:targetTime) -and ($script:targetCycles -gt 0) -and
         ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
   }
+  # 시간 지정 모드(생활): 목표 시각을 워커에 전달합니다 - 워커가 사이클 **중에도** 도달 시
+  # 스스로 멈춥니다 (2026-08-11 실측 ①: GUI 는 사이클이 끝나야 시간을 봐서 목표를 2분 24초
+  # 넘김. 사이클 길이는 이동 거리로 크게 흔들려 예측 불가가 실측됨 - 이슈 문서 참고).
+  # 매 회차 **먼저 지우고** 조건(생활 + 시간 지정)일 때만 다시 설정합니다 - GUI 프로세스에
+  # 남은 값이 다음 비시간/전투 회차 워커로 새는 것 방지 (커스텀 env 정리와 같은 이유).
+  # 전투는 전달하지 않습니다 - 판 중간 정지 불가 + 전투 초과는 미실측 (규칙 8).
+  # 전체 타임스탬프인 이유는 자정 넘김(23:50 에 00:30 지정) 모호성 방지입니다.
+  $env:HONEYNOGI_UNTIL_TIME = ''
+  if (($null -ne $script:targetTime) -and ($script:mainCategory -eq 'life')) {
+    $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm')
+  }
   # 이번 회차의 [완료] 사유 수집을 초기화합니다 (이전 회차 사유가 코드 4 상태줄에 오표시되는
   # 것 방지 - 리뷰 조건)
   $script:lastWorkerDoneReason = ''
@@ -8421,8 +8432,12 @@ function Invoke-StartAutomation {
     $script:targetTime = $null
     if ($rbCount.Checked) { $script:targetCycles = [int]$numCount.Value } else { $script:targetCycles = 0 }
     if ($rbTime.Checked) {
-      # 목표 시각 계산: 오늘 그 시각, 이미 지났으면 내일 그 시각
-      $candidate = (Get-Date).Date.Add($dtpUntil.Value.TimeOfDay)
+      # 목표 시각 계산: 오늘 그 시각, 이미 지났으면 내일 그 시각.
+      # DateTimePicker 는 화면에 HH:mm 만 보여도 생성 시점의 초가 값에 숨어 남습니다 -
+      # UI 약속은 분 단위이므로 초를 잘라 정규화합니다 (2026-08-11 교차 리뷰. 안 자르면
+      # 워커에 넘기는 문자열(yyyy-MM-dd HH:mm)과 GUI 내부 비교 시각이 최대 59초 어긋남)
+      $untilTod = $dtpUntil.Value.TimeOfDay
+      $candidate = (Get-Date).Date.AddHours($untilTod.Hours).AddMinutes($untilTod.Minutes)
       if ($candidate -le (Get-Date)) { $candidate = $candidate.AddDays(1) }
       $script:targetTime = $candidate
       if (-not (Test-TimeAllowsNextCycle)) {
