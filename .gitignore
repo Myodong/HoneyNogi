@@ -3,10 +3,9 @@
 .claude/
 
 # 빌드 결과물 (바이너리는 GitHub Releases로 배포)
-# build/ 통짜 무시는 사용자 결정 (2026-08-01) - 빌드 스크립트·런처 소스·해시 대장이 저장소에
-# 없으므로, 다른 PC 에서 프로젝트를 셋팅할 때는 이 폴더를 개발 PC 에서 수동으로 복사해야 함
-# (특히 release_hashes.json 은 없으면 빌드가 차단되는 필수 파일)
 build/
 HoneyNogi.exe
 version/
 던전이미지/
+요청사항.md
+이슈_해결_이력.md
