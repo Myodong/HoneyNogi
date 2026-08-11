@@ -1573,6 +1573,9 @@ $ptWipeStatueRevive = @(Get-ConfigValue $config @('clickPoints', 'wipeStatueRevi
 # 부활 버튼들이 표시되는 우하단 영역: 버튼 배치가 남은 횟수에 따라 달라지므로
 # 이 영역 안에서 '여신상' 글자를 OCR로 찾아 실제 위치를 클릭합니다.
 $rgReviveButtons   = @(Get-ConfigValue $config @('ocrRegions', 'reviveButtons') @(700, 570, 555, 135))
+# 게임 '너무 오랫동안 실행' 재시작 요구 팝업의 본문 영역 (2026-08-11 19:00 실사고 실측 -
+# 상단 중앙 알림. config 좌표가 아니라 하드코딩 = coordsVersion 무관. Test-GameRestartPopup)
+$rgRestartPopup    = @(430, 70, 410, 70)
 # 우하단 자동사냥 버튼의 아이콘 중심 좌표(클릭용 아님, 상태 판별용).
 # 꺼짐 = 나침반 아이콘(중심에 검은 점) / 켜짐 = 흰 사각형(정지 아이콘) → 픽셀로 구분합니다.
 $ptAutoHuntIcon    = @(Get-ConfigValue $config @('clickPoints', 'autoHuntIcon') @(1192, 637))
@@ -5112,6 +5115,24 @@ function Close-CoopMissionScreen {
   return $false
 }
 
+function Test-GameRestartPopup {
+  # 게임 클라이언트의 '너무 오랫동안 실행' 재시작 요구 팝업 (2026-08-11 19:00 실사고).
+  # 화면 상단 중앙 알림이라 옵션 화면의 난이도 알약을 정확히 덮어, "난이도 글자를 3회 모두
+  # 찾지 못했습니다"라는 엉뚱한 오류로 자동 재시작 3회까지 태웠습니다 (실측 캡처 3장).
+  # 이 팝업이 뜨면 게임을 재시작하기 전에는 어떤 자동화도 진행 불가 - 감지 즉시 명확한
+  # 사유로 조건부 정지하는 것이 목적입니다 (사용자 요청).
+  # 실측 판독 (3장 × 2영역 × 2배율 전부 동일):
+  #   '게임이너무오랫동안실행되고있습니다.게임을재Å|작해주세요.'
+  # '시'가 항상 깨져 '재시작'은 못 쓰고 '오랫동안' + '실행되' 조합을 씁니다
+  # (저장소 게임 화면 169장 전수 오탐 0건 - 조각 단독 적중도 0건).
+  # 종료 버튼은 누르지 않습니다 - 게임 종료는 사용자 결정입니다.
+  param([System.Diagnostics.Process]$Game)
+  if ($script:screenCaptureFailing) { return $false }
+  $restartText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgRestartPopup[0] -ReferenceY $rgRestartPopup[1] `
+      -RegionWidth $rgRestartPopup[2] -RegionHeight $rgRestartPopup[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  return ($restartText.Contains('오랫동안') -and $restartText.Contains('실행되'))
+}
+
 function Invoke-PurchasePopupSweep {
   param([System.Diagnostics.Process]$Game)
 
@@ -5123,6 +5144,12 @@ function Invoke-PurchasePopupSweep {
   # 대기 성공으로 오판되지 않게 `if (Invoke-PurchasePopupSweep ...) { return $false }`
   # 계약으로 소비해야 합니다 (리뷰 지적 - PS 5.1 스크립트블록 출력 오염).
   if ($script:screenCaptureFailing) { return $false }
+  # 게임 재시작 요구 팝업이면 여기서 정지합니다 - 이 스윕은 모든 콘텐츠의 시작부와 대기
+  # 루프에 배선돼 있어 한 곳에서 전 흐름을 덮습니다 (2026-08-11 19:00 실사고 대응)
+  if (Test-GameRestartPopup -Game $Game) {
+    Write-RunLog '[완료] 게임이 "너무 오랫동안 실행되고 있습니다" 안내를 띄웠습니다 - 게임을 재시작(재접속)한 뒤 다시 시작해 주세요 (조건부 정지)'
+    exit 4
+  }
   # 판독 **전에** 커서를 창 밖으로 물립니다: 직전 회차에 '닫기'를 눌렀다면 커서가 그 자리에
   # 남고, 그러면 팝업이 다시 떠도 못 찾는 제보가 있었습니다 (2026-08-09).
   # 기전 확정: 커서가 게임 창 위에 오면 게임이 자기 커서를 그리고 그게 캡처에 찍혀 글자를

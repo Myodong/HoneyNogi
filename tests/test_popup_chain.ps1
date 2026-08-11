@@ -177,4 +177,41 @@ Assert-Case '배선: 잔존이면 클릭 0회여도 경고를 남긴다' `
 Assert-Case '배선: 클릭 0회 잔존은 사유를 구분해 기록' `
   ([bool]($entryBody -match '닫기 클릭을 한 번도 보내지 못했습니다')) 'True'
 
+# ── 게임 재시작 요구 팝업 (2026-08-11 19:00 실사고) ─────────────────────────────
+# '너무 오랫동안 실행되고 있습니다' 팝업이 난이도 알약을 덮어 "글자를 못 찾음" 오류로
+# 오진되던 것 → 스윕 초입에서 감지해 명확한 사유로 조건부 정지 (사용자 요청).
+foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
+    -Names @('Test-GameRestartPopup')) {
+  . ([scriptblock]::Create($definition))
+}
+$script:screenCaptureFailing = $false
+$script:stubRestartText = ''
+$rgRestartPopup = @(430, 70, 410, 70)
+$ocrKoreanEngine = $null
+function Get-GameRegionOcrText { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $Scale, $Engine) return $script:stubRestartText }
+
+# 실측 판독 원문 (3장 × 2영역 × 2배율 전부 동일 - '시'는 항상 깨짐)
+$script:stubRestartText = '게임이너무오랫동안실행되고있습니다.게임을재Å|작해주세요.'
+Assert-Case '재시작 팝업: 실측 판독 = 감지' (Test-GameRestartPopup -Game $null) 'True'
+$script:stubRestartText = '게임이너무오랫동안실행되고있습니다.게임을재ÅI작해주세요.'
+Assert-Case '재시작 팝업: s4 변형 판독도 감지' (Test-GameRestartPopup -Game $null) 'True'
+$script:stubRestartText = '2층2구역일반어려움'
+Assert-Case '재시작 팝업: 옵션 화면 정상 판독은 비감지' (Test-GameRestartPopup -Game $null) 'False'
+$script:stubRestartText = '오랫동안'
+Assert-Case '재시작 팝업: 조각 단독은 비감지 (조합 요구)' (Test-GameRestartPopup -Game $null) 'False'
+$script:stubRestartText = ''
+Assert-Case '재시작 팝업: 빈 판독 비감지' (Test-GameRestartPopup -Game $null) 'False'
+$script:screenCaptureFailing = $true
+$script:stubRestartText = '게임이너무오랫동안실행되고있습니다'
+Assert-Case '재시작 팝업: 캡처 실패 중 판독 무효' (Test-GameRestartPopup -Game $null) 'False'
+$script:screenCaptureFailing = $false
+
+# 배선: 스윕 초입에서 검사하고 명확한 사유 + exit 4
+$sweepBody = [string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('Invoke-PurchasePopupSweep'))
+$sweepCode = (($sweepBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '배선: 스윕이 재시작 팝업을 닫기 탐색보다 먼저 검사' `
+  ([bool]($sweepCode -match "(?s)Test-GameRestartPopup -Game \`$Game[\s\S]{0,400}SearchText '닫기'")) 'True'
+Assert-Case '배선: 감지 시 명확한 사유로 조건부 정지 (exit 4)' `
+  ([bool]($sweepCode -match '(?s)너무 오랫동안 실행되고 있습니다[^\r\n]*재시작[^\r\n]*\r?\n\s*exit 4')) 'True'
+
 exit $fails
