@@ -85,7 +85,7 @@ foreach ($node in $stallAst.FindAll({
     Line = $node.Extent.StartLineNumber
     Body = $clause.Item2.Extent.Text; PreCheck = $preCheck }
 }
-Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 20
+Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 21   # 2026-08-11 ⑤ 검증 종료 루프 +1
 Assert-Case '동결 지점: while 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'while' }).Count) 7
 # 한도 되돌림 형 3곳 (클리어 대기 본문 / 어비스 선택 화면 복귀 / 그 밖). 11차에서 감시망에
 # 새로 들어온 형태입니다 - 이 자리들이 캡처 실패 중 유일한 게임 사망 감지 지점입니다.
@@ -93,7 +93,7 @@ Assert-Case '동결 지점: if-renew 형(한도 되돌림)' (@($freezeSpots | Wh
 # if-continue 형이 9곳입니다 - 3차 점검이 while 7곳만 세는 바람에 이 9곳은 계약 밖에
 # 있었습니다(공통 진입점 호출 여부는 우연히 전부 지키고 있었지만, 복구 탐침은 4곳이
 # 빠져 무한 회전이었습니다 - 7차 점검에서 발견·수정).
-Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 10
+Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 11
 $loopMissing = @()
 foreach ($spot in $freezeSpots) {
   $bodyCode = (($spot.Body -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")

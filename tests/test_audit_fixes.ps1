@@ -106,7 +106,7 @@ Assert-Case '워커: Wait-ForScreen 캡처 실패 게이트' `
 
 # ⑩ 어비스 커스텀 난이도 격상 (던전 -Strict 계약과 통일)
 Assert-Case '워커: 어비스 커스텀 난이도 확인 실패 정지' `
-  ([regex]::Matches($workerSource, '오난이도 판 방지를 위해 정지합니다').Count) 2
+  ([regex]::Matches($workerSource, '오난이도 판 방지를 위해 정지합니다').Count) 8   # 2026-08-11 ③ fail-closed 6곳 추가
 
 # ⑪ 파티원 준비 버튼은 '준비' 조각까지 요구
 Assert-Case "워커: 파티원 버튼 '준비'+'완료' 요구" `

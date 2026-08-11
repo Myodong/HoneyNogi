@@ -133,4 +133,27 @@ Assert-Case '배선: 재도전 횟수는 기존 부활 상한 공유' `
 Assert-Case '배선: 전멸 예비 좌표 config 키' `
   ($workerSource -match "wipeStatueRevive'\) @\(986, 670\)") $true
 
+# ── 2026-08-11 ② 부활 입력 계상 게이트 (클릭/키가 실제로 나갔을 때만 계상) ──
+# 실측 근거: 13:33 사냥터 실기에서 클릭 생략 + 거짓 로그 기전 확정 (같은 클릭 함수).
+Assert-Case '배선(②): 전멸 앵커 클릭 성공 여부를 lastClickPerformed 로 판정' `
+  ([bool]($workerSource -match '(?s)Click-ScreenPoint -X \$wipeAnchorHit\.Point\.X[\s\S]{0,700}\$wipeClicked = \$script:lastClickPerformed')) $true
+Assert-Case '배선(②): 전멸 예비 좌표도 같은 판정' `
+  ([bool]($workerSource -match '(?s)ptWipeStatueRevive[\s\S]{0,300}\$wipeClicked = \$script:lastClickPerformed')) $true
+Assert-Case '배선(②): 전멸 클릭을 무조건 성공으로 세지 않음' `
+  ([bool]($workerSource -match '(?m)^\s*\$wipeClicked = \$true\s*$')) $false
+Assert-Case '배선(②): 개인 거점 계상은 전송 성공 분기 안 (reviveDispatched 게이트)' `
+  ([bool]($workerSource -match '(?s)if \(\$reviveDispatched\) \{\s*\r?\n\s*\$reviveCount\+\+')) $true
+Assert-Case '배선(②): 거점 성공 로그도 전송 확인 뒤 (클릭 앞 선기록 제거)' `
+  ([bool]($workerSource -match '(?s)Click-ScreenPoint -X \$anchorHit\.Point\.X[\s\S]{0,200}if \(\$script:lastClickPerformed\) \{[\s\S]{0,200}에서 부활 클릭')) $true
+Assert-Case '배선(②): R키는 검증 입력 + 성공 시에만 계상' `
+  ([bool]($workerSource -match '(?s)if \(Press-KeyVerified -Game \$Game -VirtualKey \(\[byte\]\$reviveKey\)[\s\S]{0,160}\$reviveCount\+\+')) $true
+Assert-Case '배선(②): 전송 실패 지속 상한 20초 (거점/R 각각 throw)' `
+  (@([regex]::Matches($workerSource, '20초 동안 한 번도 전송하지 못했습니다')).Count) 2
+Assert-Case '배선(②): 상한 시계는 첫 생략에 시작 (AddSeconds 20)' `
+  (@([regex]::Matches($workerSource, '\$reviveDispatchDeadline = \(Get-Date\)\.AddSeconds\(20\)')).Count) 2
+Assert-Case '배선(②): 사망 상태 해제 시 상한 초기화' `
+  ([bool]($workerSource -match 'if \(-not \$death\.Dead -and -not \$death\.Wiped\) \{ \$reviveDispatchDeadline = \$null \}')) $true
+Assert-Case '배선(②): 성공 전송 시 상한 초기화 (초기화 선언 + 거점 + R + 해제 = 4곳 이상)' `
+  (@([regex]::Matches($workerSource, '\$reviveDispatchDeadline = \$null')).Count -ge 4) $true
+
 exit $fails

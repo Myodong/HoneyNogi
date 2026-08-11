@@ -1049,8 +1049,8 @@ Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($worke
 #   Start-Sleep 으로 시작해 캡처 실패 시 continue 하는데, 그러면 그 회전에 캡처 시도가 0이라
 #   플래그가 영영 안 풀리고 바로 다음 줄이 한도를 40초로 되돌려 무한 회전이었습니다
 #   (채집에서 2026-08-07 에 고친 것과 같은 형태가 던전/사냥터에 남아 있었음).
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 10곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '10'
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 11곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1 + 검증 종료 루프 1)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '11'
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `

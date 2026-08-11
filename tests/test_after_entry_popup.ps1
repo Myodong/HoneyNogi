@@ -16,7 +16,7 @@ function Assert-Case {
 
 # 팝업 사전 처리가 키 입력보다 먼저 있어야 함 (닫기 탐색 위치 < 첫 Press-KeyOnce 위치)
 $popupSearchIndex = $functionText.IndexOf("-SearchText '닫기'")
-$keyPressIndex = $functionText.IndexOf('Press-KeyOnce')
+$keyPressIndex = $functionText.IndexOf('Press-KeyVerified')   # 2026-08-11 ④: 검증 입력으로 격상
 Assert-Case '계약: 닫기 탐색이 존재' ($popupSearchIndex -ge 0) $true
 Assert-Case '계약: 키 입력이 존재' ($keyPressIndex -ge 0) $true
 Assert-Case '계약: 닫기 탐색이 키 입력보다 먼저' ($popupSearchIndex -lt $keyPressIndex) $true
@@ -29,7 +29,7 @@ Assert-Case '계약: 4회째는 클릭 없이 잔존 판정만' ($functionText -
 Assert-Case '계약: 캡처 실패 가드' ($functionText -match 'if \(-not \$script:screenCaptureFailing\)') $true
 
 # 키 입력 루프는 1개 그대로 (재입력 금지 - B 이중 입력은 음식 중복 소모 위험)
-Assert-Case '계약: Press-KeyOnce 는 1곳뿐' ([regex]::Matches($functionText, 'Press-KeyOnce').Count) 1
+Assert-Case '계약: 검증 키 입력 1곳 + 직접 Press-KeyOnce 0곳' ('{0}/{1}' -f [regex]::Matches($functionText, 'Press-KeyVerified').Count, [regex]::Matches($functionText, 'Press-KeyOnce').Count) '1/0'
 # 7차: 잔존 경고에 **실제 닫은 횟수**를 함께 적습니다. 3회 전부 성공했는데도 남았다면 그건
 # 클릭 불량이 아니라 연쇄가 길었던 것인데, 옛 문구는 둘을 구분하지 못해 진단이 헛돌았습니다.
 Assert-Case '계약: 잔존 시 경고 후 진행' ($functionText -match '\[경고\] 닫기 클릭 .*뒤에도 구매 팝업이 남아 있습니다') $true

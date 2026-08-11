@@ -1674,6 +1674,8 @@ $script:contentTag = '[어비스]'
 # 회복될 때 그 사이 억제한 횟수와 함께 한 번 더 안내해 진단 정보는 보존합니다.
 $script:focusWarnActive = $false
 $script:focusWarnSuppressed = 0
+# 검증 키 입력(Press-KeyVerified)의 '첫 1회 안내' 상태 (2026-08-11 ④ - 전면 미확인 키 유실 방지)
+$script:keyVerifyWarnActive = $false
 # 커서 확인 실패는 **연속 횟수**로 심각도를 나눕니다 (2026-08-10 실기 - 아래 상세).
 # 전면화(focusWarn*)와 달리 '첫 1회 경고' 규칙을 쓰지 않으므로 상태도 따로 둡니다.
 $script:cursorFailureStreak = 0
@@ -2239,7 +2241,7 @@ function Focus-Game {
   # 경고는 연속 실패의 첫 1회만 (사용자가 다른 창을 쓰는 동안 매 클릭마다 쌓이던 문제)
   switch (Get-RepeatWarnAction -WasWarned $script:focusWarnActive -Failed (-not $focusOk)) {
     'warn' {
-      Write-RunLog '[경고] 게임 창 전면화를 두 번 시도했지만 실제 전면 루트 창으로 확인되지 않았습니다 - 기존 동작대로 입력은 계속합니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)'
+      Write-RunLog '[경고] 게임 창 전면화를 두 번 시도했지만 실제 전면 루트 창으로 확인되지 않았습니다 - 입력 여부는 호출부가 결정합니다 (검증 입력은 건너뛰고, 그 외에는 기존대로 진행. 연속 실패 중에는 이 경고를 반복하지 않습니다)'
       $script:focusWarnActive = $true
       $script:focusWarnSuppressed = 0
     }
@@ -3558,7 +3560,8 @@ function Wait-ForDungeonClearScreen {
   #         'selection' = 이미 어비스 선택 화면(사용자가 끝까지 직접 진행한 경우)
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $lastFocus = Get-Date
-  $reviveCount = 0              # 이번 회차에 자동 부활한 횟수
+  $reviveCount = 0              # 이번 회차에 자동 부활한 횟수 (**실제 전송된** 입력만 - 2026-08-11 ②)
+  $reviveDispatchDeadline = $null # 부활 입력이 계속 생략될 때의 전송 상한(첫 생략 +20초, 초과 = throw)
   $reviveConfirmPending = $false # R키 입력 후 부활 완료 확인 대기 중
   $revivePendingKind = ''        # 진행 중인 부활 종류 (가루 부활/여신상 부활/전멸 재도전 - 완료 로그에 표기)
   $reviveBlockedLogged = $false  # 부활 불가 경고를 이미 남겼는지(반복 출력 방지)
@@ -3711,6 +3714,8 @@ function Wait-ForDungeonClearScreen {
     if ($reviveEnabled) {
       $death = Get-DeathScreenInfo -Game $Game
       if (-not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (리뷰 조건)
+      # 사망 상태가 풀리면(부활 성공/화면 전환) 전송 상한도 초기화 - 다음 사망은 새로 잽니다
+      if (-not $death.Dead -and -not $death.Wiped) { $reviveDispatchDeadline = $null }
       if ($death.Wiped) {
         if ($reviveCount -ge $reviveMaxPerCycle) {
           # 전멸 재도전도 자동 복구 시도이므로 기존 부활 상한을 공유합니다 (무한 재도전 루프 방지)
@@ -3732,7 +3737,11 @@ function Wait-ForDungeonClearScreen {
             $wipeAnchorName = $wipeAnchorHit.Name
             Focus-Game -Game $Game
             Click-ScreenPoint -X $wipeAnchorHit.Point.X -Y $wipeAnchorHit.Point.Y
-            $wipeClicked = $true
+            # 클릭이 실제로 나갔을 때만 '눌렀다'로 칩니다 (2026-08-11 ② - 커서 확인 실패로
+            # 생략된 클릭을 무조건 성공으로 세면 부활 횟수만 소모되고 화면은 그대로입니다.
+            # 실측 13:33 사냥터에서 같은 기전(생략+거짓 로그) 실기 확정). 생략이면 전멸
+            # 화면이 남아 있어 다음 감지에서 상태 기반으로 재시도됩니다.
+            $wipeClicked = $script:lastClickPerformed
           } else {
             $wipeButtonMisses++
             if ($wipeButtonMisses -ge 3) {
@@ -3744,7 +3753,8 @@ function Wait-ForDungeonClearScreen {
                 Write-RunLog '[경고] 전멸 화면에서 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다'
                 Focus-Game -Game $Game
                 Click-GamePoint -Game $Game -ReferenceX $ptWipeStatueRevive[0] -ReferenceY $ptWipeStatueRevive[1]
-                $wipeClicked = $true
+                # 예비 좌표도 같은 계약 - 생략된 클릭을 성공으로 세지 않습니다 (2026-08-11 ②)
+                $wipeClicked = $script:lastClickPerformed
               }
             }
           }
@@ -3766,38 +3776,70 @@ function Wait-ForDungeonClearScreen {
             $reviveBlockedLogged = $true
           }
         } elseif ($useStatueRevive -or ($null -ne $death.Remaining -and $death.Remaining -le 0)) {
-          $reviveCount++
+          # ★ 2026-08-11 ②: 계상(reviveCount)·성공 로그·대기 리셋은 **입력이 실제로 나간
+          #   뒤에만** 합니다. 예전에는 카운트가 클릭보다 먼저라, 커서 확인 실패로 클릭이
+          #   생략돼도 횟수만 소모되고(상한 10회를 채우면 정말 죽어 있어도 포기) 로그는
+          #   '부활 클릭'이라고 거짓말했습니다. 생략이면 사망 화면이 남아 있어 다음 감지에서
+          #   상태 기반으로 재시도됩니다 (전송 상한은 아래 reviveDispatchDeadline).
           $statueReason = if ($useStatueRevive) { '부활 재료 부족' } else { '남은 부활 횟수 없음' }
           Focus-Game -Game $Game
           # 부활 버튼 배치는 남은 횟수 유무에 따라 달라지므로(0회면 버튼들이 한 줄로 재배치됨),
           # 고정 좌표 대신 글자를 OCR로 찾아 실제 버튼 위치를 클릭합니다.
           # 캠프파이어 우선 - 여신상은 던전 처음부터라 손실이 큽니다 (Find-ReviveAnchorPoint 주석).
+          $reviveDispatched = $false
           $anchorHit = Find-ReviveAnchorPoint -Game $Game
           if ($anchorHit) {
-            Write-RunLog "$($script:contentTag) 행동불능($statueReason) - $($anchorHit.Name)에서 부활 클릭"
-            $revivePendingKind = "$($anchorHit.Name) 부활"
             Click-ScreenPoint -X $anchorHit.Point.X -Y $anchorHit.Point.Y
+            if ($script:lastClickPerformed) {
+              Write-RunLog "$($script:contentTag) 행동불능($statueReason) - $($anchorHit.Name)에서 부활 클릭"
+              $revivePendingKind = "$($anchorHit.Name) 부활"
+              $reviveDispatched = $true
+            }
           } else {
             Write-RunLog "[경고] 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다"
-            $revivePendingKind = '여신상 부활'
             Click-GamePoint -Game $Game -ReferenceX $ptStatueRevive[0] -ReferenceY $ptStatueRevive[1]
+            if ($script:lastClickPerformed) {
+              $revivePendingKind = '여신상 부활'
+              $reviveDispatched = $true
+            }
           }
-          $reviveConfirmPending = $true
-          Start-Sleep -Seconds 3
-          # 부활 후 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
-          $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+          if ($reviveDispatched) {
+            $reviveCount++
+            $reviveDispatchDeadline = $null
+            $reviveConfirmPending = $true
+            Start-Sleep -Seconds 3
+            # 부활 후 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+          } else {
+            # 입력 생략: 카운트/대기 리셋 없이 다음 감지에서 재시도. 단 20초 안에 한 번도
+            # 전송하지 못하면 입력 계통 장애로 보고 오류로 던집니다 (조건부 정지가 아니라
+            # 오류라야 자동 재시작 1회와 오류 세트가 남음 - 설계 합의)
+            if ($null -eq $reviveDispatchDeadline) { $reviveDispatchDeadline = (Get-Date).AddSeconds(20) }
+            elseif ((Get-Date) -gt $reviveDispatchDeadline) {
+              throw '거점 부활 입력을 20초 동안 한 번도 전송하지 못했습니다 - 커서/입력 계통을 확인해 주세요.'
+            }
+            Start-Sleep -Milliseconds 800
+          }
           continue
         } else {
-          $reviveCount++
+          # R키(여기서 부활)도 같은 계약 - 전면 확인 후 실제로 전송됐을 때만 계상합니다 (④와 결합)
           $remainText = if ($null -ne $death.Remaining) { "남은 부활 횟수 $($death.Remaining)회" } else { '남은 횟수 인식 불가' }
-          Write-RunLog "$($script:contentTag) 행동불능($remainText) - 여기서 부활 (R키, 불사의 가루 소모)"
-          $revivePendingKind = '가루 부활'
-          Focus-Game -Game $Game
-          Press-KeyOnce -VirtualKey ([byte]$reviveKey)
-          $reviveConfirmPending = $true
-          Start-Sleep -Seconds 3
-          # 부활 후 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
-          $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+          if (Press-KeyVerified -Game $Game -VirtualKey ([byte]$reviveKey) -Label 'R 부활') {
+            $reviveCount++
+            $reviveDispatchDeadline = $null
+            Write-RunLog "$($script:contentTag) 행동불능($remainText) - 여기서 부활 (R키, 불사의 가루 소모)"
+            $revivePendingKind = '가루 부활'
+            $reviveConfirmPending = $true
+            Start-Sleep -Seconds 3
+            # 부활 후 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+          } else {
+            if ($null -eq $reviveDispatchDeadline) { $reviveDispatchDeadline = (Get-Date).AddSeconds(20) }
+            elseif ((Get-Date) -gt $reviveDispatchDeadline) {
+              throw 'R키 부활 입력을 20초 동안 한 번도 전송하지 못했습니다 - 게임 전면화/입력 계통을 확인해 주세요.'
+            }
+            Start-Sleep -Milliseconds 800
+          }
           continue
         }
       } elseif ($reviveConfirmPending) {
@@ -3816,14 +3858,16 @@ function Wait-ForDungeonClearScreen {
       if ($reviveResumeKey -gt 0 -and -not $script:screenCaptureFailing) {
         $huntState = Get-AutoHuntState -Game $Game
         if ($huntState -eq 'off') {
-          $autoHuntPresses++
-          if ($autoHuntPresses -eq 1) {
-            Write-RunLog "$($script:contentTag) 자동사냥 꺼짐 감지 - Space 재입력"
-          } elseif (($autoHuntPresses % 15) -eq 0) {
-            Write-RunLog "[경고] 자동출발 입력 ${autoHuntPresses}회째에도 자동사냥이 켜지지 않습니다 - 계속 시도합니다"
+          # 전송 성공 시에만 횟수·로그 계상 (2026-08-11 ④ - 전면 미확인 키는 다른 창으로 새고,
+          # 그때 카운트만 오르면 '15회째에도 안 켜짐' 경고가 허수로 찍힘)
+          if (Press-KeyVerified -Game $Game -VirtualKey ([byte]$reviveResumeKey) -Label '자동사냥 재개') {
+            $autoHuntPresses++
+            if ($autoHuntPresses -eq 1) {
+              Write-RunLog "$($script:contentTag) 자동사냥 꺼짐 감지 - Space 재입력"
+            } elseif (($autoHuntPresses % 15) -eq 0) {
+              Write-RunLog "[경고] 자동출발 입력 ${autoHuntPresses}회째에도 자동사냥이 켜지지 않습니다 - 계속 시도합니다"
+            }
           }
-          Focus-Game -Game $Game
-          Press-KeyOnce -VirtualKey ([byte]$reviveResumeKey)
           Start-Sleep -Seconds 2
         } elseif ($huntState -eq 'on' -and $autoHuntPresses -gt 0) {
           Write-RunLog "$($script:contentTag) 자동사냥 켜짐 확인 (Space ${autoHuntPresses}회 입력)"
@@ -3839,14 +3883,15 @@ function Wait-ForDungeonClearScreen {
     if ($assistAutoOn -and -not $script:screenCaptureFailing) {
       $assistState = Get-AssistState -Game $Game
       if ($assistState -eq 'off') {
-        $assistPresses++
-        if ($assistPresses -eq 1) {
-          Write-RunLog "$($script:contentTag) ASSIST 꺼짐 감지 - H키로 켬"
-        } elseif (($assistPresses % 15) -eq 0) {
-          Write-RunLog "[경고] ASSIST 켜기 입력 ${assistPresses}회째에도 켜지지 않습니다 - 계속 시도합니다"
+        # 자동사냥 재개와 같은 계약 - 전송 성공 시에만 계상 (2026-08-11 ④)
+        if (Press-KeyVerified -Game $Game -VirtualKey ([byte]$assistKey) -Label 'ASSIST 켜기') {
+          $assistPresses++
+          if ($assistPresses -eq 1) {
+            Write-RunLog "$($script:contentTag) ASSIST 꺼짐 감지 - H키로 켬"
+          } elseif (($assistPresses % 15) -eq 0) {
+            Write-RunLog "[경고] ASSIST 켜기 입력 ${assistPresses}회째에도 켜지지 않습니다 - 계속 시도합니다"
+          }
         }
-        Focus-Game -Game $Game
-        Press-KeyOnce -VirtualKey ([byte]$assistKey)
         Start-Sleep -Seconds 2
       } elseif ($assistState -eq 'on' -and $assistPresses -gt 0) {
         Write-RunLog "$($script:contentTag) ASSIST 켜짐 확인 (H ${assistPresses}회 입력)"
@@ -4765,6 +4810,67 @@ function Find-HtNewMissionPoint {
   return $null
 }
 
+function Test-BattleFieldEvidence {
+  # 나가기 뒤 '필드로 나왔다'는 증거 (던전/사냥터 공용, 2026-08-11 ⑤):
+  # 게임플레이 HUD + 퀘스트 추적기 첫 줄에 콘텐츠 목표(던전 '구역' 클리어 / 사냥터
+  # '소탕'·'정찰')가 없음. 판독 도중 캡처가 끊기면 그 판독은 무효입니다.
+  # 마지막 판 종료의 'field-evidence'(Get-DgLastRunExitStep)와 같은 재료를 씁니다.
+  param([System.Diagnostics.Process]$Game)
+  if ($script:screenCaptureFailing) { return $false }
+  $fieldHudNow = Test-HomeEndEscHud -Game $Game
+  if ($script:screenCaptureFailing -or -not $fieldHudNow) { return $false }
+  $fieldQuestNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+      -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ($script:screenCaptureFailing) { return $false }
+  return (-not ($fieldQuestNow.Contains('구역') -or $fieldQuestNow.Contains('소탕') -or $fieldQuestNow.Contains('정찰')))
+}
+
+function Invoke-VerifiedContentExit {
+  # 나가기/X 클릭 → 필드 복귀 확인 루프 (2026-08-11 ⑤). 성공 $true / 시간 초과 $false.
+  #
+  # 예전에는 나가기를 누르고 **확인 없이** 즉시 종료했는데, 클릭은 커서 확인 실패로 생략될
+  # 수 있고(13:33 실기 실측 - 같은 기전) 그러면 화면에 결과/첫 화면이 남은 채 자동화만
+  # 끝났습니다. 안전 중지 경로는 그 상태로 exit 0 이라 회차까지 계상됐습니다.
+  # 올바른 형태는 이미 마지막 판 종료에 있었습니다('field-evidence' 확인) - 그 계약을
+  # 모든 '나가기 후 종료'로 확장한 것입니다.
+  #  - 재클릭은 $ReclickIfSource(호출부의 상태 기반 클릭 - 소스 화면이 **그대로 보일 때만**)
+  #  - '탐험을 계속하시겠습니까?' 팝업은 나가기(Space) - 이 선택은 종료 계상과 연결되므로
+  #    검증 입력(Press-KeyVerified)을 씁니다
+  #  - 필드 증거는 **연속 2회** (한 프레임 오판 방지 - 마지막 판 복구와 같은 계약)
+  param(
+    [System.Diagnostics.Process]$Game,
+    [scriptblock]$ReclickIfSource,
+    [int]$TimeoutSeconds = 40
+  )
+  $fieldStreak = 0
+  $verifyDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $verifyDeadline) {
+    Start-Sleep -Milliseconds 1500
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림)
+      $verifyDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      continue
+    }
+    $exitCenterNow = (Get-GameOcrText -Game $Game) -replace '\s', ''
+    if ($exitCenterNow.Contains('계속하')) {
+      if (Press-KeyVerified -Game $Game -VirtualKey ([byte]32) -Label '나가기(Space)') {
+        Write-RunLog "$($script:contentTag) '던전 탐험을 계속하시겠습니까?' 팝업 - 나가기(Space) 선택"
+      }
+      $fieldStreak = 0
+      continue
+    }
+    if (Test-BattleFieldEvidence -Game $Game) {
+      $fieldStreak++
+      if ($fieldStreak -ge 2) { return $true }
+      continue
+    }
+    $fieldStreak = 0
+    & $ReclickIfSource
+  }
+  return $false
+}
+
 function Exit-HuntingGroundExhausted {
   param([System.Diagnostics.Process]$Game, [string]$Reason)
 
@@ -4772,17 +4878,27 @@ function Exit-HuntingGroundExhausted {
   # 첫 화면이면 X로 닫는데, 첫 화면이 결과 화면 위에 열려 있던 경우('새 임무 선택' 경유)
   # X를 닫으면 밑의 결과 화면이 다시 나오므로(2026-07-18 01:05 실측) 결과 화면이
   # 보이면 나가기 버튼까지 눌러 사냥터 밖(필드)으로 나갑니다.
+  # ★ 2026-08-11 ⑤: 클릭 확인 없이 즉시 종료하던 것을 필드 복귀 확인 후 종료로 격상.
+  #   클릭은 상태 기반(그 화면이 보일 때만)이라 생략돼도 다음 회전에서 자기 회복합니다.
   Write-RunLog "[완료] $Reason - 사냥터에서 나가고 자동화를 마칩니다"
-  if (Find-HtEntryButtonPoint -Game $Game) {
-    Focus-Game -Game $Game
-    Click-GamePoint -Game $Game -ReferenceX $ptHtClose[0] -ReferenceY $ptHtClose[1]
-    Start-Sleep -Seconds 2
+  # 재클릭 로그 1회 억제 플래그 - 스크립트블록 안에서 지역 변수 대입은 밖에 안 보입니다
+  # (PS 5.1 동적 스코프 함정) → script 스코프 사용
+  $script:htExhaustExitLogged = $false
+  $exitVerified = Invoke-VerifiedContentExit -Game $Game -TimeoutSeconds 40 -ReclickIfSource {
+    if (Find-HtEntryButtonPoint -Game $Game) {
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptHtClose[0] -ReferenceY $ptHtClose[1]
+    } elseif (Find-HtNewMissionPoint -Game $Game) {
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
+      if ($script:lastClickPerformed -and -not $script:htExhaustExitLogged) {
+        Write-RunLog '[사냥터] 결과 화면 나가기 클릭 (사냥터 밖으로)'
+        $script:htExhaustExitLogged = $true
+      }
+    }
   }
-  if (Find-HtNewMissionPoint -Game $Game) {
-    Focus-Game -Game $Game
-    Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
-    Write-RunLog '[사냥터] 결과 화면 나가기 클릭 (사냥터 밖으로)'
-    Start-Sleep -Seconds 2
+  if (-not $exitVerified) {
+    Write-RunLog '[경고] 사냥터 밖(필드) 복귀를 확인하지 못한 채 정지합니다 - 게임 화면을 확인해 주세요'
   }
   exit 4
 }
@@ -5141,12 +5257,17 @@ function Invoke-AfterEntryKeys {
       }
     }
   }
-  Focus-Game -Game $Game
   for ($keyIndex = 0; $keyIndex -lt $afterEntryActions.Count; $keyIndex++) {
     if ($keyIndex -gt 0) { Start-Sleep -Milliseconds $afterEntryDelayMs }
     $action = $afterEntryActions[$keyIndex]
-    Press-KeyOnce -VirtualKey ([byte]$action.Key)
-    Write-RunLog ("{0} {1} ({2} 키 입력완료)" -f $LogPrefix, $action.Label, (Get-KeyDisplayName $action.Key))
+    # 전면 확인 후에만 전송 + 정직한 로그 (2026-08-11 ④). 음식(B)처럼 소모성 키가 다른
+    # 창으로 새면서 '입력완료'로 기록되던 것 방지. 재입력은 하지 않습니다 - 자동사냥 꺼짐
+    # 감시가 Space 를 이어받고, B 재입력은 중복 소모 위험(기존 정책 그대로).
+    if (Press-KeyVerified -Game $Game -VirtualKey ([byte]$action.Key) -Label $action.Label) {
+      Write-RunLog ("{0} {1} ({2} 키 입력완료)" -f $LogPrefix, $action.Label, (Get-KeyDisplayName $action.Key))
+    } else {
+      Write-RunLog ("{0} {1} - 게임 전면을 확인하지 못해 키 입력을 건너뜀 ({2})" -f $LogPrefix, $action.Label, (Get-KeyDisplayName $action.Key))
+    }
   }
 }
 
@@ -5246,20 +5367,39 @@ function Invoke-SafeStopExitIfRequested {
   # 결과 화면에서 안전 중지 예약이 있으면 나가기를 눌러 회차를 마칩니다 (던전/사냥터 공통).
   # 신호 파일은 워커가 소비(삭제)합니다 - GUI가 강제 종료되어 파일이 남아도
   # 다음 실행이 시작하자마자 헛되이 조기 종료되는 일이 없게 하기 위함입니다.
+  # ★ 2026-08-11 ⑤: 예전에는 나가기 클릭을 확인 없이 exit 0 - 클릭이 생략되면(13:33 실측
+  #   기전) 결과 화면에 남은 채 **회차만 계상**됐습니다. 셋 중 가장 무거운 경로라 필드 복귀
+  #   확인 후에만 성공 코드로 마칩니다. 확인 실패 시 코드 4 - 비커스텀은 그 판이 계상되지
+  #   않지만(완주했는데 카운트 1 손실 - 안전 측 손해) 거짓 계상보다 낫고, 커스텀은 완료
+  #   마커가 있어 계상이 유지됩니다 (마커 계약 - 교차 리뷰 확인).
   if (-not (Test-Path -LiteralPath $safeStopFlagPath)) { return }
   Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
-  Focus-Game -Game $Game
-  Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
+  $exitVerified = Invoke-VerifiedContentExit -Game $Game -TimeoutSeconds 40 -ReclickIfSource {
+    # 결과 화면이 그대로 보일 때만 나가기 재클릭 (던전 '다시 하기' / 사냥터 '새 임무 선택')
+    $safeStopSourceSeen = $false
+    if (Find-DgRetryButtonPoint -Game $Game) { $safeStopSourceSeen = $true }
+    elseif (Find-HtNewMissionPoint -Game $Game) { $safeStopSourceSeen = $true }
+    if ($safeStopSourceSeen) {
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
+    }
+  }
   if ($script:customCleanupOnly) {
     # 커스텀 새 시작 정리 모드: 이 판은 사용자가 수동으로 돌린 것이라 코드 0으로 끝내면
     # GUI가 항목 완료로 오계상합니다 - 준비 실행(코드 10)으로 마칩니다.
-    Write-RunLog '[완료] 안전 중지 예약 확인 - 수동 진행분 정리 중이라 판으로 계상하지 않고 마칩니다 (준비 실행)'
-    Start-Sleep -Seconds 2
-    exit 10
+    if ($exitVerified) {
+      Write-RunLog '[완료] 안전 중지 예약 확인 - 수동 진행분 정리 중이라 판으로 계상하지 않고 마칩니다 (준비 실행)'
+      exit 10
+    }
+    Write-RunLog '[완료] 안전 중지 예약 확인 - 나가기(필드 복귀)를 확인하지 못한 채 정리 실행을 마칩니다. 게임 화면을 확인해 주세요'
+    exit 4
   }
-  Write-RunLog '[완료] 안전 중지 예약 확인 - 결과 화면에서 나가기를 눌러 회차를 마칩니다'
-  Start-Sleep -Seconds 2
-  exit 0
+  if ($exitVerified) {
+    Write-RunLog '[완료] 안전 중지 예약 확인 - 결과 화면에서 나가기를 눌러 회차를 마칩니다'
+    exit 0
+  }
+  Write-RunLog '[완료] 안전 중지 예약 확인 - 판은 완료됐지만 나가기(필드 복귀)를 확인하지 못했습니다. 회차로 세지 않고 정지합니다 - 게임 화면을 확인해 주세요'
+  exit 4
 }
 
 function Get-ChanceToggleState {
@@ -5440,6 +5580,15 @@ function Set-DgOptionDifficulty {
   # 23:56 실기: 오류 3초 뒤 캡처는 판정 완벽 통과 = 기다리기만 하면 되는 상태였음)
   Focus-Game -Game $Game
   Click-ScreenPoint -X $point.X -Y $point.Y
+  # 생략(커서 확인 실패)이면 재전송 (2026-08-11 ③). 생략된 클릭은 눌림 연출이 시작되지 않아
+  # 위 자기 방해 계약과 충돌하지 않습니다 - '실제로 나간 클릭'만 재클릭 금지 대상입니다.
+  # 재전송은 옵션 화면(제목 '구역')이 그대로일 때만, 최대 2회.
+  for ($optDispatchTry = 1; $optDispatchTry -le 2 -and -not $script:lastClickPerformed; $optDispatchTry++) {
+    Start-Sleep -Milliseconds 700
+    if (-not ((Read-DgTitleText -Game $Game).Contains('구역'))) { break }
+    Focus-Game -Game $Game
+    Click-ScreenPoint -X $point.X -Y $point.Y
+  }
   Write-RunLog "[던전] 난이도 '$Label' 확정 클릭 (옵션 화면)"
   Start-Sleep -Milliseconds 900
   for ($passiveTry = 1; $passiveTry -le 3; $passiveTry++) {
@@ -6232,14 +6381,34 @@ function Invoke-NormalDungeonCycle {
   } else {
   $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX $dgSelHardX
   if ($difficultyPoint) {
-    Focus-Game -Game $Game
-    Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+    # 클릭 생략(커서 확인 실패) 시 선택 화면이 그대로일 때만 재전송 (2026-08-11 ③ - 사냥터와
+    # 같은 계약. 선택 화면 여부는 하단 '진입' 버튼으로 확인)
+    $ndDiffClicked = $false
+    for ($ndDiffTry = 1; $ndDiffTry -le 3; $ndDiffTry++) {
+      Focus-Game -Game $Game
+      Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+      if ($script:lastClickPerformed) { $ndDiffClicked = $true; break }
+      Start-Sleep -Milliseconds 700
+      if (-not ((([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', '').Contains('진입'))) { break }
+    }
+    if (-not $ndDiffClicked) {
+      Write-RunLog "[완료] 난이도 '$ndDifficulty' 클릭을 전송하지 못했습니다 (커서 확인 실패 지속) - 오난이도 판 방지를 위해 정지합니다"
+      exit 4
+    }
     Write-RunLog "[던전] 난이도 '$ndDifficulty' 클릭"
     Start-Sleep -Milliseconds 900
     # 사후 검증: 클릭이 빗나가 다른 난이도로 바뀌지 않았는지 선택 강조로 확인 (첫 좌표 재사용)
     $diffConfirmed = Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $ndDifficulty -Strict:$ndVeryHardTarget
     if ($ndVeryHardTarget -and -not $diffConfirmed) {
       throw "'매우 어려움' 선택 강조를 확인하지 못했습니다 - 오난이도 입장을 막기 위해 중단합니다."
+    }
+    if (-not $diffConfirmed) {
+      # 일반/어려움도 확인 실패면 정지합니다 (2026-08-11 ③ 실측 - 예전에는 경고 없이
+      # 그대로 진행해 오난이도 판이 정상 완료로 계상될 수 있었음. 확인 판독은 커서 대피
+      # 이후라 신뢰 - 실측 0/27). 매우 어려움과 달리 코드 4 - 화면 인식 문제일 수 있어
+      # 오류 세트보다 조건부 정지가 맞음 (커스텀은 아래 옵션 화면 경로에서 이미 엄격)
+      Write-RunLog "[완료] 난이도 '$ndDifficulty' 선택을 확인하지 못했습니다 - 오난이도 판 방지를 위해 정지합니다"
+      exit 4
     }
   } elseif ($ndVeryHardTarget) {
     throw "'매우 어려움' 글자를 찾지 못했습니다 - 이 던전에 없는 난이도일 수 있어 진행하지 않습니다."
@@ -6447,6 +6616,10 @@ function Invoke-NormalDungeonCycle {
       if ($ndVeryHardTarget) {
         throw "옵션 화면에서 '매우 어려움' 선택을 확정하지 못했습니다 - 오난이도 입장을 막기 위해 중단합니다."
       }
+      # 비커스텀 일반/어려움도 확정 실패면 입장하지 않습니다 (2026-08-11 ③ - 예전에는 이
+      # 분기가 비어 있어 확인 실패를 무시하고 그대로 입장. 13:33 사냥터 실측과 같은 사슬)
+      Write-RunLog "[완료] 옵션 화면에서 난이도 '$ndDifficulty' 선택을 확정하지 못했습니다 - 오난이도 판 방지를 위해 정지합니다"
+      exit 4
     }
   }
   if ($deepMode -and $ndVeryHardTarget) {
@@ -7069,10 +7242,17 @@ function Invoke-NormalDungeonCycle {
       -ExhaustContinue $ndCoinFallback -NoDoubleSweep $ndLootFallback `
       -SweepCost $dgSweepCost -FullCost $dgFullCost -CurrencyName $dgCurrencyName -ExhaustLabel $dgExhaustLabel
     if ($null -ne $resultBalance -and $resultDecision.Action -eq 'stop') {
-      Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
       Write-RunLog "[완료] $($resultDecision.Reason) - 나가기를 누르고 설정대로 자동화를 마칩니다"
-      Start-Sleep -Seconds 2
+      # 클릭 확인 없이 즉시 종료하던 것을 필드 복귀 확인 후 종료로 격상 (2026-08-11 ⑤)
+      $exitVerified = Invoke-VerifiedContentExit -Game $Game -TimeoutSeconds 40 -ReclickIfSource {
+        if (Find-DgRetryButtonPoint -Game $Game) {
+          Focus-Game -Game $Game
+          Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
+        }
+      }
+      if (-not $exitVerified) {
+        Write-RunLog '[경고] 필드 복귀를 확인하지 못한 채 정지합니다 - 게임 화면을 확인해 주세요'
+      }
       exit 4
     }
   }
@@ -7293,12 +7473,43 @@ function Invoke-HuntingGroundCycle {
   $difficultyPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgHtDifficulty[0] -ReferenceY $rgHtDifficulty[1] `
     -RegionWidth $rgHtDifficulty[2] -RegionHeight $rgHtDifficulty[3] -Scale 4 -SearchText $difficultySearch -ExactText $difficultyKey
   if ($difficultyPoint) {
-    Focus-Game -Game $Game
-    Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+    # ★ 2026-08-11 ③ (13:33 실기 실측): 예전에는 클릭 생략(커서 확인 실패)도, 확인 실패도
+    #   전부 무시하고 '일반'인 채 매칭 단계까지 진행했습니다. 이제:
+    #   ①클릭이 생략되면 첫 화면이 그대로일 때만 같은 좌표를 다시 시도 (최대 3회 -
+    #     알약 화면은 클릭 후에도 같은 화면이라 '원래 화면 그대로' 재클릭 조건을 만족)
+    #   ②'클릭' 로그는 실제 전송됐을 때만 (거짓 로그 제거)
+    #   ③확인 실패면 같은 화면 한정 1회 정정 재클릭 → 그래도 실패면 정지 (오난이도 판 방지)
+    $htDiffClicked = $false
+    for ($diffDispatchTry = 1; $diffDispatchTry -le 3; $diffDispatchTry++) {
+      Focus-Game -Game $Game
+      Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+      if ($script:lastClickPerformed) { $htDiffClicked = $true; break }
+      Start-Sleep -Milliseconds 700
+      if (-not (Find-HtEntryButtonPoint -Game $Game)) { break }
+    }
+    if (-not $htDiffClicked) {
+      Write-RunLog "[완료] 난이도 '$htDifficulty' 클릭을 전송하지 못했습니다 (커서 확인 실패 지속) - 오난이도 판 방지를 위해 정지합니다"
+      exit 4
+    }
     Write-RunLog "[사냥터] 난이도 '$htDifficulty' 클릭"
     Start-Sleep -Milliseconds 900
     # 사후 검증: 클릭이 빗나가 다른 난이도로 바뀌지 않았는지 선택 강조로 확인 (첫 좌표 재사용)
-    Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $htDifficulty | Out-Null
+    $htDiffConfirmed = [bool](Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $htDifficulty)
+    if (-not $htDiffConfirmed) {
+      # 같은 화면(첫 화면 입장 버튼 잔존)일 때만 성공 전송 기준 1회 정정 재클릭 후 재확인
+      if (Find-HtEntryButtonPoint -Game $Game) {
+        Focus-Game -Game $Game
+        Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+        if ($script:lastClickPerformed) {
+          Start-Sleep -Milliseconds 900
+          $htDiffConfirmed = [bool](Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $htDifficulty)
+        }
+      }
+    }
+    if (-not $htDiffConfirmed) {
+      Write-RunLog "[완료] 난이도 '$htDifficulty' 선택을 확인하지 못했습니다 - 오난이도 판 방지를 위해 정지합니다"
+      exit 4
+    }
   } else {
     Write-RunLog "[경고] 난이도 '$htDifficulty' 글자를 찾지 못했습니다 (이 사냥터에 없는 난이도일 수 있음) - 현재 선택된 난이도로 진행합니다"
   }
@@ -8004,6 +8215,41 @@ function Press-KeyOnce {
   [HoneyNogiInput]::keybd_event($VirtualKey, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 120
   [HoneyNogiInput]::keybd_event($VirtualKey, 0, 2, [UIntPtr]::Zero)
+}
+
+function Press-KeyVerified {
+  # 게임 전면을 **확인한 뒤에만** 키를 정확히 한 번 보냅니다. 성공 $true / 실패 $false.
+  #
+  # keybd_event 는 전역 입력이라 게임이 전면이 아니면 키가 다른 창에 들어갑니다 -
+  # 2026-08-08 hyodong 제보 실측(생활 C 키가 스킬 창에 무시됨)으로 관측된 조건이고,
+  # 생활은 그때 Press-LifeMenuKey 로 고쳤는데 전투 쪽 입력은 그대로였습니다
+  # (2026-08-11 전체 점검 ④). 재시도는 '키'가 아니라 **전면 확인**에만 붙습니다 -
+  # 키를 반복하면 부활 R·음식 B 같은 소모성 입력이 중복될 수 있습니다.
+  # 실패 시 키 전송 0회 - 호출부는 성공일 때만 계상(부활 횟수·입력 카운터)해야 합니다.
+  # 경고는 연속 실패의 첫 1회만 (커서/전면화 경고와 같은 계약).
+  param([System.Diagnostics.Process]$Game, [byte]$VirtualKey, [string]$Label = '')
+  $keySent = $false
+  foreach ($keyFocusTry in 1..3) {
+    if (Test-GameForeground -Game $Game) { $keySent = $true; break }
+    Focus-Game -Game $Game
+    Start-Sleep -Milliseconds 400
+    if (Test-GameForeground -Game $Game) { $keySent = $true; break }
+    Start-Sleep -Milliseconds 500
+  }
+  if ($keySent) {
+    Press-KeyOnce -VirtualKey $VirtualKey
+    if ($script:keyVerifyWarnActive) {
+      Write-RunLog '[안내] 게임 전면 확인이 정상으로 돌아와 키 입력을 재개했습니다'
+      $script:keyVerifyWarnActive = $false
+    }
+    return $true
+  }
+  if (-not $script:keyVerifyWarnActive) {
+    $keyLabelText = $(if ($Label) { " ($Label)" } else { '' })
+    Write-RunLog "[안내] 게임 창을 전면으로 확인하지 못해 키 입력을 건너뛰었습니다$keyLabelText - 다음 감지에서 다시 시도합니다 (연속 실패 중에는 이 안내를 반복하지 않습니다)"
+    $script:keyVerifyWarnActive = $true
+  }
+  return $false
 }
 
 # ============================================================
@@ -9017,19 +9263,10 @@ function Get-LifeQuestCountText {
 
 function Press-LifeMenuKey {
   # C 키 strict 입력 (리뷰 조건 + 사용자 합의): 전면화 → 전면 '확인' 후에만 입력.
-  # 기존 Press-KeyOnce 는 전역 입력이라 게임이 전면이 아니면 엉뚱한 곳에 들어감 - 확인 필수
+  # 2026-08-11 ④에서 같은 계약의 공용 함수(Press-KeyVerified)가 생겨 래퍼로 통일했습니다 -
+  # 검증 계약이 두 벌로 갈라지면 한쪽만 고쳐지는 사고가 납니다 (교차 리뷰 권고).
   param([System.Diagnostics.Process]$Game)
-  foreach ($focusTry in 1..3) {
-    Focus-Game -Game $Game
-    Start-Sleep -Milliseconds 400
-    if (Test-GameForeground -Game $Game) {
-      Press-KeyOnce -VirtualKey ([byte]0x43)   # C
-      return $true
-    }
-    Start-Sleep -Milliseconds 800
-  }
-  Write-RunLog '[경고] 게임 창을 전면으로 만들지 못해 C 키 입력을 건너뜁니다 - 잠시 후 재시도'
-  return $false
+  return (Press-KeyVerified -Game $Game -VirtualKey ([byte]0x43) -Label '내 정보(C)')
 }
 
 function Test-LifeWindowClosePixels {
@@ -10714,15 +10951,27 @@ try {
         $difficultyPoint = Find-GameTextPoint -Game $game -ReferenceX $rgDifficultyTabs[0] -ReferenceY $rgDifficultyTabs[1] `
           -RegionWidth $rgDifficultyTabs[2] -RegionHeight $rgDifficultyTabs[3] -SearchText $difficultySearch -ExactText $difficultyKey
         if ($difficultyPoint) {
-          Focus-Game -Game $game
-          Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+          # 클릭 생략 시 상세 화면이 그대로일 때만 재전송 (2026-08-11 ③ - 사냥터/던전과 같은 계약)
+          $abyssDiffClicked = $false
+          for ($abyssDiffTry = 1; $abyssDiffTry -le 3; $abyssDiffTry++) {
+            Focus-Game -Game $game
+            Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+            if ($script:lastClickPerformed) { $abyssDiffClicked = $true; break }
+            Start-Sleep -Milliseconds 700
+            if (-not (Test-DetailTitleMatches -Game $game)) { break }
+          }
+          if (-not $abyssDiffClicked) {
+            Write-RunLog "[완료] 난이도 '$dungeonDifficulty' 클릭을 전송하지 못했습니다 (커서 확인 실패 지속) - 오난이도 판 방지를 위해 정지합니다"
+            exit 4
+          }
           Write-RunLog "[어비스] 난이도 '$dungeonDifficulty' 클릭"
           Start-Sleep -Milliseconds 800
           # 사후 검증: 클릭이 빗나가 다른 난이도로 바뀌지 않았는지 선택 강조로 확인 (첫 좌표 재사용).
           # 커스텀(항목별 명시 난이도)은 확인 실패 시 정지 - 던전 커스텀의 -Strict 계약과 통일
           # (2026-08-01 전수 점검: 어비스만 경고 진행이라 오난이도 판이 항목 완료로 계상될 수 있었음)
           $abyssDiffConfirmed = [bool](Confirm-DifficultySelected -Game $game -ClickPoint $difficultyPoint -Label $dungeonDifficulty)
-          if ($script:customMode -and -not $abyssDiffConfirmed) {
+          if (-not $abyssDiffConfirmed) {
+            # 비커스텀도 확인 실패면 정지 (2026-08-11 ③ - 사냥터 실측과 같은 결함 사슬 차단)
             Write-RunLog "[완료] 난이도 '$dungeonDifficulty' 선택을 확정하지 못했습니다 - 오난이도 판 방지를 위해 정지합니다"
             exit 4
           }

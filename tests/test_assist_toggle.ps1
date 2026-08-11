@@ -87,8 +87,8 @@ foreach ($offHit in $sweepOffHits) { "FAIL 오탐 캡처: $offHit"; }
 $workerSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Raw -Encoding UTF8
 Assert-Case '배선(워커): 클리어 대기 루프에 ASSIST 감시' `
   ($workerSource -match 'if \(\$assistAutoOn -and -not \$script:screenCaptureFailing\)[\s\S]{0,200}Get-AssistState -Game') $true
-Assert-Case '배선(워커): off 일 때만 키 입력' `
-  ($workerSource -match "assistState -eq 'off'[\s\S]{0,700}Press-KeyOnce -VirtualKey \(\[byte\]\`$assistKey\)") $true
+Assert-Case '배선(워커): off 일 때만 키 입력 (2026-08-11 ④ 검증 입력 격상)' `
+  ($workerSource -match "assistState -eq 'off'[\s\S]{0,700}Press-KeyVerified -Game \`$Game -VirtualKey \(\[byte\]\`$assistKey\)") $true
 Assert-Case '배선(워커): assist 설정 로드(기본 켬/H키)' `
   ($workerSource -match "@\('assist', 'autoEnable'\) \`$true" -and $workerSource -match "@\('assist', 'key'\) 72") $true
 $guiSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_gui.ps1') -Raw -Encoding UTF8
