@@ -8393,8 +8393,11 @@ $lifeTargetVariants = @{
 # ── 상세 팝업 '제목 전용' 이형 (2026-08-08 8종 전 대상 팝업 전수 실측) ──
 # 위 공용 표와 **분리**합니다. 공용 표는 목록 행 선택과 퀘스트 소유 판정에도 쓰이는데,
 # 퀘스트 쪽은 정확 일치가 아니라 Contains 비교라 깨짐 문자열이 섞이면 엉뚱한 행을 클릭하거나
-# 남의 퀘스트를 자기 것으로 볼 수 있습니다 (리뷰 지적). 이 표는 **클릭 직전 제목 재확인**
-# 에서만 쓰이고, 그 판정은 틀려도 '차단하지 않음'으로만 흐르므로 위험이 한 방향입니다.
+# 남의 퀘스트를 자기 것으로 볼 수 있습니다 (리뷰 지적). 이 표는 **제목 판정**
+# (Get-LifeTitleVerdict 계열 - 클릭 직전 재확인과 order 추정 행의 링크 영역 제목 폴백)
+# 에서만 쓰입니다. 정규화 후 **정확 일치**(-contains) 비교이고 이형의 대상 간 유일성은
+# 진리표가 강제합니다. mine 은 진행 근거, other 는 차단 근거로 양방향 소비됩니다
+# (2026-08-12 정정 - 예전 주석의 "틀려도 차단하지 않는 한 방향"은 other 차단이 생기며 부정확해짐).
 # 아래 이름들은 상세·링크 영역, s3·s4 어느 조합으로도 정상 판독이 안 됩니다 (전수 재측정으로
 # 확인 - 배율/영역 문제가 아니라 OCR 이 못 읽는 글자꼴).
 $lifeTitleVariants = @{
@@ -8424,6 +8427,19 @@ function Test-LifeTitleNameMatches {
     if (@($lifeTitleVariants[$targetNorm]) -contains (Get-LifeNormalizedName $Title)) { return $true }
   }
   return $false
+}
+
+function Test-LifeTitleExplicitVariant {
+  # 제목이 대상의 **제목 전용 이형 표에 등록된 문자열과 정확 일치**하는지 (순수 - 진리표 대상).
+  # 약한 order 추정 회전의 진행 근거 전용 (2026-08-12 실사고 - 동 광맥 '도과DH' 3회 관측).
+  # Get-LifeTitleVerdict 의 mine 은 정식 이름·공용 이형까지 넓게 받는데, 그 범위로 진행을
+  # 허용하면 백동 광맥 팝업이 '백' 손실로 '동광맥'으로 읽힐 때 목표 '동 광맥'에 mine 이 되는
+  # **손실 오독 충돌**이 열립니다 (광맥←철광맥, 나무←뾰족나무 등 같은 계열 다수 - 교차 리뷰).
+  # 등록 이형은 대상 간 유일성이 진리표로 강제되고 정확 일치 비교라 이 충돌이 없습니다.
+  param([string]$Title, [string]$TargetName)
+  $targetNorm = Get-LifeNormalizedName $TargetName
+  if (-not $lifeTitleVariants.ContainsKey($targetNorm)) { return $false }
+  return [bool](@($lifeTitleVariants[$targetNorm]) -contains (Get-LifeNormalizedName $Title))
 }
 # 채집 퀘스트 판독용 넓은 영역 (기본 rgQuestTracker 는 첫 줄만 보는 좁은 영역이라, 획득
 # 알림/경험치 배지가 덮거나 퀘스트가 아래로 밀리면 '없음'으로 오판 - 2026-08-07 실사고:
@@ -8869,6 +8885,10 @@ function Get-LifeDetailVerdict {
     }
   }
   # ② 제목이 목표와 일치 (깨진 '채' 잔여 최대 2자만 끝에서 제거)
+  #    (2026-08-12 검토: 여기를 제목 이형 표 매칭으로 넓히는 안은 기각 - 이 함수가 받는
+  #    상세 영역 판독은 관측상 제목을 통째로 놓쳐 '채집물…'로 시작하므로(동 광맥 실사고
+  #    5회 전부) 넓혀도 고쳐지는 관측 사례가 없다. 제목이 실제로 읽히는 곳은 링크 영역
+  #    판독이라 그쪽 폴백으로 해결 - 상세 검증 루프의 order 분기 참고)
   for ($trimCount = 0; $trimCount -le 2; $trimCount++) {
     if (($detailTitle.Length - $trimCount) -lt 1) { break }
     $titleCandidate = $detailTitle.Substring(0, $detailTitle.Length - $trimCount)
@@ -9114,6 +9134,31 @@ function Get-LifeTargetRowByOrder {
   # 진행할 근거가 됩니다 (2026-08-06 라운드 6: 1글자 '물'은 제목·본문 어느 쪽으로도
   # 검증이 불가능해, 격자 신뢰도 외에는 통과시킬 방법이 없음)
   return @{ Y = $estimatedY; AnchorCount = @($sorted).Count }
+}
+
+function Test-LifeListAtTop {
+  # 목록이 최상단인지 판정하는 순수부 (진리표 대상) - 2026-08-12 실사고(타 PC 1908 창):
+  # 첫 항목 '광맥'이 '과D테'로 깨지는 창에서는 이름 근거가 항상 실패해, 이미 최상단인데도
+  # 매 회전 위 드래그 1회(~2초)를 낭비했다 (사용자 관측 "이미 최상단인데 또 위로 올림").
+  # 이름 근거에 **앵커 기하 근거**를 더한다: 격자 추론에 첫 항목(Order[0])을 목표로 넘겨,
+  # 읽힌 앵커들로 역산한 첫 행 Y 가 $lifeListFirstRowY(394)±12 면 첫 행이 안 읽혀도 최상단
+  # (실사고 배치 '과D테@394|철광맥@484|어므@574|석탄광맥@664'에서 철·석탄 앵커로 394 산출).
+  # ★ 고정 헤더(스킬명/설명/Lv - 항목 첫 행보다 위)는 반드시 걸러야 한다: 설명 행
+  #   '곡괭이로광맥을…'이 포함 매칭으로 idx0 앵커(Y≈212)가 되면 간격 사슬이 깨져 최상단에서도
+  #   추론이 통째로 null 이 된다 (실측 rowsKey 에 헤더 3행이 실제로 포함됨). 항목 행은
+  #   최상단에서 394+90k 이고 첫 행보다 위로는 못 가므로 Y ≥ 394-12 필터는 최상단 판정을
+  #   해치지 않고, 스크롤된 화면에서는 역산 Y 가 394 에서 밀려나 자연히 false(안전 방향).
+  param($Rows, [string[]]$Order)
+  if (-not $Order -or @($Order).Count -eq 0) { return $false }
+  $firstItemName = [string]$Order[0]
+  foreach ($row in @($Rows)) {
+    if (Test-LifeNameMatches -RowText ([string]$row.Text) -TargetName $firstItemName) { return $true }
+  }
+  $itemRows = @(@($Rows) | Where-Object { [int]$_.Y -ge ($lifeListFirstRowY - 12) })
+  if (@($itemRows).Count -lt 2) { return $false }
+  $firstRowGuess = Get-LifeTargetRowByOrder -Rows $itemRows -Order $Order -TargetName $firstItemName
+  if ($firstRowGuess -and ([Math]::Abs([int]$firstRowGuess.Y - $lifeListFirstRowY) -le 12)) { return $true }
+  return $false
 }
 
 function Find-LifeTargetScan {
@@ -9824,15 +9869,11 @@ function Invoke-LifeMenuSequence {
     # 정렬 전에 '이미 최상단인지' 먼저 판단합니다 - 목록 첫 항목(Order[0])이 보이면 위로
     # 갈 곳이 없으므로 드래그 0회 (2026-08-06 사용자 지적: 최상단에서도 확인 목적으로
     # 2번씩 끌던 낭비. 판독은 위 quickScan 결과를 재사용해 추가 OCR 도 없음)
+    # 2026-08-12: 이름 근거 단독 → Test-LifeListAtTop(이름 + 앵커 기하)으로 교체 - 첫 항목이
+    # '과D테'로 깨지는 창에서 매 회전 헛드래그 1회(~2초)가 나던 실사고 대응.
     $topRows = @($quickScan.Rows)
     $topRowsKey = (($topRows | ForEach-Object { [string]$_.Text }) -join '|')
-    $firstItemName = $(if (@($SkillEntry.Order).Count -gt 0) { [string]$SkillEntry.Order[0] } else { '' })
-    $alreadyAtTop = $false
-    if ($firstItemName) {
-      foreach ($topRow in $topRows) {
-        if (Test-LifeNameMatches -RowText ([string]$topRow.Text) -TargetName $firstItemName) { $alreadyAtTop = $true; break }
-      }
-    }
+    $alreadyAtTop = Test-LifeListAtTop -Rows $topRows -Order @($SkillEntry.Order)
     if ($alreadyAtTop) {
       Write-RunLog "[생활] 목록이 이미 최상단입니다 - 정렬 생략 (판독: $topRowsKey)"
     } else {
@@ -9872,14 +9913,8 @@ function Invoke-LifeMenuSequence {
         $topTries++
         if ($topRows.Count -eq 0) { break }
         $currentTopKey = (($topRows | ForEach-Object { [string]$_.Text }) -join '|')
-        # 첫 항목이 보이면 그 자리가 최상단 - 더 끌지 않습니다
-        if ($firstItemName) {
-          $reachedTop = $false
-          foreach ($topRow in $topRows) {
-            if (Test-LifeNameMatches -RowText ([string]$topRow.Text) -TargetName $firstItemName) { $reachedTop = $true; break }
-          }
-          if ($reachedTop) { $topRowsKey = $currentTopKey; break }
-        }
+        # 첫 항목이 보이거나 앵커 기하로 최상단이 증명되면 - 더 끌지 않습니다 (2026-08-12)
+        if (Test-LifeListAtTop -Rows $topRows -Order @($SkillEntry.Order)) { $topRowsKey = $currentTopKey; break }
         if ($currentTopKey -eq $topRowsKey) { break }
         $topRowsKey = $currentTopKey
       }
@@ -9961,6 +9996,7 @@ function Invoke-LifeMenuSequence {
   #    ('채집물'은 모든 대상 공통 문구라 단독으로는 오클릭을 못 잡음 - 리뷰 지적.
   #    판정식은 Get-LifeDetailVerdict 순수 함수 - 실측 깨짐 '자|집물' 진리표 포함)
   $detailOk = $false
+  $requireLinkTitleMine = $false   # 약한 order 추정 회전의 잠정 통과 표시 (링크 단계 게이트가 최종 판정)
   foreach ($detailTry in 1..2) {
     # 판독은 s3 → s4 사다리: 같은 팝업이라도 스케일에 따라 깨짐이 달라(23:51 실기 - s3
     # '흰'→'혼!') 한 스케일의 깨짐으로 자기 팝업을 다른 대상으로 확정하지 않기 위함.
@@ -9991,9 +10027,23 @@ function Invoke-LifeMenuSequence {
       # 격자 추론(order)으로 찍은 행은 이름 근거가 없어 여기서 통과시키면 안 됩니다 -
       # 추론이 빗나갔을 때 다른 대상을 채집하게 됨 (리뷰 블로커)
       if ($targetRowSource -eq 'order') {
-        # 앵커 2개짜리 약한 추론은 이름 근거가 없어 통과시키지 않습니다 (다른 대상 채집 방지)
-        Write-RunLog "[생활] 추정 행의 상세 제목을 확인하지 못했습니다 (판독 '$detailText') - 이번 회전 중단(남은 회전이 있으면 재시도)"
-        return $false
+        # 앵커 2개짜리 약한 추론은 이름 근거가 없어 그냥은 통과시키지 않습니다 (다른 대상
+        # 채집 방지). 예전에는 여기서 즉시 거부했는데, 2026-08-12 실사고(타 PC 1908 창,
+        # 동 광맥)에서 그 창은 상세 영역(rgLifeDetail) 판독이 제목을 통째로 놓쳐
+        # '채집물…'로 시작하는 것이 상수였고(관측 5회 전부) order 회전이 전부 거부 →
+        # 3회전 소진 → 조건부 정지가 됐습니다. 반면 **링크 단계의 링크 영역 s3 판독**에는
+        # 같은 팝업 제목이 '도과DH'(제목 전용 등록 이형)로 잡혀 클릭 직전 재확인이 매번
+        # 통과했습니다(성공 회전 3회 전부 관측). 그래서 여기서는 거부를 확정하지 않고
+        # **클릭 직전 링크 판독의 제목이 목표의 제목 전용 이형과 정확 일치할 때만 클릭**
+        # 하도록 미룹니다 ($requireLinkTitleMine - 링크 단계 게이트가 판정. 제목·링크
+        # 좌표·클릭이 같은 프레임에 묶이고 추가 OCR 0회 - 교차 리뷰 설계).
+        # 넓은 mine(정식 이름·공용 이형 포함)으로 받지 않는 이유: 백동 광맥 팝업이 '백'
+        # 손실로 '동광맥'으로 읽히면 목표 '동 광맥'에 mine 이 되는 손실 오독 충돌이
+        # 열립니다 - 관측 근거는 제목 전용 이형('도과DH')뿐이라 그 범위만 허용.
+        Write-RunLog "[생활] 추정 행의 상세 제목을 확인하지 못했습니다 (판독 '$detailText') - 클릭 직전 링크 제목이 등록 이형과 일치할 때만 진행합니다"
+        $requireLinkTitleMine = $true
+        $detailOk = $true
+        break
       }
       if ($targetRowSource -eq 'order-strong') {
         # 앵커 3개+ 격자 추론은 위치 신뢰도가 높아 진행합니다 - 1글자 대상('물')은 제목도
@@ -10058,6 +10108,17 @@ function Invoke-LifeMenuSequence {
   $linkTitle = Get-LifeDetailTitleFromWords -Words $linkWords
   $firstFrameTitle = $linkTitle
   $firstFrameLinkY = [int]$linkWord.Y
+  # 약한 order 추정 회전의 최종 게이트 (2026-08-12 실사고 - 상세 검증 order 분기 주석 참고):
+  # **이 판독(링크·제목·클릭 좌표가 같은 프레임)의 제목이 목표의 제목 전용 이형과 정확히
+  # 일치할 때만** 진행합니다. 아니면 여기서 회전을 접습니다 - 깊은 재확인의 넓은 mine 으로
+  # 대체하지 않는 이유는 손실 오독 충돌 배제 (Test-LifeTitleExplicitVariant 주석).
+  if ($requireLinkTitleMine) {
+    if (-not (Test-LifeTitleExplicitVariant -Title $linkTitle -TargetName $TargetName)) {
+      Write-RunLog "[생활] 추정 행의 링크 제목이 목표의 등록 이형과 일치하지 않습니다 (제목 '$linkTitle', 목표 '$TargetName') - 이번 회전 중단(남은 회전이 있으면 재시도)"
+      return $false
+    }
+    Write-RunLog "[생활] 추정 행이지만 링크 제목이 목표의 등록 이형과 일치합니다 (제목 '$linkTitle') - 진행"
+  }
   $deepRecheckDone = $false
   $linkVerdict = Get-LifeTitleVerdict -Title $linkTitle -TargetName $TargetName -Order @($SkillEntry.Order)
   # 링크 판독만으로는 제목 인식률이 낮습니다 (2026-08-07 전수 실측 47/65 = 72%).
@@ -10133,7 +10194,9 @@ function Invoke-LifeMenuSequence {
   if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
   Write-RunLog "[생활] 대상 '$TargetName' 상세 확인 (제목 '$linkTitle') - '가까운 위치 찾기' 클릭 (링크 탐색 $([int]$linkWord.X),$([int]$linkWord.Y))"
   Click-GamePoint -Game $Game -ReferenceX ([int]$linkWord.X) -ReferenceY ([int]$linkWord.Y)
-  Start-Sleep -Milliseconds 1500
+  # 클릭 후 고정 1500ms 는 제거했습니다 (2026-08-12): 유일한 소비자인 생성 확인 루프가
+  # 첫 판독 **전에** 또 1500ms 를 자므로 이중 대기였음 (합계 3초 → 1.5초. present 2회
+  # 계약과 판독 간격은 그대로 - 이른 첫 판독이 absent 여도 카운트만 안 오를 뿐 무해).
   return $true
 }
 

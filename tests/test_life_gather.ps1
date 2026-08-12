@@ -15,7 +15,7 @@ function Assert-Case {
 
 # ── 본체에서 순수 판정 함수/데이터 추출 ──
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
-    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeWindowClosePixels')) {
+    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeListAtTop', 'Test-LifeTitleExplicitVariant', 'Test-LifeWindowClosePixels')) {
   Invoke-Expression $definition
 }
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
@@ -551,6 +551,21 @@ Assert-Case "상세: 깨진 제목 + 본문 '백동' 수식어 → match" `
   (Get-LifeDetailVerdict -DetailText 'BHE고十臼H자|집물광석개기레벨20이상백동이섞인단단한돌무더기.곡괭이로백동광석을갤수있다.' -TargetName '백동 광맥' -Order $miningOrder) 'match'
 Assert-Case "상세: 수식어가 다른 대상에도 들어가면 인정 안 함 ('동' → 백동/동 모호)" `
   (Get-LifeDetailVerdict -DetailText 'X자|집물광석개기레벨1이상동이섞인돌무더기.' -TargetName '동 광맥' -Order $miningOrder) 'unreadable'
+# ── 2026-08-12 실사고 (타 PC 1908 창, 동 광맥) 진리표 ──
+# 그 창의 상세 판독은 제목을 통째로 놓쳐 '채집물…'로 시작 (관측 5회 전부) → 상세 단독으로는
+# 구조적으로 unreadable 이 정답 (아래 고정 - 본문 '동이섞인/동광석'은 백동 본문에도 부분
+# 문자열로 들어가 판별력 없음). 구제는 클릭 프레임 링크 제목의 명시 이형 게이트가 담당.
+Assert-Case '상세: 실사고 전문(제목 소실) → unreadable (상세 단독 판단 불가 고정)' `
+  (Get-LifeDetailVerdict -DetailText '채집물광석개기레벨10이상동이섞인단단한돌무더기.곡괭이로동광석을갤수있다.[사냥터]여신의뜰,구름황야가까운위치찾기0' -TargetName '동 광맥' -Order $miningOrder) 'unreadable'
+# 명시 이형 게이트 (약한 order 회전 전용): 제목 전용 이형 표와 정확 일치할 때만 진행 허용.
+# 넓은 mine(정식 이름 포함)을 금지하는 이유 - 백동 광맥 팝업이 '백' 손실로 '동광맥'으로
+# 읽히면 목표 '동 광맥'에 mine 이 되는 손실 오독 충돌 (교차 리뷰 반례).
+Assert-Case "명시 이형: 실측 '도과DH' → 동 광맥 진행 허용" (Test-LifeTitleExplicitVariant -Title '도과DH' -TargetName '동 광맥') 'True'
+Assert-Case "명시 이형: 정식 이름 '동광맥'은 불허 (손실 오독 충돌 배제)" `
+  (Test-LifeTitleExplicitVariant -Title '동광맥' -TargetName '동 광맥') 'False'
+Assert-Case "명시 이형: 타 대상 이형 'BHE고十DH'(백동)는 불허" (Test-LifeTitleExplicitVariant -Title 'BHE고十DH' -TargetName '동 광맥') 'False'
+Assert-Case "명시 이형: '도과DH'를 은 광맥 목표로는 불허" (Test-LifeTitleExplicitVariant -Title '도과DH' -TargetName '은 광맥') 'False'
+Assert-Case '명시 이형: 이형 미등록 대상은 항상 불허' (Test-LifeTitleExplicitVariant -Title '둥지' -TargetName '둥지') 'False'
 Assert-Case '링크: 후보 없음 → null' ($null -eq (Select-LifeFindNearestWord -Words @(@{ Text = '설명'; X = 500; Y = 300 }))) 'True'
 # 링크처럼 보이는 행이 2개면 판단 보류 (오클릭 방지 - 재시도)
 $linkTwice = @(
@@ -772,6 +787,27 @@ Assert-Case '격자: 앵커 2개 → 약한 추론 표시' ((Get-LifeTargetRowBy
 $noisyRows = @(@{ Text = '등지'; Y = 394 }, @{ Text = '4거미줄'; Y = 484 }, @{ Text = '우물'; Y = 665 })
 $noisyEstimate = Get-LifeTargetRowByOrder -Rows $noisyRows -Order $daily -TargetName '물'
 Assert-Case '격자: 잡음 섞인 행도 앵커 인정 → 앵커 3개' ('{0}/a{1}' -f $noisyEstimate.Y, $noisyEstimate.AnchorCount) '574/a3'
+# ── 최상단 판정 (Test-LifeListAtTop - 2026-08-12 실사고: 첫 항목 '광맥'이 '과D테'로
+#    깨지는 창에서 이름 근거가 죽어 매 회전 헛드래그 → 앵커 기하 근거 추가) ──
+$miningOrderFull = @('광맥', '철 광맥', '얼음', '석탄 광맥', '동 광맥', '백동 광맥', '은 광맥', '운철 광맥', '백금 광맥')
+$topSceneRows = @(
+  @{ Text = '광석캐기'; Y = 178 }, @{ Text = '곡괭이로광맥을개서쓸만한광석을찾습니다.'; Y = 212 },
+  @{ Text = 'Lv.3730,342'; Y = 316 },
+  @{ Text = '과D테'; Y = 394 }, @{ Text = '철광맥'; Y = 484 }, @{ Text = '어므'; Y = 574 }, @{ Text = '석탄광맥'; Y = 664 })
+Assert-Case '최상단: 실사고 배치(헤더 3행 포함, 첫 항목 오독) → 앵커 기하로 인정' `
+  (Test-LifeListAtTop -Rows $topSceneRows -Order $miningOrderFull) 'True'
+# ↑ 이 케이스가 헤더 필터 회귀를 잡는다: 설명 행 '…광맥을…'(Y212)을 안 거르면 포함 매칭
+#   앵커(idx0@212)가 간격 사슬을 깨 추론 전체가 null → false 가 된다 (교차 리뷰 반례).
+Assert-Case '최상단: 한 행 스크롤 화면 → 거짓 (역산 원점 304)' `
+  (Test-LifeListAtTop -Rows @(@{ Text = '철광맥'; Y = 394 }, @{ Text = '석탄광맥'; Y = 574 }) -Order $miningOrderFull) 'False'
+Assert-Case '최상단: 첫 항목이 정상 판독되면 이름 근거로 참' `
+  (Test-LifeListAtTop -Rows @(@{ Text = '광맥'; Y = 394 }) -Order $miningOrderFull) 'True'
+Assert-Case '최상단: 경계 - 역산 원점 382(-12)는 참' `
+  (Test-LifeListAtTop -Rows @(@{ Text = '철광맥'; Y = 472 }, @{ Text = '석탄광맥'; Y = 652 }) -Order $miningOrderFull) 'True'
+Assert-Case '최상단: 경계 - 역산 원점 381(-13)은 거짓' `
+  (Test-LifeListAtTop -Rows @(@{ Text = '철광맥'; Y = 471 }, @{ Text = '석탄광맥'; Y = 651 }) -Order $miningOrderFull) 'False'
+Assert-Case '최상단: Order 없음 → 거짓' (Test-LifeListAtTop -Rows $topSceneRows -Order @()) 'False'
+
 # 포함 매칭이 긴 이름 우선이어야 '거미줄 뭉치'가 '거미줄'로 잡히지 않음
 $bundleRows = @(@{ Text = '거미줄뭉치'; Y = 461 }, @{ Text = '헤이즐넛'; Y = 551 })
 Assert-Case '격자: 거미줄 뭉치 행은 뭉치로 인식 (앞 항목 추론 정확)' `
@@ -1179,11 +1215,13 @@ Assert-Case '배선: 현재 화면 우선 탐색 → 못 찾을 때만 최상단
   (($workerText -match '\$quickScan = Find-LifeTargetScan -Game \$Game -TargetName \$TargetName -Order @\(\$SkillEntry\.Order\)') -and
    ($workerText -match '스크롤 없이 선택합니다') -and
    ($workerText -match 'if \(\$null -eq \$targetRowY\) \{[\s\S]{0,400}\$topRows = @\(\$quickScan\.Rows\)')) 'True'
-# 이미 최상단이면 정렬 드래그 0회 (사용자 지적: 최상단에서도 확인 목적으로 2번씩 끌던 낭비)
-Assert-Case '배선: 첫 항목이 보이면 정렬 생략 + 도달 시 조기 종료' `
-  (($workerText -match '\$alreadyAtTop = \$false') -and
+# 이미 최상단이면 정렬 드래그 0회 (사용자 지적: 최상단에서도 확인 목적으로 2번씩 끌던 낭비.
+# 2026-08-12: 이름 단독 근거 → Test-LifeListAtTop(이름+앵커 기하)으로 교체 - 첫 항목이
+# '과D테'로 깨지는 창에서 매 회전 헛드래그 1회(~2초)가 나던 실사고 대응)
+Assert-Case '배선: 최상단 판정(이름+기하)이 정렬 생략과 도달 조기 종료 양쪽에 배선' `
+  (($workerText -match '\$alreadyAtTop = Test-LifeListAtTop -Rows \$topRows -Order @\(\$SkillEntry\.Order\)') -and
    ($workerText -match '목록이 이미 최상단입니다 - 정렬 생략') -and
-   ($workerText -match 'if \(\$reachedTop\) \{ \$topRowsKey = \$currentTopKey; break \}')) 'True'
+   ($workerText -match 'if \(Test-LifeListAtTop -Rows \$topRows -Order @\(\$SkillEntry\.Order\)\) \{ \$topRowsKey = \$currentTopKey; break \}')) 'True'
 Assert-Case '배선: 탐색은 목록 끝 도달 판정 + 안전 상한 12회 (고정 회수 아님)' `
   (($workerText -match 'while \(\$scrollStep -lt 11\)') -and
    ($workerText -match 'if \(\$lastScrollSent -and \(\$rowsKey -eq \$previousRowsKey\)\)')) 'True'
@@ -1203,12 +1241,24 @@ Assert-Case "배선: '가까운 위치 찾기' 링크는 글자 탐색으로만 
    (-not $workerText.Contains('ptLifeFindNearest'))) 'True'
 Assert-Case '배선: 링크 클릭 직전 deadline 재검사 (OCR/전면화 시간 반영)' `
   ($workerText -match 'Select-LifeFindNearestWord[\s\S]{0,6000}\(Get-Date\) -gt \$Deadline[\s\S]{0,300}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') 'True'
+# 링크 클릭 후 고정 1500ms 는 제거 (2026-08-12): 생성 확인 루프가 첫 판독 전에 또 1500ms 를
+# 자는 이중 대기였음 - present 2회 계약과 판독 간격은 루프 쪽이 그대로 담당
+Assert-Case '배선: 링크 클릭 후 고정 대기 없음 (생성 확인 루프 선행 대기가 담당)' `
+  ($workerText -match 'Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\) -ReferenceY \(\[int\]\$linkWord\.Y\)\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*return \$true') 'True'
 Assert-Case '배선: 상세 unreadable 2회는 행 매칭 근거로 진행 (오클릭 확정 아님)' `
   ($workerText -match 'if \(\$detailUnreadableCount -ge 2\)') 'True'
-# 격자 신뢰도 계약 (라운드 6: 1글자 '물'은 제목/본문 검증 불가 - 앵커 3개+ 만 통과)
-Assert-Case '배선: 약한 추론(order)은 거부 / 강한 추론(order-strong)만 통과' `
-  (($workerText -match "if \(\`$targetRowSource -eq 'order'\) \{[\s\S]{0,300}return \`$false") -and
+# 격자 신뢰도 계약 (라운드 6 + 2026-08-12 개정): order-strong 만 즉시 통과. 약한 order 는
+# 즉시 거부 대신 '클릭 프레임의 링크 제목 = 목표의 제목 전용 이형 정확 일치' 게이트로 이관
+# (동 광맥 실사고: 상세 판독이 제목을 통째로 놓치는 창에서 order 회전 전패 → 조건부 정지.
+# 링크 판독의 '도과DH'는 성공 회전 3회 전부 관측된 작동 증거)
+Assert-Case '배선: 약한 추론(order)은 링크 제목 게이트로 이관 (즉시 수용 금지)' `
+  (($workerText -match "if \(\`$targetRowSource -eq 'order'\) \{[\s\S]{0,1800}\`$requireLinkTitleMine = \`$true") -and
    ($workerText -match "if \(\`$targetRowSource -eq 'order-strong'\)[\s\S]{0,400}\`$detailOk = \`$true")) 'True'
+Assert-Case '배선: 링크 제목 게이트 - 명시 이형 판정으로만, 불일치 시 회전 중단' `
+  (($workerText -match 'if \(\$requireLinkTitleMine\) \{\s*\r?\n\s*if \(-not \(Test-LifeTitleExplicitVariant -Title \$linkTitle -TargetName \$TargetName\)\)[\s\S]{0,400}return \$false') -and
+   ($workerText -match '등록 이형과 일치하지 않습니다')) 'True'
+Assert-Case '배선: 게이트 플래그는 상세 검증 시작 시 항상 초기화' `
+  ($workerText -match '\$requireLinkTitleMine = \$false') 'True'
 Assert-Case '배선: 모달 닫기 실패 시 예비 좌표 2곳 시도 + 닫힘 재확인' `
   (($workerText -match '닫기 버튼 글자를 못 읽어 실측 좌표로') -and
    ($workerText -match 'Click-GamePoint -Game \$Game -ReferenceX 636 -ReferenceY 453')) 'True'
