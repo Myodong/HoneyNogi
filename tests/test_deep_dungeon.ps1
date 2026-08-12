@@ -299,10 +299,17 @@ Assert-Case '배선(워커): 확장이 심층 전용 게이트 없이 전 모드
   ($titleCode -notmatch 'if \(-not \$deepMode\) \{ return \$narrowText \}') $true
 Assert-Case '배선(워커): 넓은 판독은 배율 3→4→5 사다리 (2026-08-11/12 실사고 2건)' `
   ($titleCode -match 'foreach \(\$wideScale in 3, 4, 5\)') $true
+# 2026-08-13 02시: 일반 판독 전 배율 사망 캡처가 관측돼(게임 재시작 후에도 재발 제보)
+# 이진화(임계 175) 최종 단 추가 - 사고 캡처 2장에서 유일한 생환 경로, 93장 스윕 오탐 0.
+# 게이트 필수 (교차 리뷰): '구역'이 원래 없는 화면(선택/로딩/입장 확인 폴링)도 사다리가
+# 전멸하므로, 진입 버튼 '입장하기'(옵션 화면 전용)일 때만 이진화 비용을 낸다. 배율 5 먼저.
+Assert-Case '배선(워커): 이진화 최종 단 - 입장하기 게이트 + 배율 5→4 + 변수 배율 배선' `
+  (($titleCode -match "(?s)\`$binGateProbe\.Contains\('입장하기'\)[\s\S]{0,160}foreach \(\`$binScale in 5, 4\)") -and
+   ($titleCode -match '-Scale \$binScale -BinaryWhiteText')) $true
 Assert-Case '배선(워커): 넓은 판독이 사다리 변수 배율을 실제로 사용 (-Scale 고정값 퇴행 방지)' `
   ($titleCode -match '-Scale \$wideScale') $true
-Assert-Case '배선(워커): 확장 채택은 구역이 보일 때만 + 전부 실패 시 좁은 결과 유지 (전멸 반례 안전 계약)' `
-  ($titleCode -match "(?s)\`$wideText\.Contains\('구역'\)\) \{ return \`$wideText \}\s*\r?\n\s*\}\s*\r?\n\s*return \`$narrowText") $true
+Assert-Case '배선(워커): 확장 채택은 구역이 보일 때만 + 이진화 단 뒤 전부 실패 시 좁은 결과 유지 (전멸 반례 안전 계약)' `
+  ($titleCode -match "(?s)\`$wideText\.Contains\('구역'\)\) \{ return \`$wideText \}[\s\S]{0,600}\`$binText\.Contains\('구역'\)\) \{ return \`$binText \}\s*\r?\n\s*\}\s*\r?\n\s*\}\s*\r?\n\s*return \`$narrowText") $true
 Assert-Case '배선(워커): 폭 420 전역 오버라이드 철회됨' `
   ($workerSource -notmatch '\$rgDgTitle = @\(\$rgDgTitle\[0\], \$rgDgTitle\[1\], 420') $true
 # 2026-07-28 실기 2차: 주간 구역 채택이 '매우 어려움' 클릭 전 버튼을 읽어 어려움 상태 구역을

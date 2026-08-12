@@ -4431,6 +4431,27 @@ function Read-DgTitleText {
       -RegionWidth 420 -RegionHeight $rgDgTitle[3] -Scale $wideScale -Engine $ocrKoreanEngine) -replace '\s', ''
     if ($wideText.Contains('구역')) { return $wideText }
   }
+  # ★ 이진화 최종 단 (2026-08-13 02시 실사고 실측): 제목이 일반 판독 **전 배율**에서 죽는
+  #   화면 상태가 관측됨 (같은 타 PC 1908 창, 다시하기 복귀 심층 옵션 화면에서 반복 -
+  #   게임 재시작 후에도 재발했다는 제보). 흰 글자 이진화(임계 175 - 워커 공용
+  #   -BinaryWhiteText)가 그 캡처들을 살림: 00:51 캡처 bin s5 '페,江분심증2증2구역' /
+  #   01:25 캡처 bin s5 '페카고분심증2증1구역' (둘 다 스테이지 매칭·심층 표식 통과).
+  #   보관 캡처 93장 전수 스윕: 이진화 단이 채택되는 캡처는 그 사고 캡처 2장뿐 - 오탐 0.
+  #   이진화는 픽셀 루프라 느려서(1908 창 기준 판독당 ~1초대) 반드시 마지막 단.
+  #   ★ 도달 게이트 (교차 리뷰): '구역'이 원래 없는 화면(선택 화면/로딩/던전 안 - 특히
+  #     입장 확인은 '구역' **소실**을 매 폴링 확인)도 일반 사다리가 전멸하므로, 게이트 없이는
+  #     그 모든 폴링이 이진화 비용을 낸다. **진입 버튼이 '입장하기'(옵션 화면 전용 - 두
+  #     실사고 모두 정확 판독)일 때만** 이진화를 시도한다. probe 까지 실패한 프레임은 기존
+  #     probe/B-lite 백스톱이 담당. 배율은 5 먼저 - 두 사고 캡처 모두 s5 성공(s4 는 실함수
+  #     재생에서 실패 - 교차 재현), s4 는 예비로만 유지.
+  $binGateProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
+  if ($binGateProbe.Contains('입장하기')) {
+    foreach ($binScale in 5, 4) {
+      $binText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
+        -RegionWidth 420 -RegionHeight $rgDgTitle[3] -Scale $binScale -BinaryWhiteText -Engine $ocrKoreanEngine) -replace '\s', ''
+      if ($binText.Contains('구역')) { return $binText }
+    }
+  }
   return $narrowText
 }
 

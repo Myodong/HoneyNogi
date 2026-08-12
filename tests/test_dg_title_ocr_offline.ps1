@@ -34,20 +34,22 @@ if (-not $ocrKoreanEngine) {
 
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
-    -Names @('Invoke-OcrOnBitmap', 'Await-WinRt', 'Test-CustomTitleStageMatch', 'Read-DgTitleText')) {
+    -Names @('Invoke-OcrOnBitmap', 'Await-WinRt', 'Test-CustomTitleStageMatch', 'Read-DgTitleText', 'Get-DgStageEnterButtonText')) {
   Invoke-Expression $definition
 }
-# $rgDgTitle 은 사본을 박지 않고 소스 대입식을 그대로 실행해 캡처합니다 (배선 원칙)
+# 영역 변수는 사본을 박지 않고 소스 대입식을 그대로 실행해 캡처합니다 (배선 원칙)
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-$titleRegionAssign = $sourceAst.Find({
-    param($node)
-    ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
-    ($node.Left.Extent.Text -eq '$rgDgTitle')
-  }, $true)
-if (-not $titleRegionAssign) { 'FAIL 본체에서 $rgDgTitle 정의를 찾지 못했습니다'; exit 1 }
-Invoke-Expression $titleRegionAssign.Extent.Text
+foreach ($regionName in @('rgDgTitle', 'rgDgEnterBtn')) {
+  $regionAssign = $sourceAst.Find({
+      param($node)
+      ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+      ($node.Left.Extent.Text -eq ('$' + $regionName))
+    }, $true)
+  if (-not $regionAssign) { "FAIL 본체에서 `$$regionName 정의를 찾지 못했습니다"; exit 1 }
+  Invoke-Expression $regionAssign.Extent.Text
+}
 
 function Assert-Case {
   param([string]$Name, $Actual, $Expect)
@@ -60,7 +62,7 @@ function Assert-Case {
 $referenceWidth = 1272; $referenceHeight = 717
 $sourceBitmap = [System.Drawing.Bitmap]::FromFile($capturePath)
 function Get-CaptureRegionText {
-  param([int]$RefX, [int]$RefY, [int]$RefW, [int]$RefH, [int]$Scale)
+  param([int]$RefX, [int]$RefY, [int]$RefW, [int]$RefH, [int]$Scale, [bool]$Binary = $false)
   $imageW = $script:sourceBitmap.Width; $imageH = $script:sourceBitmap.Height
   $cropLeft = [int][Math]::Round($RefX * $imageW / $script:referenceWidth)
   $cropTop = [int][Math]::Round($RefY * $imageH / $script:referenceHeight)
@@ -74,9 +76,23 @@ function Get-CaptureRegionText {
       $cropGraphics.DrawImage($script:sourceBitmap, (New-Object System.Drawing.Rectangle(0, 0, $cropW, $cropH)),
         (New-Object System.Drawing.Rectangle($cropLeft, $cropTop, $cropW, $cropH)), [System.Drawing.GraphicsUnit]::Pixel)
     } finally { $cropGraphics.Dispose() }
+    if ($Binary) {
+      # 워커 Get-GameRegionCapture 의 -BinaryWhiteText 등가 (임계 175 + NearestNeighbor)
+      for ($binY = 0; $binY -lt $cropH; $binY++) {
+        for ($binX = 0; $binX -lt $cropW; $binX++) {
+          $binColor = $crop.GetPixel($binX, $binY)
+          if ($binColor.R -gt 175 -and $binColor.G -gt 175 -and $binColor.B -gt 175) {
+            $crop.SetPixel($binX, $binY, [System.Drawing.Color]::Black)
+          } else {
+            $crop.SetPixel($binX, $binY, [System.Drawing.Color]::White)
+          }
+        }
+      }
+    }
     $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaled)
     try {
-      $scaledGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $scaledGraphics.InterpolationMode = $(if ($Binary) { [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor }
+        else { [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic })
       $scaledGraphics.DrawImage($crop, (New-Object System.Drawing.Rectangle(0, 0, ($RefW * $Scale), ($RefH * $Scale))),
         (New-Object System.Drawing.Rectangle(0, 0, $cropW, $cropH)), [System.Drawing.GraphicsUnit]::Pixel)
     } finally { $scaledGraphics.Dispose() }
@@ -89,9 +105,11 @@ function Get-CaptureRegionText {
 # 워커 Get-GameRegionOcrText 를 캡처 판독으로 대체 - **실제 Read-DgTitleText 를 그대로 실행**해
 # 사다리 재구현 사본이 아니라 배포될 함수의 영역/배율/채택 순서를 검증합니다 (교차 리뷰 반영:
 # 사본 사다리는 워커의 -Scale 배선이 고정값으로 퇴행해도 통과해 버림)
+$script:binReadCount = 0   # 이진화 판독 호출 계수 (게이트 계약 검증용)
 function Get-GameRegionOcrText {
-  param($Game, [int]$ReferenceX, [int]$ReferenceY, [int]$RegionWidth, [int]$RegionHeight, [int]$Scale, $Engine)
-  return (Get-CaptureRegionText -RefX $ReferenceX -RefY $ReferenceY -RefW $RegionWidth -RefH $RegionHeight -Scale $Scale)
+  param($Game, [int]$ReferenceX, [int]$ReferenceY, [int]$RegionWidth, [int]$RegionHeight, [int]$Scale, $Engine, [switch]$BinaryWhiteText)
+  if ($BinaryWhiteText) { $script:binReadCount++ }
+  return (Get-CaptureRegionText -RefX $ReferenceX -RefY $ReferenceY -RefW $RegionWidth -RefH $RegionHeight -Scale $Scale -Binary ([bool]$BinaryWhiteText))
 }
 
 try {
@@ -128,10 +146,34 @@ if (-not (Test-Path -LiteralPath $deepCapturePath)) {
     $deepWide4 = Get-CaptureRegionText -RefX $rgDgTitle[0] -RefY $rgDgTitle[1] -RefW 420 -RefH $rgDgTitle[3] -Scale 4
     $deepWide5 = Get-CaptureRegionText -RefX $rgDgTitle[0] -RefY $rgDgTitle[1] -RefW 420 -RefH $rgDgTitle[3] -Scale 5
     "정보(심층): 좁 s3='$deepNarrow3' / 넓 s4='$deepWide4' / 넓 s5='$deepWide5' (실측 당시 '패가고분=石'/'패가고분=石石丁曰'/'제고분심증2증1구역')"
+    $script:binReadCount = 0
     $deepLadderText = Read-DgTitleText -Game $null
     Assert-Case '심층 캡처: 사다리 결과에 구역 생존(수정 전에는 40초 전멸)' ($deepLadderText.Contains('구역')) $true
     Assert-Case '심층 캡처: 목표 2-1 과 매치(복귀 확인 통과)' `
       (Test-CustomTitleStageMatch -TitleText $deepLadderText -Stage '2-1') 'match'
+    Assert-Case '심층 캡처: 일반 사다리가 채택하면 이진화 비용 0회 (게이트/순서 계약)' $script:binReadCount 0
+  } finally {
+    $sourceBitmap.Dispose()
+  }
+}
+
+# ── 2026-08-13 02시 실사고 캡처 (제목이 일반 판독 **전 배율(s2~s6)** 사망 - 사다리 한계):
+#    이진화 최종 단(임계 175)이 유일한 생환 경로. binS5 = '페,江분심증2증2구역' (2-2 매치 +
+#    심층 표식 통과). 이 캡처가 이진화 단의 존재 이유다 (단을 빼면 아래 단언이 실패).
+$binCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_제목전배율사망_1908창_심층옵션.png'
+if (-not (Test-Path -LiteralPath $binCapturePath)) {
+  "SKIP 전배율 사망 캡처가 없어 이진화 단 재현을 건너뜁니다: $binCapturePath"
+} else {
+  $sourceBitmap = [System.Drawing.Bitmap]::FromFile($binCapturePath)
+  try {
+    $script:binReadCount = 0
+    $binLadderText = Read-DgTitleText -Game $null
+    "정보(이진화): 사다리 결과='$binLadderText' (실측 당시 binS5 '페,江분심증2증2구역')"
+    Assert-Case '전배율 사망 캡처: 이진화 단이 구역을 생환시킴' ($binLadderText.Contains('구역')) $true
+    Assert-Case '전배율 사망 캡처: 화면 스테이지 2-2 매치' `
+      (Test-CustomTitleStageMatch -TitleText $binLadderText -Stage '2-2') 'match'
+    # 게이트가 캡처의 실제 진입 버튼('Space입장하기' 실측)을 읽고 통과 → 이진화 s5 1회로 생환
+    Assert-Case '전배율 사망 캡처: 이진화 판독 1회로 생환 (게이트 통과 + s5 우선 순서)' $script:binReadCount 1
   } finally {
     $sourceBitmap.Dispose()
   }
