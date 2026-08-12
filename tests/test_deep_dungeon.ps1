@@ -216,6 +216,24 @@ Assert-Case '탭: 심증+던전(짝)만 있으면 던전 선택 null (오클릭 
 Assert-Case '배선(워커): 심층 표식 심[층충증] = 5곳' ([regex]::Matches($ddWorker, '심\[층충증\]').Count) 5
 Assert-Case '배선(워커): 구형 심[층충] 잔존 0곳' ([regex]::Matches($ddWorker, '심\[층충\]').Count) 0
 
+# ── '입장하기' 2차 신호 계약 (2026-08-12 23:55 + 08-13 00:51 실사고 ×2 - 제목이 화면
+#    인스턴스 단위로 전 배율 사망하는 1908 창. 진입 버튼 영역은 두 사고 모두 'Space입장하기'
+#    정확 판독 = 옵션 화면 전용 판별자. '진입'은 선택 화면 전용) ──
+Assert-Case '배선(워커): 다시하기 복귀 대기 - 입장하기 1차 + 제목 구역 2차' `
+  ($ddWorker -match "\`$backProbe\.Contains\('입장하기'\) -or \(Read-DgTitleText -Game \`$Game\)\.Contains\('구역'\)") $true
+Assert-Case '배선(워커): 시작 probe 입장하기 → 옵션 확정 + 선택 오판 무효화' `
+  ($ddWorker -match "(?s)if \(\`$selProbe\.Contains\('입장하기'\)\) \{\s*\r?\n\s*\`$optionsByProbe = \`$true\s*\r?\n\s*if \(\`$onSelectionScreen\) \{ \`$onSelectionScreen = \`$false \}") $true
+Assert-Case '배선(워커): 복구 판정에 probe 옵션 전달 (복구 한정 수용)' `
+  ($ddWorker -match '-OnOptionsScreen \(\$onOptionsScreen -or \$optionsByProbe\)') $true
+Assert-Case '배선(워커): lastRun 필드 복구도 probe 옵션이면 차단' `
+  ($ddWorker -match 'if \(\$script:dgLastRun -and -not \$onOptionsScreen -and -not \$optionsByProbe -and -not \$recoveryOnSelection\)') $true
+Assert-Case '배선(워커): 복구의 선택 화면 인정에서 probe 옵션 제외 (고분 오판 차단)' `
+  ($ddWorker -match '\$recoveryOnSelection = \(-not \$optionsByProbe\) -and') $true
+Assert-Case '배선(워커): probe 옵션은 일반 회차에서 fail-closed 정지 (무증거 진행 금지)' `
+  ($ddWorker -match '(?s)if \(\$optionsByProbe\) \{\s*\r?\n\s*Write-RunLog[^\r\n]*진입 옵션 화면으로 확인되지만[\s\S]{0,220}exit 4') $true
+# (죽은 제목 '메카고분0°°=='가 선택 화면으로 오판되는 실측 근거 케이스는
+#  test_dg_layout_system.ps1 의 선택 화면 진리표에 있음 - probe 무효화의 존재 이유)
+
 # ── 8. 배선 가드 (소스 텍스트 검사 - GUI 심층 분기가 유지되는지) ─────────────
 $guiSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_gui.ps1') -Raw -Encoding UTF8
 Assert-Case '배선: 심층 카테고리 저장값 deepdungeon' ($guiSource -match "rbCatDeep\.Checked\)\s*\{\s*\`$categoryValue = 'deepdungeon'") $true

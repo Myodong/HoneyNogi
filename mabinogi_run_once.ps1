@@ -6058,10 +6058,24 @@ function Invoke-NormalDungeonCycle {
   # 제목만 판독 실패·진입 버튼은 정상 판독 실측). 하단 'N층 M구역 진입' 버튼은 선택 화면
   # 전용 문구라 2차 신호로 인정합니다 (Test-KnownScreen 의 이중 신호와 동일 원리).
   # 탭 게이트/시작 분기 두 곳이 이 변수로 통일됩니다.
+  # ★ 옵션 화면 2차 인식 (2026-08-12 23:55 + 08-13 00:51 실사고 ×2 - 타 PC 1908 창):
+  #   제목이 화면 인스턴스 단위로 완전히 죽는 상태가 있습니다 (캡처 재현: s2~s6 전 배율
+  #   '구역' 소실 '메카고분0°°==' 등 - 배율 사다리 한계). 그때도 같은 진입 버튼 영역은
+  #   '입장하기'를 정확히 읽습니다 (두 사고 진단 + 재현 s3·s4 전부). '입장하기'는 옵션 화면
+  #   전용, '진입'은 선택 화면 전용이라 견고한 판별자입니다. 죽은 제목의 '고분' 조각이
+  #   Test-DgSelectionTitle 을 참으로 만들어 옵션 화면에 선택 화면 좌표를 누르던 사고를
+  #   여기서 무효화합니다. **$onOptionsScreen 은 세우지 않습니다** - 그 플래그의 소비처들은
+  #   읽히는 제목을 전제하므로, 별도 플래그($optionsByProbe)로 복구 한정 수용 + 그 외
+  #   정확한 정지에만 씁니다 (교차 리뷰 설계).
   $onSelectionScreen = (Test-DgSelectionTitle -TitleText $titleText)
-  if (-not $onOptionsScreen -and -not $onSelectionScreen) {
+  $optionsByProbe = $false
+  if (-not $onOptionsScreen) {
     $selProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
-    if ($selProbe.Contains('진입')) {
+    if ($selProbe.Contains('입장하기')) {
+      $optionsByProbe = $true
+      if ($onSelectionScreen) { $onSelectionScreen = $false }
+      Write-RunLog "[던전] 옵션 화면 인식 (제목 판독 실패 - 진입 버튼 '$selProbe' 기준)"
+    } elseif (-not $onSelectionScreen -and $selProbe.Contains('진입')) {
       $onSelectionScreen = $true
       Write-RunLog "[던전] 선택 화면 인식 (제목 판독 실패 - 진입 버튼 '$selProbe' 기준)"
     }
@@ -6177,12 +6191,14 @@ function Invoke-NormalDungeonCycle {
     # 복귀/진입 버튼으로 이미 확정된 선택 화면 플래그를 신뢰합니다 (2026-08-01 3차 점검:
     # 탭 전환 복귀 후 제목 재판독이 일시 공백이면 제목만 보는 판정이 선택 화면을 놓쳐,
     # 완료 마커가 있는 항목을 다시 입장할 수 있었음 - 리뷰 승인)
-    $recoveryOnSelection = ($onSelectionScreen -or (Test-DgSelectionTitle -TitleText $titleText))
+    # 죽은 제목의 '고분' 조각이 선택 화면 판정을 참으로 만들 수 있어, 진입 버튼으로 옵션
+    # 화면이 확정된 회차($optionsByProbe)는 선택 화면 인정에서 제외합니다 (08-13 실사고)
+    $recoveryOnSelection = (-not $optionsByProbe) -and ($onSelectionScreen -or (Test-DgSelectionTitle -TitleText $titleText))
     # 마지막 판 복구: 마무리가 '나가기 → 필드'라서 옵션/선택 화면이 아니라 필드가 목표 화면입니다.
     # 필드 상태(HUD + 던전 목표 없음, 연속 2회)면 재입장 없이 복구 완료 처리하고, 나가기 팝업에서
     # 끊긴 경우는 나가기(Space)를 이어서 처리합니다 (교차 리뷰 반영 - 기존 로직은 필드를
     # '던전 화면 아님' 오류로 처리해 마지막 판 복구가 항상 실패).
-    if ($script:dgLastRun -and -not $onOptionsScreen -and -not $recoveryOnSelection) {
+    if ($script:dgLastRun -and -not $onOptionsScreen -and -not $optionsByProbe -and -not $recoveryOnSelection) {
       $recoveryFieldStreak = 0
       $recoveryPopupHandled = $false
       for ($recoveryProbe = 1; $recoveryProbe -le 8; $recoveryProbe++) {
@@ -6222,7 +6238,7 @@ function Invoke-NormalDungeonCycle {
     }
     $recoveryFinishAction = Get-CustomFinishAction -Item $script:customItem -Next $script:customNext
     $recoveryReadyAction = Get-CustomRecoveryReadyAction -RecoveryOnly $true `
-      -OnOptionsScreen $onOptionsScreen -OnSelectionScreen $recoveryOnSelection -FinishAction $recoveryFinishAction
+      -OnOptionsScreen ($onOptionsScreen -or $optionsByProbe) -OnSelectionScreen $recoveryOnSelection -FinishAction $recoveryFinishAction
     if ($recoveryReadyAction -eq 'blocked') {
       # 1-3 → 2층은 반드시 '다음 층으로' 뒤의 선택 화면이어야 합니다. 1층 옵션 화면을
       # 복구 완료로 인정하면 다음 2층 항목이 < 없는 화면에서 막히므로 진행도를 유지합니다.
@@ -6232,6 +6248,16 @@ function Invoke-NormalDungeonCycle {
       Write-RunLog "[커스텀] 마무리 목표 화면이 이미 준비돼 있습니다 (제목: '$titleText') - 완료 항목 재입장 없이 복구 완료"
       exit 0
     }
+  }
+
+  # 진입 버튼으로만 확인된 옵션 화면(제목 완전 사망)은 여기서 정지합니다 (2026-08-13 설계 -
+  # 교차 리뷰 합의). 위 복구 전용 회차는 옵션 화면 존재만으로 완료를 닫을 수 있어 수용했지만,
+  # 일반 회차는 제목 없이는 구역/난이도를 확정할 수단이 없고, 이대로 흘리면 '알 수 없는 화면'
+  # 폴백이 옵션 화면 우상단 X(던전 UI 닫힘)를 누르거나 죽은 제목의 '고분' 조각으로 선택 화면
+  # 좌표를 누릅니다 (00:51 실사고 - 탭 단어 클릭 시도). 무증거 진행 대신 fail-closed.
+  if ($optionsByProbe) {
+    Write-RunLog "[완료] 진입 옵션 화면으로 확인되지만 제목 판독이 계속 실패합니다 (제목: '$titleText') - 게임 화면 상태를 새로 고친 뒤(던전 구역 선택 화면 권장) 다시 시작해 주세요"
+    exit 4
   }
 
   # 0-커스텀. 진입 옵션 화면에서 시작한 경우의 경로 판정 (판정식: Get-CustomOptionStartAction,
@@ -7449,7 +7475,14 @@ function Invoke-NormalDungeonCycle {
       $optionsDeadline = (Get-Date).AddSeconds(40)
       continue
     }
-    if ((Read-DgTitleText -Game $Game).Contains('구역')) {
+    # 진입 버튼 '입장하기'를 1차 신호로 씁니다 (2026-08-12 23:55 + 08-13 00:51 실사고 ×2 -
+    # 타 PC 1908 창: 옵션 화면이 열렸는데 제목이 40초 내내 전 배율 '구역' 소실로 죽어
+    # 이 대기가 초과 → exit 1 → 재시작 오판 연쇄. 같은 40초 동안 진입 버튼 영역은
+    # 'Space입장하기'를 정확히 읽고 있었음 - 두 사고 진단 + 캡처 재현 s3·s4).
+    # 이 대기에서 닿는 화면(결과/전환/계속하기 팝업/옵션) 중 '입장하기'는 옵션 화면 전용.
+    # 버튼을 먼저 보는 이유: 제목이 죽으면 사다리(s3→s4→s5)를 매 폴링 전부 도는 낭비 방지.
+    $backProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
+    if ($backProbe.Contains('입장하기') -or (Read-DgTitleText -Game $Game).Contains('구역')) {
       $backToOptions = $true
       break
     }

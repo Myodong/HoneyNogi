@@ -155,9 +155,10 @@ Assert-Case '런처: 시스템 PowerShell 절대 경로 우선' `
   ($launcherSource -match 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe') $true
 
 # ── 3차 전수 검사 반영 (2026-08-01 - 리뷰 조건 포함) ─────────────────────────
-# 회귀: 복구 회차가 복귀로 확정된 선택 화면 플래그를 신뢰
-Assert-Case '3차: 복구 판정이 onSelectionScreen 플래그 신뢰' `
-  ($workerSource -match '\$recoveryOnSelection = \(\$onSelectionScreen -or \(Test-DgSelectionTitle') $true
+# 회귀: 복구 회차가 복귀로 확정된 선택 화면 플래그를 신뢰 (2026-08-13 개정: 진입 버튼으로
+# 옵션 화면이 확정된 회차는 죽은 제목의 '고분' 조각이 만드는 선택 화면 오판을 제외)
+Assert-Case '3차: 복구 판정이 onSelectionScreen 플래그 신뢰 (+probe 옵션 제외)' `
+  ($workerSource -match '\$recoveryOnSelection = \(-not \$optionsByProbe\) -and \(\$onSelectionScreen -or \(Test-DgSelectionTitle') $true
 # 회귀: 마감 throw 직전 성공 화면(클리어/결과/보상/선택) 최종 탐침 + 탐침 중 캡처 실패 동결
 Assert-Case '3차: 마감 직전 성공 화면 최종 탐침(4상태+HUD 부재)' `
   ($workerSource -match 'elseif \(\(Test-DungeonClearPrompt -Game \$Game\) -or\s+\(\$FindResultButton[\s\S]{0,120}Test-HomeEndEscHud[\s\S]{0,400}Test-AbyssSelectionScreen') $true

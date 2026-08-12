@@ -95,6 +95,10 @@ $selTitleCases = @(
   @{ N = '심층 전용: 남쪽 폐허';   T = '남쪽폐허';         E = $true }
   @{ N = '심층 옵션 제목은 여전히 선택 아님'; T = '북쪽폐하심층2층3구역'; E = $false }
   @{ N = '실다 옵션 제목도 선택 아님 (08-12 실측 문자열)'; T = '실다2층3구역'; E = $false }
+  # 08-13 00:51 실사고 문서화: 구역이 통째로 죽은 옵션 제목은 '고분' 조각 때문에 선택
+  # 화면으로 **오판된다** - 이게 참이라서 시작 판정의 진입 버튼('입장하기') probe 무효화가
+  # 필요하다 (워커 $optionsByProbe). 이 단언이 거짓이 되면 그 무효화의 근거가 사라진 것.
+  @{ N = '죽은 옵션 제목(메카고분0°°==)은 선택으로 오판됨 (probe 무효화 근거)'; T = '메카고분0°°=='; E = $true }
 )
 foreach ($case in $selTitleCases) {
   Assert-Case "선택제목: $($case.N)" (Test-DgSelectionTitle -TitleText $case.T) $case.E
