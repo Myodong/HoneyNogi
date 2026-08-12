@@ -30,7 +30,7 @@ $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
-    -Names @('Get-DgMapLabelText', 'Get-CustomCoinDecision', 'Select-DgTabWord', 'Test-DgTabProbeMatchesMode')) {
+    -Names @('Get-DgMapLabelText', 'Get-CustomCoinDecision', 'Select-DgTabWord', 'Test-DgDeepMarkText', 'Test-DgTabProbeMatchesMode')) {
   Invoke-Expression $definition
 }
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') `
@@ -212,9 +212,28 @@ Assert-Case '탭: 심증 오독 탭 단어 - 심층 선택은 135' ((Select-DgTa
 Assert-Case '탭: 심증 오독 탭 단어 - 던전 선택은 66 (심증 짝 172 제외)' ((Select-DgTabWord -Words $tabWordsSimJeung -DeepTab $false).X) 66
 Assert-Case '탭: 심증+던전(짝)만 있으면 던전 선택 null (오클릭 방지)' `
   ($null -eq (Select-DgTabWord -Words @(@{ Text = '심증'; X = 135; Y = 128 }, @{ Text = '던전'; X = 172; Y = 128 }) -DeepTab $false)) $true
-# 배선: 심층 표식 정규식이 워커 5곳 전부 '심[층충증]' 이고 구형 '심[층충]' 은 0곳
-Assert-Case '배선(워커): 심층 표식 심[층충증] = 5곳' ([regex]::Matches($ddWorker, '심\[층충증\]').Count) 5
+# 배선: 심층 표식 - 탭 단어 2곳은 '심[층충증]' 정확 매치, 판정 3곳(옵션 제목/선택 버튼/탭
+# 전환 확인)은 공용 순수 함수 Test-DgDeepMarkText(조각 + 구조 패턴) 경유. 구형 심[층충] 0곳.
+Assert-Case '배선(워커): 심[층충증] 리터럴 = 3곳 (탭 단어 2 + 공용 함수 내부 1)' `
+  ([regex]::Matches($ddWorker, '심\[층충증\]').Count) 3
 Assert-Case '배선(워커): 구형 심[층충] 잔존 0곳' ([regex]::Matches($ddWorker, '심\[층충\]').Count) 0
+Assert-Case '배선(워커): 옵션 제목·선택 버튼 마크가 공용 함수 경유 (2곳)' `
+  ([regex]::Matches($ddWorker, '\$deepTabMark = \(Test-DgDeepMarkText -Text ').Count) 2
+Assert-Case '배선(워커): 탭 전환 확인 deepSeen 도 공용 함수 경유' `
+  ($ddWorker -match '\$deepSeen = \(Test-DgDeepMarkText -Text \$normalized\)') $true
+
+# ── 심층 표식 구조 패턴 진리표 (2026-08-13 01:41 실사고 - '심'→'긬' 깨짐. 전부 실측 문자열) ──
+Assert-Case '표식: 정상 심층 옵션 제목' (Test-DgDeepMarkText -Text '페카고분심층2층2구역') 'True'
+Assert-Case '표식: 심증 오독 (00:33 실측)' (Test-DgDeepMarkText -Text '제고분심증2증1구역') 'True'
+Assert-Case '표식: 긬증 오독 - 구조 패턴이 잡음 (01:41 실측)' (Test-DgDeepMarkText -Text '표119涎분긬증2증3구역') 'True'
+Assert-Case '표식: 심층 선택 버튼 문구' (Test-DgDeepMarkText -Text 'Space심층2층2구역진입') 'True'
+Assert-Case '표식: 일반 옵션 제목(로다2증1구역)은 토큰 1개 = 불일치' (Test-DgDeepMarkText -Text '로다2증1구역') 'False'
+Assert-Case '표식: 일반 옵션 제목(실다2층3구역) 불일치' (Test-DgDeepMarkText -Text '실다2층3구역') 'False'
+Assert-Case '표식: 피오드+층 합침 오독(피오듸층3구역)도 토큰 1개 = 불일치' (Test-DgDeepMarkText -Text '피오듸층3구역') 'False'
+Assert-Case '표식: 죽은 제목(메카고분0°°==)은 불일치 (probe/B-lite 담당)' (Test-DgDeepMarkText -Text '메카고분0°°==') 'False'
+Assert-Case '표식: 빈 문자열 불일치' (Test-DgDeepMarkText -Text '') 'False'
+Assert-Case '탭 확인: 긬증 구조 오독 + deep 목표 = 일치 (공용 함수 배선 검증)' `
+  (Test-DgTabProbeMatchesMode -ProbeText 'Space긬증2증3구역진입' -DeepTab $true) $true
 
 # ── '입장하기' 2차 신호 계약 (2026-08-12 23:55 + 08-13 00:51 실사고 ×2 - 제목이 화면
 #    인스턴스 단위로 전 배율 사망하는 1908 창. 진입 버튼 영역은 두 사고 모두 'Space입장하기'

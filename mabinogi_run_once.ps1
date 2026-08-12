@@ -1159,6 +1159,18 @@ function Select-DgTabWord {
   return $null
 }
 
+function Test-DgDeepMarkText {
+  # 심층 표식 판정 (순수 - 진리표 대상): ①'심층' 조각(오독 관용 '심충'/'심증') 또는
+  # ②구조 패턴 - 층 토큰이 층·구역 숫자를 사이에 두고 **두 번** 나오는 '…[심]층N층M구역' 꼬리.
+  # 2026-08-13 01:41 실사고: '심' 자체가 '긬'으로 깨져('표119涎분긬증2증3구역') 글자 이형
+  # 추가로는 끝이 없음 - 일반 옵션 제목('이름+N층+M구역')은 층 토큰이 1개라 구조로 갈립니다
+  # ('피오듸층3구역' 실측도 토큰 1개 = 불일치 유지). 숫자는 게임 실범위(층 1~2, 구역 1~3)
+  # 화이트리스트. 일반 정식 캡처 40장 + 최근 사고 3장 스윕 오탐 0건 (교차 검증).
+  # 소비처 3곳 공용: 옵션 제목 마크 / 선택 버튼 마크 / 탭 전환 확인(Test-DgTabProbeMatchesMode).
+  param([string]$Text)
+  return [bool](([string]$Text) -match '심[층충증]|[층충증][12][층충증][123]구역')
+}
+
 function Test-DgTabProbeMatchesMode {
   param([string]$ProbeText, [bool]$DeepTab)
 
@@ -1167,7 +1179,7 @@ function Test-DgTabProbeMatchesMode {
   # 요구합니다 (리뷰 지적). '심층' 오독 관용: '심충' + '심증'(2026-08-13 실측).
   $normalized = ([string]$ProbeText) -replace '\s', ''
   if (-not $normalized.Contains('진입')) { return $false }
-  $deepSeen = [bool]($normalized -match '심[층충증]')
+  $deepSeen = (Test-DgDeepMarkText -Text $normalized)
   return ($deepSeen -eq $DeepTab)
 }
 
@@ -6097,10 +6109,11 @@ function Invoke-NormalDungeonCycle {
   if ($onOptionsScreen -or $onSelectionScreen) {
     $deepTabMark = $false
     if ($onOptionsScreen) {
-      $deepTabMark = [bool]($titleText -match '심[층충증]')
+      # 구조 패턴 포함 판정 (Test-DgDeepMarkText - 2026-08-13 01:41 '긬증' 실사고로 교체)
+      $deepTabMark = (Test-DgDeepMarkText -Text $titleText)
     } else {
       $deepTabProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
-      $deepTabMark = [bool]($deepTabProbe -match '심[층충증]')
+      $deepTabMark = (Test-DgDeepMarkText -Text $deepTabProbe)
     }
     if ($deepMode -ne $deepTabMark) {
       $tabTargetLabel = $(if ($deepMode) { '심층 던전' } else { '던전' })
