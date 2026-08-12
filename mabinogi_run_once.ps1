@@ -1131,13 +1131,14 @@ function Select-DgTabWord {
 
   # 선택 화면 상단 '던전|심층 던전' 탭에서 클릭할 단어를 고릅니다 (순수 - 진리표 대상).
   # 실측 (2026-07-28, 1272x717): 던전(66,128) / 심층(135,128) 던전(172,128).
-  # 심층 던전 탭 = '심층' 단어('심충' 오독 관용 - 퀘스트 트래커 실측 사례).
+  # 심층 던전 탭 = '심층' 단어(오독 관용: '심충' 퀘스트 트래커 실측 / '심증' 2026-08-13
+  # 1908 창 제목 실측 - '층'→'증' 깨짐은 '로다2증' 등 반복 관측된 계열).
   # 던전 탭 = 왼쪽 70px 안 같은 줄에 심층 단어가 없는 '던전' 단어
   # (난이도 알약의 '매우 어려움' 뒷단어 제외와 같은 패턴 - 심층 던전 탭의 '던전' 오클릭 방지).
   # 반환: @{ X; Y } (기준 좌표) 또는 $null (호출부가 실측 예비 좌표 사용)
   if ($DeepTab) {
     foreach ($word in $Words) {
-      if ([string]$word.Text -match '^심[층충]$') { return @{ X = [int]$word.X; Y = [int]$word.Y } }
+      if ([string]$word.Text -match '^심[층충증]$') { return @{ X = [int]$word.X; Y = [int]$word.Y } }
     }
     return $null
   }
@@ -1145,7 +1146,7 @@ function Select-DgTabWord {
     if ([string]$word.Text -ne '던전') { continue }
     $deepPaired = $false
     foreach ($other in $Words) {
-      if ([string]$other.Text -match '^심[층충]$') {
+      if ([string]$other.Text -match '^심[층충증]$') {
         $dx = [int]$word.X - [int]$other.X
         if ($dx -gt 0 -and $dx -le 70 -and [Math]::Abs([int]$word.Y - [int]$other.Y) -le 14) {
           $deepPaired = $true
@@ -1163,10 +1164,10 @@ function Test-DgTabProbeMatchesMode {
 
   # 탭 전환 확인 (순수 - 진리표 대상): 선택 화면 진입 버튼 문구가 목표 탭과 일치하는지.
   # 빈/불완전 판독이 '심층 없음 = 던전 탭 성공'으로 오인되지 않게 '진입' 존재를 함께
-  # 요구합니다 (리뷰 지적). '심층' 오독 '심충' 관용 포함.
+  # 요구합니다 (리뷰 지적). '심층' 오독 관용: '심충' + '심증'(2026-08-13 실측).
   $normalized = ([string]$ProbeText) -replace '\s', ''
   if (-not $normalized.Contains('진입')) { return $false }
-  $deepSeen = [bool]($normalized -match '심[층충]')
+  $deepSeen = [bool]($normalized -match '심[층충증]')
   return ($deepSeen -eq $DeepTab)
 }
 
@@ -6072,17 +6073,20 @@ function Invoke-NormalDungeonCycle {
 
   # 던전|심층 탭 확인·자동 전환: 같은 선택 화면의 탭이라 제목(던전명)만으로는 구분되지
   # 않습니다. 옵션 화면은 제목의 '심층' 조각으로, 선택 화면은 진입 버튼('심층 N층 M구역
-  # 진입')의 '심층' 조각으로 확인합니다 ('심충' 오독 관용). 요청 모드와 다르면 상단
+  # 진입')의 '심층' 조각으로 확인합니다 (오독 관용 '심충'/'심증' - 2026-08-13 실사고:
+  # s5 복구 제목 '제고분심증2증1구역'의 '심증' 미매치로 심층 옵션 화면을 타 탭으로 오판,
+  # '<' 없는 다시하기 옵션 화면에서 복귀 4회 실패 → 정지. 복귀 실패 정지 자체는 설계대로의
+  # fail-closed 유지 - 트리거였던 표식 미매치만 제거). 요청 모드와 다르면 상단
   # '던전|심층 던전' 탭을 눌러 자동 전환하고(2026-07-28 사용자 요청 - 기존 코드 4 정지에서
   # 변경), 전환 확인 실패 시에만 기존 안내로 정지합니다 (fail-closed 유지).
   # 선택/옵션 화면이 아닌 재시작(던전 안/결과 화면)은 게이트 대상이 아닙니다.
   if ($onOptionsScreen -or $onSelectionScreen) {
     $deepTabMark = $false
     if ($onOptionsScreen) {
-      $deepTabMark = [bool]($titleText -match '심[층충]')
+      $deepTabMark = [bool]($titleText -match '심[층충증]')
     } else {
       $deepTabProbe = ([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', ''
-      $deepTabMark = [bool]($deepTabProbe -match '심[층충]')
+      $deepTabMark = [bool]($deepTabProbe -match '심[층충증]')
     }
     if ($deepMode -ne $deepTabMark) {
       $tabTargetLabel = $(if ($deepMode) { '심층 던전' } else { '던전' })

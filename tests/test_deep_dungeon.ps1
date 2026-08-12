@@ -199,6 +199,22 @@ Assert-Case '탭 확인: 일반 진입 버튼 + deep 목표 = 불일치' (Test-D
 Assert-Case '탭 확인: 빈 판독은 어느 쪽도 성공 아님' `
   ((Test-DgTabProbeMatchesMode -ProbeText '' -DeepTab $false) -or (Test-DgTabProbeMatchesMode -ProbeText '' -DeepTab $true)) $false
 Assert-Case '탭 확인: 진입 소실 판독은 성공 아님' (Test-DgTabProbeMatchesMode -ProbeText 'Space심층2층3구역' -DeepTab $true) $false
+# ── '심증' 오독 관용 (2026-08-13 00:33 실사고 - 1908 창): s5 복구 제목 '제고분심증2증1구역'의
+#    '심증' 이 심[층충] 에 없어 심층 옵션 화면을 타 탭으로 오판 → '<' 없는 다시하기 옵션
+#    화면에서 복귀 4회 실패 → 정지. '층'→'증' 깨짐은 '로다2증' 등 반복 실측 계열.
+Assert-Case '탭 확인: 심증 오독 + deep 목표 = 일치 (08-13 실사고 계열)' `
+  (Test-DgTabProbeMatchesMode -ProbeText 'Space심증2증1구역진입' -DeepTab $true) $true
+Assert-Case '실측 제목의 심층 표식: 제고분심증2증1구역 -match 심[층충증]' `
+  ([bool]('제고분심증2증1구역' -match '심[층충증]')) $true
+$tabWordsSimJeung = @(
+  @{ Text = '던전'; X = 66; Y = 128 }, @{ Text = '심증'; X = 135; Y = 128 }, @{ Text = '던전'; X = 172; Y = 128 })
+Assert-Case '탭: 심증 오독 탭 단어 - 심층 선택은 135' ((Select-DgTabWord -Words $tabWordsSimJeung -DeepTab $true).X) 135
+Assert-Case '탭: 심증 오독 탭 단어 - 던전 선택은 66 (심증 짝 172 제외)' ((Select-DgTabWord -Words $tabWordsSimJeung -DeepTab $false).X) 66
+Assert-Case '탭: 심증+던전(짝)만 있으면 던전 선택 null (오클릭 방지)' `
+  ($null -eq (Select-DgTabWord -Words @(@{ Text = '심증'; X = 135; Y = 128 }, @{ Text = '던전'; X = 172; Y = 128 }) -DeepTab $false)) $true
+# 배선: 심층 표식 정규식이 워커 5곳 전부 '심[층충증]' 이고 구형 '심[층충]' 은 0곳
+Assert-Case '배선(워커): 심층 표식 심[층충증] = 5곳' ([regex]::Matches($ddWorker, '심\[층충증\]').Count) 5
+Assert-Case '배선(워커): 구형 심[층충] 잔존 0곳' ([regex]::Matches($ddWorker, '심\[층충\]').Count) 0
 
 # ── 8. 배선 가드 (소스 텍스트 검사 - GUI 심층 분기가 유지되는지) ─────────────
 $guiSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_gui.ps1') -Raw -Encoding UTF8
