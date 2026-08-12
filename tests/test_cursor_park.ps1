@@ -205,7 +205,7 @@ Assert-Case '배선: 옵션 지도 보조 판정이 판독 전에 대피' `
     'Move-CursorOutsideGame -Game \$Game\r?\n\s*\$mapTexts = @\(\)')) 'True'
 Assert-Case '배선: 옵션 구역 카드 글자 탐색이 탐색 전에 대피' `
   ([bool]([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-DgOptStageCardPoint')) -match
-    'Move-CursorOutsideGame -Game \$Game\r?\n\s*foreach \(\$labelScale in 4, 6, 8\)')) 'True'
+    'Move-CursorOutsideGame -Game \$Game\r?\n\s*foreach \(\$labelScale in \$labelScales\)')) 'True'
 
 # ── ⑭ 전투 판정 2곳의 커서 가림 (2026-08-10 심층 커스텀 반복 실기 실사고) ────
 # 클릭 지점이 **판정 대상의 한가운데**인 위젯들입니다. 클릭하면 커서가 바로 그 위에 남아

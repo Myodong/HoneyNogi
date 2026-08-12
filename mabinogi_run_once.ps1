@@ -821,7 +821,9 @@ $dgNamePatterns = @(
   # 오독 이형은 전부 2026-07-24~25 실기 검증 실측입니다 (첫 글자/둘째 글자가 자주 깨짐).
   # '오드'는 약한 조각이지만 다른 던전명과 충돌하지 않고, '바리오드'류는 다중 매칭 가드가
   # null 처리합니다 (설계 합의).
-  @{ Id = '룬다';     Any = @('룬다', '로다', '른다', '분다', '닡다', '눛나') }
+  # '실다' = 2026-08-12 11:43·11:47 실사고 실측(1908 창, '실다2층3구역' ×2 + 캡처 재현 일치).
+  # ID 불명 → 예비 좌표 경로 차단 → 커스텀 구역 전환이 fail-closed 정지했던 원인.
+  @{ Id = '룬다';     Any = @('룬다', '로다', '른다', '분다', '닡다', '눛나', '실다') }
   @{ Id = '피오드';   Any = @('피오', '깨오', '오드') }
   @{ Id = '페카고분'; Any = @('페카', '패가') }
   @{ Id = '페론고분'; Any = @('페론', '페로', '페혼', '페붇') }
@@ -1329,12 +1331,21 @@ function Get-DgOptStageCardPoint {
       $labelCandidates += ('0' + $Stage)
     }
   }
+  # 배율 사다리 끝 s10 (일반 던전 한정 - 2026-08-12 11:47 실사고 실측): 1908 창 옵션
+  # 지도에서 s4/6/8 판독이 **전부 빈 값**인 프레임이 관측됨(오류 캡처 재생 동일 - 글자 탐색
+  # 전멸로 예비 좌표에만 의존하게 됨). 같은 캡처 s10 재생: 2-2(875,239)·2-3(979,295) 정확
+  # 판독(예비 좌표 874,238/979,295와 일치). 보관 옵션 캡처 40장 스윕: s10 추가 검출 4장
+  # 전부 배치표 좌표와 일치, 오탐 0 (교차 검증 2회 합의). 심층 제외 - 심층은 라벨 발견 시
+  # 카드 픽셀 검증을 생략하는 계약이라(아래 적갈색 주석) 오탐이 곧 오클릭이 됨. 그 경로는
+  # 픽셀 게이트라는 안전 근거가 없어 실측 없이 넓히지 않습니다.
+  $labelScales = @(4, 6, 8)
+  if (-not $deepMode) { $labelScales += 10 }
   # ★ 라벨 탐색 직전 커서 대피 (2026-08-11 23:55 실사고와 같은 기전 - Get-DgOptObservedStage
   #   주석 참고): 직전 클릭 커서가 지도 라벨 위에 남으면 그 라벨만 깨져('2-1'→'IL?-1결'
   #   캡처 재현) 글자 탐색이 목표 카드를 못 찾고 예비 좌표로 빠지거나 실패합니다.
   #   여기도 판독 직전 위치라 클릭 무효화 계약과 충돌 없고, 창 밖이면 무동작입니다.
   Move-CursorOutsideGame -Game $Game
-  foreach ($labelScale in 4, 6, 8) {
+  foreach ($labelScale in $labelScales) {
     foreach ($labelCandidate in $labelCandidates) {
       $cardPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgDgOptStageMap[0] -ReferenceY $rgDgOptStageMap[1] `
         -RegionWidth $rgDgOptStageMap[2] -RegionHeight $rgDgOptStageMap[3] `

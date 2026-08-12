@@ -59,6 +59,8 @@ $idCases = @(
   @{ N = '마스 오독(마싀 = 마스+1층 합침, 실기)'; T = '〈마싀층2구역'; E = '마스던전' }
   @{ N = '라비 오독(라바, 실기)'; T = '라바2층1구역'; E = '라비던전' }
   @{ N = '키아 오독(기아, 실기)'; T = '기아2츰1구역'; E = '키아던전' }
+  @{ N = '룬다 오독(실다, 실기 08-12)'; T = '실다2층3구역'; E = '룬다' }
+  @{ N = '실다+오드 다중 매칭 불명'; T = '실다오드'; E = '' }
 )
 foreach ($case in $idCases) {
   Assert-Case "ID: $($case.N)" ([string](Get-DgDungeonIdFromTitle -TitleText $case.T)) $case.E
@@ -92,10 +94,30 @@ $selTitleCases = @(
   @{ N = '심층 전용: 북쪽 오독(폐하, 실기)'; T = '북쪽폐하'; E = $true }
   @{ N = '심층 전용: 남쪽 폐허';   T = '남쪽폐허';         E = $true }
   @{ N = '심층 옵션 제목은 여전히 선택 아님'; T = '북쪽폐하심층2층3구역'; E = $false }
+  @{ N = '실다 옵션 제목도 선택 아님 (08-12 실측 문자열)'; T = '실다2층3구역'; E = $false }
 )
 foreach ($case in $selTitleCases) {
   Assert-Case "선택제목: $($case.N)" (Test-DgSelectionTitle -TitleText $case.T) $case.E
 }
+
+# ── 1c. 2026-08-12 실사고의 ID→배치→예비 좌표 연결 계약 (실측 진리표) ─────────
+# 사슬: '실다2층3구역' 오독으로 ID 불명 → 배치표 차단 → 라벨 탐색 전멸(s4/6/8) →
+# fail-closed 정지. '실다' 등록으로 ID=룬다가 서면 아래 연결이 좌표까지 이어져야 한다.
+# 기대값은 소스 사본이 아니라 **캡처 실측**이다: 오류 캡처 s10 재생에서 2-2 라벨 중심
+# (875,239) - 예비 좌표 (874,238)와 일치 확인. 배치·좌표를 바꾸면 이 실측과 어긋난다.
+Assert-Case '연결: 룬다 2층 배치 = CR (실측 배치표)' ([string]$dgLayoutTable['룬다'][1]) 'CR'
+$crFallback = Get-DgOptStageFallbackPoint -Stage '2-2' -LayoutType 'CR'
+Assert-Case '연결: CR 2-2 예비 좌표 = 874,238 (08-12 캡처 s10 실측 875,239와 일치)' `
+  ('{0},{1}' -f $crFallback.X, $crFallback.Y) '874,238'
+
+# ── 1d. 옵션 라벨 탐색 배율 배선 (2026-08-12 - s4/6/8 전멸 프레임 실측으로 s10 추가) ──
+# s10은 일반 던전 한정: 심층은 라벨 발견 시 카드 픽셀 검증을 생략하는 계약이라 오탐이
+# 곧 오클릭 - 픽셀 게이트 없는 경로는 실측 없이 넓히지 않는다 (교차 리뷰 합의).
+$cardCode = ((([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-DgOptStageCardPoint'))) `
+    -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '배선: 옵션 라벨 탐색 기본 배율 4·6·8' ($cardCode -match '\$labelScales = @\(4, 6, 8\)') $true
+Assert-Case '배선: s10은 일반 던전 한정 (심층 제외 - 픽셀 게이트 없음)' `
+  ($cardCode -match 'if \(-not \$deepMode\) \{ \$labelScales \+= 10 \}') $true
 
 # ── 2. 던전·층 → 유형 매핑 (40장 3중 교차 검증 결과 그대로) ─────────────────
 $layoutCases = @(
