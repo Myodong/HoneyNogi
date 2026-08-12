@@ -6620,7 +6620,12 @@ function Invoke-NormalDungeonCycle {
     if ($stageSelected) {
       Write-RunLog "[던전] 구역 $ndStage 선택 확인 (진입 버튼: ${stageFloor}층 ${stageArea}구역 진입)"
       Invoke-ClickUntil -Game $Game -Point $ptDgStageEnter -Description '던전 진입 옵션 화면' -TimeoutSeconds 20 -Condition {
-        (Read-DgTitleText -Game $Game).Contains('구역')
+        # 진입 버튼 '입장하기' 1차 + 제목 '구역' 2차 (2026-08-13 01:24 실사고 - 제목이 전
+        # 배율 사망한 옵션 화면이 열렸는데 제목만 봐서 20초 초과. 이 전환에서 '입장하기'는
+        # 옵션 화면 전용, 선택 화면 잔존 시 같은 영역은 '...진입'. 목표 구역은 바로 위에서
+        # 선택 화면 진입 버튼으로 이미 확정된 흐름이라 probe 도착 인정이 안전 - 교차 리뷰)
+        ((([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', '').Contains('입장하기')) -or
+        ((Read-DgTitleText -Game $Game).Contains('구역'))
       } -SourceCondition {
         Test-DgStageEnterButtonVisible -Game $Game -Stage $ndStage
       } -FallbackPoint $ptDgStageEnterLeft -FallbackCondition {
@@ -6638,7 +6643,11 @@ function Invoke-NormalDungeonCycle {
     if ($selectionResult.Action -eq 'same-floor' -and -not $planWasCandidate) {
       Write-RunLog "[던전] 구역 ${ndStage} 클릭 대신 같은 층의 $($selectionResult.CurrentStage)이 선택됐습니다 - 옵션 화면에서 목표 구역으로 변경합니다"
       Invoke-ClickUntil -Game $Game -Point $ptDgStageEnter -Description '같은 층 오선택 구역의 진입 옵션 화면' -TimeoutSeconds 20 -Condition {
-        ((& $readDgTitle) -replace '\s', '').Contains('구역')
+        # '입장하기' 1차 신호 - 기본 진입과 동일 계약 (제목 사망 시에도 옵션 도착 인정.
+        # 이후 Set-DgOptionStage 는 제목이 계속 죽으면 카드 클릭 없이 실패 → 커스텀 exit 4
+        # = 기존 fail-closed 가 지킴 - 교차 리뷰 확인)
+        ((([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', '').Contains('입장하기')) -or
+        (((& $readDgTitle) -replace '\s', '').Contains('구역'))
       } -SourceCondition {
         Test-DgStageEnterButtonVisible -Game $Game -Stage $selectionResult.CurrentStage
       } -FallbackPoint $ptDgStageEnterLeft -FallbackCondition {
@@ -6666,6 +6675,13 @@ function Invoke-NormalDungeonCycle {
     if ($selectionResult.Action -eq 'different-floor' -and -not $planWasCandidate -and $selectionRound -lt 2) {
       Write-RunLog "[던전] 구역 ${ndStage} 클릭 대신 다른 층의 $($selectionResult.CurrentStage)이 선택됐습니다 - 옵션 화면에서 뒤로 나간 뒤 다시 선택합니다"
       Invoke-ClickUntil -Game $Game -Point $ptDgStageEnter -Description '다른 층 오선택 구역의 진입 옵션 화면' -TimeoutSeconds 20 -Condition {
+        # ★ 여기는 '입장하기' probe 를 **일부러 넣지 않습니다** (2026-08-13 교차 리뷰 반례):
+        #   이 분기는 대기 성공 직후 Invoke-DgBackToSelection 을 부르는데, 그 함수는 제목이
+        #   죽으면('메카고분0°°==') '고분' 조각의 선택 화면 오판으로 **'<'를 누르지 않고
+        #   Ok=true** 를 돌려줍니다. probe 로 죽은 제목의 옵션 도착을 인정해 흘리면 실제
+        #   옵션 화면을 선택 화면으로 믿고 선택 좌표를 누르게 됩니다. 제목 사망 시 이 대기는
+        #   초과 → 재시작의 probe 인식 → 정확한 정지(B-lite)가 현재 안전한 경로입니다.
+        #   확장하려면 뒤로가기 함수의 probe-aware 개정이 선행돼야 합니다 (목록 설계 항목).
         ((& $readDgTitle) -replace '\s', '').Contains('구역')
       } -SourceCondition {
         Test-DgStageEnterButtonVisible -Game $Game -Stage $selectionResult.CurrentStage

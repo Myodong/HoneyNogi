@@ -227,6 +227,15 @@ Assert-Case '배선(워커): 복구 판정에 probe 옵션 전달 (복구 한정
   ($ddWorker -match '-OnOptionsScreen \(\$onOptionsScreen -or \$optionsByProbe\)') $true
 Assert-Case '배선(워커): lastRun 필드 복구도 probe 옵션이면 차단' `
   ($ddWorker -match 'if \(\$script:dgLastRun -and -not \$onOptionsScreen -and -not \$optionsByProbe -and -not \$recoveryOnSelection\)') $true
+# 선택→옵션 전환 대기 3곳 중 2곳만 probe 확장 (01:24 실사고 - 기본 진입 대기 초과):
+# 다른층 오선택(3곳째)은 대기 직후 Invoke-DgBackToSelection 이 죽은 제목의 '고분' 오판으로
+# '<' 없이 Ok=true 를 돌려주는 구멍이 있어 **일부러 제외** (교차 리뷰 반례 - 확장 금지 고정)
+Assert-Case '배선(워커): 기본 진입 대기에 입장하기 probe' `
+  ($ddWorker -match "(?s)-Description '던전 진입 옵션 화면'[\s\S]{0,700}Contains\('입장하기'\)") $true
+Assert-Case '배선(워커): 같은층 오선택 대기에 입장하기 probe' `
+  ($ddWorker -match "(?s)-Description '같은 층 오선택 구역의 진입 옵션 화면'[\s\S]{0,700}Contains\('입장하기'\)") $true
+Assert-Case '배선(워커): 다른층 오선택 대기는 probe 미확장 (뒤로가기 오판 구멍 - 제목만)' `
+  ($ddWorker -notmatch "(?s)-Description '다른 층 오선택 구역의 진입 옵션 화면'[\s\S]{0,900}Contains\('입장하기'\)") $true
 Assert-Case '배선(워커): 복구의 선택 화면 인정에서 probe 옵션 제외 (고분 오판 차단)' `
   ($ddWorker -match '\$recoveryOnSelection = \(-not \$optionsByProbe\) -and') $true
 Assert-Case '배선(워커): probe 옵션은 일반 회차에서 fail-closed 정지 (무증거 진행 금지)' `
