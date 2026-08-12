@@ -4375,7 +4375,7 @@ function Read-DgTitleText {
   param([System.Diagnostics.Process]$Game)
 
   # 좌상단 던전 제목 판독 - 좁은 기본 영역(config 폭 250) 우선, 조건부 확장(전 모드,
-  # 폭 420 + 배율 3→4 사다리. '구역'이 보일 때만 채택).
+  # 폭 420 + 배율 3→4→5 사다리. '구역'이 보일 때만 채택).
   # 실측 근거 (2026-07-28, 같은 날 상반된 두 사고):
   #  - 심층 옵션 제목('던전명+심층+N층 M구역')은 길어서 폭 250이면 끝 '구역'이 잘림
   #    (20:20 오류: '〈북쪽폐61심층2층3국'. 폭 420은 심층 옵션 캡처 21장 전수 '구역' 포함)
@@ -4401,10 +4401,19 @@ function Read-DgTitleText {
   #   s4 만 더합니다. 로컬 보관 캡처 87장 전수 재생: 이 사다리가 반환값을 바꾸는 캡처 0건
   #   (s4 추가 채택 없음) - 기존 판정 전부 그대로, 활성화 사례는 이 사고 캡처뿐.
   #   비용은 좁은·넓은 s3 둘 다 '구역'이 없을 때만 OCR 1회 추가.
+  #
+  # ★ 2026-08-12 23:55 실사고(같은 타 PC, 심층 페카고분)로 사다리에 **s5** 를 더합니다.
+  #   '다시 하기' 후 옵션 화면이 실제로 열렸는데(진단에 'Space입장하기') 제목이 40초 내내
+  #   '패가고분=石'(구역/심층 통째 소실)이라 복귀 대기가 초과 → 오류 → 재시작 회차도 같은
+  #   오독으로 선택 화면 오판 → 탭 전환 시도 → 정지. 캡처 재현: 좁 s3 '패가고분=石'(로그
+  #   동일) / 넓 s3 '페카고분님°2°1=' / 넓 s4 '패가고분=石石丁曰' (둘 다 '구역' 소실 -
+  #   기존 사다리로도 실패) / **넓 s5 '제고분심증2증1구역'** (복구 - 스테이지 매칭 통과).
+  #   어제 룬다 캡처는 s4 성공·s5 실패, 오늘 심층은 s4 실패·s5 성공 - 프레임마다 갈려서
+  #   사다리 순회가 정답. 로컬 보관 90장 전수 재생: s5 가 반환값을 바꾸는 캡처 0건.
   $narrowText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
     -RegionWidth $rgDgTitle[2] -RegionHeight $rgDgTitle[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if ($narrowText.Contains('구역')) { return $narrowText }
-  foreach ($wideScale in 3, 4) {
+  foreach ($wideScale in 3, 4, 5) {
     $wideText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgDgTitle[0] -ReferenceY $rgDgTitle[1] `
       -RegionWidth 420 -RegionHeight $rgDgTitle[3] -Scale $wideScale -Engine $ocrKoreanEngine) -replace '\s', ''
     if ($wideText.Contains('구역')) { return $wideText }

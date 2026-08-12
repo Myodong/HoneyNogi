@@ -1,5 +1,5 @@
-﻿# 던전 옵션 제목 배율 사다리(s3→s4)의 오프라인 OCR 재현 검증 (2026-08-11 23:55 실사고)
-# 본체: mabinogi_run_once.ps1 Read-DgTitleText - 좁은 s3 → 넓은 s3 → 넓은 s4, '구역' 채택 게이트.
+﻿# 던전 옵션 제목 배율 사다리(s3→s4→s5)의 오프라인 OCR 재현 검증 (2026-08-11/12 실사고 2건)
+# 본체: mabinogi_run_once.ps1 Read-DgTitleText - 좁은 s3 → 넓은 s3→s4→s5, '구역' 채택 게이트.
 # 사고: 타 PC 1908x1076 창에서 구역 2-1 전환이 실제 성공했는데(캡처 제목 '룬다 2층 1구역')
 #   확인 재판독 8회 전부 실패('훈다0') → exit 4. 캡처 재현: 좁은 s3 '훈다0' / 넓은 s3
 #   '로다2증1구°'('역' 깨짐) / 넓은 s4 '로다2증1구역'(정상) → s4 사다리가 수정.
@@ -112,6 +112,29 @@ try {
     (Test-CustomTitleStageMatch -TitleText $wideS4 -Stage '2-1') 'match'
 } finally {
   $sourceBitmap.Dispose()
+}
+
+# ── 2026-08-12 23:55 실사고 캡처 (심층 페카고분 - '다시 하기' 복귀 대기 40초 초과 → 오류 →
+#    재시작 회차 선택 화면 오판 정지): 옵션 화면이 열려 있는데 제목이 '패가고분=石'.
+#    재현: 좁 s3 '패가고분=石' / 넓 s3·s4 '구역' 소실 / **넓 s5 '제고분심증2증1구역' 복구**.
+#    어제 룬다 캡처는 s4 성공·s5 실패로 반대 - 사다리 순회(3→4→5)가 두 캡처를 모두 살린다.
+$deepCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260812_페카고분심층_다시하기복귀실패_1908창.png'
+if (-not (Test-Path -LiteralPath $deepCapturePath)) {
+  "SKIP 심층 실측 캡처가 없어 두 번째 재현을 건너뜁니다: $deepCapturePath"
+} else {
+  $sourceBitmap = [System.Drawing.Bitmap]::FromFile($deepCapturePath)
+  try {
+    $deepNarrow3 = Get-CaptureRegionText -RefX $rgDgTitle[0] -RefY $rgDgTitle[1] -RefW $rgDgTitle[2] -RefH $rgDgTitle[3] -Scale 3
+    $deepWide4 = Get-CaptureRegionText -RefX $rgDgTitle[0] -RefY $rgDgTitle[1] -RefW 420 -RefH $rgDgTitle[3] -Scale 4
+    $deepWide5 = Get-CaptureRegionText -RefX $rgDgTitle[0] -RefY $rgDgTitle[1] -RefW 420 -RefH $rgDgTitle[3] -Scale 5
+    "정보(심층): 좁 s3='$deepNarrow3' / 넓 s4='$deepWide4' / 넓 s5='$deepWide5' (실측 당시 '패가고분=石'/'패가고분=石石丁曰'/'제고분심증2증1구역')"
+    $deepLadderText = Read-DgTitleText -Game $null
+    Assert-Case '심층 캡처: 사다리 결과에 구역 생존(수정 전에는 40초 전멸)' ($deepLadderText.Contains('구역')) $true
+    Assert-Case '심층 캡처: 목표 2-1 과 매치(복귀 확인 통과)' `
+      (Test-CustomTitleStageMatch -TitleText $deepLadderText -Stage '2-1') 'match'
+  } finally {
+    $sourceBitmap.Dispose()
+  }
 }
 
 exit $fails
