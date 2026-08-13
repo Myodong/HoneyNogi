@@ -179,4 +179,81 @@ if (-not (Test-Path -LiteralPath $binCapturePath)) {
   }
 }
 
+# ── 2026-08-13 11:00 실사고 캡처 (네이티브 1908 창의 선택 화면 난이도 알약 이탈):
+#    모니터 배율 100% PC에서 창을 물리 1908x1076으로 리사이즈하면(제목줄 31px) 선택 화면
+#    상단 UI가 순비율 위치보다 위에 놓여 알약 행이 y163에 옴 - 구영역(30,165,200,50)은
+#    전 배율(4/3/5/2) 단어 0개로 3연속 정지. v8에서 위로 20 확장(30,145,200,70).
+#    실제 Find-DgDifficultyPoint 사다리를 캡처 위에서 실행해 "구영역 REJECT / 신영역 PICK"
+#    양쪽을 고정합니다 (신영역은 소스 대입식 캡처 - 영역을 되돌리면 이 단언이 실패).
+$pillCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_난이도알약이탈_네이티브1908_선택화면.png'
+if (-not (Test-Path -LiteralPath $pillCapturePath)) {
+  "SKIP 난이도 알약 이탈 캡처가 없어 네 번째 재현을 건너뜁니다: $pillCapturePath"
+} else {
+  foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
+      -Names @('Select-DgDifficultyWord', 'Find-DgDifficultyPoint')) {
+    Invoke-Expression $definition
+  }
+  $regionAssign = $sourceAst.Find({
+      param($node)
+      ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+      ($node.Left.Extent.Text -eq '$rgDgDifficulty')
+    }, $true)
+  if (-not $regionAssign) { 'FAIL 본체에서 $rgDgDifficulty 정의를 찾지 못했습니다'; $fails++ }
+  else {
+    Invoke-Expression $regionAssign.Extent.Text
+    # Find-DgDifficultyPoint 의 게임 의존 3함수를 캡처 재생/항등으로 대체
+    function Get-GameRegionOcrWords {
+      param($Game, [int]$ReferenceX, [int]$ReferenceY, [int]$RegionWidth, [int]$RegionHeight, [int]$Scale, $Engine)
+      $imageW = $script:sourceBitmap.Width; $imageH = $script:sourceBitmap.Height
+      $cropLeft = [int][Math]::Round($ReferenceX * $imageW / $script:referenceWidth)
+      $cropTop = [int][Math]::Round($ReferenceY * $imageH / $script:referenceHeight)
+      $cropW = [Math]::Max(1, [int][Math]::Round($RegionWidth * $imageW / $script:referenceWidth))
+      $cropH = [Math]::Max(1, [int][Math]::Round($RegionHeight * $imageH / $script:referenceHeight))
+      $crop = New-Object System.Drawing.Bitmap $cropW, $cropH
+      $scaled = New-Object System.Drawing.Bitmap ($RegionWidth * $Scale), ($RegionHeight * $Scale)
+      try {
+        $cropGraphics = [System.Drawing.Graphics]::FromImage($crop)
+        try {
+          $cropGraphics.DrawImage($script:sourceBitmap, (New-Object System.Drawing.Rectangle(0, 0, $cropW, $cropH)),
+            (New-Object System.Drawing.Rectangle($cropLeft, $cropTop, $cropW, $cropH)), [System.Drawing.GraphicsUnit]::Pixel)
+        } finally { $cropGraphics.Dispose() }
+        $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaled)
+        try {
+          $scaledGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+          $scaledGraphics.DrawImage($crop, (New-Object System.Drawing.Rectangle(0, 0, ($RegionWidth * $Scale), ($RegionHeight * $Scale))),
+            (New-Object System.Drawing.Rectangle(0, 0, $cropW, $cropH)), [System.Drawing.GraphicsUnit]::Pixel)
+        } finally { $scaledGraphics.Dispose() }
+        $ocrResult = Invoke-OcrOnBitmap -Bitmap $scaled -Engine $ocrKoreanEngine
+        $regionWords = @()
+        foreach ($ocrLine in $ocrResult.Lines) {
+          foreach ($ocrWord in $ocrLine.Words) {
+            $regionWords += , @{
+              Text = ($ocrWord.Text -replace '\s', '')
+              X = $ReferenceX + [int][Math]::Round(($ocrWord.BoundingRect.X + $ocrWord.BoundingRect.Width / 2) / $Scale)
+              Y = $ReferenceY + [int][Math]::Round(($ocrWord.BoundingRect.Y + $ocrWord.BoundingRect.Height / 2) / $Scale)
+            }
+          }
+        }
+        return $regionWords
+      } finally { $crop.Dispose(); $scaled.Dispose() }
+    }
+    function Wait-GameRestoredIfMinimized { param($Game) }
+    function Get-ScaledScreenPoint { param($Game, [int]$ReferenceX, [int]$ReferenceY) return @{ X = $ReferenceX; Y = $ReferenceY } }
+    $sourceBitmap = [System.Drawing.Bitmap]::FromFile($pillCapturePath)
+    try {
+      $oldRegionPick = Find-DgDifficultyPoint -Game $null -Region @(30, 165, 200, 50) -Label '어려움' -HardX 140
+      Assert-Case '알약 이탈 캡처: 구영역(165~215)은 전 배율 판독 실패 (사고 재현)' ($null -eq $oldRegionPick) $true
+      $newRegionPick = Find-DgDifficultyPoint -Game $null -Region $rgDgDifficulty -Label '어려움' -HardX 140
+      Assert-Case '알약 이탈 캡처: 소스 영역(v8 확장)이 어려움을 채택' ($null -ne $newRegionPick) $true
+      if ($newRegionPick) {
+        # 실측 채택 좌표 (127,163) - OCR 흔들림 허용 폭은 알약 크기(폭 ~55, 높이 ~40) 이내
+        Assert-Case '알약 이탈 캡처: 채택 x가 알약 위 (127±10)' ([Math]::Abs([int]$newRegionPick.X - 127) -le 10) $true
+        Assert-Case '알약 이탈 캡처: 채택 y가 알약 위 (163±8)' ([Math]::Abs([int]$newRegionPick.Y - 163) -le 8) $true
+      }
+    } finally {
+      $sourceBitmap.Dispose()
+    }
+  }
+}
+
 exit $fails

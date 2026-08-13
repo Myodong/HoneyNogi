@@ -448,7 +448,7 @@ if (Test-Path -LiteralPath $configPath) {
 #    아래 버전과 config.json 의 coordsVersion 을 반드시 함께 +1 하세요.
 #    (안 올리면 옛 config 의 좌표가 게이트를 통과해 이번 사고가 재발합니다.
 #     두 값이 어긋나면 빌드 스크립트가 실패하도록 검사합니다)
-$coordsVersionCurrent = 7
+$coordsVersionCurrent = 8
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -786,7 +786,14 @@ if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
 $script:dgLastRun = ([string]$env:HONEYNOGI_LAST_RUN -eq '1')
 # 던전 선택/옵션 화면의 OCR 영역들 (2026-07-15 실측 검증)
 $rgDgTitle      = @(Get-ConfigValue $config @('ocrRegions', 'dgTitle') @(30, 45, 250, 55))        # 좌상단 제목 (선택: '○○ 던전' / 옵션: 'N층 M구역') - 기본값은 config.json과 동일하게 유지
-$rgDgDifficulty = @(Get-ConfigValue $config @('ocrRegions', 'dgDifficulty') @(30, 165, 200, 50))  # 일반/어려움 알약
+# 일반/어려움 알약. 위로 20 확장 (2026-08-13 실사고, coordsVersion 8): 네이티브 1908x1076 창
+# (제목줄 31px - 모니터 배율 100%에서 창을 물리 1908로 리사이즈한 경우)은 선택 화면 상단
+# UI가 순비율 위치보다 위에 놓여 알약 행이 y163에 옴(기존 영역 165~215를 1px 차로 이탈,
+# 3연속 판독 0단어 정지). 오류 캡처 3장 실재현 + 1272 보관 선택 캡처 45장(일반 21/심층 24)
+# x 일반/어려움/매우어려움 3키 스윕: 3장 전부 REJECT→PICK 전환, 45장 채택 불변·오탐 0.
+# 상단 145는 탭 행(1272 y128/네이티브1908 y109)을 계속 배제, 하단 215 유지로 층 패널
+# '1층 매우 어려움'(네이티브 1908 y232)도 기존과 동일하게 배제.
+$rgDgDifficulty = @(Get-ConfigValue $config @('ocrRegions', 'dgDifficulty') @(30, 145, 200, 70))
 $rgDgEnterBtn   = @(Get-ConfigValue $config @('ocrRegions', 'dgEnterButton') @(660, 620, 520, 70)) # 'N층 M구역 진입' 버튼
 # 은동전/더블 루팅 카드 버튼은 상태별로 위치·폭이 달라('선택됨'=넓고 우측 / '도전'=좁고 좌측)
 # 한 영역으로 두 상태를 다 읽지 못합니다. 그래서 각 카드마다 주 영역 + 보조 영역을 두고,
