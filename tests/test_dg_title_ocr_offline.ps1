@@ -402,4 +402,64 @@ if (-not (Test-Path -LiteralPath $tailCapturePath)) {
   }
 }
 
+# ── 2026-08-13 23:31 실사고 (사냥터 첫 화면 - 네이티브 1908): 난이도 알약 글자가 판독 영역
+#    상단(100)에 잘려 탐색 3배율 전멸 → 기존 '현재 난이도로 진행' 계약이 **어려움 요청을
+#    일반 판으로** 돌림(사용자 확인). 같은 화면에서 더블 루팅 '도전'도 상단(490) 잘림으로
+#    '(판독 없음)'. v13 = 두 영역 위로 확장 + 난이도 미탐색을 fail-closed 정지로 격상.
+#    은동전 카드는 같은 캡처에서 판독 성공 → 무변경(규칙 8)이며 그 사실도 함께 고정합니다.
+$huntCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_사냥터첫화면_네이티브1908_창백한산.png'
+if (-not (Test-Path -LiteralPath $huntCapturePath)) {
+  "SKIP 사냥터 첫 화면 캡처가 없어 재현을 건너뜁니다: $huntCapturePath"
+} elseif (-not (Get-Command Get-GameRegionOcrWords -ErrorAction SilentlyContinue)) {
+  'SKIP 단어 판독 스텁이 없어 사냥터 재현을 건너뜁니다'
+} else {
+  foreach ($regionName in @('rgHtDifficulty', 'rgHtLootButton', 'rgHtLootButtonAlt', 'rgHtCardButton', 'rgHtCardButtonAlt')) {
+    $regionAssign = $sourceAst.FindAll({
+        param($node)
+        ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+        ($node.Left.Extent.Text -eq ('$' + $regionName))
+      }, $true) | Select-Object -First 1
+    if (-not $regionAssign) { "FAIL 본체에서 `$$regionName 정의를 찾지 못했습니다"; $fails++ }
+    else { Invoke-Expression $regionAssign.Extent.Text }
+  }
+  function Find-HuntWord {
+    # 영역 목록 × 배율 사다리에서 조건에 맞는 첫 단어 (호출부 계약 등가)
+    param([int[][]]$Regions, [int[]]$Scales, [scriptblock]$Match)
+    foreach ($huntScale in $Scales) {
+      foreach ($huntRegion in $Regions) {
+        $huntWords = @(Get-GameRegionOcrWords -Game $null -ReferenceX $huntRegion[0] -ReferenceY $huntRegion[1] `
+          -RegionWidth $huntRegion[2] -RegionHeight $huntRegion[3] -Scale $huntScale -Engine $ocrKoreanEngine)
+        foreach ($huntWord in $huntWords) {
+          if (& $Match ([string]$huntWord.Text)) { return $huntWord }
+        }
+      }
+    }
+    return $null
+  }
+  $sourceBitmap = [System.Drawing.Bitmap]::FromFile($huntCapturePath)
+  try {
+    $isHard = { param($t) $t -eq '어려움' }
+    $isCard = { param($t) $t.Contains('됨') -or $t.Contains('선택') -or $t.Contains('선태') -or $t -eq '도전' }
+    # 난이도: 구영역 실패(사고 재현) → 소스 영역 성공
+    $oldDiff = Find-HuntWord -Regions @(, @(560, 100, 330, 45)) -Scales @(4) -Match $isHard
+    Assert-Case '사냥터 캡처: 구 난이도 영역은 어려움 탐색 실패 (오난이도 판 사고 재현)' ($null -eq $oldDiff) $true
+    $newDiff = Find-HuntWord -Regions @(, $rgHtDifficulty) -Scales @(4) -Match $isHard
+    Assert-Case '사냥터 캡처: v13 난이도 영역이 어려움 탐색 성공' ($null -ne $newDiff) $true
+    if ($newDiff) {
+      Assert-Case '사냥터 캡처: 어려움 위치 (713,102)±10' `
+        (([Math]::Abs([int]$newDiff.X - 713) -le 10) -and ([Math]::Abs([int]$newDiff.Y - 102) -le 10)) $true
+    }
+    # 더블 루팅: 구영역 '(판독 없음)' → 소스 영역 '도전'
+    $oldLoot = Find-HuntWord -Regions @(@(388, 490, 130, 82), @(388, 489, 205, 86)) -Scales @(5, 3, 4) -Match $isCard
+    Assert-Case '사냥터 캡처: 구 루팅 영역은 판독 없음 (사고 재현)' ($null -eq $oldLoot) $true
+    $newLoot = Find-HuntWord -Regions @($rgHtLootButton, $rgHtLootButtonAlt) -Scales @(5, 3, 4) -Match $isCard
+    Assert-Case '사냥터 캡처: v13 루팅 영역이 도전 판독' (($null -ne $newLoot) -and ([string]$newLoot.Text -eq '도전')) $true
+    # 은동전 카드는 무변경으로 계속 판독돼야 함 (규칙 8 - 관측된 것만 고침)
+    $coinCard = Find-HuntWord -Regions @($rgHtCardButton, $rgHtCardButtonAlt) -Scales @(5, 3, 4) -Match $isCard
+    Assert-Case '사냥터 캡처: 은동전 카드는 현행 영역으로 계속 판독 (무변경 근거)' ($null -ne $coinCard) $true
+  } finally {
+    $sourceBitmap.Dispose()
+  }
+}
+
 exit $fails

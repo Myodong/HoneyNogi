@@ -106,7 +106,7 @@ Assert-Case '워커: Wait-ForScreen 캡처 실패 게이트' `
 
 # ⑩ 어비스 커스텀 난이도 격상 (던전 -Strict 계약과 통일)
 Assert-Case '워커: 어비스 커스텀 난이도 확인 실패 정지' `
-  ([regex]::Matches($workerSource, '오난이도 판 방지를 위해 정지합니다').Count) 8   # 2026-08-11 ③ fail-closed 6곳 추가
+  ([regex]::Matches($workerSource, '오난이도 판 방지를 위해 정지합니다').Count) 9   # 08-11 ③ 6곳 + 08-13 사냥터 미탐색 격상 1곳
 
 # ⑪ 파티원 준비 버튼은 '준비' 조각까지 요구
 Assert-Case "워커: 파티원 버튼 '준비'+'완료' 요구" `
@@ -501,11 +501,11 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,300}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v12 - 네이티브 1908 계열)' `
-  ($workerSource -match '\$coordsVersionCurrent = 12') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v13 - 네이티브 1908 계열)' `
+  ($workerSource -match '\$coordsVersionCurrent = 13') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 12' ([int]$auditConfigJson.coordsVersion) 12
+Assert-Case 'config: coordsVersion 13' ([int]$auditConfigJson.coordsVersion) 13
 # v12 (2026-08-13 21:35·21:38 실사고 ×2): 네이티브 1908에서 어비스 상세 하단 버튼 '이동하기'가
 # 우측 경계(1080)에 걸려 '하7'로 반토막 - 이동 클릭 루프 조기 탈출 + 도착 대기 180초 헛대기.
 # 오른쪽 +80 (왼쪽/상하 불변 - 구 범위가 신 범위의 부분집합).
@@ -537,6 +537,32 @@ Assert-Case '고스트: 배선 2곳 (시작 복구 ladder + 어비스 복귀 루
   ([regex]::Matches($workerSource, 'Close-GhostRegisterPrompt -Game \$Game').Count) 2
 Assert-Case '고스트: 클릭은 자기앵커만 (지금 고스트 등록 좌표 미보유)' `
   ($workerSource -notmatch "'지금 고스트 등록'[^\r\n]*@\(") $true
+# v13 (2026-08-13 23:31 실사고): 네이티브 1908 사냥터 첫 화면의 난이도 알약(글자 y102)과
+# 더블 루팅 '도전'(y493)이 영역 상단(100/490)에 잘려 탐색 실패 → **어려움 요청이 일반 판으로
+# 입장**(사용자 확인). 두 영역 위로 확장 + 난이도 미탐색을 fail-closed 정지로 격상
+# (던전 2026-08-11 ③·어비스 08-01 과 계약 통일). 은동전 카드는 같은 캡처에서 판독 성공이라
+# 무변경(규칙 8).
+Assert-Case 'v13: htDifficulty 워커 기본값 (560,85,330,60)' `
+  ($workerSource -match "'htDifficulty'\) @\(560, 85, 330, 60\)") $true
+Assert-Case 'v13: htLootButton 워커 기본값 (388,470,130,102)' `
+  ($workerSource -match "'htLootButton'\) @\(388, 470, 130, 102\)") $true
+Assert-Case 'v13: htLootButtonAlt 워커 기본값 (388,469,205,106)' `
+  ($workerSource -match "'htLootButtonAlt'\) @\(388, 469, 205, 106\)") $true
+foreach ($htCase in @(
+    @{ Key = 'htDifficulty';   E = '560,85,330,60';   Row = 102 }
+    @{ Key = 'htLootButton';   E = '388,470,130,102'; Row = 493 }
+    @{ Key = 'htLootButtonAlt'; E = '388,469,205,106'; Row = 493 })) {
+  $htRegion = $auditConfigJson.ocrRegions.($htCase.Key)
+  Assert-Case ('v13: config {0} = ({1})' -f $htCase.Key, $htCase.E) (($htRegion -join ',')) $htCase.E
+  $htTop = [int]$htRegion[1]; $htBottom = $htTop + [int]$htRegion[3]
+  Assert-Case ('v13: {0}이 네이티브 1908 글자 행 y{1}을 덮음' -f $htCase.Key, $htCase.Row) `
+    (($htTop -le $htCase.Row) -and ($htBottom -ge $htCase.Row)) $true
+}
+Assert-Case 'v13: 사냥터 난이도 미탐색은 경고 진행이 아니라 정지 (오난이도 판 방지)' `
+  (($workerSource -match "글자를 찾지 못했습니다 \(이 사냥터에 없는 난이도이거나 화면 판독 실패\)[\s\S]{0,200}?exit 4") -and
+   ($workerSource -notmatch '이 사냥터에 없는 난이도일 수 있음')) $true
+Assert-Case 'v13: 은동전 카드 영역은 무변경 (관측된 것만 수정 - 규칙 8)' `
+  (($auditConfigJson.ocrRegions.htCardButton -join ',')) '400,288,130,80'
 # v11 (2026-08-13 20:30 실사고): 네이티브 1908 창의 '발견한 전리품' 라벨이 ref (614~658,277)
 # - 구영역 상단 293을 16px 이탈해 전리품 화면 진행 클릭이 안 나가 결과 대기 정체.
 # 상단 265 확장 (하단 333·x 불변 - 구 범위가 신 범위의 부분집합이라 1272 회귀 면 0).

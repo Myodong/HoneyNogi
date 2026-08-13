@@ -449,10 +449,11 @@ if (Test-Path -LiteralPath $configPath) {
 #    (안 올리면 옛 config 의 좌표가 게이트를 통과해 이번 사고가 재발합니다.
 #     두 값이 어긋나면 빌드 스크립트가 실패하도록 검사합니다)
 # v8(난이도 알약)·v9(제목 상단)·v10(카드 버튼 4영역)·v11(전리품 라벨)·v12(어비스 입장
-# 버튼) 모두 미배포(공개 배포는 7). 버전을 나눈 이유: 각 단계의 실기 PC에 직전 버전
-# config가 이미 설치돼 있어, 같은 번호를 유지하면 GUI 이전 게이트(사용자 버전 >= 기본
-# 버전이면 이전 안 함)를 통과하지 못해 구 영역이 남는다 (교차 리뷰 지적 - v9 이후 동일 사유).
-$coordsVersionCurrent = 12
+# 버튼)·v13(사냥터 난이도·더블 루팅) 모두 미배포(공개 배포는 7). 버전을 나눈 이유: 각
+# 단계의 실기 PC에 직전 버전 config가 이미 설치돼 있어, 같은 번호를 유지하면 GUI 이전
+# 게이트(사용자 버전 >= 기본 버전이면 이전 안 함)를 통과하지 못해 구 영역이 남는다
+# (교차 리뷰 지적 - v9 이후 동일 사유).
+$coordsVersionCurrent = 13
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -1271,7 +1272,11 @@ $htDoubleLoot   = Get-ConfigBoolean $config @('huntingGround', 'doubleLoot') $fa
 $htLootFallback = Get-ConfigBoolean $config @('huntingGround', 'continueSweepOnly') $false
 $htMatching     = [string](Get-ConfigValue $config @('huntingGround', 'matching') '파티찾기')
 # 사냥터 첫 화면의 영역/좌표 (2026-07-15 창백한 산 화면 실측 - 모든 사냥터 공통 배치)
-$rgHtDifficulty = @(Get-ConfigValue $config @('ocrRegions', 'htDifficulty') @(560, 100, 330, 45))  # 난이도 알약 (상단 중앙, 매우 어려움 3개 배치까지 커버)
+# 난이도 알약 (상단 중앙, 매우 어려움 3개 배치까지 커버). 상단 100→85 (2026-08-13 23:31
+# 실사고, coordsVersion 13): 네이티브 1908 창은 알약 글자가 ref y102(글자 상단 ~95)에 와
+# 상단 100에 잘려 3배율 전부 탐색 실패 → 오난이도 판. 새 대역(85~100)은 맵 배경뿐
+# (제목 '창백한 산'은 x40~200이라 x560 시작인 이 영역과 무관). 하단 145 유지.
+$rgHtDifficulty = @(Get-ConfigValue $config @('ocrRegions', 'htDifficulty') @(560, 85, 330, 60))
 # 임무 카드 버튼: 카드의 설명 줄 수에 따라 버튼 위치가 달라집니다 (2026-07-18 실측:
 # 1줄 카드 = y292 / 2줄 카드 = y322). 두 위치를 모두 덮는 세로 확장 영역을 씁니다.
 # (이 x 구간(388~530)에는 버튼 외 다른 글자가 없어 넓혀도 안전 - 실측 확인)
@@ -1280,8 +1285,12 @@ $rgHtCardButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'htCardButtonAlt'
 $rgHtEnterBtn   = @(Get-ConfigValue $config @('ocrRegions', 'htEnterButton') @(930, 632, 230, 50)) # 하단 입장 버튼 글자 (첫 화면 감지용 - 첫 진입 '입장하기' / 새 임무 선택 복귀 후 '임무 시작')
 $ptHtCardButton = @(463, 330)      # 클릭 지점: 1줄(버튼 292~335)/2줄(322~364) 두 배치 모두 버튼 안 (실측)
 # 더블 루팅 카드: 임무 카드 줄 수에 따라 같이 내려갑니다 (1줄 = y494 / 2줄 = y524 실측)
-$rgHtLootButton = @(Get-ConfigValue $config @('ocrRegions', 'htLootButton') @(388, 490, 130, 82))
-$rgHtLootButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'htLootButtonAlt') @(388, 489, 205, 86)) # 보조: 넓은 영역
+# 상단 -20 (2026-08-13 23:32 실사고, coordsVersion 13): 네이티브 1908 창은 '도전' 글자가
+# ref y493(글자 상단 ~485)에 와 상단 490/489에 잘려 '(판독 없음)' → 더블 루팅 설정 실패
+# (소모량 교차검증이 정정해 결과는 정상이었지만 카드 확인은 못 함). 하단 572/575 유지.
+# 새 대역(469~490)은 카드 여백 - 설명문 '도전에 성공하면…'은 ref y≈427 + x<388 이중 배제.
+$rgHtLootButton = @(Get-ConfigValue $config @('ocrRegions', 'htLootButton') @(388, 470, 130, 102))
+$rgHtLootButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'htLootButtonAlt') @(388, 469, 205, 106)) # 보조: 넓은 영역
 $ptHtLootButton = @(452, 530)      # 클릭 지점: 두 배치(494~537 / 524~568) 모두 버튼 안 (실측)
 # 결과 화면 (2026-07-17 실측): 던전(나가기/다시 하기)과 달리 '나가기/머무르기/새 임무 선택'
 # 3버튼 구성이라 반복 재시작 버튼이 다릅니다 - '새 임무 선택'을 눌러야 첫 화면으로 돌아갑니다.
@@ -7875,8 +7884,11 @@ function Invoke-HuntingGroundCycle {
   if (-not $insideAlready) {
 
   # 1. 난이도 클릭 (화면 상단 중앙의 알약: 일반/어려움, 일부 사냥터는 매우 어려움도 있음).
-  #    '매우 어려움'은 두 단어로 읽히므로 앞 2글자('매우')로 찾습니다. 해당 사냥터에
-  #    없는 난이도를 선택했으면 글자를 못 찾고 현재 난이도로 그대로 진행합니다.
+  #    '매우 어려움'은 두 단어로 읽히므로 앞 2글자('매우')로 찾습니다.
+  #    글자를 못 찾으면 **정지합니다** (2026-08-13 23:31 실사고: 네이티브 1908에서 알약
+  #    글자가 판독 영역 상단에 잘려 탐색 실패 → 기존 '현재 난이도로 진행' 계약이 실제로
+  #    어려움 요청을 일반 판으로 돌렸음 - 사용자 확인). 미지원 난이도와 판독 실패는
+  #    구분할 수 없으므로 둘 다 정지가 안전합니다 (던전 2026-08-11 ③·어비스 08-01 과 통일).
   $difficultyKey = $htDifficulty -replace '\s', ''
   $difficultySearch = $difficultyKey.Substring(0, [Math]::Min(2, $difficultyKey.Length))
   $difficultyPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgHtDifficulty[0] -ReferenceY $rgHtDifficulty[1] `
@@ -7920,7 +7932,8 @@ function Invoke-HuntingGroundCycle {
       exit 4
     }
   } else {
-    Write-RunLog "[경고] 난이도 '$htDifficulty' 글자를 찾지 못했습니다 (이 사냥터에 없는 난이도일 수 있음) - 현재 선택된 난이도로 진행합니다"
+    Write-RunLog "[완료] 난이도 '$htDifficulty' 글자를 찾지 못했습니다 (이 사냥터에 없는 난이도이거나 화면 판독 실패) - 오난이도 판 방지를 위해 정지합니다. 난이도 설정과 게임 화면을 확인해 주세요."
+    exit 4
   }
 
   # 2. 은동전(사냥 임무)/더블 루팅 카드 설정 - 소탕 10개, 더블 루팅 +10개(합 20개).

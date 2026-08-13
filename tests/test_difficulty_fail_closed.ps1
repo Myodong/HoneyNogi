@@ -29,9 +29,13 @@ Assert-Case '사냥터: 확인 결과를 버리지 않음 (Out-Null 제거)' `
   ([bool]($workerRaw -match 'Confirm-DifficultySelected -Game \$Game -ClickPoint \$difficultyPoint -Label \$htDifficulty \| Out-Null')) 'False'
 Assert-Case '사냥터: 확인 실패 시 같은 화면 한정 1회 정정 후 최종 정지' `
   ([bool]($workerRaw -match "(?s)if \(-not \`$htDiffConfirmed\) \{\s*\r?\n\s*Write-RunLog `"\[완료\] 난이도 '\`$htDifficulty' 선택을 확인하지 못했습니다[^`"]*정지합니다`"\s*\r?\n\s*exit 4")) 'True'
-# 글자 미발견은 기존 설계(이 사냥터에 없는 난이도) 유지 - fail-closed 로 바꾸지 않음 (규칙 8)
-Assert-Case '사냥터: 글자 미발견은 경고 진행 유지 (기존 설계 보존)' `
-  ([bool]($workerRaw -match "\[경고\] 난이도 '\`$htDifficulty' 글자를 찾지 못했습니다 \(이 사냥터에 없는 난이도일 수 있음\)")) 'True'
+# 글자 미발견도 정지로 격상 (2026-08-13 23:31 실사고 - '경고 후 현재 난이도로 진행' 계약이
+# 네이티브 1908 판독 실패와 만나 **어려움 요청을 일반 판으로** 돌렸음(사용자 확인).
+# 미지원 난이도와 판독 실패는 구분할 수 없어 둘 다 정지가 안전 - 던전·어비스와 계약 통일)
+Assert-Case '사냥터: 글자 미발견도 fail-closed 정지 (오난이도 판 방지)' `
+  ([bool]($workerRaw -match "(?s)\[완료\] 난이도 '\`$htDifficulty' 글자를 찾지 못했습니다[^`"]*정지합니다[^`"]*`"\s*\r?\n\s*exit 4")) 'True'
+Assert-Case '사냥터: 옛 경고 진행 문구가 남아 있지 않음' `
+  ([bool]($workerRaw -match '이 사냥터에 없는 난이도일 수 있음')) 'False'
 
 # ── 던전 선택 화면 ──
 Assert-Case '던전 선택: 생략 재전송 루프 (진입 버튼 잔존일 때만)' `
