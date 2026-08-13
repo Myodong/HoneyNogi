@@ -61,6 +61,11 @@ $idCases = @(
   @{ N = '키아 오독(기아, 실기)'; T = '기아2츰1구역'; E = '키아던전' }
   @{ N = '룬다 오독(실다, 실기 08-12)'; T = '실다2층3구역'; E = '룬다' }
   @{ N = '실다+오드 다중 매칭 불명'; T = '실다오드'; E = '' }
+  # v9 (2026-08-13 네이티브 1908 실측 - 제목 영역 상단 확장 스윕에서 관측된 이형 등록)
+  @{ N = '페카 오독(메카고분, 네이티브 1908 실측 3회)'; T = '메카고분0°°=='; E = '페카고분' }
+  @{ N = '페카 오독(涎분 뭉개짐, 실측)'; T = '〈페,涎분2층1구역'; E = '페카고분' }
+  @{ N = '메카 단독은 미등록(관측 전부 메카고분 형태 - 확장 안 함)'; T = '메카'; E = '' }
+  @{ N = '페론 오독(페붙고분, 실측)'; T = '〈페붙고분1층1구역'; E = '페론고분' }
 )
 foreach ($case in $idCases) {
   Assert-Case "ID: $($case.N)" ([string](Get-DgDungeonIdFromTitle -TitleText $case.T)) $case.E
@@ -70,6 +75,7 @@ $savedNamePatterns = $dgNamePatterns
 $dgNamePatterns = $ddNamePatterns
 Assert-Case 'ID(심층): 마스 오독(파스, 실기 21:52)' ([string](Get-DgDungeonIdFromTitle -TitleText '파스던전')) '마스던전'
 Assert-Case 'ID(심층): 파스 + 층구역 제목' ([string](Get-DgDungeonIdFromTitle -TitleText '파스1층2구역')) '마스던전'
+Assert-Case 'ID(심층): 페카 涎분 뭉개짐 (01:41 실사고 원문)' ([string](Get-DgDungeonIdFromTitle -TitleText '표119涎분긬증2증3구역')) '페카고분'
 $dgNamePatterns = $savedNamePatterns
 
 # ── 1b. 선택 화면 제목 판정 (2026-07-25 실기: '페카 고분' 제목에 '던전'이 없어

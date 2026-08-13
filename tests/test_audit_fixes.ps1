@@ -501,11 +501,11 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,300}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8 = 난이도 알약 확장)' `
-  ($workerSource -match '\$coordsVersionCurrent = 8') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8 알약 + v9 제목 확장)' `
+  ($workerSource -match '\$coordsVersionCurrent = 9') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 8' ([int]$auditConfigJson.coordsVersion) 8
+Assert-Case 'config: coordsVersion 9' ([int]$auditConfigJson.coordsVersion) 9
 # v8 (2026-08-13 실사고): 네이티브 1908 창(모니터 100% + 물리 1908 리사이즈, 제목줄 31px)은
 # 선택 화면 알약 행이 y163 - 구영역(30,165,200,50)을 1px 차로 이탈해 3연속 정지.
 # 위로 20 확장. 두 실측 기하(1272 네이티브 y187 / 1908 네이티브 y163)를 모두 덮고,
@@ -520,6 +520,18 @@ Assert-Case 'v8: 네이티브 1908 알약(y163)을 덮음' (($dgDiffTop -le 163)
 Assert-Case 'v8: 네이티브 1272 알약(y187)을 덮음' (($dgDiffTop -le 187) -and ($dgDiffBottom -ge 187)) $true
 Assert-Case 'v8: 탭 행(y128)은 배제' ($dgDiffTop -gt 128) $true
 Assert-Case 'v8: 층 패널 라벨(y232)은 배제' ($dgDiffBottom -lt 232) $true
+# v9 (2026-08-13 11:53 실사고): 네이티브 1908 창의 제목 글자 상단이 ref 42(사용자 PC)~44.6
+# (타 PC 5장 실측) - 구영역 상단 45가 구역 숫자 윗부분을 잘라 '2층 2구역' 꼬리가 전 단에서
+# 사망. 상단 34로 확장(하단 100 유지). 제목줄 밴드(DWM 스트레치 하단 ref 31.3)는 계속 배제.
+Assert-Case 'v9: dgTitle 워커 기본값 (30,34,250,66)' `
+  ($workerSource -match "\`$rgDgTitle\s+=\s+@\(Get-ConfigValue \`$config @\('ocrRegions', 'dgTitle'\) @\(30, 34, 250, 66\)\)") $true
+$dgTitleRegion = $auditConfigJson.ocrRegions.dgTitle
+Assert-Case 'config: dgTitle 영역이 워커 기본값과 일치' (($dgTitleRegion -join ',')) '30,34,250,66'
+$dgTitleTop = [int]$auditConfigJson.ocrRegions.dgTitle[1]
+$dgTitleBottom = $dgTitleTop + [int]$auditConfigJson.ocrRegions.dgTitle[3]
+Assert-Case 'v9: 네이티브 1908 제목 글자 상단(y42)을 덮음' ($dgTitleTop -le 42) $true
+Assert-Case 'v9: 창 제목줄 밴드(y31)는 배제' ($dgTitleTop -gt 31) $true
+Assert-Case 'v9: 하단 경계 100 유지 (아래 요소 오탐 면 불변)' $dgTitleBottom 100
 # 판독 영역은 '광고 없음(어비스 y387)' 과 '광고 있음(y531)' 을 모두 덮어야 합니다.
 # 실측: 광고 없을 때 y387(2026-07-16 옛 ptAbyssMenu) / 광고 있을 때 y531(2026-08-08).
 $abyssTop = [int]$auditConfigJson.ocrRegions.abyssMenu[1]

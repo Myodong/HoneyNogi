@@ -105,10 +105,18 @@ function Get-CaptureRegionText {
 # 워커 Get-GameRegionOcrText 를 캡처 판독으로 대체 - **실제 Read-DgTitleText 를 그대로 실행**해
 # 사다리 재구현 사본이 아니라 배포될 함수의 영역/배율/채택 순서를 검증합니다 (교차 리뷰 반영:
 # 사본 사다리는 워커의 -Scale 배선이 고정값으로 퇴행해도 통과해 버림)
-$script:binReadCount = 0   # 이진화 판독 호출 계수 (게이트 계약 검증용)
+$script:binReadCount = 0      # 이진화 판독 호출 계수 (게이트 계약 검증용)
+$script:forceTitleBlank = $false   # 일반(비이진화) '제목 영역' 판독만 강제 실패시키는 스위치
 function Get-GameRegionOcrText {
   param($Game, [int]$ReferenceX, [int]$ReferenceY, [int]$RegionWidth, [int]$RegionHeight, [int]$Scale, $Engine, [switch]$BinaryWhiteText)
   if ($BinaryWhiteText) { $script:binReadCount++ }
+  # 이진화-단 동적 가드용: 제목 영역(좁/넓 모두 원점이 rgDgTitle)의 비이진화 판독만 비웁니다.
+  # 진입 버튼 판독(게이트)은 실제 OCR 유지 - 전부 비우면 '입장하기' 게이트가 닫혀
+  # 이진화 단 자체가 실행되지 않습니다 (교차 리뷰 지적).
+  if ($script:forceTitleBlank -and -not $BinaryWhiteText -and
+      $ReferenceX -eq $rgDgTitle[0] -and $ReferenceY -eq $rgDgTitle[1]) {
+    return ''
+  }
   return (Get-CaptureRegionText -RefX $ReferenceX -RefY $ReferenceY -RefW $RegionWidth -RefH $RegionHeight -Scale $Scale -Binary ([bool]$BinaryWhiteText))
 }
 
@@ -157,9 +165,13 @@ if (-not (Test-Path -LiteralPath $deepCapturePath)) {
   }
 }
 
-# ── 2026-08-13 02시 실사고 캡처 (제목이 일반 판독 **전 배율(s2~s6)** 사망 - 사다리 한계):
-#    이진화 최종 단(임계 175)이 유일한 생환 경로. binS5 = '페,江분심증2증2구역' (2-2 매치 +
-#    심층 표식 통과). 이 캡처가 이진화 단의 존재 이유다 (단을 빼면 아래 단언이 실패).
+# ── 2026-08-13 02시 실사고 캡처 (당시: 제목이 일반 판독 전 배율 사망 - 이진화 단이 유일한
+#    생환 경로였음). v9 제목 영역 상단 확장(45→34) 후에는 **일반 단이 곧장 살린다**
+#    ('페카고분심층2층2구역' - 상단 45가 구역 숫자 윗부분을 잘라 온 것이 전 배율 사망의
+#    기여 원인이었다는 방증). 그래서 이 캡처로 두 계약을 나눠 고정한다:
+#    ③-1 새 영역에서 일반 사다리가 살림 + 조기 종료라 이진화 비용 0회
+#    ③-2 일반 판독 전멸 상황(제목 영역 비이진화 판독 강제 '')에서 이진화 단이 홀로 생환 -
+#        '입장하기' 게이트와 이진화 배선의 동적 가드 (단을 빼면 이 단언이 실패)
 $binCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_제목전배율사망_1908창_심층옵션.png'
 if (-not (Test-Path -LiteralPath $binCapturePath)) {
   "SKIP 전배율 사망 캡처가 없어 이진화 단 재현을 건너뜁니다: $binCapturePath"
@@ -168,12 +180,24 @@ if (-not (Test-Path -LiteralPath $binCapturePath)) {
   try {
     $script:binReadCount = 0
     $binLadderText = Read-DgTitleText -Game $null
-    "정보(이진화): 사다리 결과='$binLadderText' (실측 당시 binS5 '페,江분심증2증2구역')"
-    Assert-Case '전배율 사망 캡처: 이진화 단이 구역을 생환시킴' ($binLadderText.Contains('구역')) $true
+    "정보(이진화 ③-1): 사다리 결과='$binLadderText' (구영역 실측 당시 binS5 '페,江분심증2증2구역')"
+    Assert-Case '전배율 사망 캡처: v9 영역에서 일반 사다리가 구역을 생환시킴' ($binLadderText.Contains('구역')) $true
     Assert-Case '전배율 사망 캡처: 화면 스테이지 2-2 매치' `
       (Test-CustomTitleStageMatch -TitleText $binLadderText -Stage '2-2') 'match'
-    # 게이트가 캡처의 실제 진입 버튼('Space입장하기' 실측)을 읽고 통과 → 이진화 s5 1회로 생환
-    Assert-Case '전배율 사망 캡처: 이진화 판독 1회로 생환 (게이트 통과 + s5 우선 순서)' $script:binReadCount 1
+    Assert-Case '전배율 사망 캡처: 일반 단 채택 시 이진화 비용 0회 (조기 종료 계약)' $script:binReadCount 0
+    # ③-2 강제 전멸 → 이진화 단독 생환
+    $script:forceTitleBlank = $true
+    try {
+      $script:binReadCount = 0
+      $forcedLadderText = Read-DgTitleText -Game $null
+      "정보(이진화 ③-2): 강제 전멸 사다리 결과='$forcedLadderText' (binReads=$script:binReadCount)"
+      Assert-Case '강제 전멸: 이진화 단이 구역을 생환시킴 (단 제거 시 실패)' ($forcedLadderText.Contains('구역')) $true
+      Assert-Case '강제 전멸: 화면 스테이지 2-2 매치' `
+        (Test-CustomTitleStageMatch -TitleText $forcedLadderText -Stage '2-2') 'match'
+      Assert-Case '강제 전멸: 이진화 판독이 실제로 발생 (게이트 통과 배선)' ($script:binReadCount -ge 1) $true
+    } finally {
+      $script:forceTitleBlank = $false
+    }
   } finally {
     $sourceBitmap.Dispose()
   }
@@ -250,6 +274,39 @@ if (-not (Test-Path -LiteralPath $pillCapturePath)) {
         Assert-Case '알약 이탈 캡처: 채택 x가 알약 위 (127±10)' ([Math]::Abs([int]$newRegionPick.X - 127) -le 10) $true
         Assert-Case '알약 이탈 캡처: 채택 y가 알약 위 (163±8)' ([Math]::Abs([int]$newRegionPick.Y - 163) -le 8) $true
       }
+    } finally {
+      $sourceBitmap.Dispose()
+    }
+  }
+}
+
+# ── 2026-08-13 11:53 실사고 캡처 (네이티브 1908 옵션 화면 - 구역 2-2 전환이 실제 성공했는데
+#    구영역(상단 45)이 크게 그려지는 구역 숫자 윗부분(글자 상단 ref 42)을 잘라 확인 8회 전멸
+#    → fail-closed 정지). v9 영역(상단 34)의 존재 이유 - 영역을 되돌리면 아래 단언이 실패.
+$tailCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_제목꼬리소실_네이티브1908_옵션2층2구역.png'
+if (-not (Test-Path -LiteralPath $tailCapturePath)) {
+  "SKIP 제목 꼬리 소실 캡처가 없어 다섯 번째 재현을 건너뜁니다: $tailCapturePath"
+} else {
+  foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-DgDungeonIdFromTitle')) {
+    Invoke-Expression $definition
+  }
+  $patternsAssign = $sourceAst.FindAll({
+      param($node)
+      ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+      ($node.Left.Extent.Text -eq '$dgNamePatterns')
+    }, $true) | Select-Object -First 1
+  if (-not $patternsAssign) { 'FAIL 본체에서 $dgNamePatterns 정의를 찾지 못했습니다'; $fails++ }
+  else {
+    Invoke-Expression $patternsAssign.Extent.Text
+    $sourceBitmap = [System.Drawing.Bitmap]::FromFile($tailCapturePath)
+    try {
+      $tailLadderText = Read-DgTitleText -Game $null
+      "정보(꼬리 소실): 사다리 결과='$tailLadderText' (구영역 실측 당시 전 단 '메카고분' - 구역 없음)"
+      Assert-Case '꼬리 소실 캡처: v9 영역에서 구역 꼬리 생환 (구영역은 8회 전멸)' ($tailLadderText.Contains('구역')) $true
+      Assert-Case '꼬리 소실 캡처: 화면 스테이지 2-2 매치 (전환 확인 통과)' `
+        (Test-CustomTitleStageMatch -TitleText $tailLadderText -Stage '2-2') 'match'
+      Assert-Case '꼬리 소실 캡처: 던전 ID 페카고분 확정 (실측 이형 등록 포함)' `
+        ([string](Get-DgDungeonIdFromTitle -TitleText $tailLadderText)) '페카고분'
     } finally {
       $sourceBitmap.Dispose()
     }
