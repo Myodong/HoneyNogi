@@ -501,11 +501,42 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,300}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8 알약 + v9 제목 + v10 카드 + v11 전리품)' `
-  ($workerSource -match '\$coordsVersionCurrent = 11') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v12 - 네이티브 1908 계열)' `
+  ($workerSource -match '\$coordsVersionCurrent = 12') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 11' ([int]$auditConfigJson.coordsVersion) 11
+Assert-Case 'config: coordsVersion 12' ([int]$auditConfigJson.coordsVersion) 12
+# v12 (2026-08-13 21:35·21:38 실사고 ×2): 네이티브 1908에서 어비스 상세 하단 버튼 '이동하기'가
+# 우측 경계(1080)에 걸려 '하7'로 반토막 - 이동 클릭 루프 조기 탈출 + 도착 대기 180초 헛대기.
+# 오른쪽 +80 (왼쪽/상하 불변 - 구 범위가 신 범위의 부분집합).
+Assert-Case 'v12: enterButton 워커 기본값 (880,630,280,48)' `
+  ($workerSource -match "'enterButton'\) @\(880, 630, 280, 48\)") $true
+$enterBtnRegion = $auditConfigJson.ocrRegions.enterButton
+Assert-Case 'config: enterButton 영역이 워커 기본값과 일치' (($enterBtnRegion -join ',')) '880,630,280,48'
+# 이동 클릭 루프 정직성 (2026-08-09 계약 배선 - 실제 전송된 클릭만 계수 + 0회면 도착 대기 금지)
+Assert-Case 'v12: 이동 클릭 루프 2곳이 lastClickPerformed 검사' `
+  ([regex]::Matches($workerSource, "이동 클릭을 건너뜀 \(커서 확인 실패\)").Count) 2
+Assert-Case 'v12: 실제 클릭 0회면 도착 대기 진입 금지 (throw) 2곳' `
+  ([regex]::Matches($workerSource, "'이동하기' 클릭을 한 번도 보내지 못했습니다").Count) 2
+# 지역 제한 거부 토스트 (2026-08-13 21:51 진단 클릭 실측: '일반 필드에서만 입장 신청할 수
+# 있습니다.' - 특수 지역이면 클릭을 받고도 거부만 하고 ~2초 표시. 같은 위치 재시작도
+# 재실패 확정이라 조건부 정지(코드 4)로 사용자 조치 안내)
+Assert-Case 'v12: 거부 토스트 판정 함수 존재 (조각 필드에서만/일반+신청)' `
+  (($workerSource -match "function Test-AbyssFieldOnlyToast") -and
+   ($workerSource -match "Contains\('필드에서만'\)")) $true
+Assert-Case 'v12: 이동 클릭 직후 토스트 확인 → 조건부 정지 2곳 (혼자/함께)' `
+  ([regex]::Matches($workerSource, "게임이 입장 신청을 거부했습니다").Count) 2
+# '고스트 등록' 안내 (2026-08-13 22:18 실측 - 신규 화면, 사용자 확정: '나중에'만 클릭):
+# '고스트'+'나중에' 이중 게이트, '나중에' 단어 자기앵커, 초록 버튼 좌표 미보유.
+# 배선 2곳: 시작 복구 이벤트 ladder + 어비스 ESC-복귀 루프(X 순환보다 앞, 즉시).
+Assert-Case '고스트: 판정 함수 존재 (이중 게이트)' `
+  (($workerSource -match 'function Close-GhostRegisterPrompt') -and
+   ($workerSource -match "Contains\('고스트'\)") -and
+   ($workerSource -match "-eq '나중에'")) $true
+Assert-Case '고스트: 배선 2곳 (시작 복구 ladder + 어비스 복귀 루프)' `
+  ([regex]::Matches($workerSource, 'Close-GhostRegisterPrompt -Game \$Game').Count) 2
+Assert-Case '고스트: 클릭은 자기앵커만 (지금 고스트 등록 좌표 미보유)' `
+  ($workerSource -notmatch "'지금 고스트 등록'[^\r\n]*@\(") $true
 # v11 (2026-08-13 20:30 실사고): 네이티브 1908 창의 '발견한 전리품' 라벨이 ref (614~658,277)
 # - 구영역 상단 293을 16px 이탈해 전리품 화면 진행 클릭이 안 나가 결과 대기 정체.
 # 상단 265 확장 (하단 333·x 불변 - 구 범위가 신 범위의 부분집합이라 1272 회귀 면 0).
@@ -523,6 +554,12 @@ Assert-Case 'v11: 구 하단 경계(333) 유지 (1272 커버 불변)' $lootRevea
 # 리터럴 (600,85,320,60) = 네이티브 y103·1272 y121 모두 커버 (85≤103,121≤145 - 산술 자명)
 Assert-Case '옵션 알약: 워커 하드코딩 (600,85,320,60)' `
   ($workerSource -match '\$rgDgOptDifficulty = @\(600, 85, 320, 60\)') $true
+# 어비스 ESC 자기앵커 (2026-08-13 21:25 실사고): 고정점 (1083,89)가 네이티브 1908에서 버튼
+# 밖(실측 (1102,74)) - 17회 무반응. 읽힌 'ESC' 글자 위치 클릭 + 고정점 폴백(1272 유지).
+Assert-Case '어비스 ESC: 글자 탐색 클릭 배선 (rgHomeEndEsc + ESC)' `
+  ($workerSource -match "Find-GameTextPoint[^\r\n]*\`$rgHomeEndEsc\[0\][\s\S]{0,220}?-SearchText 'ESC' -ExactText 'ESC'") $true
+Assert-Case '어비스 ESC: 미발견 시 고정점 폴백 유지' `
+  ($workerSource -match "if \(\`$escPoint\) \{[\s\S]{0,120}?Click-ScreenPoint[\s\S]{0,200}?Click-GamePoint[^\r\n]*ptEscButton") $true
 # v8 (2026-08-13 실사고): 네이티브 1908 창(모니터 100% + 물리 1908 리사이즈, 제목줄 31px)은
 # 선택 화면 알약 행이 y163 - 구영역(30,165,200,50)을 1px 차로 이탈해 3연속 정지.
 # 위로 20 확장. 두 실측 기하(1272 네이티브 y187 / 1908 네이티브 y163)를 모두 덮고,

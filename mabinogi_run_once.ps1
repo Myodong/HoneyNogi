@@ -448,11 +448,11 @@ if (Test-Path -LiteralPath $configPath) {
 #    아래 버전과 config.json 의 coordsVersion 을 반드시 함께 +1 하세요.
 #    (안 올리면 옛 config 의 좌표가 게이트를 통과해 이번 사고가 재발합니다.
 #     두 값이 어긋나면 빌드 스크립트가 실패하도록 검사합니다)
-# v8(난이도 알약)·v9(제목 상단)·v10(카드 버튼 4영역)·v11(전리품 라벨) 모두 미배포(공개
-# 배포는 7). 버전을 나눈 이유: 각 단계의 실기 PC에 직전 버전 config가 이미 설치돼 있어,
-# 같은 번호를 유지하면 GUI 이전 게이트(사용자 버전 >= 기본 버전이면 이전 안 함)를 통과하지
-# 못해 구 영역이 남는다 (교차 리뷰 지적 - v9 이후 전부 같은 사유).
-$coordsVersionCurrent = 11
+# v8(난이도 알약)·v9(제목 상단)·v10(카드 버튼 4영역)·v11(전리품 라벨)·v12(어비스 입장
+# 버튼) 모두 미배포(공개 배포는 7). 버전을 나눈 이유: 각 단계의 실기 PC에 직전 버전
+# config가 이미 설치돼 있어, 같은 번호를 유지하면 GUI 이전 게이트(사용자 버전 >= 기본
+# 버전이면 이전 안 함)를 통과하지 못해 구 영역이 남는다 (교차 리뷰 지적 - v9 이후 동일 사유).
+$coordsVersionCurrent = 12
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -597,7 +597,11 @@ $rgClearExit   = @(Get-ConfigValue $config @('ocrRegions', 'clearAndExitText') @
 # 두 기하 모두 수용하고 위 행 '160점 이상 S등급'(ref ~253)은 계속 배제 (top 300/280/265/250
 # 스윕 실측). 하단 465 유지.
 $rgClearScore  = @(185, 265, 230, 200)
-$rgEnterButton = @(Get-ConfigValue $config @('ocrRegions', 'enterButton') @(880, 630, 200, 48))
+# 오른쪽 +80 (2026-08-13 21:35·21:38 실사고 ×2, coordsVersion 12): 네이티브 1908 창은
+# '이동하기' 텍스트가 우측 경계(1080)에 걸려 '하7'/'하기'로 반토막 판독 - 이동 클릭 루프가
+# 판독 불안정으로 조기 탈출해 도착 대기 180초 헛대기. 1272에서 새로 들어오는 x1080..1160은
+# 같은 버튼의 연장/빈 공간이라 매처 오탐 면 불변 (왼쪽/상하 불변 - 구 범위가 부분집합).
+$rgEnterButton = @(Get-ConfigValue $config @('ocrRegions', 'enterButton') @(880, 630, 280, 48))
 $rgHomeEndEsc  = @(Get-ConfigValue $config @('ocrRegions', 'homeEndEsc') @(875, 60, 265, 55))
 # ESC 메뉴의 **타일 그리드 전체**를 봅니다 (2026-08-08 coordsVersion 7).
 # 예전에는 '필드 보스/어비스/망령의 탑/레이드' 한 줄만 보는 좁은 영역(850,330,350,85)이라,
@@ -3499,6 +3503,54 @@ function Write-DgStageDiagnostics {
   }
 }
 
+function Test-AbyssFieldOnlyToast {
+  param([System.Diagnostics.Process]$Game)
+
+  # '일반 필드에서만 입장 신청할 수 있습니다.' 거부 토스트 감지 (2026-08-13 21:51 실측 -
+  # 캐릭터가 던전 앞 등 특수 지역에 있으면 게임이 '이동하기' 클릭을 받고도 이 토스트만
+  # 띄우고 거부, ~2초 표시 후 소멸. 진단 클릭으로 확정: 클릭 3회 시도 전부 정상 전송됐는데
+  # 토스트가 짧아 워커도 사람도 못 봄 → 도착 대기 180초 헛대기 ×3회.
+  # 실측 단어: '일반(523,78) 필드에서만(574,78) 입장(626,78) 신청할(663,78) …').
+  # 클릭 직후 + 상단 토스트 영역이라는 시간/공간 게이트가 있어 조각 조합으로 충분 (교차 리뷰).
+  $toastText = (Get-GameRegionOcrText -Game $Game -ReferenceX 450 -ReferenceY 50 `
+    -RegionWidth 400 -RegionHeight 55 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  if ($toastText.Contains('필드에서만')) { return $true }
+  return ($toastText.Contains('일반') -and $toastText.Contains('신청'))
+}
+
+function Close-GhostRegisterPrompt {
+  param([System.Diagnostics.Process]$Game, [string]$LogPrefix = '[안내] ')
+
+  # '고스트 등록' 안내 화면 처리 (2026-08-13 22:18 실측 - 게임 신규 화면): 고양이 상인 NPC +
+  # 하단 '지금 고스트 등록'(초록)/'나중에'(회색) 2버튼. 어비스 클리어 후 필드 복귀 중 출현해
+  # ESC 복귀를 막았고, X 후보 순환·NPC 중앙 클릭으로는 닫히지 않음 (오류 정지 2회).
+  # 사용자 확정 지시: '지금 고스트 등록'은 누르면 안 되고 **'나중에'만** 클릭.
+  # 실측: '지금 고스트 등록' 단어들 ref (522..664, 652) / '나중에' 중심 (713,652).
+  # '고스트' 조각 AND 정확 단어 '나중에'가 함께 보일 때만 동작(오탐 게이트), '나중에' 단어
+  # 자기앵커 클릭 - 초록 버튼 좌표는 코드에 두지 않아 오클릭을 원천 배제합니다.
+  # 게이트 성립 시 클릭이 커서 확인으로 생략돼도 $true 반환 - 호출부가 X/중앙 폴백으로
+  # 내려가 이 화면을 헤집지 않게 하고, 다음 확인에서 재시도합니다 (교차 리뷰 조건).
+  $ghostWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX 500 -ReferenceY 620 `
+      -RegionWidth 280 -RegionHeight 70 -Scale 3 -Engine $ocrKoreanEngine)
+  $hasGhost = $false
+  $laterWord = $null
+  foreach ($word in $ghostWords) {
+    $wordText = [string]$word.Text
+    if ($wordText.Contains('고스트')) { $hasGhost = $true }
+    if ($wordText -eq '나중에') { $laterWord = $word }
+  }
+  if (-not ($hasGhost -and $laterWord)) { return $false }
+  Focus-Game -Game $Game
+  Click-GamePoint -Game $Game -ReferenceX ([int]$laterWord.X) -ReferenceY ([int]$laterWord.Y)
+  if ($script:lastClickPerformed) {
+    Write-RunLog "${LogPrefix}고스트 등록 안내 - '나중에' 클릭"
+  } else {
+    Write-RunLog "${LogPrefix}고스트 등록 안내 감지 - 커서 확인이 안 돼 클릭을 건너뜀 (다음 확인에서 재시도)"
+  }
+  Start-Sleep -Seconds 2
+  return $true
+}
+
 function Get-EnterButtonText {
   param([System.Diagnostics.Process]$Game)
 
@@ -4702,6 +4754,9 @@ function Clear-EventOverlay {
         Click-GamePoint -Game $Game -ReferenceX $ptNoticeBoardClose[0] -ReferenceY $ptNoticeBoardClose[1]
         Write-RunLog '[안내] 공지 보드 팝업 - 우상단 닫기(X) 클릭'
         Start-Sleep -Seconds 2
+      } elseif (Close-GhostRegisterPrompt -Game $Game) {
+        # '고스트 등록' 안내 (신규 화면 - 2026-08-13 실측): 함수가 '나중에' 클릭·로그·대기까지
+        # 처리. 아래 일반 폴백(중앙 클릭/X 순환)은 이 화면을 닫지 못함이 실측됨.
       } elseif (-not (Invoke-EventSkipOrConfirm -Game $Game)) {
         # 건너뛰기/확인 버튼이 둘 다 없는 화면. 처리 우선순위:
         # 1) 말풍선에 글자가 보이면 NPC 대화(알리사 도입 장면 등)로 보고 중앙 클릭으로 진행
@@ -8469,7 +8524,20 @@ function Return-ToAbyssSelection {
         continue
       }
       Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptEscButton[0] -ReferenceY $ptEscButton[1]
+      # ESC 버튼 자기앵커 (2026-08-13 21:25 실사고): 고정점 (1083,89)가 네이티브 1908에서
+      # 버튼 밖(실측 'ESC' 단어 중심 (1102,74) - 우상단 앵커라 위-오른쪽으로 이동) → 17회
+      # 클릭 무반응으로 시간 초과. HUD 글자는 같은 진단에서 매번 정확히 읽혔으므로 읽힌
+      # 'ESC' 글자 위치를 클릭하고, 못 찾을 때만 기존 고정점(1272 실측 동작) 폴백.
+      # 폴백을 유지하는 이유(토글과 다름): 빗나가도 오입장류 사고가 아니고 루프가 매 회전
+      # 화면을 재판정하는 안전 구조 (교차 리뷰 승인).
+      $escPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgHomeEndEsc[0] -ReferenceY $rgHomeEndEsc[1] `
+        -RegionWidth $rgHomeEndEsc[2] -RegionHeight $rgHomeEndEsc[3] -SearchText 'ESC' -ExactText 'ESC' `
+        -Scale 5 -Engine $ocrEnglishEngine
+      if ($escPoint) {
+        Click-ScreenPoint -X $escPoint.X -Y $escPoint.Y
+      } else {
+        Click-GamePoint -Game $Game -ReferenceX $ptEscButton[0] -ReferenceY $ptEscButton[1]
+      }
       Write-RunLog '[어비스] ESC 클릭'
       Start-Sleep -Seconds 2
       continue
@@ -8522,6 +8590,12 @@ function Return-ToAbyssSelection {
         }
       }
 
+      # 고스트 등록 안내 (신규 화면 - 2026-08-13 22:18 실측): X 후보로는 닫히지 않고
+      # '나중에'를 눌러야 함. 확정 판별(두 버튼 문구 게이트)이라 20초 대기 없이 즉시 처리.
+      if (Close-GhostRegisterPrompt -Game $Game -LogPrefix '[안내] 복귀 중 ') {
+        $unknownSince = $null
+        continue
+      }
       # 5.5) 알 수 없는 화면이 계속되면(오클릭으로 열린 우편함/전체 화면 UI 등 - 실측 2026-07-17)
       #      알려진 닫기(X) 위치를 순환 클릭해 원래 화면으로 복구를 시도합니다.
       #      단, 나가기 직후 화면 전환(페이드/로딩)도 몇 초간 '알 수 없음'으로 보이므로
@@ -11429,7 +11503,18 @@ try {
             $goneCount = 0
             Focus-Game -Game $game
             Click-GamePoint -Game $game -ReferenceX $ptEnter[0] -ReferenceY $ptEnter[1]
-            $moveClicked = $true
+            # 실제 전송된 클릭만 셉니다 (혼자하기 루프와 동일 계약 - 21:35·21:38 실사고)
+            if ($script:lastClickPerformed) {
+              $moveClicked = $true
+              # 클릭 직후 거부 토스트 확인 (혼자하기 루프와 동일 - Test-AbyssFieldOnlyToast)
+              Start-Sleep -Milliseconds 400
+              if (Test-AbyssFieldOnlyToast -Game $game) {
+                Write-RunLog "[완료] 게임이 입장 신청을 거부했습니다('일반 필드에서만 입장 신청 가능') - 캐릭터를 마을 등 일반 필드로 옮긴 뒤 다시 시작해 주세요."
+                exit 4
+              }
+            } else {
+              Write-RunLog '[어비스] 이동 클릭을 건너뜀 (커서 확인 실패) - 재시도'
+            }
             Start-Sleep -Milliseconds 1500
           } else {
             $goneCount++
@@ -11438,7 +11523,8 @@ try {
           }
         }
         if (-not $moveClicked) {
-          Write-RunLog '[경고] 이동하기 버튼을 클릭하지 못했습니다 - 화면 상태를 확인해 주세요'
+          # 실제 클릭 0회면 도착 대기에 들어가지 않고 즉시 중단 (혼자하기 루프와 동일 보강)
+          throw "'이동하기' 클릭을 한 번도 보내지 못했습니다 (커서 확인 실패/판독 불안정) - 도착 대기를 시작하지 않고 중단합니다."
         }
         # 도착하면 상세 화면이 다시 열립니다 (열리는 탭 상태가 다를 수 있어 어느 쪽 버튼이든 인정)
         Wait-ForScreen -Game $game -TimeoutSeconds $timeoutTravel -Description '던전 도착(상세 화면)' -Condition {
@@ -11630,7 +11716,22 @@ try {
           $goneCount = 0
           Focus-Game -Game $game
           Click-GamePoint -Game $game -ReferenceX $ptEnter[0] -ReferenceY $ptEnter[1]
-          $moveClicked = $true
+          # 실제로 전송된 클릭만 셉니다 (2026-08-13 21:35·21:38 실사고: 커서 확인 실패로
+          # 생략된 클릭까지 눌렀다고 세어, 실제 클릭 0회로 루프를 빠져나가 도착 대기 180초를
+          # 헛돌았음 - 2026-08-09 로그 정직성 계약을 이 루프에도 배선)
+          if ($script:lastClickPerformed) {
+            $moveClicked = $true
+            # 클릭 직후 거부 토스트 확인 (Test-AbyssFieldOnlyToast 주석 참고): 특수 지역이면
+            # 게임이 클릭을 받고도 거부만 하므로, 같은 위치의 자동 재시작도 재실패 확정 -
+            # 오류(재시도 소모)가 아니라 조건부 정지로 사용자 조치를 안내합니다 (교차 리뷰)
+            Start-Sleep -Milliseconds 400
+            if (Test-AbyssFieldOnlyToast -Game $game) {
+              Write-RunLog "[완료] 게임이 입장 신청을 거부했습니다('일반 필드에서만 입장 신청 가능') - 캐릭터를 마을 등 일반 필드로 옮긴 뒤 다시 시작해 주세요."
+              exit 4
+            }
+          } else {
+            Write-RunLog '[어비스] 이동 클릭을 건너뜀 (커서 확인 실패) - 재시도'
+          }
           Start-Sleep -Milliseconds 1500
         } else {
           $goneCount++
@@ -11639,7 +11740,9 @@ try {
         }
       }
       if (-not $moveClicked) {
-        Write-RunLog '[경고] 이동하기 버튼을 클릭하지 못했습니다 - 화면 상태를 확인해 주세요'
+        # 실제 클릭 0회면 도착 대기(180초)에 들어가지 않고 즉시 중단합니다 (교차 리뷰 보강 -
+        # 오류로 던져 자동 재시작 1회와 오류 세트를 남김)
+        throw "'이동하기' 클릭을 한 번도 보내지 못했습니다 (커서 확인 실패/판독 불안정) - 도착 대기를 시작하지 않고 중단합니다."
       }
       Wait-ForScreen -Game $game -TimeoutSeconds $timeoutTravel -Description '던전 도착(상세 화면의 입장하기 버튼)' -Condition {
         Test-DetailScreen -Game $game

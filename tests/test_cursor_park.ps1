@@ -294,8 +294,9 @@ $toggleBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @(
 $lifeCloseBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Close-LifeOpenWindows'))
 Assert-Case '로그: 생활 시작 정리도 실제 클릭일 때만 눌렀다고 기록' `
   ([bool]($lifeCloseBody -match '(?s)Invoke-LifeWindowCloseClick -Game \$Game.{0,600}?if \(\$script:lastClickPerformed\) \{')) 'True'
+# 3곳 = 생활 2 + 고스트 등록 안내('나중에' 클릭 생략 - 2026-08-13 신규 화면 처리)
 Assert-Case '로그: 생활 건너뜀도 사유를 남긴다' `
-  ([regex]::Matches($workerRaw, '커서 확인이 안 돼 .{0,20}클릭을 건너뜀').Count) 2
+  ([regex]::Matches($workerRaw, '커서 확인이 안 돼 .{0,20}클릭을 건너뜀').Count) 3
 Assert-Case '로그: 카드 토글도 실제 클릭일 때만 눌렀다고 기록' `
   ([bool]($toggleBody -match 'if \(\$script:lastClickPerformed\) \{[\s\S]{0,400}\$script:dgToggleClicked = \$true')) 'True'
 Assert-Case '로그: 토글 건너뜀도 사유를 남긴다' `
