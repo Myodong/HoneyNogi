@@ -443,8 +443,8 @@ Assert-Case 'GUI: Stop-LifeSlideNow -SkipUiRefresh 2곳(패널 갱신/종료)' `
   ([regex]::Matches($guiSource, 'Stop-LifeSlideNow -SkipUiRefresh').Count) 2
 Assert-Case 'GUI: 실행 시작 시 일반 Stop(스냅샷 오염 방지)' `
   ($guiSource -match 'if \(\$IsRunning -and \$script:lifeSlideActive\) \{ Stop-LifeSlideNow \}') $true
-Assert-Case 'GUI: 종료 타이머 정리 목록에 슬라이드 타이머 포함' `
-  ($guiSource -match '\$script:approvalTimer, \$script:lifeSlideTimer\)') $true
+Assert-Case 'GUI: 종료 타이머 정리 목록에 슬라이드 타이머 포함 (2026-08-13: 리사이즈 결과 타이머 추가)' `
+  ($guiSource -match '\$script:approvalTimer, \$script:lifeSlideTimer, \$script:timerResizeResult\)') $true
 Assert-Case 'GUI: 폼 Dispose 전 슬라이드 정리' `
   ($guiSource -match 'Stop-LifeSlideNow -SkipUiRefresh \} catch \{ \}\s+try \{ \$form\.Dispose\(\)') $true
 

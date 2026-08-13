@@ -55,12 +55,75 @@ Add-Type -Namespace Win32 -Name HotkeyPoll -MemberDefinition @'
 [DllImport("user32.dll")]
 public static extern short GetAsyncKeyState(int vKey);
 '@
+# 게임 창 물리 크기 추정용 API (권장 창 모드 메뉴의 현재 크기 체크 표시 - 2026-08-13):
+# 비 DPI 인식 GUI 의 GetWindowRect 는 가상(축소) 좌표를 주므로, 물리 데스크톱 해상도
+# (GetDeviceCaps DESKTOPHORZRES=118/VERTRES=117)와 가상 화면 크기의 비율로 환산합니다.
+Add-Type -Namespace Win32 -Name WindowProbe -MemberDefinition @'
+[StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+[DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+[DllImport("gdi32.dll")] public static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+'@
+
+function Get-RecommendedSizeMatch {
+  # 물리 창 크기가 권장 두 크기 중 어느 쪽인지 (순수 - 진리표 대상). 권장 창 모드 메뉴의
+  # 현재 크기 체크 표시용. 허용 오차 ±6px - 정상 상태는 정확히 일치(MoveWindow/워커
+  # nearest 정규화가 정확값을 씀)하고, 1280x720 같은 이웃 크기(폭 차 8px)를 권장 크기로
+  # 오표시하지 않는 경계입니다. 반환: '1272' | '1908' | ''(불일치/판독 실패).
+  param([int]$PhysicalWidth, [int]$PhysicalHeight)
+  if (([Math]::Abs($PhysicalWidth - 1272) -le 6) -and ([Math]::Abs($PhysicalHeight - 717) -le 6)) { return '1272' }
+  if (([Math]::Abs($PhysicalWidth - 1908) -le 6) -and ([Math]::Abs($PhysicalHeight - 1076) -le 6)) { return '1908' }
+  return ''
+}
+
+function Get-GameWindowPhysicalSize {
+  # 게임 창의 '물리 픽셀' 크기 추정 (메뉴 체크 표시용 - 실패하면 $null = 체크 없음, 무해).
+  # 다중 모니터에서 배율이 서로 다르면 주 모니터 비율 기준이라 부정확할 수 있는데, 그때도
+  # 체크가 안 보일 뿐 크기 적용 동작(헬퍼가 DPI 인식으로 별도 계산)에는 영향이 없습니다.
+  try {
+    $game = Get-Process -Name 'MabinogiMobile' -ErrorAction SilentlyContinue |
+      Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    if (-not $game) { return $null }
+    $rect = New-Object Win32.WindowProbe+RECT
+    if (-not [Win32.WindowProbe]::GetWindowRect($game.MainWindowHandle, [ref]$rect)) { return $null }
+    $desktopDc = [Win32.WindowProbe]::GetDC([IntPtr]::Zero)
+    try {
+      $physicalScreenW = [Win32.WindowProbe]::GetDeviceCaps($desktopDc, 118)
+    } finally { [void][Win32.WindowProbe]::ReleaseDC([IntPtr]::Zero, $desktopDc) }
+    $virtualScreenW = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
+    if ($virtualScreenW -le 0 -or $physicalScreenW -le 0) { return $null }
+    $dpiScale = $physicalScreenW / [double]$virtualScreenW
+    return @{
+      Width  = [int][Math]::Round(($rect.Right - $rect.Left) * $dpiScale)
+      Height = [int][Math]::Round(($rect.Bottom - $rect.Top) * $dpiScale)
+    }
+  } catch { return $null }
+}
 
 function Apply-RecommendedWindowSize {
-  # 게임 창을 '권장 크기'(화면에 들어가면 1908x1076, 아니면 1272x717)로 즉시 변경합니다.
+  # 게임 창을 권장 크기로 즉시 변경합니다. Width/Height 지정 시 그 크기(메뉴에서 사용자
+  # 선택 - 2026-08-13 시안 확정), 미지정 시 기존 자동 결정(화면에 들어가면 1908, 아니면 1272).
   # GUI 프로세스는 DPI 가상 좌표를 쓰고 워커는 실제 픽셀을 쓰므로, 좌표 불일치를 피하기 위해
   # DPI 인식 헬퍼 스크립트를 별도 프로세스로 실행합니다 (워커의 계산과 완전히 동일).
+  # 선택 크기가 모니터 작업 영역보다 크면(FHD에서 1908 등) 적용하지 않습니다 - 창이 잘리면
+  # 하단 버튼 인식이 깨져 무인 운용이 죽음(fail-closed, 사용자 확정). 헬퍼는 별도 프로세스라
+  # GUI 로그를 직접 못 쓰므로 결과 파일을 남기고 아래 결과 타이머가 읽어 안내합니다.
+  param([int]$Width = 0, [int]$Height = 0)
   $helper = Join-Path $scriptRoot 'resize_to_recommended.ps1'
+  # 요청별 새 결과 파일 (교차 리뷰: 고정 경로면 연속 클릭·GUI 재시작 시 이전 헬퍼의 늦은
+  # 결과를 새 타이머가 소비할 수 있음 - GUID 로 요청과 결과를 1:1 묶고, 타이머는 현재
+  # 경로만 읽으므로 낡은 결과는 자연히 무시됩니다. 임시 폴더의 고아 파일은 무해)
+  $script:resizeResultPath = Join-Path ([IO.Path]::GetTempPath()) ('honeynogi_resize_' + [guid]::NewGuid().ToString('N') + '.txt')
+  # 헬퍼 스크립트의 작은따옴표 문자열에 박히므로 경로의 ' 는 '' 로 이스케이프 (교차 리뷰 -
+  # 사용자 프로필 경로에 ' 가 있으면 헬퍼가 구문 오류로 통째로 죽음)
+  $resultPath = ([string]$script:resizeResultPath).Replace("'", "''")
+  Remove-Item -LiteralPath $script:resizeResultPath -ErrorAction SilentlyContinue
+  $sizeLine = if ($Width -gt 0 -and $Height -gt 0) {
+    "`$tw = $Width; `$th = $Height"
+  } else {
+    "if (`$ww -ge 2100 -and `$wh -ge 1150) { `$tw = 1908; `$th = 1076 } else { `$tw = 1272; `$th = 717 }"
+  }
   $lines = @(
     "`$ErrorActionPreference = 'SilentlyContinue'",
     "`$md = '[StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }' +",
@@ -68,26 +131,53 @@ function Apply-RecommendedWindowSize {
     " '[DllImport(`"user32.dll`")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int W, int H, bool bRepaint);' +",
     " '[DllImport(`"user32.dll`")] public static extern int GetSystemMetrics(int nIndex);' +",
     " '[DllImport(`"user32.dll`")] public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);' +",
+    " '[StructLayout(LayoutKind.Sequential)] public struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }' +",
+    " '[DllImport(`"user32.dll`")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);' +",
+    " '[DllImport(`"user32.dll`")] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);' +",
     " '[DllImport(`"user32.dll`")] public static extern bool SetProcessDPIAware();'",
     "Add-Type -Namespace RW -Name Win -MemberDefinition `$md",
     "[RW.Win]::SetProcessDPIAware() | Out-Null",
     "`$p = Get-Process -Name 'MabinogiMobile' -ErrorAction SilentlyContinue | Where-Object { `$_.MainWindowHandle -ne 0 } | Select-Object -First 1",
-    "if (-not `$p) { exit }",
-    "# 작업 영역(작업표시줄 제외) 기준 - 창이 작업표시줄과 겹치면 하단 감지/클릭이 막힘",
-    "`$wa = New-Object RW.Win+RECT",
-    "if ([RW.Win]::SystemParametersInfo(0x0030, 0, [ref]`$wa, 0)) { `$wx=`$wa.Left; `$wy=`$wa.Top; `$ww=`$wa.Right-`$wa.Left; `$wh=`$wa.Bottom-`$wa.Top }",
-    "else { `$wx=0; `$wy=0; `$ww=[RW.Win]::GetSystemMetrics(0); `$wh=[RW.Win]::GetSystemMetrics(1) }",
-    "if (`$ww -ge 2100 -and `$wh -ge 1150) { `$tw = 1908; `$th = 1076 } else { `$tw = 1272; `$th = 717 }",
+    "if (-not `$p) { Set-Content -LiteralPath '$resultPath' -Value 'no-game' -Encoding UTF8; exit }",
+    "# 작업 영역(작업표시줄 제외) - **게임 창이 있는 모니터** 기준 (교차 리뷰: 주 모니터",
+    "# 기준이면 보조 모니터의 1908 을 잘못 거부하거나 창을 주 모니터 쪽으로 끌어올 수 있음)",
+    "`$haveWork = `$false",
+    "`$mon = [RW.Win]::MonitorFromWindow(`$p.MainWindowHandle, 2)",
+    "`$mi = New-Object RW.Win+MONITORINFO",
+    "`$mi.cbSize = [Runtime.InteropServices.Marshal]::SizeOf(`$mi)",
+    "if (`$mon -ne [IntPtr]::Zero -and [RW.Win]::GetMonitorInfo(`$mon, [ref]`$mi)) { `$wx=`$mi.rcWork.Left; `$wy=`$mi.rcWork.Top; `$ww=`$mi.rcWork.Right-`$mi.rcWork.Left; `$wh=`$mi.rcWork.Bottom-`$mi.rcWork.Top; `$haveWork=`$true }",
+    "if (-not `$haveWork) {",
+    "  `$wa = New-Object RW.Win+RECT",
+    "  if ([RW.Win]::SystemParametersInfo(0x0030, 0, [ref]`$wa, 0)) { `$wx=`$wa.Left; `$wy=`$wa.Top; `$ww=`$wa.Right-`$wa.Left; `$wh=`$wa.Bottom-`$wa.Top }",
+    "  else { `$wx=0; `$wy=0; `$ww=[RW.Win]::GetSystemMetrics(0); `$wh=[RW.Win]::GetSystemMetrics(1) }",
+    "}",
+    $sizeLine,
+    "if (`$tw -gt `$ww -or `$th -gt `$wh) { Set-Content -LiteralPath '$resultPath' -Value ('too-big ' + `$tw + ' x ' + `$th) -Encoding UTF8; exit }",
     "`$r = New-Object RW.Win+RECT",
     "[RW.Win]::GetWindowRect(`$p.MainWindowHandle, [ref]`$r) | Out-Null",
     "`$tx = [Math]::Min([Math]::Max(`$r.Left, `$wx), [Math]::Max(`$wx + `$ww - `$tw, `$wx))",
     "`$ty = [Math]::Min([Math]::Max(`$r.Top, `$wy), [Math]::Max(`$wy + `$wh - `$th, `$wy))",
-    "[RW.Win]::MoveWindow(`$p.MainWindowHandle, `$tx, `$ty, `$tw, `$th, `$true) | Out-Null"
+    "# 적용 결과를 실측으로 검증 - MoveWindow 성공 반환만으로는 게임이 크기를 거부한 경우를",
+    "# 못 잡음 (교차 리뷰: 무조건 ok 는 거짓 성공 로그가 됨)",
+    "[void][RW.Win]::MoveWindow(`$p.MainWindowHandle, `$tx, `$ty, `$tw, `$th, `$true)",
+    "Start-Sleep -Milliseconds 250",
+    "`$r2 = New-Object RW.Win+RECT",
+    "[RW.Win]::GetWindowRect(`$p.MainWindowHandle, [ref]`$r2) | Out-Null",
+    "`$aw = `$r2.Right - `$r2.Left",
+    "`$ah = `$r2.Bottom - `$r2.Top",
+    "if (`$aw -eq `$tw -and `$ah -eq `$th) { Set-Content -LiteralPath '$resultPath' -Value ('ok ' + `$tw + ' x ' + `$th) -Encoding UTF8 }",
+    "else { Set-Content -LiteralPath '$resultPath' -Value ('failed ' + `$aw + ' x ' + `$ah) -Encoding UTF8 }"
   )
   try {
     Set-Content -LiteralPath $helper -Value ($lines -join "`r`n") -Encoding UTF8
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $helper + '"'))
-    Add-GuiLog '[안내] 게임 창을 권장 크기로 변경합니다 (OCR 인식 최적 - 1908x1076 또는 1272x717)'
+    if ($Width -gt 0) { Add-GuiLog "[안내] 게임 창을 $Width x $Height(으)로 변경합니다" }
+    else { Add-GuiLog '[안내] 게임 창을 권장 크기로 변경합니다 (OCR 인식 최적 - 1908x1076 또는 1272x717)' }
+    # 결과 타이머 시작 (헬퍼가 남긴 결과 파일을 읽어 성공/거부/게임 없음을 로그로 안내).
+    # pending 플래그는 시작 버튼·추가 리사이즈를 잠깐 막고, 타이머가 어느 경로로든 해제
+    $script:resizePending = $true
+    $script:resizeResultTicks = 0
+    if ($script:timerResizeResult) { $script:timerResizeResult.Stop(); $script:timerResizeResult.Start() }
   } catch {
     Add-GuiLog "[경고] 권장 창 크기 적용 실패: $($_.Exception.Message)"
   }
@@ -4290,14 +4380,92 @@ $chkAssist.Location = New-Object System.Drawing.Point(210, 25)
 $chkAssist.Size = New-Object System.Drawing.Size(175, 22)
 $grpSettings.Controls.Add($chkAssist)
 
-# 권장 창 모드 버튼: 클릭하면 게임 창을 OCR 인식 최적 크기(QHD 이상=1908x1076,
-# FHD 등=1272x717, 작업표시줄 안 겹치게)로 즉시 변경합니다. 한 번 맞춰두면
-# 매 회차 자동 보정이 그 크기를 그대로 유지하므로 별도 상시 설정이 필요 없습니다.
+# 권장 창 모드 버튼: 클릭하면 크기 선택 메뉴(1272 추천 / 1908)가 버튼 아래 열리고, 항목을
+# 누르면 게임 창을 그 크기로 즉시 변경합니다 (2026-08-13 시안 확정 - 기존 자동 결정에서
+# 사용자 선택으로 변경). 한 번 맞춰두면 매 회차 자동 보정이 그 크기를 그대로 유지합니다.
+# 1272 추천 근거: 캡처 확대가 '기준 크기(1272)×배율' 고정이라 1908은 실효 배율이 1.5로
+# 나뉘어 떨어짐 - 제목 열화 계열 실사고 전부가 1908 창 (이슈 이력 08-11~13).
 $btnRecommendedWindow = New-Object System.Windows.Forms.Button
-$btnRecommendedWindow.Text = '권장 창 모드'
+$btnRecommendedWindow.Text = '권장 창 모드 ▾'
 $btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)
 $btnRecommendedWindow.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnRecommendedWindow)
+
+# 크기 선택 드롭다운 - 버튼 클릭 즉답 UI 라 GUI 팝업 금지 규칙의 예외 ②에 해당.
+# 열 때마다 현재 게임 창의 물리 크기를 읽어 일치하는 항목에 체크(✓)를 표시합니다.
+$menuRecommendedWindow = New-Object System.Windows.Forms.ContextMenuStrip
+$menuItemWin1272 = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuItemWin1272.Text = '1272 x 717   (추천)'
+$menuItemWin1908 = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuItemWin1908.Text = '1908 x 1076  (큰 모니터용)'
+[void]$menuRecommendedWindow.Items.Add($menuItemWin1272)
+[void]$menuRecommendedWindow.Items.Add($menuItemWin1908)
+# 실행 중 크기 변경 금지 (교차 리뷰): 워커의 좌표 계산·캡처와 리사이즈가 경쟁하면 이전
+# 좌표를 클릭할 수 있음. 버튼(메뉴 열기)과 항목 클릭 양쪽에서 막습니다 (이중 가드 -
+# 메뉴를 열어 둔 채 시작을 누르는 틈까지 차단).
+function Test-ResizeBlockedByRunning {
+  if ($script:running) {
+    Add-GuiLog '[안내] 자동화 실행 중에는 창 크기를 바꾸지 않습니다 (판독·클릭 좌표와 충돌 방지) - 중지 후 다시 눌러 주세요'
+    return $true
+  }
+  if ($script:resizePending) {
+    # 직전 변경의 헬퍼가 아직 끝나지 않음 - 연속 선택이 서로 덮어쓰는 경쟁 방지 (교차 리뷰)
+    Add-GuiLog '[안내] 직전 창 크기 변경이 진행 중입니다 - 몇 초 뒤 다시 눌러 주세요'
+    return $true
+  }
+  return $false
+}
+$menuItemWin1272.Add_Click({ if (Test-ResizeBlockedByRunning) { return }; Apply-RecommendedWindowSize -Width 1272 -Height 717 })
+$menuItemWin1908.Add_Click({ if (Test-ResizeBlockedByRunning) { return }; Apply-RecommendedWindowSize -Width 1908 -Height 1076 })
+$menuRecommendedWindow.Add_Opening({
+    # 체크 갱신 - 판독 실패($null)면 둘 다 체크 없음 (적용 동작에는 영향 없음)
+    $physicalSize = Get-GameWindowPhysicalSize
+    $sizeMatch = if ($physicalSize) { Get-RecommendedSizeMatch -PhysicalWidth $physicalSize.Width -PhysicalHeight $physicalSize.Height } else { '' }
+    $menuItemWin1272.Checked = ($sizeMatch -eq '1272')
+    $menuItemWin1908.Checked = ($sizeMatch -eq '1908')
+  })
+
+# 크기 변경 결과 타이머: DPI 헬퍼(별도 프로세스)가 남긴 결과 파일을 읽어 로그로 안내합니다
+# (성공 / 모니터보다 커서 거부 / 게임 없음). 0.5초 x 8회 안에 없으면 안내 후 종료.
+$script:resizeResultPath = ''   # 요청마다 GUID 파일로 새로 발급 (Apply-RecommendedWindowSize)
+$script:resizeResultTicks = 0
+$script:resizePending = $false  # 리사이즈 헬퍼 진행 중 표시 - 시작·추가 리사이즈를 잠깐 차단
+$script:timerResizeResult = New-Object System.Windows.Forms.Timer
+$script:timerResizeResult.Interval = 500
+$script:timerResizeResult.Add_Tick({
+    # 타이머 틱은 통째로 try/catch (교차 리뷰 - 이 저장소 실측 계약: 타이머 예외는 PS 5.1
+    # 모달 오류창으로 이어져 무인 자동화 전체를 멈춤. TEMP 접근 오류 등도 여기서 삼킴)
+    try {
+      $script:resizeResultTicks++
+      $resizeResultLine = $null
+      if ($script:resizeResultPath -and (Test-Path -LiteralPath $script:resizeResultPath)) {
+        $resizeResultLine = ([string](Get-Content -LiteralPath $script:resizeResultPath -ErrorAction SilentlyContinue | Select-Object -First 1)).Trim()
+      }
+      if ($resizeResultLine) {
+        $script:timerResizeResult.Stop()
+        $script:resizePending = $false
+        Remove-Item -LiteralPath $script:resizeResultPath -ErrorAction SilentlyContinue
+        if ($resizeResultLine -like 'ok *') {
+          Add-GuiLog "[안내] 게임 창 크기 변경 완료: $($resizeResultLine.Substring(3))"
+        } elseif ($resizeResultLine -like 'too-big *') {
+          Add-GuiLog "[경고] 선택한 크기($($resizeResultLine.Substring(8)))가 모니터 작업 영역보다 큽니다 - 적용하지 않았습니다. 1272 x 717을 사용해 주세요"
+        } elseif ($resizeResultLine -like 'failed *') {
+          Add-GuiLog "[경고] 창 크기 변경이 적용되지 않았습니다 (현재 $($resizeResultLine.Substring(7)) - 게임이 크기를 거부했을 수 있음) - 게임 창을 직접 확인해 주세요"
+        } elseif ($resizeResultLine -eq 'no-game') {
+          Add-GuiLog '[경고] 게임 창을 찾지 못해 크기를 변경하지 못했습니다 - 게임 실행 후 다시 눌러 주세요'
+        }
+        return
+      }
+      if ($script:resizeResultTicks -ge 8) {
+        $script:timerResizeResult.Stop()
+        $script:resizePending = $false
+        Add-GuiLog '[안내] 창 크기 변경 결과를 확인하지 못했습니다 - 게임 창 크기를 직접 확인해 주세요'
+      }
+    } catch {
+      $script:resizePending = $false
+      try { $script:timerResizeResult.Stop() } catch { }
+    }
+  })
 
 # '적용된 설정' 버튼: 설정 그룹에서 켜 둔 항목과 기본 설정 기능(항상 자동 동작)을
 # 한 팝업으로 보여줍니다 (설정 저장 버튼 위). 콘텐츠/난이도 등은 화면에서 바로
@@ -8465,6 +8633,13 @@ function Invoke-StartAutomation {
 $btnStart.Add_Click({
     # 생활 대분류 지원 범위 게이트 (가공/미지원 스킬 차단. F9 도 PerformClick 경유라 함께 검사)
     if (Test-LifeStartBlocked) { return }
+    # 창 크기 변경 진행 중 시작 금지 (2026-08-13 교차 리뷰): 비동기 리사이즈 헬퍼의
+    # MoveWindow 가 워커 시작 직후 좌표 계산을 흔들 수 있음. pending 은 결과 타이머가
+    # 결과 확인/타임아웃(최대 4초)에 반드시 해제하므로 잠깐만 막힙니다.
+    if ($script:resizePending) {
+      Add-GuiLog '[안내] 창 크기 변경이 끝난 뒤 시작해 주세요 (몇 초 안에 완료됩니다)'
+      return
+    }
     # 사용 승인 게이트 (새 자동화 시작 시 검사 - 스펙): 미승인 상태는 즉시 거부하고,
     # 승인 상태여도 명단을 한 번 더 비동기 조회한 뒤 시작합니다.
   # 상한은 GUI 쪽 $approvalFetchTimeoutSeconds(25초)입니다 - 러닝스페이스 안의 -TimeoutSec 10 은
@@ -8552,7 +8727,10 @@ $btnOpenLog.Add_Click({
   })
 
 $btnRecommendedWindow.Add_Click({
-    Apply-RecommendedWindowSize
+    # 즉시 적용 대신 크기 선택 메뉴를 버튼 바로 아래에 엽니다 (2026-08-13 시안 확정).
+    # 실행 중에는 메뉴 자체를 열지 않습니다 (항목 클릭 쪽에도 같은 가드 - 이중 방어)
+    if (Test-ResizeBlockedByRunning) { return }
+    $menuRecommendedWindow.Show($btnRecommendedWindow, (New-Object System.Drawing.Point(0, $btnRecommendedWindow.Height)))
   })
 
 $form.Add_FormClosing({
@@ -9237,7 +9415,7 @@ try {
 } finally {
   # 창을 닫을 때 폴링 타이머·업데이트 러닝스페이스·전역 뮤텍스를 명시적으로 정리합니다.
   # 프로세스 종료에만 맡기면 업데이트 확인 중 닫은 직후 재실행 시 뮤텍스가 잠깐 남을 수 있습니다.
-  foreach ($uiTimer in @($hotkeyTimer, $timer, $script:updateTimer, $script:approvalTimer, $script:lifeSlideTimer)) {
+  foreach ($uiTimer in @($hotkeyTimer, $timer, $script:updateTimer, $script:approvalTimer, $script:lifeSlideTimer, $script:timerResizeResult)) {
     if ($uiTimer) {
       try { $uiTimer.Stop() } catch { }
       try { $uiTimer.Dispose() } catch { }
