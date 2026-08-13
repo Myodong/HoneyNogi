@@ -1381,10 +1381,10 @@ Assert-Case 'GUI: 전투 안전 중지 문구는 그대로 유지' `
 # 전투는 왼쪽이 체크 4개 + 클리어 대기 줄로 꽉 차 오른쪽 세로 3단을 유지하고,
 # 생활은 '진행 없음' 한 줄뿐이라 아래가 비므로 폭 158 세 개를 가로로 놓습니다.
 # (버튼을 선언부에서 아래 가로로 옮겼더니 전투의 클리어 대기 줄이 가려졌던 실사고 - 실캡처 확인)
-Assert-Case 'GUI: 전투 기본 배치는 오른쪽 세로 유지' `
+Assert-Case 'GUI: 전투 기본 배치는 오른쪽 세로 유지 (2026-08-13: 균등 간격 12px - 25/67/109)' `
   (($guiText.Contains('$btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)')) -and
-   ($guiText.Contains('$btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 70)')) -and
-   ($guiText.Contains('$btnSave.Location = New-Object System.Drawing.Point(390, 108)'))) 'True'
+   ($guiText.Contains('$btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 67)')) -and
+   ($guiText.Contains('$btnSave.Location = New-Object System.Drawing.Point(390, 109)'))) 'True'
 Assert-Case 'GUI: 생활 전환 시 아래 가로 한 줄(y56, 15/183/351)' `
   ([bool]($guiText -match "if \(\`$isLife\) \{\s*\r?\n\s*\`$btnRecommendedWindow\.Location = New-Object System\.Drawing\.Point\(15, 56\)\s*\r?\n\s*\`$btnAlwaysOn\.Location = New-Object System\.Drawing\.Point\(183, 56\)\s*\r?\n\s*\`$btnSave\.Location = New-Object System\.Drawing\.Point\(351, 56\)")) 'True'
 Assert-Case 'GUI: 생활 버튼 폭 158 / 전투 폭 108 로 되돌림' `

@@ -4472,7 +4472,7 @@ $script:timerResizeResult.Add_Tick({
 # 보이므로 팝업에는 넣지 않습니다. 켠 항목만 누를 때 상태를 읽어 표시합니다.
 $btnAlwaysOn = New-Object System.Windows.Forms.Button
 $btnAlwaysOn.Text = '적용된 설정'
-$btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 70)
+$btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 67)
 $btnAlwaysOn.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnAlwaysOn)
 
@@ -4645,7 +4645,7 @@ $numClearWait.Add_ValueChanged($updateClearHuman)
 
 $btnSave = New-Object System.Windows.Forms.Button
 $btnSave.Text = '설정 저장'
-$btnSave.Location = New-Object System.Drawing.Point(390, 108)
+$btnSave.Location = New-Object System.Drawing.Point(390, 109)
 $btnSave.Size = New-Object System.Drawing.Size(108, 30)
 $grpSettings.Controls.Add($btnSave)
 
@@ -8926,8 +8926,8 @@ $updateCategoryPanels = {
   }
   else {
     $btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)
-    $btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 70)
-    $btnSave.Location = New-Object System.Drawing.Point(390, 108)
+    $btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 67)
+    $btnSave.Location = New-Object System.Drawing.Point(390, 109)
     foreach ($settingsBtn in @($btnRecommendedWindow, $btnAlwaysOn, $btnSave)) {
       $settingsBtn.Size = New-Object System.Drawing.Size(108, 30)
     }
