@@ -501,11 +501,28 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,300}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8 알약 + v9 제목 + v10 카드)' `
-  ($workerSource -match '\$coordsVersionCurrent = 10') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8 알약 + v9 제목 + v10 카드 + v11 전리품)' `
+  ($workerSource -match '\$coordsVersionCurrent = 11') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 10' ([int]$auditConfigJson.coordsVersion) 10
+Assert-Case 'config: coordsVersion 11' ([int]$auditConfigJson.coordsVersion) 11
+# v11 (2026-08-13 20:30 실사고): 네이티브 1908 창의 '발견한 전리품' 라벨이 ref (614~658,277)
+# - 구영역 상단 293을 16px 이탈해 전리품 화면 진행 클릭이 안 나가 결과 대기 정체.
+# 상단 265 확장 (하단 333·x 불변 - 구 범위가 신 범위의 부분집합이라 1272 회귀 면 0).
+Assert-Case 'v11: dgLootReveal 워커 기본값 (520,265,240,68)' `
+  ($workerSource -match "'dgLootReveal'\) @\(520, 265, 240, 68\)") $true
+$lootRevealRegion = $auditConfigJson.ocrRegions.dgLootReveal
+Assert-Case 'config: dgLootReveal 영역이 워커 기본값과 일치' (($lootRevealRegion -join ',')) '520,265,240,68'
+$lootRevealTop = [int]$auditConfigJson.ocrRegions.dgLootReveal[1]
+$lootRevealBottom = $lootRevealTop + [int]$auditConfigJson.ocrRegions.dgLootReveal[3]
+Assert-Case 'v11: 네이티브 1908 라벨(y277)을 덮음' (($lootRevealTop -le 277) -and ($lootRevealBottom -ge 277)) $true
+Assert-Case 'v11: 구 하단 경계(333) 유지 (1272 커버 불변)' $lootRevealBottom 333
+# 옵션 난이도 알약 (2026-08-13 20:48 실사고 - 하드코딩 영역이라 coordsVersion 무관):
+# 네이티브 1908 심층 다시하기-복귀 옵션의 '어려움' 글자 상단(~95)이 구 상단 95에 걸려
+# 토큰째 사망. 상단 85 확장 (하단 145 유지 - 구 범위가 신 범위의 부분집합).
+# 리터럴 (600,85,320,60) = 네이티브 y103·1272 y121 모두 커버 (85≤103,121≤145 - 산술 자명)
+Assert-Case '옵션 알약: 워커 하드코딩 (600,85,320,60)' `
+  ($workerSource -match '\$rgDgOptDifficulty = @\(600, 85, 320, 60\)') $true
 # v8 (2026-08-13 실사고): 네이티브 1908 창(모니터 100% + 물리 1908 리사이즈, 제목줄 31px)은
 # 선택 화면 알약 행이 y163 - 구영역(30,165,200,50)을 1px 차로 이탈해 3연속 정지.
 # 위로 20 확장. 두 실측 기하(1272 네이티브 y187 / 1908 네이티브 y163)를 모두 덮고,
