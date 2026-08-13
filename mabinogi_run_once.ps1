@@ -592,7 +592,11 @@ $rgClearExit   = @(Get-ConfigValue $config @('ocrRegions', 'clearAndExitText') @
 # 클리어 화면 좌측 점수표(빠른 처치/완벽한 전투/재도전·협동 보너스 등) - 하단 문구의 보조 신호.
 # 하단 문구는 캐릭터가 겹쳐 깨지기 일쑤지만 점수표는 겹치지 않는 위치라 안정적 (2026-07-19 실측:
 # 클리어 캡처 2장 모두 라벨 판독, 결과/옵션/전투 화면에선 미검출)
-$rgClearScore  = @(185, 300, 230, 165)
+# 상단 300→265 (2026-08-13 19:16 실사고): 네이티브 1908 창은 점수표가 위로 밀려 '빠른 처치'
+# 행이 영역 밖('처치' 소실) - 보조 신호 불충족으로 클리어 감지 전멸에 기여. 265는 '처치' 행을
+# 두 기하 모두 수용하고 위 행 '160점 이상 S등급'(ref ~253)은 계속 배제 (top 300/280/265/250
+# 스윕 실측). 하단 465 유지.
+$rgClearScore  = @(185, 265, 230, 200)
 $rgEnterButton = @(Get-ConfigValue $config @('ocrRegions', 'enterButton') @(880, 630, 200, 48))
 $rgHomeEndEsc  = @(Get-ConfigValue $config @('ocrRegions', 'homeEndEsc') @(875, 60, 265, 55))
 # ESC 메뉴의 **타일 그리드 전체**를 봅니다 (2026-08-08 coordsVersion 7).
@@ -1298,7 +1302,10 @@ $ptDgBackArrow    = @(43, 67)      # 진입 옵션 화면 좌상단 '<' (선택 
 $rgDgOptDifficulty = @(600, 95, 320, 50) # 진입 옵션 화면 상단 난이도 알약 - 2026-07-24 확장: '매우 어려움'('매우' 단어 x≈796)까지 커버 (기존 190 폭은 x790에서 잘림)
 $ptDgCoinButton   = @(463, 313)    # 은동전(소탕) 카드의 선택됨/도전 버튼
 $ptDgLootButton   = @(452, 517)    # 더블 루팅 카드의 선택됨/도전 버튼
-$ptDgChanceToggle = @(1183, 415)   # '우연한 만남' 토글 (초록 = 켜짐)
+# '우연한 만남' 토글 고정점은 폐기 (2026-08-13 19:15 실사고: 네이티브 1908에서 토글 밖
+# (1183,415) 회색 지대 - 'off' 오판 + 빈 자리 클릭). 던전 흐름은 라벨 자기앵커
+# (Find-DgChanceTogglePoint)만 사용. 1272 실측 참고값: 토글 초록 중심 (1180,416).
+# 어비스는 별도 화면·별도 고정점($ptAbyssChanceToggle) - 실측 없어 무변경.
 $ptDgPartyFind    = @(775, 655)    # '파티 찾기' 버튼
 $ptDgEnterFinal   = @(1015, 655)   # '입장하기' 버튼
 # '던전에 입장하시겠습니까?' 확인 팝업 (도전 미수락 시 표시): '일주일 동안 보지 않기' 체크 후 입장
@@ -4221,6 +4228,12 @@ function Test-DungeonClearPrompt {
   if ($normalized.Contains('치해') -and $normalized.Contains('면')) { return $true }
   if ($normalized.Contains('화면') -and $normalized.Contains('치')) { return $true }
   if ($normalized.Contains('터치해') -or $normalized.Contains('터치하')) { return $true }
+  #  - '화D을1치ö주세요'(s3) / '호을4치6주세요'(s2) / '호十D을터치ö주세요'(s4)
+  #    (2026-08-13 19:16·19:26 네이티브 1908 실사고 2회 - '면'·'터'가 라틴/한자로 깨져
+  #    위 조합 5종 전멸, 클리어 대기 600초 타임아웃 ×2). 낱글자 조합('치'+'주세요')은
+  #    '위치를/장치를/경험치를 확인해 주세요'류 오탐 면이 넓어 기각하고, 문구 골격
+  #    '[화|호]…을…치…주세요'의 **순서**를 요구하는 정규식으로 좁게 잡음 (교차 리뷰 채택)
+  if ($normalized -match '[화호].{0,8}을.{0,8}치.{0,8}주세요') { return $true }
 
   # 보조 신호(사용자 제안 2026-07-19): 하단 문구가 아예 못 읽힐 만큼 깨져도, 클리어 화면
   # 좌측 점수표('빠른 처치'/'완벽한 전투'/'재도전·협동 보너스')는 캐릭터와 안 겹쳐 잘 읽힙니다.
@@ -5545,6 +5558,49 @@ function Invoke-SafeStopExitIfRequested {
   exit 4
 }
 
+function Select-DgChanceToggleAnchor {
+  param($Words)
+
+  # '우연한 만남' 라벨 단어에서 토글 중심 기준 좌표를 유도합니다 (순수 - 진리표 대상).
+  # 실측 (2026-08-13, 1272 옵션 캡처 2장 + 네이티브 1908 캡처):
+  #   1272:        '만남'(1137,416) → 토글 초록 중심 (1180,416) = +43,0
+  #   네이티브1908: '만남'(1095,441) → 토글 초록 중심 (1136,443) = +41,+2
+  # → 1순위 '만남' +(42,1) (오차 ±1px). '만남' 미검출 시 2순위 '우연한' +(82,2)
+  #   (오차 ±3px - 토글 초록 폭 ~40px라 충분). **정확 일치만** - 오프셋이 단어별 실측이라
+  #   다른 단어에 일반화하지 않습니다. 미관측 오독 이형은 규칙 8로 미등록.
+  # 3순위 '우연한만남' 한 단어 합침 +(64,1): 키아던전_옵션1층 실측(중심 (1112,416), 토글
+  #   (1180,416) = +68) + 네이티브 분리 단어 산술(중심 ~1076, 토글 1136 = +60) - 평균 64로
+  #   두 기하 초록 상자(1159..1201 / 1117..1155) 안 안착 검증 (43장 스윕에서 유일한 미검출분).
+  foreach ($word in $Words) {
+    if ([string]$word.Text -eq '만남') { return @{ X = ([int]$word.X + 42); Y = ([int]$word.Y + 1) } }
+  }
+  foreach ($word in $Words) {
+    if ([string]$word.Text -eq '우연한') { return @{ X = ([int]$word.X + 82); Y = ([int]$word.Y + 2) } }
+  }
+  foreach ($word in $Words) {
+    if ([string]$word.Text -eq '우연한만남') { return @{ X = ([int]$word.X + 64); Y = ([int]$word.Y + 1) } }
+  }
+  return $null
+}
+
+function Find-DgChanceTogglePoint {
+  param([System.Diagnostics.Process]$Game)
+
+  # 던전 옵션 화면 '우연한 만남' 토글의 기준 좌표를 라벨 자기앵커로 찾습니다
+  # (2026-08-13 19:15·19:26 실사고 ×2: 고정점 (1183,415)가 네이티브 1908에서는 토글 밖
+  # 회색 지대(실측 토글 중심 (1136,443)) - 'off' 오판 후 빈 자리를 클릭했음. 난이도 알약·
+  # 카드 버튼과 같은 자기앵커 패턴). 라벨 영역은 두 기하의 '우연한 만남'을 모두 덮는
+  # (1000,380,272,100) 실측. 미검출 시 $null - 호출부는 고정점으로 돌아가지 않고
+  # fail-closed 합니다 (빈 자리 클릭이 실측된 이상 고정점 폴백은 금지 - 교차 리뷰).
+  foreach ($anchorScale in 3, 2, 4) {
+    $anchorWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX 1000 -ReferenceY 380 `
+        -RegionWidth 272 -RegionHeight 100 -Scale $anchorScale -Engine $ocrKoreanEngine)
+    $anchor = Select-DgChanceToggleAnchor -Words $anchorWords
+    if ($anchor) { return $anchor }
+  }
+  return $null
+}
+
 function Get-ChanceToggleState {
   param(
     [System.Diagnostics.Process]$Game,
@@ -5851,6 +5907,14 @@ function Set-DgToggleCard {
   $cardRegions += , $Region
   if ($AltRegion) { $cardRegions += , $AltRegion }
   $clickedRecheckDone = $false
+  # 클릭 후 판독 실패 누계 (2026-08-13 15:29 실사고): 클릭 1.1초 뒤 첫 재판독이 전환
+  # 애니메이션 프레임에 걸려 1회 실패했는데 곧장 '재확인 생략'으로 포기 → 미사용 역방향
+  # 게이트(소모량 null)가 정지. 같은 PC 같은 화면에서 +1초(15:12)/+2초(15:24)에 '도전'이
+  # 정상 판독된 실측이 있어, 실패 3회까지는 회전을 계속합니다 (800ms 대기 2회 + 추가 판독
+  # 회전 비용). 진짜 흐림(1272 해제 후 글자 흐림 실측)은 3회 소진 후 기존과 동일하게
+  # '재확인 생략' $true. 카운트는 '마지막으로 성공한 클릭' 기준(재클릭 시 0으로 리셋)이고
+  # 캡처 실패로 빈 판독은 세지 않습니다 (캡처 실패 회전 미소모 계약과 일치 - 교차 리뷰).
+  $postClickReadFails = 0
   $setTryMax = 6
   for ($setTry = 1; $setTry -le $setTryMax; $setTry++) {
     # 캡처 실패 중에는 시도를 소모하지 않고 복구를 기다립니다 (2026-08-02 06:03 실사고:
@@ -5957,9 +6021,13 @@ function Set-DgToggleCard {
       # 글자를 못 읽은 상태. 해제된 카드는 버튼 글자가 사라지거나 흐려져 OCR이 실패하는데,
       # 이미 원하는 방향으로 한 번 클릭했다면 그 클릭으로 설정은 반영된 것이므로 성공 처리합니다
       # (재확인만 불가). 아직 클릭 전이면 화면 전환 중일 수 있어 잠시 기다렸다 다시 확인합니다.
+      # 클릭 후에도 1회 실패로 곧장 포기하지 않습니다 ($postClickReadFails 주석 참고).
       if ($clicked) {
-        Write-RunLog "$($script:contentTag) $Label = $(if ($WantSelected) { '사용' } else { '미사용' })으로 설정 (재확인 생략)"
-        return $true
+        if (-not $script:screenCaptureFailing) { $postClickReadFails++ }
+        if ($postClickReadFails -ge 3 -or $setTry -ge $setTryMax) {
+          Write-RunLog "$($script:contentTag) $Label = $(if ($WantSelected) { '사용' } else { '미사용' })으로 설정 (재확인 생략)"
+          return $true
+        }
       }
       Start-Sleep -Milliseconds 800
       continue
@@ -5988,6 +6056,8 @@ function Set-DgToggleCard {
       Write-RunLog "$($script:contentTag) $Label 버튼 클릭 → $(if ($WantSelected) { '사용' } else { '미사용' })으로 변경"
       $clicked = $true
       $script:dgToggleClicked = $true
+      # 재판독 실패 카운트는 '마지막으로 성공한 클릭' 기준 (재클릭 시 리셋 - 교차 리뷰)
+      $postClickReadFails = 0
     } else {
       Write-RunLog "$($script:contentTag) $Label 버튼 클릭을 건너뜀 (커서 확인 실패) - 다음 회전에서 재시도"
     }
@@ -7106,18 +7176,41 @@ function Invoke-NormalDungeonCycle {
 
   # 6. 매칭 방식 처리
   if ($ndMatching -eq '우연한 만남') {
-    $toggleState = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
-    if ($toggleState -eq 'unknown') {
-      # 빈 프레임/픽셀 확인 불가: 켜져 있던 토글을 실수로 꺼버리지 않도록 클릭하지 않습니다
-      Write-RunLog "[경고] '우연한 만남' 토글 상태를 판별하지 못했습니다(화면 확인 불가) - 클릭 없이 현재 상태로 진행합니다"
-    } elseif ($toggleState -ne 'on') {
-      Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptDgChanceToggle[0] -ReferenceY $ptDgChanceToggle[1]
+    # 자기앵커 + fail-closed 로 개편 (2026-08-13 19:15·19:26 실사고 ×2): 고정점 픽셀이
+    # 네이티브 1908에서 토글 밖 회색이라 'off' 오판 → 빈 자리 클릭 → 경고 진행이 반복됐고,
+    # 토글이 실제로 꺼져 있었다면 켜지 못한 채 solo 오입장이 됐음. 라벨 앵커로 위치를
+    # 확정하고, 끝내 확인이 안 되면 경고 진행 대신 정지합니다 (파티찾기 분기의 기존
+    # fail-closed 계약과 대칭 - 교차 리뷰 채택. 빈 프레임/일시 가림은 3회 재시도가 흡수).
+    $chancePoint = Find-DgChanceTogglePoint -Game $Game
+    $toggleState = $(if ($chancePoint) {
+        Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
+      } else { 'unknown' })
+    for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleState -eq 'unknown'; $toggleProbe++) {
       Start-Sleep -Milliseconds 900
-      if ((Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle) -eq 'on') {
+      if (-not $chancePoint) { $chancePoint = Find-DgChanceTogglePoint -Game $Game }
+      if ($chancePoint) {
+        $toggleState = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
+      }
+    }
+    if ($toggleState -eq 'unknown') {
+      Write-RunLog "[완료] '우연한 만남' 토글 위치/상태를 확인하지 못했습니다 - 매칭 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+      exit 4
+    }
+    if ($toggleState -ne 'on') {
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX ([int]$chancePoint.X) -ReferenceY ([int]$chancePoint.Y)
+      Start-Sleep -Milliseconds 900
+      $toggleAfterOn = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
+      for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOn -ne 'on'; $toggleProbe++) {
+        Start-Sleep -Milliseconds 900
+        $toggleAfterOn = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
+      }
+      if ($toggleAfterOn -eq 'on') {
         Write-RunLog "[던전] '우연한 만남' 토글 켬"
       } else {
-        Write-RunLog "[경고] '우연한 만남' 토글이 켜진 것을 확인하지 못했습니다 - 현재 상태로 진행합니다"
+        # 켬 확인 실패 = solo 오입장 위험 - 경고 진행(구 계약)이 아니라 정지 (교차 리뷰)
+        Write-RunLog "[완료] '우연한 만남' 토글을 켠 것을 확인하지 못했습니다 - 매칭 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+        exit 4
       }
     } else {
       Write-RunLog "[던전] '우연한 만남' 토글 켜짐 확인"
@@ -7273,13 +7366,21 @@ function Invoke-NormalDungeonCycle {
     # 파티찾기: '우연한 만남' 토글이 켜져 있으면 파티 찾기 버튼이 없고 그 자리가 넓은
     # 입장하기 버튼이라, 잘못 누르면 우연한 만남(혼자)으로 입장돼 버립니다.
     # 어비스와 동일하게 토글을 먼저 끄고 꺼짐을 확인한 뒤 파티 찾기를 클릭합니다.
-    $toggleState = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+    # 자기앵커 (2026-08-13 19:15 계열): 고정점은 네이티브 1908에서 토글 밖 - 앵커 미검출은
+    # 기존 unknown fail-closed 계약에 그대로 합류합니다 (고정점 폴백 금지 - 빈 클릭 실측)
+    $chanceOffPoint = Find-DgChanceTogglePoint -Game $Game
+    $toggleState = $(if ($chanceOffPoint) {
+        Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
+      } else { 'unknown' })
     # unknown 은 재판독으로 해소를 시도하고, 끝내 확인이 안 되면 정지합니다 (2026-08-01 전수
     # 점검: 기존 '꺼짐으로 보고 진행'은 토글이 실제로 켜져 있으면 그 자리의 넓은 입장하기
     # 버튼을 눌러 혼자 오입장 - 파티찾기는 정확한 꺼짐 확인이 안전 전제라 fail-closed. 리뷰 승인)
     for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleState -eq 'unknown'; $toggleProbe++) {
       Start-Sleep -Milliseconds 900
-      $toggleState = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+      if (-not $chanceOffPoint) { $chanceOffPoint = Find-DgChanceTogglePoint -Game $Game }
+      if ($chanceOffPoint) {
+        $toggleState = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
+      }
     }
     if ($toggleState -eq 'unknown') {
       Write-RunLog "[완료] '우연한 만남' 토글 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
@@ -7287,13 +7388,13 @@ function Invoke-NormalDungeonCycle {
     }
     if ($toggleState -eq 'on') {
       Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptDgChanceToggle[0] -ReferenceY $ptDgChanceToggle[1]
+      Click-GamePoint -Game $Game -ReferenceX ([int]$chanceOffPoint.X) -ReferenceY ([int]$chanceOffPoint.Y)
       Start-Sleep -Milliseconds 900
       # 끄기 확인도 'off' 확정을 요구합니다 (기존에는 'on'만 아니면 통과 → unknown 이 꺼짐으로 둔갑)
-      $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+      $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
       for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOff -ne 'off'; $toggleProbe++) {
         Start-Sleep -Milliseconds 900
-        $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point $ptDgChanceToggle
+        $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
       }
       if ($toggleAfterOff -eq 'on') {
         throw "'우연한 만남' 토글을 끄지 못해 파티찾기를 진행할 수 없습니다 (토글이 켜진 상태에서는 파티 찾기 버튼이 없음)"

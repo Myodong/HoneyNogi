@@ -568,6 +568,17 @@ Assert-Case 'v10: 정정 클릭이 고정 ptDgLootButton 을 직접 쓰지 않�
   ([regex]::Matches($workerSource, 'Click-GamePoint[^\r\n]*ptDgLootButton').Count) 0
 Assert-Case 'v10: 정정 클릭이 스냅샷 좌표(lootWordPoint) 사용' `
   ($workerSource -match 'Click-GamePoint[^\r\n]*lootWordPoint') $true
+# '우연한 만남' 토글 자기앵커 (2026-08-13 19:15·19:26 실사고 ×2): 고정점 (1183,415)가
+# 네이티브 1908에서 토글 밖 회색 - 'off' 오판 + 빈 자리 클릭. 던전 두 분기(켜기/끄기)를
+# 라벨 앵커로 개편, 고정점($ptDgChanceToggle) 사용 0곳, 미확인은 fail-closed.
+Assert-Case '토글: 던전 흐름에서 고정점 사용 0곳 (자기앵커 전환)' `
+  ([regex]::Matches($workerSource, '\$ptDgChanceToggle\[').Count) 0
+Assert-Case '토글: 켜기/끄기 분기가 앵커 헬퍼 사용 (2곳 이상)' `
+  ([regex]::Matches($workerSource, 'Find-DgChanceTogglePoint -Game \$Game').Count -ge 2) $true
+Assert-Case '토글: 켬 확인 실패는 경고 진행이 아니라 정지 (오입장 방지)' `
+  ($workerSource -match "토글을 켠 것을 확인하지 못했습니다[^\r\n]*정지") $true
+Assert-Case '토글: 어비스 고정점은 무변경 (실측 없음 - 규칙 8)' `
+  ([regex]::Matches($workerSource, '\$ptAbyssChanceToggle\[').Count -ge 1) $true
 # 판독 영역은 '광고 없음(어비스 y387)' 과 '광고 있음(y531)' 을 모두 덮어야 합니다.
 # 실측: 광고 없을 때 y387(2026-07-16 옛 ptAbyssMenu) / 광고 있을 때 y531(2026-08-08).
 $abyssTop = [int]$auditConfigJson.ocrRegions.abyssMenu[1]

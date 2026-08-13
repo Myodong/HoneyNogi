@@ -375,4 +375,31 @@ if (-not (Test-Path -LiteralPath $tailCapturePath)) {
   }
 }
 
+# ── 2026-08-13 19:15 실사고 (우연한 만남 토글 자기앵커): 고정점 (1183,415)가 네이티브
+#    1908에서 토글 밖(실측 초록 중심 (1136,443)). 같은 11:53 옵션 캡처(토글 켜짐)로
+#    "라벨 판독 → Select-DgChanceToggleAnchor → 유도 좌표가 실측 초록 상자 안"을 고정합니다.
+if (-not (Test-Path -LiteralPath $tailCapturePath)) {
+  "SKIP 캡처가 없어 토글 앵커 재현을 건너뜁니다: $tailCapturePath"
+} elseif (-not (Get-Command Get-GameRegionOcrWords -ErrorAction SilentlyContinue)) {
+  'SKIP 단어 판독 스텁이 없어(네 번째 케이스 스킵) 토글 앵커 재현을 건너뜁니다'
+} else {
+  foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @('Select-DgChanceToggleAnchor', 'Find-DgChanceTogglePoint')) {
+    Invoke-Expression $definition
+  }
+  $sourceBitmap = [System.Drawing.Bitmap]::FromFile($tailCapturePath)
+  try {
+    $togglePoint = Find-DgChanceTogglePoint -Game $null
+    Assert-Case '토글 앵커 캡처: 라벨에서 좌표 유도 성공' ($null -ne $togglePoint) $true
+    if ($togglePoint) {
+      # 실측 초록 상자 (x 1117..1155, y 433..453) 안이어야 프로브/클릭이 토글 위에 꽂힘.
+      # 구 고정점 (1183,415)는 이 상자 밖 - 앵커가 고정점으로 퇴행하면 실패.
+      Assert-Case '토글 앵커 캡처: 유도 좌표가 실측 초록 상자 안 (1117..1155, 433..453)' `
+        (([int]$togglePoint.X -ge 1117) -and ([int]$togglePoint.X -le 1155) -and
+         ([int]$togglePoint.Y -ge 433) -and ([int]$togglePoint.Y -le 453)) $true
+    }
+  } finally {
+    $sourceBitmap.Dispose()
+  }
+}
+
 exit $fails

@@ -8,7 +8,7 @@ $workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
     -Names @('Get-DgDungeonIdFromTitle', 'Test-DgCardColor', 'Get-DgSelStagePoint', 'Get-DgOptStageFallbackPoint',
-             'Select-DgDifficultyWord', 'Resolve-DgObservedStage', 'Test-DgSelectionTitle')) {
+             'Select-DgDifficultyWord', 'Resolve-DgObservedStage', 'Test-DgSelectionTitle', 'Select-DgChanceToggleAnchor')) {
   Invoke-Expression $definition
 }
 # 본체의 데이터 표를 AST 로 추출 (변수 사본을 수작업으로 복제하지 않음 - 값 자체가 진리표)
@@ -77,6 +77,22 @@ Assert-Case 'ID(심층): 마스 오독(파스, 실기 21:52)' ([string](Get-DgDu
 Assert-Case 'ID(심층): 파스 + 층구역 제목' ([string](Get-DgDungeonIdFromTitle -TitleText '파스1층2구역')) '마스던전'
 Assert-Case 'ID(심층): 페카 涎분 뭉개짐 (01:41 실사고 원문)' ([string](Get-DgDungeonIdFromTitle -TitleText '표119涎분긬증2증3구역')) '페카고분'
 $dgNamePatterns = $savedNamePatterns
+
+# ── '우연한 만남' 토글 라벨 앵커 (2026-08-13 19:15 실사고 - 고정점 폐기, 자기앵커) ──
+# 실측: 1272 '만남'(1137,416)→토글(1180,416) / 네이티브1908 '만남'(1095,441)→토글(1136,443)
+$anchorMannam = Select-DgChanceToggleAnchor -Words @(@{ Text = '우연한'; X = 1095; Y = 441 }, @{ Text = '만남'; X = 1137; Y = 416 })
+Assert-Case '토글 앵커: 만남 1순위 +(42,1)' ('{0},{1}' -f $anchorMannam.X, $anchorMannam.Y) '1179,417'
+$anchorUyeon = Select-DgChanceToggleAnchor -Words @(@{ Text = '우연한'; X = 1095; Y = 441 })
+Assert-Case '토글 앵커: 만남 없으면 우연한 2순위 +(82,2)' ('{0},{1}' -f $anchorUyeon.X, $anchorUyeon.Y) '1177,443'
+# 합쳐진 단어 3순위 (키아던전_옵션1층 실측 - 중심 (1112,416)→토글 (1180,416), 오프셋 64)
+$anchorMerged = Select-DgChanceToggleAnchor -Words @(@{ Text = '우연한만남'; X = 1112; Y = 416 })
+Assert-Case '토글 앵커: 합쳐진 단어(우연한만남) 3순위 +(64,1)' ('{0},{1}' -f $anchorMerged.X, $anchorMerged.Y) '1176,417'
+Assert-Case '토글 앵커: 분리 단어가 있으면 만남 우선 (합침보다 정밀)' `
+  ('{0}' -f ([string](Select-DgChanceToggleAnchor -Words @(@{ Text = '우연한만남'; X = 1112; Y = 416 }, @{ Text = '만남'; X = 1137; Y = 416 })).X)) '1179'
+Assert-Case '토글 앵커: 단어 없음 = null (호출부 fail-closed)' `
+  ($null -eq (Select-DgChanceToggleAnchor -Words @())) $true
+Assert-Case '토글 앵커: 오독 합침(후연한만남)은 미등록 - 다른 배율이 구제 (s2 실측)' `
+  ($null -eq (Select-DgChanceToggleAnchor -Words @(@{ Text = '후연한만남'; X = 1113; Y = 415 }))) $true
 
 # ── 1b. 선택 화면 제목 판정 (2026-07-25 실기: '페카 고분' 제목에 '던전'이 없어
 #        시작 전 정리가 선택 화면을 알 수 없는 화면으로 오인 - 고분·광구·ID 매칭 추가) ──

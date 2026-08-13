@@ -348,26 +348,35 @@ Assert-Case '배선(워커): 구역 좌표 소진 시 이미 선택 확인' `
 # ── 카드 토글 루프 상태 기계 시뮬레이션 (2026-08-02 06:03 실사고 회귀) ─────────────
 # 사고: RDP 전환 5초가 6회 중 5회를 소모 → 복구 직후 마지막 회전에서 클릭만 하고 재확인 없이
 # 종료 → 게이트 정지. 새 계약: ①캡처 실패는 회전 미소모 ②마지막 회전 클릭 시 1회전 연장.
+# ③(2026-08-13 15:29 실사고) 클릭 후 판독 실패는 3회까지 회전 계속 - 전환 애니메이션 프레임
+#   1회에 '재확인 생략'으로 포기하면 미사용 역방향 게이트(소모량 null)가 정지. 카운트는
+#   마지막 클릭 기준 리셋, 캡처 실패는 미집계.
 # 프레임 시퀀스: FAIL=캡처실패 / SEL=선택됨 / CHA=도전 / NONE=판독불가
 function Simulate-ToggleLoop {
   param([string[]]$Frames, [bool]$WantSelected)
   $idx = 0; $clicked = $false; $recheckDone = $false; $extended = $false
-  $setTryMax = 6; $rounds = 0
+  $setTryMax = 6; $rounds = 0; $postClickReadFails = 0
   for ($setTry = 1; $setTry -le $setTryMax; $setTry++) {
-    while ($idx -lt $Frames.Count -and $Frames[$idx] -eq 'FAIL') { $idx++ }   # 캡처 실패 대기 (회전 미소모)
+    while ($idx -lt $Frames.Count -and $Frames[$idx] -eq 'FAIL') { $idx++ }   # 캡처 실패 대기 (회전·실패 카운트 미소모)
     $rounds++
     $frame = $(if ($idx -lt $Frames.Count) { $Frames[$idx] } else { 'NONE' }); $idx++
     if ($clicked -and -not $recheckDone) { $recheckDone = $true }
     $isSelected = ($frame -eq 'SEL'); $isChallenge = ($frame -eq 'CHA')
     if (-not ($isSelected -or $isChallenge)) {
-      if ($clicked) { return @{ Ok = $true; Via = '재확인 생략'; Rounds = $rounds; Extended = $extended } }
+      if ($clicked) {
+        $postClickReadFails++
+        if ($postClickReadFails -ge 3 -or $setTry -ge $setTryMax) {
+          return @{ Ok = $true; Via = '재확인 생략'; Rounds = $rounds; Extended = $extended; Rechecked = $false }
+        }
+      }
       continue
     }
-    if ($isSelected -eq $WantSelected) { return @{ Ok = $true; Via = '확인'; Rounds = $rounds; Extended = $extended } }
+    if ($isSelected -eq $WantSelected) { return @{ Ok = $true; Via = '확인'; Rounds = $rounds; Extended = $extended; Rechecked = $true } }
     $clicked = $true
+    $postClickReadFails = 0
     if ($setTry -eq $setTryMax -and $setTryMax -eq 6 -and -not $recheckDone) { $setTryMax = 7; $extended = $true }
   }
-  return @{ Ok = $false; Via = '실패'; Rounds = $rounds; Extended = $extended }
+  return @{ Ok = $false; Via = '실패'; Rounds = $rounds; Extended = $extended; Rechecked = $false }
 }
 # 사고 재현: 캡처 실패 5프레임이 회전을 소모하지 않아, 복구 후 클릭→재확인이 정상 진행
 $simCase1 = Simulate-ToggleLoop -Frames @('FAIL','FAIL','FAIL','FAIL','FAIL','SEL','CHA') -WantSelected $false
@@ -380,9 +389,31 @@ $simCase3 = Simulate-ToggleLoop -Frames @('NONE','NONE','NONE','NONE','NONE','SE
 Assert-Case '토글 시뮬: 연장 재확인도 반대 상태면 실패 반환' (-not $simCase3.Ok -and $simCase3.Extended) $true
 # 연장은 1회뿐 (무한 연장 금지)
 Assert-Case '토글 시뮬: 연장 후 추가 연장 없음(총 7회전)' ($simCase3.Rounds -eq 7) $true
+# ③ 클릭 후 판독 실패 재시도 진리표 (2026-08-13 15:29 실사고 - 실측: 15:12 +1초/15:24 +2초 회복)
+$simRetry1 = Simulate-ToggleLoop -Frames @('SEL', 'NONE', 'CHA') -WantSelected $false
+Assert-Case '토글 시뮬: 클릭 후 실패 1회를 넘겨 확인 성공 (15:29 사고 재현)' `
+  ($simRetry1.Via -eq '확인' -and $simRetry1.Rechecked) $true
+$simRetry2 = Simulate-ToggleLoop -Frames @('SEL', 'NONE', 'NONE', 'CHA') -WantSelected $false
+Assert-Case '토글 시뮬: 실패 2회 후 세 번째 판독에서 확인 성공' ($simRetry2.Via -eq '확인') $true
+$simRetry3 = Simulate-ToggleLoop -Frames @('SEL', 'NONE', 'NONE', 'NONE') -WantSelected $false
+Assert-Case '토글 시뮬: 실패 3회 소진 → 기존 재확인 생략 (흐림 폴백 보존)' `
+  ($simRetry3.Ok -and $simRetry3.Via -eq '재확인 생략' -and -not $simRetry3.Rechecked) $true
+$simRetry4 = Simulate-ToggleLoop -Frames @('NONE', 'NONE', 'NONE', 'NONE', 'NONE', 'SEL', 'NONE') -WantSelected $false
+Assert-Case '토글 시뮬: 늦은 클릭은 남은 회전(연장 포함)까지만 재시도' `
+  ($simRetry4.Via -eq '재확인 생략' -and $simRetry4.Rounds -eq 7 -and $simRetry4.Extended) $true
+$simRetry5 = Simulate-ToggleLoop -Frames @('SEL', 'NONE', 'NONE', 'SEL', 'NONE', 'CHA') -WantSelected $false
+Assert-Case '토글 시뮬: 재클릭 시 실패 카운트 리셋 (리셋 없으면 3회째에 생략됐을 시퀀스)' `
+  ($simRetry5.Via -eq '확인' -and $simRetry5.Rounds -eq 6) $true
+$simRetry6 = Simulate-ToggleLoop -Frames @('SEL', 'FAIL', 'FAIL', 'NONE', 'CHA') -WantSelected $false
+Assert-Case '토글 시뮬: 캡처 실패는 실패 카운트 미집계' ($simRetry6.Via -eq '확인' -and $simRetry6.Rounds -eq 3) $true
 # 배선: 실제 함수가 시뮬과 같은 계약을 갖는지
+Assert-Case '배선(워커): 클릭 후 실패 3회 문턱 + 회전 상한 (재확인 생략 게이트)' `
+  ($workerSource -match 'if \(\$postClickReadFails -ge 3 -or \$setTry -ge \$setTryMax\)') $true
+Assert-Case '배선(워커): 실패 카운트가 클릭 성공 시 리셋 + 캡처 실패 미집계' `
+  (($workerSource -match '\$script:dgToggleClicked = \$true[\s\S]{0,200}?\$postClickReadFails = 0') -and
+   ($workerSource -match 'if \(-not \$script:screenCaptureFailing\) \{ \$postClickReadFails\+\+ \}')) $true
 Assert-Case '배선(워커): 토글 루프 캡처 실패 대기(회전 미소모)' `
-  ($workerSource -match 'for \(\$setTry = 1; \$setTry -le \$setTryMax; \$setTry\+\+\) \{[\s\S]{0,700}?while \(\$script:screenCaptureFailing\)') $true
+  ($workerSource -match 'for \(\$setTry = 1; \$setTry -le \$setTryMax; \$setTry\+\+\) \{[\s\S]{0,900}?while \(\$script:screenCaptureFailing\)') $true
 Assert-Case '배선(워커): 마지막 회전 클릭 시 1회전 연장' `
   ($workerSource -match 'if \(\$setTry -eq \$setTryMax -and \$setTryMax -eq 6 -and -not \$clickedRecheckDone\) \{ \$setTryMax = 7 \}') $true
 
