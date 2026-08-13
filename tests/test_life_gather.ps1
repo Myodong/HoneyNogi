@@ -1377,24 +1377,27 @@ Assert-Case 'GUI: 생활 안전 중지 로그가 소요 시간까지 안내' `
   ($guiText.Contains('진행 중인 채집을 끝까지 마친 뒤 다음 사이클을 시작하지 않습니다')) 'True'
 Assert-Case 'GUI: 전투 안전 중지 문구는 그대로 유지' `
   ($guiText.Contains('안전 중지 예약: 던전에서 나와 밖이 확인되면 멈춥니다. (버튼을 다시 누르면 취소)')) 'True'
-# 설정 그룹 공용 버튼 3개의 배치는 대분류마다 다릅니다 (2026-08-08 사용자 지시).
-# 전투는 왼쪽이 체크 4개 + 클리어 대기 줄로 꽉 차 오른쪽 세로 3단을 유지하고,
-# 생활은 '진행 없음' 한 줄뿐이라 아래가 비므로 폭 158 세 개를 가로로 놓습니다.
-# (버튼을 선언부에서 아래 가로로 옮겼더니 전투의 클리어 대기 줄이 가려졌던 실사고 - 실캡처 확인)
-Assert-Case 'GUI: 전투 기본 배치는 오른쪽 세로 유지 (2026-08-13: 균등 간격 12px - 25/67/109)' `
-  (($guiText.Contains('$btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)')) -and
-   ($guiText.Contains('$btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 67)')) -and
-   ($guiText.Contains('$btnSave.Location = New-Object System.Drawing.Point(390, 109)'))) 'True'
+# 설정 그룹 공용 버튼 3개는 양 대분류 모두 아래 가로 1줄 (2026-08-13 시안 확정 - 전투는
+# 체크 4개를 가로 2줄로 압축하고 클리어 대기 줄을 자동부활 오른쪽으로 옮겨 높이 150 유지.
+# 대분류별 차이는 버튼 y뿐: 전투 110 / 생활 56. 크기는 선언부에서 158x28 단일)
+Assert-Case 'GUI: 전투도 아래 가로 한 줄(y110, 15/183/351 - 2026-08-13 시안)' `
+  ([bool]($guiText -match "else \{\s*\r?\n\s*\`$btnRecommendedWindow\.Location = New-Object System\.Drawing\.Point\(15, 110\)\s*\r?\n\s*\`$btnAlwaysOn\.Location = New-Object System\.Drawing\.Point\(183, 110\)\s*\r?\n\s*\`$btnSave\.Location = New-Object System\.Drawing\.Point\(351, 110\)")) 'True'
 Assert-Case 'GUI: 생활 전환 시 아래 가로 한 줄(y56, 15/183/351)' `
   ([bool]($guiText -match "if \(\`$isLife\) \{\s*\r?\n\s*\`$btnRecommendedWindow\.Location = New-Object System\.Drawing\.Point\(15, 56\)\s*\r?\n\s*\`$btnAlwaysOn\.Location = New-Object System\.Drawing\.Point\(183, 56\)\s*\r?\n\s*\`$btnSave\.Location = New-Object System\.Drawing\.Point\(351, 56\)")) 'True'
-Assert-Case 'GUI: 생활 버튼 폭 158 / 전투 폭 108 로 되돌림' `
-  (($guiText.Contains('$settingsBtn.Size = New-Object System.Drawing.Size(158, 28)')) -and
-   ($guiText.Contains('$settingsBtn.Size = New-Object System.Drawing.Size(108, 30)'))) 'True'
+Assert-Case 'GUI: 버튼 크기 158x28 단일 (구 108x30 잔존 없음)' `
+  (($guiText.Contains('$btnSave.Size = New-Object System.Drawing.Size(158, 28)')) -and
+   (-not $guiText.Contains('System.Drawing.Size(108, 30)'))) 'True'
+Assert-Case 'GUI: 전투 체크 가로 배치 (음식 183,25 / 어시스트 351,25 / 부활 15,52)' `
+  (($guiText.Contains('$chkFood.Location = New-Object System.Drawing.Point(183, 25)')) -and
+   ($guiText.Contains('$chkAssist.Location = New-Object System.Drawing.Point(351, 25)')) -and
+   ($guiText.Contains('$chkRevive.Location = New-Object System.Drawing.Point(15, 52)'))) 'True'
+Assert-Case 'GUI: 클리어 대기 줄이 자동부활 오른쪽 (숫자 333,50)' `
+  ($guiText.Contains('$numClearWait.Location = New-Object System.Drawing.Point(333, 50)')) 'True'
 Assert-Case 'GUI: 설정 그룹 높이도 대분류별 (생활 94 / 전투 150)' `
   (($guiText.Contains('$grpSettings.Height = 94')) -and ($guiText.Contains('$grpSettings.Height = 150'))) 'True'
-Assert-Case 'GUI: 저장 안내 라벨도 함께 이동 (버튼 줄과 겹침 방지)' `
+Assert-Case 'GUI: 저장 안내 라벨도 함께 이동 (버튼 줄과 겹침 방지 - 2026-08-13: 전투는 353,88)' `
   (($guiText.Contains('$lblSaveInfo.Location = New-Object System.Drawing.Point(350, 28)')) -and
-   ([regex]::Matches($guiText, '\$lblSaveInfo\.Location = New-Object System\.Drawing\.Point\(205, 82\)').Count -eq 2)) 'True'
+   ([regex]::Matches($guiText, '\$lblSaveInfo\.Location = New-Object System\.Drawing\.Point\(353, 88\)').Count -eq 2)) 'True'
 # '적용된 설정' 팝업이 시작 게이트와 같은 지원 목록을 보게 (함수 지역 변수였을 때 못 읽어
 # 낚시도 지원되는 것처럼 보였습니다 - 2026-08-08)
 Assert-Case 'GUI: 지원 스킬 목록이 script 스코프 단일 선언' `

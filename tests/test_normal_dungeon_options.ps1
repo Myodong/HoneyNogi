@@ -46,10 +46,10 @@ Check-Pattern '더블 불가 소탕 라디오를 기존 config 키로 저장' $g
   'continueSweepOnly\s*=\s*\[bool\]\(\$chkNdCoin\.Checked\s+-and\s+\$chkNdDoubleLoot\.Checked\s+-and\s+\$rbNdNoDoubleSweep\.Checked\)'
 Check-Pattern '두 대응 줄 표시 시 상세 그룹 높이 확장' $gui `
   '\$ndNoDoubleRowOn[\s\S]{0,120}\$pnlNdParty\.Top\s*=\s*174[\s\S]{0,80}\$grpContentDetail\.Height\s*=\s*208'
-Check-Pattern '권장 창 모드 버튼 폭 108' $gui `
-  '\$btnRecommendedWindow\.Size\s*=\s*New-Object System\.Drawing\.Size\(108, 30\)'
-Check-Pattern '적용된 설정 버튼 폭 108' $gui `
-  '\$btnAlwaysOn\.Size\s*=\s*New-Object System\.Drawing\.Size\(108, 30\)'
+Check-Pattern '권장 창 모드 버튼 폭 158 (2026-08-13 아래 가로 배치 통일)' $gui `
+  '\$btnRecommendedWindow\.Size\s*=\s*New-Object System\.Drawing\.Size\(158, 28\)'
+Check-Pattern '적용된 설정 버튼 폭 158' $gui `
+  '\$btnAlwaysOn\.Size\s*=\s*New-Object System\.Drawing\.Size\(158, 28\)'
 # 2026-08-04 폭 560 다이어트: 진행 초기화는 80 (합계 라벨과 겹침 방지 - 리뷰 좌표 재배분),
 # 리스트 조작 버튼은 94 유지
 Check-Pattern '진행 초기화 버튼 폭 80(폭 560 재배분)' $gui `

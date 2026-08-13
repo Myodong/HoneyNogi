@@ -4361,23 +4361,22 @@ $grpSettings.Controls.Add($chkSpace)
 
 $chkFood = New-Object System.Windows.Forms.CheckBox
 $chkFood.Text = '음식 자동 먹기 (B)'
-$chkFood.Location = New-Object System.Drawing.Point(15, 52)
+$chkFood.Location = New-Object System.Drawing.Point(183, 25)   # 체크 가로 배치 (2026-08-13 시안 - 버튼 열과 같은 x)
 $chkFood.Size = New-Object System.Drawing.Size(150, 22)
 $grpSettings.Controls.Add($chkFood)
 
 $chkRevive = New-Object System.Windows.Forms.CheckBox
 $chkRevive.Text = '자동부활 (불사의 가루)'
-$chkRevive.Location = New-Object System.Drawing.Point(15, 79)
+$chkRevive.Location = New-Object System.Drawing.Point(15, 52)
 $chkRevive.Size = New-Object System.Drawing.Size(185, 22)
 $grpSettings.Controls.Add($chkRevive)
 
 # 어시스트 자동 켜기 (2026-07-28 사용자 요청): 전투 중 우측 ASSIST 토글이 꺼져 있으면 H키로 켬.
-# 배치는 2열 상단 - 1열 4번째 줄(y106)은 클리어 대기 줄(도움말?+라벨+숫자, y108~132)과 겹침
-# (교차 리뷰 지적으로 이동. 2열 y82 의 저장 안내 라벨과도 안 겹치는 자리)
+# 배치는 체크 가로 1줄의 3번째 열 (2026-08-13 시안 - 버튼 열과 같은 x 15/183/351 정렬)
 $chkAssist = New-Object System.Windows.Forms.CheckBox
 $chkAssist.Text = '어시스트 자동 켜기 (H)'
-$chkAssist.Location = New-Object System.Drawing.Point(210, 25)
-$chkAssist.Size = New-Object System.Drawing.Size(175, 22)
+$chkAssist.Location = New-Object System.Drawing.Point(351, 25)
+$chkAssist.Size = New-Object System.Drawing.Size(158, 22)
 $grpSettings.Controls.Add($chkAssist)
 
 # 권장 창 모드 버튼: 클릭하면 크기 선택 메뉴(1272 추천 / 1908)가 버튼 아래 열리고, 항목을
@@ -4387,8 +4386,8 @@ $grpSettings.Controls.Add($chkAssist)
 # 나뉘어 떨어짐 - 제목 열화 계열 실사고 전부가 1908 창 (이슈 이력 08-11~13).
 $btnRecommendedWindow = New-Object System.Windows.Forms.Button
 $btnRecommendedWindow.Text = '권장 창 모드 ▾'
-$btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)
-$btnRecommendedWindow.Size = New-Object System.Drawing.Size(108, 30)
+$btnRecommendedWindow.Location = New-Object System.Drawing.Point(15, 110)   # 아래 가로 1줄 (2026-08-13 시안 - 생활과 동일 배치)
+$btnRecommendedWindow.Size = New-Object System.Drawing.Size(158, 28)
 $grpSettings.Controls.Add($btnRecommendedWindow)
 
 # 크기 선택 드롭다운 - 버튼 클릭 즉답 UI 라 GUI 팝업 금지 규칙의 예외 ②에 해당.
@@ -4472,8 +4471,8 @@ $script:timerResizeResult.Add_Tick({
 # 보이므로 팝업에는 넣지 않습니다. 켠 항목만 누를 때 상태를 읽어 표시합니다.
 $btnAlwaysOn = New-Object System.Windows.Forms.Button
 $btnAlwaysOn.Text = '적용된 설정'
-$btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 67)
-$btnAlwaysOn.Size = New-Object System.Drawing.Size(108, 30)
+$btnAlwaysOn.Location = New-Object System.Drawing.Point(183, 110)
+$btnAlwaysOn.Size = New-Object System.Drawing.Size(158, 28)
 $grpSettings.Controls.Add($btnAlwaysOn)
 
 $btnAlwaysOn.Add_Click({
@@ -4534,7 +4533,7 @@ $btnAlwaysOn.Add_Click({
 # '?' 도움말 버튼: 파란 원형 배지, 클릭하면 클리어 대기 시간 설명 팝업
 $btnClearHelp = New-Object System.Windows.Forms.Button
 $btnClearHelp.Text = '?'
-$btnClearHelp.Location = New-Object System.Drawing.Point(16, 110)
+$btnClearHelp.Location = New-Object System.Drawing.Point(210, 52)   # 클리어 대기 줄을 자동부활 오른쪽으로 (2026-08-13 시안)
 $btnClearHelp.Size = New-Object System.Drawing.Size(18, 18)
 $btnClearHelp.FlatStyle = 'Flat'
 $btnClearHelp.FlatAppearance.BorderSize = 0
@@ -4570,12 +4569,12 @@ $toolTip.SetToolTip($chkAcrRandom, "켜면 매 바퀴 시작 때 리스트 순�
 
 $lblClearWait = New-Object System.Windows.Forms.Label
 $lblClearWait.Text = '클리어 대기(초):'
-$lblClearWait.Location = New-Object System.Drawing.Point(40, 111)
+$lblClearWait.Location = New-Object System.Drawing.Point(236, 53)
 $lblClearWait.Size = New-Object System.Drawing.Size(95, 20)
 $grpSettings.Controls.Add($lblClearWait)
 
 $numClearWait = New-Object System.Windows.Forms.NumericUpDown
-$numClearWait.Location = New-Object System.Drawing.Point(137, 108)
+$numClearWait.Location = New-Object System.Drawing.Point(333, 50)
 $numClearWait.Size = New-Object System.Drawing.Size(65, 24)
 $numClearWait.Minimum = 60
 $numClearWait.Maximum = 10800
@@ -4584,8 +4583,8 @@ $grpSettings.Controls.Add($numClearWait)
 
 # 초 → 분·초 환산 표시 (값이 바뀔 때마다 자동 갱신)
 $lblClearHuman = New-Object System.Windows.Forms.Label
-$lblClearHuman.Location = New-Object System.Drawing.Point(210, 111)
-$lblClearHuman.Size = New-Object System.Drawing.Size(160, 20)
+$lblClearHuman.Location = New-Object System.Drawing.Point(404, 53)
+$lblClearHuman.Size = New-Object System.Drawing.Size(105, 20)   # x404 + 105 = 509 (그룹 폭 514 안 - 교차 리뷰)
 $lblClearHuman.ForeColor = [System.Drawing.Color]::SteelBlue
 $grpSettings.Controls.Add($lblClearHuman)
 
@@ -4645,14 +4644,14 @@ $numClearWait.Add_ValueChanged($updateClearHuman)
 
 $btnSave = New-Object System.Windows.Forms.Button
 $btnSave.Text = '설정 저장'
-$btnSave.Location = New-Object System.Drawing.Point(390, 109)
-$btnSave.Size = New-Object System.Drawing.Size(108, 30)
+$btnSave.Location = New-Object System.Drawing.Point(351, 110)
+$btnSave.Size = New-Object System.Drawing.Size(158, 28)
 $grpSettings.Controls.Add($btnSave)
 
 $lblSaveInfo = New-Object System.Windows.Forms.Label
 $lblSaveInfo.Text = ''
-$lblSaveInfo.Location = New-Object System.Drawing.Point(205, 82)
-$lblSaveInfo.Size = New-Object System.Drawing.Size(180, 20)
+$lblSaveInfo.Location = New-Object System.Drawing.Point(353, 88)
+$lblSaveInfo.Size = New-Object System.Drawing.Size(156, 20)   # x353 + 156 = 509 (그룹 폭 안 - 교차 리뷰)
 $lblSaveInfo.ForeColor = [System.Drawing.Color]::SeaGreen
 $grpSettings.Controls.Add($lblSaveInfo)
 
@@ -8907,32 +8906,25 @@ $updateCategoryPanels = {
   $lblGatherWait.Visible = $isLife
   $numGatherWait.Visible = $isLife
   $lblGatherHuman.Visible = $isLife
-  # 공용 버튼 3개(권장 창 모드/적용된 설정/설정 저장) 배치도 대분류에 따라 갈립니다
-  # (2026-08-08 사용자 지시 - '설정 아래 가로 한 줄'은 생활에만).
-  #  · 전투: 오른쪽 세로 3단 (체크 4개 + 클리어 대기 줄이 왼쪽을 다 쓰므로 원래 자리 유지)
-  #  · 생활: 진행 없음 줄 하나뿐이라 아래가 비므로 폭 158 세 개를 가로로 (시안 확정)
-  # 두 배치 모두 그룹 안쪽 폭 514 안에 들어갑니다.
+  # 공용 버튼 3개(권장 창 모드/적용된 설정/설정 저장)는 양 대분류 모두 **아래 가로 1줄**
+  # (폭 158×28, x 15/183/351)로 통일됐습니다 (2026-08-13 시안 확정 - 전투는 체크 4개를
+  # 가로 2줄로 압축하고 클리어 대기 줄을 자동부활 오른쪽으로 옮겨 그룹 높이 150을 유지).
+  # 대분류별로 갈리는 것은 버튼 줄의 y(전투 110 / 생활 56)와 저장 안내 위치·그룹 높이뿐.
   if ($isLife) {
     $btnRecommendedWindow.Location = New-Object System.Drawing.Point(15, 56)
     $btnAlwaysOn.Location = New-Object System.Drawing.Point(183, 56)
     $btnSave.Location = New-Object System.Drawing.Point(351, 56)
-    foreach ($settingsBtn in @($btnRecommendedWindow, $btnAlwaysOn, $btnSave)) {
-      $settingsBtn.Size = New-Object System.Drawing.Size(158, 28)
-    }
     # 저장 안내는 진행 없음 줄 오른쪽 빈 자리로 (버튼 줄과 겹치지 않게)
     $lblSaveInfo.Location = New-Object System.Drawing.Point(350, 28)
     $lblSaveInfo.Size = New-Object System.Drawing.Size(159, 20)
     $grpSettings.Height = 94
   }
   else {
-    $btnRecommendedWindow.Location = New-Object System.Drawing.Point(390, 25)
-    $btnAlwaysOn.Location = New-Object System.Drawing.Point(390, 67)
-    $btnSave.Location = New-Object System.Drawing.Point(390, 109)
-    foreach ($settingsBtn in @($btnRecommendedWindow, $btnAlwaysOn, $btnSave)) {
-      $settingsBtn.Size = New-Object System.Drawing.Size(108, 30)
-    }
-    $lblSaveInfo.Location = New-Object System.Drawing.Point(205, 82)
-    $lblSaveInfo.Size = New-Object System.Drawing.Size(180, 20)
+    $btnRecommendedWindow.Location = New-Object System.Drawing.Point(15, 110)
+    $btnAlwaysOn.Location = New-Object System.Drawing.Point(183, 110)
+    $btnSave.Location = New-Object System.Drawing.Point(351, 110)
+    $lblSaveInfo.Location = New-Object System.Drawing.Point(353, 88)
+    $lblSaveInfo.Size = New-Object System.Drawing.Size(156, 20)
     $grpSettings.Height = 150
   }
   # 어비스용 패널 (함께하기일 때만 매칭 줄이 난이도 아래에 나타나고 던전 목록이 내려감)
