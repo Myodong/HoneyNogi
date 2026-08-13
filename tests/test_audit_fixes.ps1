@@ -501,11 +501,11 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,300}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8 알약 + v9 제목 확장)' `
-  ($workerSource -match '\$coordsVersionCurrent = 9') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8 알약 + v9 제목 + v10 카드)' `
+  ($workerSource -match '\$coordsVersionCurrent = 10') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 9' ([int]$auditConfigJson.coordsVersion) 9
+Assert-Case 'config: coordsVersion 10' ([int]$auditConfigJson.coordsVersion) 10
 # v8 (2026-08-13 실사고): 네이티브 1908 창(모니터 100% + 물리 1908 리사이즈, 제목줄 31px)은
 # 선택 화면 알약 행이 y163 - 구영역(30,165,200,50)을 1px 차로 이탈해 3연속 정지.
 # 위로 20 확장. 두 실측 기하(1272 네이티브 y187 / 1908 네이티브 y163)를 모두 덮고,
@@ -532,6 +532,42 @@ $dgTitleBottom = $dgTitleTop + [int]$auditConfigJson.ocrRegions.dgTitle[3]
 Assert-Case 'v9: 네이티브 1908 제목 글자 상단(y42)을 덮음' ($dgTitleTop -le 42) $true
 Assert-Case 'v9: 창 제목줄 밴드(y31)는 배제' ($dgTitleTop -gt 31) $true
 Assert-Case 'v9: 하단 경계 100 유지 (아래 요소 오탐 면 불변)' $dgTitleBottom 100
+# v10 (2026-08-13 13:03 실사고): 네이티브 1908 창의 카드 버튼 글자가 소탕 (427,280) /
+# 루팅 (415,466) - 기존 영역(상단 292/493)을 이탈해 6회전 '(판독 없음)' 정지. 4영역 상단
+# 확장 + Set-DgToggleCard 클릭 자기앵커(-AnchorClickToText, 던전 호출부 한정 - 사냥터는
+# 실측 캡처가 없어 기존 고정점 유지).
+foreach ($cardCase in @(
+    @{ Key = 'dgCoinButton';    E = '388,264,205,86'; Rows = @(280, 314) }
+    @{ Key = 'dgCoinButtonAlt'; E = '400,262,130,74'; Rows = @(280, 314) }
+    @{ Key = 'dgLootButton';    E = '388,452,130,90'; Rows = @(466, 516) }
+    @{ Key = 'dgLootButtonAlt'; E = '388,448,205,95'; Rows = @(466, 516) })) {
+  $cardRegion = $auditConfigJson.ocrRegions.($cardCase.Key)
+  Assert-Case ('v10: config {0} = ({1})' -f $cardCase.Key, $cardCase.E) (($cardRegion -join ',')) $cardCase.E
+  $cardTop = [int]$cardRegion[1]; $cardBottom = $cardTop + [int]$cardRegion[3]
+  foreach ($rowY in $cardCase.Rows) {
+    Assert-Case ('v10: {0}이 글자 행 y{1}을 덮음 (네이티브 1908/1272 실측)' -f $cardCase.Key, $rowY) `
+      (($cardTop -le $rowY) -and ($cardBottom -ge $rowY)) $true
+  }
+}
+# 워커 기본값이 config와 일치 (사본 방지 - 소스 대입식 문자열 검증)
+Assert-Case 'v10: dgCoinButton 워커 기본값 일치' `
+  ($workerSource -match "'dgCoinButton'\) @\(388, 264, 205, 86\)") $true
+Assert-Case 'v10: dgLootButton 워커 기본값 일치' `
+  ($workerSource -match "'dgLootButton'\) @\(388, 452, 130, 90\)") $true
+Assert-Case 'v10: dgCoinButtonAlt 워커 기본값 일치' `
+  ($workerSource -match "'dgCoinButtonAlt'\) @\(400, 262, 130, 74\)") $true
+Assert-Case 'v10: dgLootButtonAlt 워커 기본값 일치' `
+  ($workerSource -match "'dgLootButtonAlt'\) @\(388, 448, 205, 95\)") $true
+# 자기앵커 배선: 던전 호출부 6곳만 스위치 사용, 사냥터 4곳은 기존 고정점 동작 유지
+Assert-Case 'v10: -AnchorClickToText 던전 호출부 6곳' `
+  ([regex]::Matches($workerSource, 'Set-DgToggleCard[^\r\n]*-AnchorClickToText').Count) 6
+Assert-Case 'v10: 사냥터 호출부는 자기앵커 미사용 (Ht 영역 + 스위치 없음)' `
+  ([regex]::Matches($workerSource, 'Set-DgToggleCard[^\r\n]*rgHt[^\r\n]*-AnchorClickToText').Count) 0
+# 소모량 정정 1회 클릭: 고정점 블라인드 클릭 제거, 스냅샷 좌표만 사용
+Assert-Case 'v10: 정정 클릭이 고정 ptDgLootButton 을 직접 쓰지 않음' `
+  ([regex]::Matches($workerSource, 'Click-GamePoint[^\r\n]*ptDgLootButton').Count) 0
+Assert-Case 'v10: 정정 클릭이 스냅샷 좌표(lootWordPoint) 사용' `
+  ($workerSource -match 'Click-GamePoint[^\r\n]*lootWordPoint') $true
 # 판독 영역은 '광고 없음(어비스 y387)' 과 '광고 있음(y531)' 을 모두 덮어야 합니다.
 # 실측: 광고 없을 때 y387(2026-07-16 옛 ptAbyssMenu) / 광고 있을 때 y531(2026-08-08).
 $abyssTop = [int]$auditConfigJson.ocrRegions.abyssMenu[1]

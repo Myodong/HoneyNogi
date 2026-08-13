@@ -313,4 +313,66 @@ if (-not (Test-Path -LiteralPath $tailCapturePath)) {
   }
 }
 
+# ── 2026-08-13 13:03 실사고 (네이티브 1908 카드 버튼 이탈): 소탕 해제가 필요한데 카드 버튼이
+#    구영역(상단 292/493) 밖(실측 소탕 (427,280)/루팅 (415,466))이라 6회전 '(판독 없음)' 정지.
+#    v10 = 4영역 상단 확장 + 클릭 자기앵커. 같은 11:53 캡처(두 카드 '선택됨')로
+#    "신영역 × Set-DgToggleCard 배율 사다리(5,3,4) → 선택됨 단어 + 실측 위치" 를 고정합니다.
+#    단어 y가 구 고정 클릭점(313/517)과 20px 이상 떨어져 있음까지 단언 - 고정점 클릭이
+#    버튼을 빗나가는 기하라는 사고 근거의 회귀 가드 (영역/사다리를 되돌리면 실패).
+if (-not (Test-Path -LiteralPath $tailCapturePath)) {
+  "SKIP 제목 꼬리 소실 캡처가 없어 카드 버튼 재현을 건너뜁니다: $tailCapturePath"
+} elseif (-not (Get-Command Get-GameRegionOcrWords -ErrorAction SilentlyContinue)) {
+  # 단어 판독 스텁은 네 번째 케이스(알약 이탈) 블록에서 정의됩니다 - 그 캡처가 없어 스킵된
+  # 부분 클론 환경에서는 이 케이스도 함께 건너뜁니다 (스킵 = 실패 아님)
+  'SKIP 단어 판독 스텁이 없어(네 번째 케이스 스킵) 카드 버튼 재현을 건너뜁니다'
+} else {
+  foreach ($regionName in @('rgDgCoinButton', 'rgDgCoinButtonAlt', 'rgDgLootButton', 'rgDgLootButtonAlt')) {
+    $regionAssign = $sourceAst.FindAll({
+        param($node)
+        ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+        ($node.Left.Extent.Text -eq ('$' + $regionName))
+      }, $true) | Select-Object -First 1
+    if (-not $regionAssign) { "FAIL 본체에서 `$$regionName 정의를 찾지 못했습니다"; $fails++ }
+    else { Invoke-Expression $regionAssign.Extent.Text }
+  }
+  function Get-CardWordFromCapture {
+    # Set-DgToggleCard 1회전 등가: 배율 5,3,4 × (주 → 보조) 순회, 선택됨 계열 단어 첫 매치
+    param([int[][]]$Regions)
+    foreach ($cardScale in 5, 3, 4) {
+      foreach ($cardRegion in $Regions) {
+        $cardWords = @(Get-GameRegionOcrWords -Game $null -ReferenceX $cardRegion[0] -ReferenceY $cardRegion[1] `
+          -RegionWidth $cardRegion[2] -RegionHeight $cardRegion[3] -Scale $cardScale -Engine $ocrKoreanEngine)
+        foreach ($cardWord in $cardWords) {
+          $wordText = [string]$cardWord.Text
+          if ($wordText.Contains('됨') -or $wordText.Contains('선택') -or $wordText.Contains('선태')) {
+            return $cardWord
+          }
+        }
+      }
+    }
+    return $null
+  }
+  $sourceBitmap = [System.Drawing.Bitmap]::FromFile($tailCapturePath)
+  try {
+    $coinWord = Get-CardWordFromCapture -Regions @($rgDgCoinButton, $rgDgCoinButtonAlt)
+    Assert-Case '카드 버튼 캡처: 소탕 선택됨 단어 검출 (구영역은 판독 없음)' ($null -ne $coinWord) $true
+    if ($coinWord) {
+      Assert-Case '카드 버튼 캡처: 소탕 단어 위치 (427,280)±12' `
+        (([Math]::Abs([int]$coinWord.X - 427) -le 12) -and ([Math]::Abs([int]$coinWord.Y - 280) -le 12)) $true
+      Assert-Case '카드 버튼 캡처: 소탕 단어가 구 고정 클릭점(y313)과 다른 행' `
+        ([Math]::Abs([int]$coinWord.Y - 313) -gt 20) $true
+    }
+    $lootWord = Get-CardWordFromCapture -Regions @($rgDgLootButton, $rgDgLootButtonAlt)
+    Assert-Case '카드 버튼 캡처: 루팅 선택됨 단어 검출 (구영역은 판독 없음)' ($null -ne $lootWord) $true
+    if ($lootWord) {
+      Assert-Case '카드 버튼 캡처: 루팅 단어 위치 (415,466)±12' `
+        (([Math]::Abs([int]$lootWord.X - 415) -le 12) -and ([Math]::Abs([int]$lootWord.Y - 466) -le 12)) $true
+      Assert-Case '카드 버튼 캡처: 루팅 단어가 구 고정 클릭점(y517)과 다른 행' `
+        ([Math]::Abs([int]$lootWord.Y - 517) -gt 20) $true
+    }
+  } finally {
+    $sourceBitmap.Dispose()
+  }
+}
+
 exit $fails

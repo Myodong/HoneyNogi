@@ -448,10 +448,11 @@ if (Test-Path -LiteralPath $configPath) {
 #    아래 버전과 config.json 의 coordsVersion 을 반드시 함께 +1 하세요.
 #    (안 올리면 옛 config 의 좌표가 게이트를 통과해 이번 사고가 재발합니다.
 #     두 값이 어긋나면 빌드 스크립트가 실패하도록 검사합니다)
-# v8(난이도 알약 확장)·v9(제목 영역 상단 확장) 모두 미배포(공개 배포는 7). 8→9를 나눈 이유:
-# 실기 PC에 'v8 + 구 dgTitle' config가 이미 설치돼 있어, 8 유지 시 GUI 이전 게이트(사용자
-# 버전 >= 기본 버전이면 이전 안 함)를 통과하지 못해 구 제목 영역이 남는다 (교차 리뷰 지적).
-$coordsVersionCurrent = 9
+# v8(난이도 알약)·v9(제목 상단)·v10(카드 버튼 4영역) 모두 미배포(공개 배포는 7). 버전을
+# 나눈 이유: 각 단계의 실기 PC에 직전 버전 config가 이미 설치돼 있어, 같은 번호를 유지하면
+# GUI 이전 게이트(사용자 버전 >= 기본 버전이면 이전 안 함)를 통과하지 못해 구 영역이
+# 남는다 (교차 리뷰 지적 - v9/v10 모두 같은 사유).
+$coordsVersionCurrent = 10
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -811,10 +812,15 @@ $rgDgEnterBtn   = @(Get-ConfigValue $config @('ocrRegions', 'dgEnterButton') @(6
 # 은동전/더블 루팅 카드 버튼은 상태별로 위치·폭이 달라('선택됨'=넓고 우측 / '도전'=좁고 좌측)
 # 한 영역으로 두 상태를 다 읽지 못합니다. 그래서 각 카드마다 주 영역 + 보조 영역을 두고,
 # 주 영역에서 판별이 안 되면 보조 영역을 읽습니다 (Set-DgToggleCard의 AltRegion).
-$rgDgCoinButton = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButton') @(388, 300, 205, 50))     # 은동전 주: 넓은 영역 ('선택됨' 대응, 실측 검증)
-$rgDgCoinButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButtonAlt') @(400, 292, 130, 44)) # 은동전 보조: 좁은 영역 ('도전' 대응)
-$rgDgLootButton = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButton') @(388, 494, 130, 48))     # 더블 루팅 주: 좁은 영역 ('도전' 대응, 실측 검증)
-$rgDgLootButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButtonAlt') @(388, 493, 205, 50)) # 더블 루팅 보조: 넓은 영역 ('선택됨' 대응)
+# 카드 버튼 4영역 위로 확장 (2026-08-13 13:03 실사고, coordsVersion 10): 네이티브 1908 창은
+# 버튼 글자가 소탕 (427,280) / 루팅 (415,466)로 기존 영역 상단(292/493)보다 위에 있어
+# 6회전 전부 '(판독 없음)' → 해제 불가 정지. 두 기하의 글자 행(소탕 280·314 / 루팅 466·516)을
+# 모두 덮도록 상단만 올리고 하단은 유지. 오탐 면: 1272 소모량 '010'(y260)은 상단 262/264로
+# 배제, 루팅 설명 행(1272 y444/네이티브 ~398)은 상단 448/452 + x경계(388)로 이중 배제.
+$rgDgCoinButton = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButton') @(388, 264, 205, 86))     # 은동전 주: 넓은 영역 ('선택됨' 대응, 실측 검증)
+$rgDgCoinButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgCoinButtonAlt') @(400, 262, 130, 74)) # 은동전 보조: 좁은 영역 ('도전' 대응)
+$rgDgLootButton = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButton') @(388, 452, 130, 90))     # 더블 루팅 주: 좁은 영역 ('도전' 대응, 실측 검증)
+$rgDgLootButtonAlt = @(Get-ConfigValue $config @('ocrRegions', 'dgLootButtonAlt') @(388, 448, 205, 95)) # 더블 루팅 보조: 넓은 영역 ('선택됨' 대응)
 # ===== 던전 구역 지도 4유형 좌표 체계 (2026-07-24 확정 실측: 10던전 x 4화면 40장, 3중 교차 검증) =====
 # 구역 지도 배치는 던전·층마다 다르며 총 4유형입니다:
 #   A  = 가로형·소카드 하단  / B = 가로형·소카드 상단
@@ -5810,7 +5816,14 @@ function Set-DgToggleCard {
     [int[]]$ClickPoint,
     [bool]$WantSelected,
     [string]$Label,
-    [int[]]$AltRegion = $null
+    [int[]]$AltRegion = $null,
+    # 클릭 자기앵커 (2026-08-13 13:03 실사고, coordsVersion 10): 네이티브 1908 창(모니터 100%
+    # 물리 1908)은 카드 버튼이 고정 클릭점보다 위-왼쪽 ~35px에 있고(실측: 소탕 (427,280) vs
+    # 고정점 (463,313) / 루팅 (415,466) vs (452,517)), 버튼 높이 ~29ref라 두 기하의 버튼
+    # y구간이 겹치지 않아 고정점으로는 한쪽이 반드시 빗나갑니다. 스위치가 켜지면 방금 상태를
+    # 판정한 그 단어의 중심을 클릭합니다 (글자 = 버튼 라벨이라 버튼 안 보장). 던전 호출부만
+    # 사용 - 사냥터는 실측 캡처가 없어 검증 불가라 기존 고정점 동작 유지 (교차 리뷰 조건).
+    [switch]$AnchorClickToText
   )
 
   # 은동전(소탕)/더블 루팅 카드의 상태를 설정값에 맞춥니다. 버튼 글자가
@@ -5829,6 +5842,10 @@ function Set-DgToggleCard {
   # **재판독 없이도** 꺼졌습니다(2026-08-09 감사 - 어긋나는 방향이 늘 안전장치를 끄는 쪽).
   # 그래서 '상태를 실제로 확인함'은 이 별도 플래그로 분리해 호출부가 따로 요구하게 합니다.
   $script:dgToggleRechecked = $false
+  # 마지막으로 상태를 판정한 버튼 단어의 기준 좌표 (자기앵커 클릭·호출부 정정 클릭용).
+  # 글자 판독 없이 끝난 경로(회색 비활성/재확인 생략)는 $null 로 남습니다 - 호출부는
+  # $null 이면 블라인드 고정 클릭을 하지 않습니다 (교차 리뷰 조건).
+  $script:dgToggleWordPoint = $null
   # 판독 영역 목록 (주 → 보조). PS 5.1 배열 풀림 방지로 쉼표 연산자를 씁니다.
   $cardRegions = @()
   $cardRegions += , $Region
@@ -5883,20 +5900,35 @@ function Set-DgToggleCard {
     Move-CursorOutsideGame -Game $Game
     $isSelected = $false
     $isChallenge = $false
+    # 단어 좌표는 회전마다 초기화합니다 - 이전 회전/배율의 좌표를 클릭에 재사용하지 않기 위함
+    # (교차 리뷰 조건. 클릭으로 상태가 바뀌면 버튼 폭·위치도 바뀝니다)
+    $matchedWordPoint = $null
     foreach ($cardScale in $cardScales) {
       foreach ($cardRegion in $cardRegions) {
-        $cardText = (Get-GameRegionOcrText -Game $Game -ReferenceX $cardRegion[0] -ReferenceY $cardRegion[1] `
-          -RegionWidth $cardRegion[2] -RegionHeight $cardRegion[3] -Scale $cardScale -Engine $ocrKoreanEngine) -replace '\s', ''
+        # 단어 목록 판독 (좌표 포함 - 자기앵커 클릭용. 판정 조각은 기존 문자열 판정과 동일)
+        $cardWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $cardRegion[0] -ReferenceY $cardRegion[1] `
+          -RegionWidth $cardRegion[2] -RegionHeight $cardRegion[3] -Scale $cardScale -Engine $ocrKoreanEngine)
         # 진단 로그가 실제 마지막 판독을 가리키도록 빈 값도 그대로 반영합니다
         # (기존에는 비어 있으면 갱신을 건너뛰어 이전 오독값이 경고에 남았음)
-        $lastText = $cardText
-        # '선태되' = '선택됨' 깨짐 실측 (2026-07-19 00:21 - '됨'도 '선택'도 안 남아 판별 불가였음)
-        $isSelected = ($cardText.Contains('됨') -or $cardText.Contains('선택') -or $cardText.Contains('선태'))
-        $isChallenge = $cardText.Contains('도전')
+        $lastText = (@($cardWords | ForEach-Object { [string]$_.Text }) -join '')
+        foreach ($cardWord in $cardWords) {
+          $wordText = [string]$cardWord.Text
+          # '선태되' = '선택됨' 깨짐 실측 (2026-07-19 00:21 - '됨'도 '선택'도 안 남아 판별 불가였음)
+          if ($wordText.Contains('됨') -or $wordText.Contains('선택') -or $wordText.Contains('선태')) {
+            $isSelected = $true
+          } elseif ($wordText -eq '도전') {
+            # '도전'은 단어 정확 일치 - 설명문('도전에 성공하면…')의 앞단어와 구분 (교차 리뷰.
+            # 영역 x경계(388)가 설명문을 이미 배제하지만 판정면도 좁혀 둡니다)
+            $isChallenge = $true
+          } else { continue }
+          $matchedWordPoint = @{ X = [int]$cardWord.X; Y = [int]$cardWord.Y }
+          break
+        }
         if ($isSelected -or $isChallenge) { break }
       }
       if ($isSelected -or $isChallenge) { break }
     }
+    $script:dgToggleWordPoint = $matchedWordPoint
     if (-not ($isSelected -or $isChallenge)) {
       # 은동전이 부족하면 게임이 카드를 자동 해제하고 버튼을 회색 비활성('도전')으로
       # 바꾸는데, 회색 글자는 대비가 낮아 OCR이 못 읽습니다 (실측: 두 영역 모두 빈값).
@@ -5940,7 +5972,14 @@ function Set-DgToggleCard {
       return $true
     }
     Focus-Game -Game $Game
-    Click-GamePoint -Game $Game -ReferenceX $ClickPoint[0] -ReferenceY $ClickPoint[1]
+    # 자기앵커: 방금 상태를 판정한 단어의 중심을 클릭 (파라미터 주석 참고). 단어 좌표가 없는
+    # 경로(회색 비활성 픽셀 판정)만 기존 고정점 폴백 - 회색 비활성은 1272/스트레치 창에서만
+    # 실측됐고 네이티브 1908의 회색 케이스는 미관측이라 방어를 넣지 않습니다 (규칙 8).
+    if ($AnchorClickToText -and $matchedWordPoint) {
+      Click-GamePoint -Game $Game -ReferenceX ([int]$matchedWordPoint.X) -ReferenceY ([int]$matchedWordPoint.Y)
+    } else {
+      Click-GamePoint -Game $Game -ReferenceX $ClickPoint[0] -ReferenceY $ClickPoint[1]
+    }
     # 클릭이 **실제로 나갔을 때만** '눌렀다'로 표시합니다. Click-ScreenPoint 는 커서 확인
     # 실패 시 클릭을 건너뛰는데, 그걸 눌렀다고 기록하면 ①로그가 거짓이 되고 ②이 상태를
     # 쓰는 소모량 잔상 판정($script:dgToggleClicked)이 '방금 전환했으니 잔상'이라며
@@ -6845,7 +6884,7 @@ function Invoke-NormalDungeonCycle {
     $effectiveLoot = [bool]$coinDecision.Loot
     if ($coinDecision.Reason) { Write-RunLog "[던전] $($coinDecision.Reason)" }
   }
-  $coinToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $effectiveCoin -Label "$dgCurrencyName(소탕)")
+  $coinToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $effectiveCoin -Label "$dgCurrencyName(소탕)" -AnchorClickToText)
   $coinToggleClicked = $script:dgToggleClicked
   # Ok(설정 반영)과 Rechecked(상태를 실제로 다시 봄)는 다릅니다 - 아래 생략 게이트는 후자를 요구합니다
   $coinToggleRechecked = $script:dgToggleRechecked
@@ -6858,10 +6897,14 @@ function Invoke-NormalDungeonCycle {
     $lootToggleClicked = $false
     # 심층은 더블 루팅 카드 자체가 없어 '확인할 것이 없음' = 확인됨으로 둡니다
     $lootToggleRechecked = $true
+    $lootWordPoint = $null
     if (-not $deepMode) {
-      $lootToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $effectiveLoot -Label '더블 루팅')
+      $lootToggleOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $effectiveLoot -Label '더블 루팅' -AnchorClickToText)
       $lootToggleClicked = $script:dgToggleClicked
       $lootToggleRechecked = $script:dgToggleRechecked
+      # 아래 소모량 정정 1회 클릭용 스냅샷 (교차 리뷰): 이 시점의 단어 좌표가 더블 루팅 버튼의
+      # 실측 위치입니다. 글자 판독 없이 끝났으면 $null - 그때는 정정 클릭을 하지 않습니다.
+      $lootWordPoint = $script:dgToggleWordPoint
     }
 
     # 5-1. '입장하기' 버튼의 공물(은동전) 소모량으로 더블 루팅 설정을 교차 검증합니다.
@@ -6911,10 +6954,19 @@ function Invoke-NormalDungeonCycle {
           Write-RunLog "[경고] 공물 소모량이 여전히 예상(${expectedCost})과 다릅니다 (실제 '$($lagWait.Value)') - 현재 상태로 진행합니다"
         }
       } else {
-      Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 더블 루팅 버튼을 눌러 정정합니다"
-      Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptDgLootButton[0] -ReferenceY $ptDgLootButton[1]
-      Start-Sleep -Milliseconds 1100
+      # 정정 1회 클릭도 자기앵커 좌표만 사용합니다 (2026-08-13 13:03 계열, 교차 리뷰):
+      # 고정점(452,517)은 네이티브 1908에서 버튼 밖(카드 여백)이라 블라인드 클릭 금지.
+      # 판독 좌표가 없으면 클릭 없이 재확인만 하고 기존 정책(커스텀 정지/비커스텀 경고)으로
+      # 흘러갑니다. Set-DgToggleCard 재호출로 대체하지 않는 이유: 직전 판독이 목표 상태라고
+      # 봤다면 재호출도 무클릭으로 끝나 '소모량 증거에 따른 강제 1회'의 의미가 사라집니다.
+      if ($lootWordPoint) {
+        Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 더블 루팅 버튼을 눌러 정정합니다"
+        Focus-Game -Game $Game
+        Click-GamePoint -Game $Game -ReferenceX ([int]$lootWordPoint.X) -ReferenceY ([int]$lootWordPoint.Y)
+        Start-Sleep -Milliseconds 1100
+      } else {
+        Write-RunLog "[경고] 공물 소모량 불일치 (예상 ${expectedCost}, 실제 ${actualCost}) - 버튼 위치 판독이 없어 정정 클릭 없이 재확인합니다"
+      }
       $recheck = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
       if ($null -ne $recheck -and $recheck -eq $expectedCost) {
         Write-RunLog "[던전] 공물 소모량 ${recheck}개로 정정 확인"
@@ -7001,7 +7053,7 @@ function Invoke-NormalDungeonCycle {
       # '확정 판독'이어야 아래에서 소모량 잔상을 이길 수 있습니다. 반환 $true 만 보면 클릭 후
       # 글자를 못 읽은 '재확인 생략'까지 확정으로 세어, 소탕이 켜진 채 미사용 항목에 입장할
       # 수 있습니다 (2026-08-09 리뷰 - 어긋남의 방향이 늘 안전장치를 끄는 쪽).
-      $offCardConfirmed = ([bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)") -and
+      $offCardConfirmed = ([bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)" -AnchorClickToText) -and
         $script:dgToggleRechecked)
       for ($offTry = 1; $offTry -le 5; $offTry++) {
         Start-Sleep -Milliseconds 2000
@@ -7163,7 +7215,7 @@ function Invoke-NormalDungeonCycle {
         #   입장이 계속 막히면 아래 안전 정지가 실제 잔량 기준으로 마무리합니다(fail-closed).
         if ($null -ne $retryBalance -and $retryDecision.Coin -and -not $retryDecision.Loot -and $effectiveLoot -and -not $lootFallbackDone) {
           Write-RunLog "[던전] $($retryDecision.Reason)"
-          $lootOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅')
+          $lootOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅' -AnchorClickToText)
           if ($lootOffOk -and $script:dgToggleRechecked) {
             $effectiveLoot = $false
           } else {
@@ -7173,7 +7225,7 @@ function Invoke-NormalDungeonCycle {
         }
         if ($null -ne $retryBalance -and -not $retryDecision.Coin -and $effectiveCoin -and -not $coinFallbackDone) {
           if ($effectiveLoot) {
-            $lootOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅')
+            $lootOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgLootButton -AltRegion $rgDgLootButtonAlt -ClickPoint $ptDgLootButton -WantSelected $false -Label '더블 루팅' -AnchorClickToText)
             if ($lootOffOk -and $script:dgToggleRechecked) {
               $effectiveLoot = $false
             } else {
@@ -7181,7 +7233,7 @@ function Invoke-NormalDungeonCycle {
             }
           }
           Write-RunLog "[던전] $($retryDecision.Reason)"
-          $coinOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)")
+          $coinOffOk = [bool](Set-DgToggleCard -Game $Game -Region $rgDgCoinButton -AltRegion $rgDgCoinButtonAlt -ClickPoint $ptDgCoinButton -WantSelected $false -Label "$dgCurrencyName(소탕)" -AnchorClickToText)
           if ($coinOffOk -and $script:dgToggleRechecked) {
             $effectiveCoin = $false
           } else {

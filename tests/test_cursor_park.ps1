@@ -236,8 +236,10 @@ $pillBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('T
 $toggleBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Set-DgToggleCard'))
 Assert-Case '카드: 대피가 정확히 1곳' `
   ([regex]::Matches($toggleBody, '(?m)^\s*Move-CursorOutsideGame -Game \$Game\s*$').Count) 1
+# v10: 버튼 판독이 텍스트 → 단어 목록(Get-GameRegionOcrWords - 자기앵커 클릭용 좌표 포함)으로
+# 바뀌었습니다. 대피-판독 순서 계약은 동일합니다.
 Assert-Case '카드: 대피가 버튼 OCR 보다 앞' `
-  (Test-ParkBeforeProbe -Body $toggleBody -ProbePattern 'Get-GameRegionOcrText -Game \$Game -ReferenceX \$cardRegion') '대피가앞'
+  (Test-ParkBeforeProbe -Body $toggleBody -ProbePattern 'Get-GameRegionOcrWords -Game \$Game -ReferenceX \$cardRegion') '대피가앞'
 Assert-Case '카드: 대피가 픽셀 폴백보다 앞' `
   (Test-ParkBeforeProbe -Body $toggleBody -ProbePattern 'Get-GamePixel -Game \$Game -ReferenceX \(\$ClickPoint') '대피가앞'
 # 판독 루프 **안**이어야 합니다. 함수 첫머리(for 밖)에 두면 클릭 후 회전이 안 걸립니다.
