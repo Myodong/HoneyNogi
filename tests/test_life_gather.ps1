@@ -106,6 +106,12 @@ Assert-Case "상세: 또렷한 우물 제목 + 본문에 물 시그니처 → wr
 # 교차 가드: 시그니처는 등록 대상('물')에만 효력 - 물 팝업이 목표 '우물'을 통과시키지 않는다
 Assert-Case "상세: 제목 소실 물 팝업 + 목표 '우물' → unreadable (시그니처 교차 오염 없음)" `
   (Get-LifeDetailVerdict -DetailText '0채집물일상채집레벨1이상마실수있는맑은물.빈병으로물을뜰수있다.가까운위치찾기0' -TargetName '우물' -Order $dailyOrder) 'unreadable'
+# 우물 시그니처 (2026-08-14 18:26 실사고 - 근거 index + 제목 소실 + 스킬명 '일상치1집' 깨짐
+# 으로 3회전 소진). 판독 원문 그대로 - 시그니처('깨끗한지하수를모아둔곳')가 우물을 확정한다.
+Assert-Case "상세: 실측 제목 소실 우물 팝업 → match (설명문 시그니처)" `
+  (Get-LifeDetailVerdict -DetailText '채집물일상치1집레벨1이상깨끗한지하수를모아둔곳.빈병으로물을뜰수있다.가까운위치찾기' -TargetName '우물' -Order $dailyOrder) 'match'
+Assert-Case "상세: 같은 우물 팝업 + 목표 '물' → unreadable (교차 오염 없음)" `
+  (Get-LifeDetailVerdict -DetailText '채집물일상치1집레벨1이상깨끗한지하수를모아둔곳.빈병으로물을뜰수있다.가까운위치찾기' -TargetName '물' -Order $dailyOrder) 'unreadable'
 Assert-Case "상세: 목표 '거미줄' + 거미줄 팝업 → match" `
   (Get-LifeDetailVerdict -DetailText '거미줄채집물일상채집레벨1이상' -TargetName '거미줄' -Order $dailyOrder) 'match'
 Assert-Case '상세: 목록의 다른 대상과 일치 → wrong-target' `
@@ -113,8 +119,11 @@ Assert-Case '상세: 목록의 다른 대상과 일치 → wrong-target' `
 Assert-Case '상세: 목록 밖 깨짐 제목 → unreadable (확정 보류)' `
   (Get-LifeDetailVerdict -DetailText '샤OO초채집물약초채집' -TargetName '화살꽃' -Order $herbOrder) 'unreadable'
 # 제목 깨짐 vs 오클릭 구분 (전수 배치 01:04 실측 - 깨진 제목을 오클릭으로 확정하던 사고)
-Assert-Case "상세: 실기 깨짐 '丁亞'(한글 0자) + 본문에 대상 없음 → unreadable" `
-  (Get-LifeDetailVerdict -DetailText '丁亞치|집물일상채집레벨1이상깨끗한지하수를모아둔곳.빈병으로물을뜰수있다.' -TargetName '우물') 'unreadable'
+# 2026-08-14 계약 변화: 아래 문자열은 진짜 우물 팝업 판독이라 시그니처 등록 후 match 가
+# 정답이 됐다 (원래 목적 = 깨진 제목을 오클릭으로 '확정'하지 않는 것 - wrong-target 만
+# 아니면 지켜짐. unreadable 시절보다 강한 판정)
+Assert-Case "상세: 실기 깨짐 '丁亞'(한글 0자) → match (시그니처, 오클릭 확정 아님)" `
+  (Get-LifeDetailVerdict -DetailText '丁亞치|집물일상채집레벨1이상깨끗한지하수를모아둔곳.빈병으로물을뜰수있다.' -TargetName '우물') 'match'
 Assert-Case "상세: 실기 깨짐 'C0자' 이지만 본문에 '젖소' → match (본문 구제)" `
   (Get-LifeDetailVerdict -DetailText 'C0자|집물일상새집레벨1이상얼룩덜룩한무늬)특징인젖소.빈병으로신선한우유를' -TargetName '젖소') 'match'
 Assert-Case '상세: 한 글자 제목 → unreadable (오클릭 확정 보류)' (Get-LifeDetailVerdict -DetailText '亞집물일상채집' -TargetName '우물') 'unreadable'
