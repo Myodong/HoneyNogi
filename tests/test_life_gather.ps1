@@ -15,7 +15,7 @@ function Assert-Case {
 
 # ── 본체에서 순수 판정 함수/데이터 추출 ──
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
-    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeListAtTop', 'Test-LifeTitleExplicitVariant', 'Test-LifeWindowClosePixels')) {
+    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestConceptHits', 'Get-LifeQuestOwnerText', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeListAtTop', 'Test-LifeTitleExplicitVariant', 'Test-LifeWindowClosePixels')) {
   Invoke-Expression $definition
 }
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
@@ -662,7 +662,10 @@ Assert-Case '퀘스트: 종료 텍스트 + HUD 없음 → unknown (부재 오판
 Assert-Case '퀘스트: 빈 판독 + HUD → absent' (Invoke-QuestStateCase '' $true) 'absent'
 Assert-Case '퀘스트: 빈 판독 + HUD 없음 → unknown' (Invoke-QuestStateCase '' $false) 'unknown'
 Assert-Case '퀘스트: 캡처 실패 중 → unknown (텍스트 무관)' (Invoke-QuestStateCase '•채집 장소 탐색' $true $true) 'unknown'
-Assert-Case "퀘스트: '채집' 한 조각만 → present 아님 (2조각 요구)" (Invoke-QuestStateCase '채집 0/10' $true) 'absent'
+# 2026-08-14 계약 반전: '채집 N/M'은 채집(정지) 단계 트래커의 콤팩트 목표줄 그 자체다
+# (계측 실측 19:18:44 '채집0/10:즤뇨…' - 이름이 통째로 깨진 채 퀘스트 생존 중). 구 계약
+# (2조각 요구)은 이 줄을 absent 로 봐서 진행 중 오완료를 만들었다 - present 가 정답.
+Assert-Case "퀘스트: 콤팩트 목표줄('채집 N/M') → present (2026-08-14 반전)" (Invoke-QuestStateCase '채집 0/10' $true) 'present'
 # 3조각(채집/장소/탐색) 중 2개면 present - 한 조각이 깨져도 놓치지 않음 (2026-08-07 사용자 지적)
 Assert-Case '퀘스트: 탐색 깨짐 실측 (채집+장소만) → present' (Invoke-QuestStateCase '채집 장소 탐 •백금 광맥 채집 010' $true) 'present'
 Assert-Case "퀘스트: '채집' 깨짐 + 장소/탐색 → present" (Invoke-QuestStateCase '차||집 장소 탐색' $true) 'present'
@@ -672,6 +675,24 @@ Assert-Case "퀘스트: '탐색' 한 조각만 → present 아님" (Invoke-Quest
 Assert-Case '조각: 채집+장소 → true' (Test-LifeQuestFragments -QuestText '•채집 장소 •사과 나부 채집 0/10') 'True'
 Assert-Case '조각: 주간 목표 문구 → false' (Test-LifeQuestFragments -QuestText '표] 모험가 길드의 정기 의뢰 •심층 던전 클리어 0/3') 'False'
 Assert-Case '조각: 빈 문자열 → false' (Test-LifeQuestFragments -QuestText '') 'False'
+# 2026-08-14 네이티브 계측 실측: 채집(정지) 단계 트래커는 제목줄 없이 '{대상}채집 N/M' 만
+# 남는다 - 조각 2-of-3 이 구조적으로 불가능해 진행 중 오완료(사과나무 6/10·헤이즐넛 0/10).
+# 아래 present 4건은 실사고 판독 원문 그대로
+Assert-Case '조각: 콤팩트 목표줄(분모 소실) → true' (Test-LifeQuestFragments -QuestText '7•둥지채집0/[주간목표]모험가길두의정기의뢰(2)') 'True'
+Assert-Case '조각: 콤팩트 목표줄(이름 깨짐) → true' (Test-LifeQuestFragments -QuestText '들자채집0/10[주간목표]모험가길드의정기의뢰(2)') 'True'
+Assert-Case "조각: '집→칩' 깨짐 + 분자/분모 → true" (Test-LifeQuestFragments -QuestText "연')辱나阜자|칩9/10/*晷넣츄보冒가길4의정기호로(2,") 'True'
+Assert-Case '조각: 이동 안내 → true' (Test-LifeQuestFragments -QuestText '목적지로이동•길을찾는중••。卜소탐색+목喜1구험)결-」정기의뢰') 'True'
+# 오탐 가드: 진성 부재 판독(퀘스트가 정말 없는 트래커 - 길드/이벤트 줄만)은 absent 유지
+Assert-Case '조각: 진성 부재(길드 하위 N/M) → false' (Test-LifeQuestFragments -QuestText '[주간목표]모험가길드의정기의뢰(2)던전클리어0/5사냥터클리어4/5') 'False'
+Assert-Case '조각: 진성 부재(이벤트 줄) → false' (Test-LifeQuestFragments -QuestText '달걀을지켜라!12일남음시원한여름을보내는법C33일남음마음을전합니다19회=') 'False'
+Assert-Case "조각: 같은 개념 이형 중복은 1점 ('채집해집') → false" (Test-LifeQuestFragments -QuestText '채집해집') 'False'
+# 소유자 증거 분리 (Codex 반례): 콤팩트 줄 뒤 주간 목표 줄의 긴 이름을 소유자로 집으면 안 됨
+Assert-Case '소유 범위: 콤팩트 목표줄까지만 → 나무' `
+  (Get-LifeQuestOwner -QuestText (Get-LifeQuestOwnerText -QuestText '•나무채집0/10[주간목표]뾰족나무') -Order @('나무', '뾰족 나무')) '나무'
+Assert-Case '소유 범위: 이동 안내만으로는 미확정 (이름 근거 없음)' `
+  (Get-LifeQuestOwnerText -QuestText '목적지로이동[주간목표]뾰족나무') ''
+Assert-Case '소유 범위: 제목줄 형태는 전체 유지 (기존 계약)' `
+  (Get-LifeQuestOwner -QuestText (Get-LifeQuestOwnerText -QuestText '채집 장소 탐색 우물 채집 3/10') -Order @('물', '우물')) '우물'
 # ── ②a 좁은 판독 → 넓은 판독 2단 구조 (2026-08-09 감사 - 이전 스텁으로는 검증 불가였음) ──
 # 실사고: 획득 경험치 배지가 첫 줄(좁은 ROI)을 덮고 퀘스트는 아래로 밀렸는데, 좁은 판독만
 # 보고 '없음'으로 확정해 진행 중인 채집을 완료로 처리했습니다.
@@ -921,6 +942,15 @@ $sim = Invoke-CycleSim 'resume-sibling'
 Assert-Case "사이클: '우물' 퀘스트를 목표 '물' 이 인수하지 않음 (대기 후 메뉴 진행)" ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '0/m1'
 Assert-Case '사이클: 다른 대상 대기 로그' `
   ([bool](@($sim.Out | Where-Object { "$_" -match '다른 대상의 채집이 진행 중' }).Count -ge 1)) 'True'
+# 2026-08-14 실사고 (계약 반전): 이름 미확정 잔존 퀘스트를 '내 것'으로 인수해 그 소멸만으로
+# 빈 사이클 3건을 완료로 계상. 이제 미확정은 '다른 대상'과 동일 - 대기 후 메뉴로 새로 시작
+$sim = Invoke-CycleSim 'resume-unreadable'
+Assert-Case '사이클: 이름 미확정 잔존은 인수하지 않음 - 대기 후 메뉴로 새로 시작 → exit 0' ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '0/m1'
+Assert-Case '사이클: 미확정 잔존 안내 로그 (새로 시작 방침 명시)' `
+  ([bool](@($sim.Out | Where-Object { "$_" -match '끝나기를 기다린 뒤 새로 시작합니다' }).Count -ge 1)) 'True'
+$sim = Invoke-CycleSim 'resume-unreadable-stuck'
+Assert-Case '사이클: 미확정 잔존이 안 끝나면 메뉴 미진입 조건부 정지 → exit 4 (명시적 안전 정지 계약 - Codex 합의)' `
+  ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m0'
 # 게임플레이 화면을 확정 못 하면 입력하지 않고 정지 (로딩/다른 화면에서 메뉴를 열면 사고)
 $sim = Invoke-CycleSim 'start-unknown'
 Assert-Case '사이클: 초기 확인이 전부 unknown → exit 4, 메뉴 미진입' ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m0'
@@ -1322,7 +1352,12 @@ Assert-Case '배선: 소멸 판정은 absent 일 때만 카운트 (로딩 unknow
 # 다른 창이 게임을 덮으면 판독은 남의 창 글자를, 클릭은 엉뚱한 곳을 향함 (2026-08-07 실사고)
 # 전면화는 '퀘스트가 안 읽혔을 때만' (읽히면 게임 화면이라는 증거 - 사용자 지시)
 Assert-Case '배선: 판독 먼저 → 안 읽힐 때만 전면화 후 재판독 → 그래도 안 되면 unknown' `
-  ($workerText -match 'function Get-LifeQuestState[\s\S]{0,900}Test-LifeQuestFragments[\s\S]{0,600}if \(-not \(Test-GameForeground -Game \$Game\)\) \{\s*\r?\n\s*Focus-Game -Game \$Game[\s\S]{0,900}if \(Test-HomeEndEscHud -Game \$Game\) \{ return ''absent'' \}') 'True'
+  ($workerText -match 'function Get-LifeQuestState[\s\S]{0,2200}Test-LifeQuestFragments[\s\S]{0,1400}if \(-not \(Test-GameForeground -Game \$Game\)\) \{\s*\r?\n\s*Focus-Game -Game \$Game[\s\S]{0,2200}if \(Test-HomeEndEscHud -Game \$Game\) \{ \$script:lifeQuestStateEvidence\.Hud = ''HUD 보임''; return ''absent'' \}') 'True'
+# 2026-08-14 실사고 대응: 소멸 판정에 실제 쓰인 판독 원문을 보존·기록한다 (재발 시 원인 확정용)
+Assert-Case '배선: 소멸 판정 근거 보존 (판정 원문 로그 + 1회차 캡처)' `
+  (($workerText -match '\$script:lifeQuestStateEvidence = @\{ Narrow') -and
+   ($workerText -match '소멸 판정 \{0\}/3') -and
+   ($workerText -match "if \(\`$absentStreak -eq 1\) \{ Write-LifeDiagnostics -Game \`$Game -Context '소멸 판정 근거' -CaptureOnly \}")) 'True'
 Assert-Case '배선: 메뉴 시퀀스·링크 클릭 전 전면 확인 소함수' `
   (($workerText -match 'function Confirm-LifeGameFront') -and
    ([regex]::Matches($workerText, 'Confirm-LifeGameFront -Game \$Game').Count -ge 2)) 'True'

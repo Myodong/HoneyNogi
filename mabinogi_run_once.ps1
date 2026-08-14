@@ -9704,17 +9704,52 @@ function Invoke-LifeListScroll {
 }
 
 function Test-LifeQuestFragments {
-  # 채집 퀘스트 문구 판정 (순수 - 진리표 대상): '채집 장소 탐색 - {대상} 채집 N/10'.
-  # 세 조각(채집/장소/탐색) 중 2개 이상이면 present 로 봅니다 - 한 조각이 깨져도(실측:
-  # '탐색'→'탐"', '장소'→'잠소') 놓치지 않기 위함 (2026-08-07 사용자 지적: '탐색'은
-  # 채집 퀘스트 공통 단어). 주간 목표 등 다른 줄에는 이 조합이 없어 오탐이 없습니다.
+  # 채집 퀘스트 문구 판정 (순수 - 진리표 대상). present 증거 3종 (2026-08-14 확장):
+  # ① 조각 개념(채집/장소/탐색) 2-of-3 - 개념별 최대 1점. 이형은 실측 등록분만
+  #    (해집·타색·다색: 카운트 함수의 배율 실측 주석 / 잠소: 2026-08-07 실측).
+  # ② 콤팩트 목표줄 '{대상}채집 N/M' - **채집(정지) 단계의 트래커는 제목줄('채집 장소
+  #    탐색') 없이 이 줄만 남는다** (2026-08-14 네이티브 1908 계측 실측: '둥지채집0/[주간…'
+  #    '들자채집0/10…' '칩9/10' - 조각 2-of-3이 구조적으로 불가능해 진행 중 absent 3연속이
+  #    뚫렸고 사과나무 6/10·헤이즐넛 0/10이 오완료됐다). '집'의 '칩' 깨짐과 분자/분모
+  #    한쪽 소실을 실측 범위에서 허용합니다.
+  # ③ 자동 이동 안내('목적지로이동'/'길을찾는중') - 이동 단계 트래커 실측(19:18:59에는
+  #    목표줄 N/M 도 조각 2개도 없이 이 문구만 남았다).
+  # 오탐 검증: 주간 목표 하위 '던전클리어0/5' 류('집' 불일치), 이벤트 '12일남음'(슬래시
+  # 없음), '정기의뢰(2)' 전부 불통과 - 진성 부재 판독(길드/이벤트만 남은 트래커)은 absent.
   param([string]$QuestText)
   $normalized = ([string]$QuestText) -replace '\s', ''
-  $hits = 0
-  foreach ($piece in @('채집', '장소', '탐색')) {
-    if ($normalized.Contains($piece)) { $hits++ }
+  if ((Get-LifeQuestConceptHits -NormalizedText $normalized) -ge 2) { return $true }
+  if ($normalized -match '[집칩](\d+/\d*|\d*/\d+)') { return $true }
+  if ($normalized.Contains('목적지로이동') -or $normalized.Contains('길을찾는중')) { return $true }
+  return $false
+}
+
+function Get-LifeQuestConceptHits {
+  # 조각 개념 적중 수 (순수 - 진리표 대상). 같은 개념의 이형이 여럿 보여도 1점만 -
+  # '채집해집' 같은 문자열이 2점이 되면 안 됩니다 (Codex 지적).
+  param([string]$NormalizedText)
+  $conceptHits = 0
+  foreach ($conceptPieces in @(@('채집', '해집'), @('장소', '잠소'), @('탐색', '타색', '다색'))) {
+    foreach ($piece in $conceptPieces) {
+      if ($NormalizedText.Contains($piece)) { $conceptHits++; break }
+    }
   }
-  return ($hits -ge 2)
+  return $conceptHits
+}
+
+function Get-LifeQuestOwnerText {
+  # 소유자 판정에 쓸 판독 부분만 잘라냅니다 (순수 - 진리표 대상). present 증거와 소유자
+  # 증거의 분리 (2026-08-14 Codex 반례: '나무채집0/10[주간목표]뾰족나무' 를 전체로 넘기면
+  # 긴 이름 우선 규칙이 주간 목표 줄의 '뾰족나무'를 소유자로 오판).
+  # - 콤팩트 목표줄이 있으면 그 매치 끝까지만 (뒤에 붙는 주간 목표/이벤트 줄을 버림)
+  # - 없으면 조각 개념 2-of-3일 때만 전체 (제목줄이 읽히는 기존 형태)
+  # - 이동 안내만으로 present 가 된 판독은 이름 근거가 없어 미확정('')
+  param([string]$QuestText)
+  $normalized = ([string]$QuestText) -replace '\s', ''
+  $countMatch = [regex]::Match($normalized, '[집칩](\d+/\d*|\d*/\d+)')
+  if ($countMatch.Success) { return $normalized.Substring(0, $countMatch.Index + $countMatch.Length) }
+  if ((Get-LifeQuestConceptHits -NormalizedText $normalized) -ge 2) { return $normalized }
+  return ''
 }
 
 function Get-LifeQuestState {
@@ -9723,16 +9758,24 @@ function Get-LifeQuestState {
   # 획득 알림/경험치 배지가 첫 줄을 덮거나 퀘스트가 아래로 밀리면 좁은 영역만으로는
   # '없음'이 되어 채집 중에 완료로 오판합니다 (2026-08-07 실사고).
   # absent 는 HUD 가 보이는 확정 상태에서만. 그 외 전부 unknown (부재 오판 방지)
+  # 판정에 실제 쓰인 판독 원문을 $script:lifeQuestStateEvidence 에 보존합니다 (2026-08-14
+  # 실사고: 진행 중 오완료(사과나무 6/10·헤이즐넛 0/10)의 원인 판독이 로그에 없어 확정
+  # 불가였다. Codex 합의: 진단용 재판독은 다른 결과가 나올 수 있으므로 판정에 쓴 원문
+  # 그대로를 남긴다. 전면화 재판독이 있으면 그 값으로 덮음 = 마지막 판정 근거).
   param([System.Diagnostics.Process]$Game)
   if ($script:screenCaptureFailing) { return 'unknown' }
   # ① 먼저 그냥 읽습니다 - 퀘스트 조각이 보이면 게임 화면이라는 증거이므로 전면화가
   #    필요 없습니다 (전면화는 사용자 조작을 방해하니 꼭 필요할 때만 - 사용자 지시)
-  if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+  $stateNarrowText = (Get-GameRegionOcrText -Game $Game `
       -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
-      -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
-  if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+      -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $script:lifeQuestStateEvidence = @{ Narrow = (([string]$stateNarrowText) -replace '\s', ''); Wide = ''; Hud = '' }
+  if (Test-LifeQuestFragments -QuestText $stateNarrowText) { return 'present' }
+  $stateWideText = (Get-GameRegionOcrText -Game $Game `
       -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
-      -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+      -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $script:lifeQuestStateEvidence.Wide = (([string]$stateWideText) -replace '\s', '')
+  if (Test-LifeQuestFragments -QuestText $stateWideText) { return 'present' }
   # ② 안 읽혔을 때만 '다른 창이 가린 건 아닌지' 확인합니다 - 전면화 후 한 번 더 읽고,
   #    전면화조차 안 되면 판단을 포기합니다(unknown - 부재로 세지 않음. 2026-08-07 실사고:
   #    개발 창이 게임을 덮은 채 그 글자를 읽고 '퀘스트 없음'으로 완료 오판)
@@ -9740,15 +9783,20 @@ function Get-LifeQuestState {
     Focus-Game -Game $Game
     Start-Sleep -Milliseconds 700
     if (-not (Test-GameForeground -Game $Game)) { return 'unknown' }
-    if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+    $stateNarrowText = (Get-GameRegionOcrText -Game $Game `
         -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
-        -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
-    if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
+        -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
+    $script:lifeQuestStateEvidence.Narrow = (([string]$stateNarrowText) -replace '\s', '')
+    if (Test-LifeQuestFragments -QuestText $stateNarrowText) { return 'present' }
+    $stateWideText = (Get-GameRegionOcrText -Game $Game `
         -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
-        -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+        -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)
+    $script:lifeQuestStateEvidence.Wide = (([string]$stateWideText) -replace '\s', '')
+    if (Test-LifeQuestFragments -QuestText $stateWideText) { return 'present' }
   }
   # ③ 게임 화면이 확실한데도 퀘스트가 없을 때만 absent (게임플레이 HUD 가 증거)
-  if (Test-HomeEndEscHud -Game $Game) { return 'absent' }
+  if (Test-HomeEndEscHud -Game $Game) { $script:lifeQuestStateEvidence.Hud = 'HUD 보임'; return 'absent' }
+  $script:lifeQuestStateEvidence.Hud = 'HUD 안 보임'
   return 'unknown'
 }
 
@@ -10065,7 +10113,9 @@ function Write-LifeDiagnostics {
   # 생활 흐름 실패 지점의 원인 분석용 진단 세트 (조건부 정지 코드 4는 오류 catch 를 타지
   # 않아 캡처가 없음 - 던전 Write-DgStageDiagnostics 와 같은 2026-07-22 교훈. 1차 실기
   # 22:45 실패도 캡처 부재로 원인 미확정 → 신설). 스크린샷은 error_* 명명/보관 정책 공유.
-  param([System.Diagnostics.Process]$Game, [string]$Context)
+  # -CaptureOnly: 화면 캡처만 남기고 목록행/상세 덤프는 생략 (소멸 판정 근거 캡처 용도 -
+  # 대기 루프 안이라 추가 OCR 3회의 시간·로그 소음을 피한다. 2026-08-14 신설)
+  param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly)
   try {
     $diagStamp = Get-Date -Format 'yyyyMMdd_\hHH\mmm\sss'
     if ($Game) {
@@ -10096,6 +10146,7 @@ function Write-LifeDiagnostics {
         }
       }
     }
+    if ($CaptureOnly) { return }
     # 생활 판정 재료 덤프: 창 상태 + 대상 목록 행 + 상세 영역 판독문 (분석 시 캡처와 대조)
     $diagRows = @(Get-LifeTargetRows -Game $Game -Scale 4)
     $rowDump = (@($diagRows | ForEach-Object { "$($_.Text)@$($_.Y)" }) -join ' | ')
@@ -10804,16 +10855,25 @@ function Invoke-LifeGatherCycle {
     # 소유자로 집어 남의 퀘스트로 오판합니다 (리뷰 지적). 아니면 미확정 → 아래 기본값.
     $questOwner = ''
     if (Test-LifeQuestFragments -QuestText $initialQuestText) {
-      $questOwner = Get-LifeQuestOwner -QuestText $initialQuestText -Order (Get-LifeAllTargetNames)
+      # 소유자 판정 입력은 콤팩트 목표줄까지로 제한합니다 (Get-LifeQuestOwnerText 주석 참고 -
+      # 뒤에 붙는 주간 목표 줄의 긴 이름을 소유자로 집는 오판 방지. 2026-08-14 Codex 반례)
+      $questOwner = Get-LifeQuestOwner -QuestText (Get-LifeQuestOwnerText -QuestText $initialQuestText) -Order (Get-LifeAllTargetNames)
     }
-    # 어느 대상인지 못 정했으면(이름이 통째로 깨짐) '내 것'으로 봅니다 - 비대칭 비용 때문입니다.
-    # 남의 것을 내 것으로 보면 그 채집이 끝날 때까지 기다렸다가 한 회차를 헛돌 뿐이지만,
-    # 내 것을 남의 것으로 보면 3분 대기 후 exit 4 로 무인 반복 전체가 멈춥니다 (2026-08-07 감사)
-    $questMatchesTarget = $true
+    # 이름을 못 정한(통째로 깨진) 잔존 퀘스트는 '내 것'으로 인수하지 않습니다.
+    # (2026-08-07 감사의 '미확정 = 내 것' 기본값을 2026-08-14 실사고로 뒤집음: 오완료가
+    # 남긴 잔존 퀘스트를 다음 회차들이 미확정 인수해 - 자기가 만들지 않은 퀘스트의 소멸만으로 -
+    # 빈 사이클 3건을 완료로 계상했다. 차나무·거미줄 뭉치는 채집 없이 10~17초 "완주",
+    # 얽힌 거미줄은 남의 진행 4→9/10 을 자기 진행 로그로 남기며 완료 처리.)
+    # 미확정은 아래 '다른 대상' 분기와 동일하게 처리한다: 끝나기를 기다렸다가 메뉴로 자기
+    # 퀘스트를 만든다. 남의 것이었으면 기존 동작 그대로고, 진짜 내 잔존이어도 같은 대상을
+    # 다시 만들어 정상 완료한다 (중복 채집 1회 비용 - 방향은 안전). 3분 상한을 넘기면 기존
+    # 계약대로 조건부 정지 - 빈 완료보다 정지가 옳다 (Codex 합의: 명시적 안전 정지로 수용).
+    # 생성 후 대기 루프의 present 우선 비대칭(깨진 판독을 부재로 안 셈)은 그대로다.
+    $questMatchesTarget = $false
     if ($questOwner) {
       $questMatchesTarget = (Test-LifeNameMatches -RowText $questOwner -TargetName $lifeTargetName)
     } else {
-      Write-RunLog "[생활] 진행 중인 퀘스트의 대상 이름을 확정하지 못했습니다 (판독 '$initialQuestText') - 내 채집으로 보고 이어서 대기합니다"
+      Write-RunLog "[생활] 진행 중인 퀘스트의 대상 이름을 확정하지 못했습니다 (판독 '$initialQuestText') - 내가 만든 퀘스트가 아닐 수 있어 끝나기를 기다린 뒤 새로 시작합니다"
     }
     if ($questMatchesTarget) {
       Write-RunLog '[생활] 진행 중인 채집 퀘스트 감지 - 이어서 대기합니다'
@@ -10823,7 +10883,9 @@ function Invoke-LifeGatherCycle {
       # 다른 대상을 누르면 진행 중인 채집만 방해합니다 (2026-08-06 사용자 실기 관찰:
       # "이동 중인데 중간에 다른 채집을 누른다"). 그 채집이 끝날 때까지 기다렸다가
       # 시작합니다 - 바로 정지하면 대상을 바꿀 때마다 멈춰 버립니다(같은 날 실측).
-      Write-RunLog "[생활] 다른 대상의 채집이 진행 중입니다 (판독 '$initialQuestText') - 끝나기를 기다립니다"
+      if ($questOwner) {
+        Write-RunLog "[생활] 다른 대상의 채집이 진행 중입니다 (판독 '$initialQuestText') - 끝나기를 기다립니다"
+      }
       # 소멸 판정도 '연속 3회' 확인해야 합니다 - 1회 판독으로 확정하면 트래커가 잠깐
       # 가려진 사이 '끝났다'고 보고 메뉴를 열어 진행 중인 채집을 방해합니다
       # (2026-08-07 사용자 실기 관찰: 5초 만에 끝났다고 판정하고 다른 대상을 누름)
@@ -10950,7 +11012,8 @@ function Invoke-LifeGatherCycle {
           # 소유 판정은 초기 확인과 같은 규칙(긴 이름 우선 + 이형·치환)을 씁니다 - 부분 문자열
           # 비교는 '우물'을 '물'로, '얽힌 거미줄'을 '거미줄'로 오인합니다 (2026-08-07 감사).
           # 여기서는 '다른 대상임이 확정될 때만' 정지합니다 - 확정 못 하면 재시도가 안전합니다
-          $leftoverOwner = Get-LifeQuestOwner -QuestText $leftoverQuestText -Order (Get-LifeAllTargetNames)
+          # 입력 범위 제한도 초기 확인과 동일 (Get-LifeQuestOwnerText - 2026-08-14 Codex 반례)
+          $leftoverOwner = Get-LifeQuestOwner -QuestText (Get-LifeQuestOwnerText -QuestText $leftoverQuestText) -Order (Get-LifeAllTargetNames)
           $leftoverIsOther = ($leftoverOwner -and -not (Test-LifeNameMatches -RowText $leftoverOwner -TargetName $lifeTargetName))
           if ($leftoverIsOther) {
             Write-RunLog "[완료] 다른 채집 퀘스트가 진행 중이라 '$lifeTargetName' 을 시작할 수 없습니다 (판독 '$leftoverQuestText') - 조건부 정지"
@@ -11098,6 +11161,16 @@ function Invoke-LifeGatherCycle {
       # 게임이 자꾸 앞으로 튀어나옴). 가림 상황은 Get-LifeQuestState 안에서 이미
       # '판독 실패 → 전면화 → 재판독' 으로 처리되고, 실패하면 unknown 이라 여기 오지 않습니다.
       $absentStreak++
+      # 소멸 판정 근거 보존 (2026-08-14 실사고: 사과나무 6/10·헤이즐넛 0/10 진행 중에
+      # absent 3연속이 뚫려 오완료됐는데, 판정에 쓰인 판독 원문이 로그에 없어 원인 확정이
+      # 불가했다. 재발 시 이 줄들과 1회차 캡처가 근거가 된다. 시뮬레이터는 상태 스텁이라
+      # 근거 변수가 비어 있음 - 그때는 생략)
+      $absentEvidence = $script:lifeQuestStateEvidence
+      if ($absentEvidence) {
+        Write-RunLog ("[진단] 소멸 판정 {0}/3 - 좁은 '{1}' / 넓은 '{2}' / {3}" -f `
+            $absentStreak, [string]$absentEvidence.Narrow, [string]$absentEvidence.Wide, [string]$absentEvidence.Hud)
+        if ($absentStreak -eq 1) { Write-LifeDiagnostics -Game $Game -Context '소멸 판정 근거' -CaptureOnly }
+      }
       if ($absentStreak -ge 3) {
         # 완료 확정은 되돌릴 수 없으므로 이 순간에만 '게임이 실제로 전면인지' 확인합니다.
         # HUD 가 보여도 게임이 전면이 아닐 수 있고(창 영역 밖의 다른 창), 그 상태의 판독은

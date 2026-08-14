@@ -10,7 +10,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
     -Names @('Invoke-LifeGatherCycle', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeRequiredLevel', 'Get-LifeNormalizedName',
-      'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus',
+      'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeQuestConceptHits', 'Get-LifeQuestOwnerText', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus',
       # 지정 시간(시간 지정 모드) 검사는 스텁이 아니라 **본체**를 씁니다 (2026-08-11 실측 ① 대응
       # 수정) - 시나리오가 env 를 안 주면 파싱이 $null 이라 무동작 = 기존 시나리오 영향 없음.
       # 시간 도달 시나리오는 HONEYNOGI_UNTIL_TIME 을 지난 시각으로 넣어 exit 4 를 확인합니다.
@@ -213,6 +213,26 @@ switch ($Scenario) {
     # 초기 present → (다른 대상 대기) absent 3연속 → 메뉴 → 생성 확인 present 2 → 소멸 3
     $script:stateSeq = @('present') + @('absent', 'absent', 'absent') + @('present', 'present') + @('absent', 'absent', 'absent')
     $script:stateTail = 'absent'
+  }
+  'resume-unreadable' {
+    # 2026-08-14 실사고 재현: 오완료가 남긴 잔존 퀘스트를 이름 미확정('내 채집으로 보고')
+    # 인수해, 자기가 만들지 않은 퀘스트의 소멸만으로 빈 사이클을 완료로 계상했습니다
+    # (차나무·거미줄 뭉치 10~17초 "완주"). 이제는 미확정도 '다른 대상'과 동일하게 끝나기를
+    # 기다렸다가 메뉴로 자기 퀘스트를 만듭니다 - 완료는 메뉴 진입 이후에만 (MENU 1회 필수).
+    $script:questTrackerText = '채집 장소 탐색 ㅇX2 채집 8/10'
+    $script:menuResults = @($true)
+    # 초기 present → (미확정 잔존 대기) absent 3연속 → 메뉴 → 생성 확인 present 2 → 소멸 3
+    $script:stateSeq = @('present') + @('absent', 'absent', 'absent') + @('present', 'present') + @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
+  }
+  'resume-unreadable-stuck' {
+    # 미확정 잔존이 3분 상한(탐침 60회)까지 안 끝나면 메뉴 미진입 조건부 정지.
+    # Codex 합의: 진짜 내 잔존이 3분을 넘기는 드문 경우도 빈 완료가 아니라 명시적 안전
+    # 정지가 옳다 - 이 케이스가 그 계약을 못 박습니다 (가상 시계로 대기 생략).
+    $script:useVirtualClock = $true
+    $script:questTrackerText = '채집 장소 탐색 ㅇX2 채집 0/10'
+    $script:stateSeq = @('present')
+    $script:stateTail = 'present'
   }
   'start-unknown' {
     # 초기 확인 20회가 전부 unknown(로딩/다른 화면 지속) → 입력하지 않고 조건부 정지
