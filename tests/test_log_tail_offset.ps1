@@ -96,6 +96,13 @@ if ($guiRaw.Contains('^\[\d{4}-\d{2}-\d{2}\]\s*자동화 로그\s*\(시작')) {
 }
 Check-Equal 'GUI: 숫자 단독 노이즈 줄 숨김' `
   (Convert-WorkerLogLineForGui '1' $false) $null
+# 소멸 판정 계측은 화면 숨김·파일 보존 (2026-08-15 사용자 피드백 - [설정] 줄과 같은 방식)
+Check-Equal 'GUI: 소멸 판정 계측 줄 숨김' `
+  (Convert-WorkerLogLineForGui "12:00:00 [진단] 소멸 판정 1/3 - 좁은 'x' / 넓은 'y' / HUD 보임" $false) $null
+Check-Equal 'GUI: 소멸 판정 근거 캡처 줄 숨김' `
+  (Convert-WorkerLogLineForGui '12:00:00 [진단] 소멸 판정 근거 - 화면 캡처 저장: C:\x.png' $false) $null
+Check-Equal 'GUI: 오류 경로 [진단] 줄은 계속 표시' `
+  ([bool](Convert-WorkerLogLineForGui '12:00:00 [진단] 채집 대상 미발견 - 상세 영역 판독: ''x''' $false)) $true
 
 $workerPath = Join-Path $root 'mabinogi_run_once.ps1'
 $workerRaw = Get-Content -LiteralPath $workerPath -Raw -Encoding UTF8

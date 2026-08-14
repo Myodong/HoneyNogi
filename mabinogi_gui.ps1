@@ -663,6 +663,11 @@ function Convert-WorkerLogLineForGui {
   if ($Line -match '\[설정\]|\[준비\]\s*게임 확인:\s*PID|^\[\d{4}-\d{2}-\d{2}\]\s*자동화 로그\s*\(시작') {
     return $null
   }
+  # 소멸 판정 계측(판독 원문 + 근거 캡처)은 매 사이클 완료마다 3~5줄씩 나와 화면에는 소음입니다
+  # (2026-08-15 사용자 피드백: "사용자가 볼 때는 이상한데"). 원본 로그 파일에는 그대로 남아
+  # 분석 가치를 보존합니다 - 오류 경로의 다른 [진단] 줄(목록행/탐색 궤적 등)은 드물고 오류
+  # 문맥이라 계속 표시 (Codex 합의)
+  if ($Line -match '\[진단\]\s*소멸 판정') { return $null }
   # 정상 워커 로그는 항상 시각(HH:mm:ss)으로 시작합니다. 숫자 단독 줄은 화면에서만 버립니다.
   # ※ 과거 이 줄의 주석은 원인을 '파일 교체 경계'로 적어 두었지만 **오진이었습니다**.
   #   진짜 원인은 타이머의 Read-NewLogLines 반환을 @() 로 감싸지 않아 새 줄이 1줄뿐인 틱에서
@@ -6732,8 +6737,38 @@ function Set-CustomListRandomView {
   # 텍스트 손실이 없고, 저장 함수는 Tag 순 정렬로 등록 순서를 보존합니다 (실행 중 [설정 저장]
   # 이 화면 순서를 그대로 저장하는 사고 방어 - 리뷰 조건)
   param($Context)
-  if (-not $Context -or -not $Context.RandomOrder -or -not $Context.Order) { return }
+  if (-not $Context) { return }
   $view = Get-CustomActiveListView -SectionName ([string]$Context.SectionName)
+  if (-not $Context.RandomOrder) {
+    # 등록 순서(비랜덤) 바퀴에서도 현재 항목 행 색을 표시합니다 (2026-08-15 사용자 요청 -
+    # 기존에는 랜덤 바퀴 전용). 재배열·'진행순서 (등록번호)' 표기·열 폭 변경은 하지 않고
+    # **행 색만** 바꿉니다. 현재 행 인덱스는 전투 = Index(비랜덤은 실행 순서 = 등록 순서),
+    # 생활 = RegisteredIndex(비랜덤이면 sourceIndex = 등록 순번) - getter 계약 그대로.
+    # 정지 시 색 복원은 랜덤과 같은 공용 경로(Restore-CustomListRegisteredView)를 쓰도록
+    # Tag(등록 인덱스 identity)와 플래그를 동일하게 세팅합니다 - 복원의 Tag 순 정렬은
+    # 비랜덤에서 순서 불변이고, 열 폭 30/32 재설정도 원값이라 무해 (Codex 합의).
+    $plainTotal = [int]$Context.RegisteredTotal
+    $plainIndex = $(if ([string]$Context.SectionName -eq 'lifeCustomRepeat') { [int]$Context.RegisteredIndex } else { [int]$Context.Index })
+    if ($view.Items.Count -ne $plainTotal) { return }              # 화면-config 불일치면 표시만 생략 (안전)
+    if ($plainIndex -lt 0 -or $plainIndex -ge $view.Items.Count) { return }   # 인덱스 범위 확인 후에만 Tag/플래그 (Codex 조건)
+    $prevLoading = $script:crLoading
+    $script:crLoading = $true
+    $view.BeginUpdate()
+    try {
+      if (-not $script:customViewShuffled) {
+        foreach ($viewRow in $view.Items) { $viewRow.Tag = [int]$viewRow.Index }   # 등록 인덱스 고정 (복원 경로 공용)
+      }
+      foreach ($viewRow in $view.Items) { $viewRow.BackColor = [System.Drawing.Color]::White }
+      $view.Items[$plainIndex].BackColor = [System.Drawing.Color]::FromArgb(245, 231, 201)
+      $view.Items[$plainIndex].EnsureVisible()
+      $script:customViewShuffled = $true   # '실행 중 표시/Tag 관리 상태' 플래그 (재배열 여부가 아님)
+    } finally {
+      $view.EndUpdate()
+      $script:crLoading = $prevLoading
+    }
+    return
+  }
+  if (-not $Context.Order) { return }   # 랜덤일 때만 순열 유효성 요구
   # 리스트 행 수 기준은 '등록 항목 수'입니다. 생활만 Total 이 펼친 실행 칸 수라 다르므로
   # RegisteredTotal/RegisteredIndex 를 씁니다 (리스트에는 항목이 한 줄씩만 있음)
   $viewTotal = [int]$Context.Total

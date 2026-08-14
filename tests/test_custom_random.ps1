@@ -154,4 +154,48 @@ Assert-Case 'config: schema 8' ([int]$configJson.configSchemaVersion) 8   # v2.0
 Assert-Case 'config: randomOrder 기본 false 4섹션' `
   (($configJson.customRepeat.randomOrder -eq $false) -and ($configJson.deepCustomRepeat.randomOrder -eq $false) -and ($configJson.abyssCustomRepeat.randomOrder -eq $false) -and ($configJson.lifeCustomRepeat.randomOrder -eq $false)) $true
 
+# ── 비랜덤 현재 행 표시 (2026-08-15 사용자 요청 - 헤드리스 ListView 실물 검증, Codex 조건) ──
+# 계약: 재배열·번호 표기·열 폭 불변 / 현재 행만 크림색 / 생활은 등록 순번 행 / 정지 후 전체 복원
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') `
+    -Names @('Get-CustomActiveListView', 'Set-CustomListRandomView', 'Restore-CustomListRegisteredView')) {
+  Invoke-Expression $definition
+}
+$script:crLoading = $false
+$script:customViewShuffled = $false
+$lvCrList = New-Object System.Windows.Forms.ListView
+$lvCrList.View = 'Details'
+[void]$lvCrList.Columns.Add('', 24)
+[void]$lvCrList.Columns.Add('#', 32)
+[void]$lvCrList.Columns.Add('내용', 120)
+foreach ($rowNo in 1..3) {
+  $lvRow = New-Object System.Windows.Forms.ListViewItem('')
+  [void]$lvRow.SubItems.Add([string]$rowNo)
+  [void]$lvRow.SubItems.Add('항목' + $rowNo)
+  [void]$lvCrList.Items.Add($lvRow)
+}
+$lvAcrList = $lvCrList; $lvDcrList = $lvCrList; $lvLcrList = $lvCrList
+$creamArgb = [System.Drawing.Color]::FromArgb(245, 231, 201).ToArgb()
+Set-CustomListRandomView -Context @{ RandomOrder = $false; RegisteredTotal = 3; Index = 1; SectionName = 'customRepeat' }
+Assert-Case '비랜덤 표시: 현재(2번) 행만 크림색' `
+  (($lvCrList.Items[1].BackColor.ToArgb() -eq $creamArgb) -and ($lvCrList.Items[0].BackColor.ToArgb() -ne $creamArgb) -and ($lvCrList.Items[2].BackColor.ToArgb() -ne $creamArgb)) $true
+Assert-Case '비랜덤 표시: 행 순서·번호 텍스트 불변' `
+  ((($lvCrList.Items | ForEach-Object { $_.SubItems[1].Text + $_.SubItems[2].Text }) -join '|')) '1항목1|2항목2|3항목3'
+Assert-Case '비랜덤 표시: # 열 폭 불변 (32)' ([int]$lvCrList.Columns[1].Width) 32
+Set-CustomListRandomView -Context @{ RandomOrder = $false; RegisteredTotal = 3; Index = 2; SectionName = 'customRepeat' }
+Assert-Case '비랜덤 표시: 진행 이동 시 하이라이트 이동 (2번 해제, 3번 크림)' `
+  (($lvCrList.Items[1].BackColor.ToArgb() -ne $creamArgb) -and ($lvCrList.Items[2].BackColor.ToArgb() -eq $creamArgb)) $true
+# 생활 비랜덤: 실행 칸 Index 가 아니라 등록 순번(RegisteredIndex) 행을 칠한다 (반복 횟수로
+# 펼친 칸이 진행돼도 같은 등록 행 유지)
+Set-CustomListRandomView -Context @{ RandomOrder = $false; RegisteredTotal = 3; Index = 5; RegisteredIndex = 0; SectionName = 'lifeCustomRepeat' }
+Assert-Case '비랜덤 표시(생활): 등록 순번 행(1번) 크림 - 펼친 칸 번호 무시' `
+  (($lvCrList.Items[0].BackColor.ToArgb() -eq $creamArgb) -and ($lvCrList.Items[2].BackColor.ToArgb() -ne $creamArgb)) $true
+Restore-CustomListRegisteredView
+Assert-Case '비랜덤 표시: 정지 복원 - 전 행 White + Tag 해제 + 플래그 해제' `
+  ((@($lvCrList.Items | Where-Object { $_.BackColor.ToArgb() -eq $creamArgb }).Count -eq 0) -and ($null -eq $lvCrList.Items[0].Tag) -and (-not $script:customViewShuffled)) $true
+# 행 수 불일치(화면-config 어긋남)면 표시만 생략 - Tag/플래그도 건드리지 않음
+Set-CustomListRandomView -Context @{ RandomOrder = $false; RegisteredTotal = 4; Index = 0; SectionName = 'customRepeat' }
+Assert-Case '비랜덤 표시: 행 수 불일치면 생략 (플래그 미설정)' ([bool]$script:customViewShuffled) $false
+
 exit $fails
