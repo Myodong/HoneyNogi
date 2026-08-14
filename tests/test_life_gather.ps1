@@ -1019,6 +1019,22 @@ Assert-Case "이름: 공통 규칙 고요한빛부리 → 고요한 빛 무리" 
 Assert-Case "이름: 복합 깨짐 황폐한곤춤부리 → 황폐한 곤충 무리" (Test-LifeNameMatches -RowText '황폐한곤춤부리' -TargetName '황폐한 곤충 무리') 'True'
 Assert-Case "이름: 단일 깨짐 삭막한곤충부리 → 삭막한 곤충 무리" (Test-LifeNameMatches -RowText '삭막한곤충부리' -TargetName '삭막한 곤충 무리') 'True'
 Assert-Case "이름: 복합 치환이 다른 대상까지 통과시키지 않음" (Test-LifeNameMatches -RowText '황폐한곤춤부리' -TargetName '삭막한 곤충 무리') 'False'
+# '광'→'고十' 분해 계열 (2026-08-14 네이티브 1908 - 은 광맥 미발견 정지 진단에서 6건 동시 실측)
+Assert-Case "이름: 이형 으고十맥 → 은 광맥" (Test-LifeNameMatches -RowText '으고十맥' -TargetName '은 광맥') 'True'
+Assert-Case "이름: 이형 도고十臼H → 동 광맥" (Test-LifeNameMatches -RowText '도고十臼H' -TargetName '동 광맥') 'True'
+Assert-Case "이름: 이형 BH금광맥 → 백금 광맥" (Test-LifeNameMatches -RowText 'BH금광맥' -TargetName '백금 광맥') 'True'
+Assert-Case "이름: 이형 고十맥 → 광맥" (Test-LifeNameMatches -RowText '고十맥' -TargetName '광맥') 'True'
+Assert-Case "이름: 이형 *40고十맥 → 철 광맥" (Test-LifeNameMatches -RowText '*40고十맥' -TargetName '철 광맥') 'True'
+Assert-Case "이름: 이형 어으 → 얼음" (Test-LifeNameMatches -RowText '어으' -TargetName '얼음') 'True'
+Assert-Case "이름: 으고十맥이 광맥(기저)을 통과시키지 않음" (Test-LifeNameMatches -RowText '으고十맥' -TargetName '광맥') 'False'
+# 소유자 긴 이름 우선 (Codex 조건): '고十맥'이 부분 문자열이어도 긴 이형이 이긴다
+$miningOrderQ = @('광맥', '철 광맥', '얼음', '석탄 광맥', '동 광맥', '백동 광맥', '은 광맥', '운철 광맥', '백금 광맥')
+Assert-Case "소유: 으고十맥 퀘스트 → 은 광맥 (광맥 축소 금지)" `
+  (Get-LifeQuestOwner -QuestText '채집 장소 탐색 으고十맥 채집 0/10' -Order $miningOrderQ) '은 광맥'
+Assert-Case "소유: *40고十맥 퀘스트 → 철 광맥 (광맥 축소 금지)" `
+  (Get-LifeQuestOwner -QuestText '채집 장소 탐색 *40고十맥 채집 3/10' -Order $miningOrderQ) '철 광맥'
+Assert-Case "소유: BH금광맥 퀘스트 → 백금 광맥 (광맥 축소 금지)" `
+  (Get-LifeQuestOwner -QuestText '채집 장소 탐색 BH금광맥 채집 9/10' -Order $miningOrderQ) '백금 광맥'
 # '벼'→'斟'(한자) 실측 (2026-08-14 네이티브 1908 - 나무 베기 스크롤 탐색이 목록 끝까지 미발견)
 Assert-Case "이름: 이형 斟락나무 → 벼락 나무" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '벼락 나무') 'True'
 Assert-Case "이름: 斟락나무가 다른 나무를 통과시키지 않음" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '어스름 나무') 'False'
