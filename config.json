@@ -1,8 +1,8 @@
 ﻿{
     "_설명":  "꿀비노기(마비노기 모바일 자동화) 설정 파일입니다. 값만 바꾸고 저장하면 다음 실행부터 적용됩니다. '_설명' 항목은 스크립트가 무시하므로 자유롭게 참고하세요. 이 파일을 지우면 스크립트 내장 기본값으로 실행됩니다.",
     "_configSchemaVersion":  "설정 구조 버전. 새 설정 키/섹션을 기존 사용자 config에 안전하게 합칠 때 사용하며 좌표 버전과 별도로 관리합니다.",
-    "configSchemaVersion":  8,
-    "_mainCategory":  "대분류. battle = 전투(어비스/던전/심층던전/사냥터) / life = 생활(채집/가공 - v2.0.0 개발 중)",
+    "configSchemaVersion":  9,
+    "_mainCategory":  "대분류. battle = 전투(어비스/던전/심층던전/사냥터) / life = 생활(채집/가공 - v2.0.0 개발 중) / etc = 기타(고양이 상인 - 2026-08-15)",
     "mainCategory":  "battle",
     "life":  {
                  "_설명":  "'생활' 대분류 설정입니다 (v2.0.0 - 채집은 낚시를 제외한 8종 지원. 낚시·가공은 개발 중)",
@@ -15,6 +15,17 @@
                  "_gatherWaitSeconds":  "채집 진행이 멈춘 채로 견디는 시간(초, 60~3600). 수량이 늘어나는 동안은 오래 걸려도 멈추지 않습니다 - 총 시간 제한이 아닙니다. 이동이 아주 먼 대상에서 멈추면 늘려 주세요 (절대 상한은 1시간 고정)",
                  "gatherWaitSeconds":  600
              },
+    "etc":  {
+                "_설명":  "'기타' 대분류 설정입니다 (2026-08-15 - 고양이 상인 냥코인 뽑기)",
+                "_content":  "catMerchant = 고양이 상인 냥코인 뽑기",
+                "content":  "catMerchant",
+                "_nyanTargetCoins":  "목표 냥코인(1~99,999,999). 우상단 냥코인 잔량이 이 값 이상이 되면 스스로 멈춥니다",
+                "nyanTargetCoins":  10,
+                "_goldLimitEnabled":  "최대 사용 골드 옵션. true면 이번 실행에서 '시작 골드 - 현재 골드'가 아래 값 이상일 때 멈춥니다 (냥코인이 안 나오는 불운이 이어질 때 전 재산 소모 방지)",
+                "goldLimitEnabled":  false,
+                "_goldLimitGold":  "이번 실행 최대 사용 골드 (1,000~999,999,999)",
+                "goldLimitGold":  1000000
+            },
     "_coordsVersion":  "좌표(ocrRegions/clickPoints) 버전. 프로그램의 최신 좌표 버전보다 낮으면 이 파일의 좌표를 무시하고 내장 최신 좌표를 사용합니다 (게임 UI 개편 시 옛 좌표로 헛클릭하는 사고 방지). 좌표를 직접 수정했다면 프로그램 버전과 같게 유지하세요.",
     "coordsVersion":  14,
     "referenceResolution":  {

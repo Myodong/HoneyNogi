@@ -523,6 +523,15 @@ $lifeGatherWait = Get-ConfigInteger $config @('life', 'gatherWaitSeconds') 600 6
 # 잡습니다 - 실측 최장 사이클이 521초였으므로 정상 채집은 절대 여기 닿지 않습니다.
 $lifeGatherHardCapSeconds = 3600
 
+# 대분류 '기타' (2026-08-15 신설) - 고양이 상인 냥코인 뽑기.
+# 목표 냥코인: 우상단 잔량이 이 값 이상이 되면 정지. 골드 상한: 체크 옵션(기본 꺼짐) -
+# 켜면 '시작 골드 - 현재 골드'가 상한 이상일 때 정지 (가격표 합산이 아닌 잔량 차감 -
+# 가격 숫자 '1→7' 오독 실측 때문. Codex 합의)
+$etcContent = [string](Get-ConfigValue $config @('etc', 'content') 'catMerchant')
+$nyanTargetCoins = Get-ConfigInteger $config @('etc', 'nyanTargetCoins') 10 1 99999999
+$nyanGoldLimitEnabled = Get-ConfigBoolean $config @('etc', 'goldLimitEnabled') $false
+$nyanGoldLimit = Get-ConfigInteger $config @('etc', 'goldLimitGold') 1000000 1000 999999999
+
 $ptAbyssCard   = @(Get-ConfigValue $config @('clickPoints', 'abyssCard') @(956, 157))
 
 # 선택된 던전 프로파일: config.dungeons.selected 로 대상 던전이 정해지고,
@@ -11272,6 +11281,261 @@ function Invoke-LifeGatherCycle {
   }
 }
 
+# ============================================================
+#  기타 - 고양이 상인 냥코인 뽑기 (2026-08-15 신설)
+# ============================================================
+# 실측: 던전이미지\고양이상인\ 캡처 4장(1272×1 + 네이티브 1908×3) + 시연 연속 40프레임×2.
+# 흐름: 물음표 카드(각 가격표 1,600~1,800골드)를 클릭해 구매 → 정체 공개, 도둑 고양이가
+# 나오면 현상금(냥코인) 획득. 가격표가 소진되면 '다시 뽑기'로 새 판. 우상단 냥코인 잔량이
+# 목표 이상이 되면 정지. 사용자 제약: 새로 고침 후 **가격표가 표시된 카드만 클릭 가능** -
+# 가격표 좌표 자기앵커 클릭이 이 제약의 상태 기반 구현입니다 (Codex 설계 합의).
+# 영역은 전부 하드코딩(config 키 아님 - coordsVersion 무관), 두 기하 겸용을 스윕으로 검증.
+$rgNyanTitle  = @(25, 38, 300, 55)     # 제목 '고양이 상인 뽑기' (1272 y54 / 네이티브 1908 y42)
+$rgNyanCoin   = @(1085, 40, 125, 45)   # 우상단 냥코인 잔량 (실측 '0401,217'/'@8.181.217')
+$rgNyanGold   = @(935, 40, 150, 45)    # 우상단 골드 잔량 (지출 = 시작-현재 차감)
+$rgNyanCards  = @(390, 330, 480, 340)  # 카드 존 (가격표 탐색 한정 ROI - HUD 재화 오인 방지)
+$rgNyanReroll = @(1090, 630, 170, 50)  # '다시 뽑기' 버튼 ('뽑기' 앵커. '다시'는 '다셔' 깨짐 실측)
+$ptNyanReroll = @(1163, 655)           # 다시 뽑기 폴백 클릭점 (앵커 실패 시)
+
+function Get-NyanNumberValue {
+  # 재화 판독 토큰 → 정수 (순수 - 진리표 대상). digits 만 추출해 아이콘 오독('0'/'@' 접두)과
+  # 쉼표→마침표 깨짐을 흡수합니다 (스윕 실측: '0401,217'/'@8.181.217'/'021,830,510').
+  # 선행 0은 정수 변환이 무해화. 판독 불능(숫자 없음/12자리 초과)은 -1.
+  param([string]$Text)
+  $digits = (([string]$Text) -replace '[^0-9]', '')
+  if ($digits.Length -lt 1 -or $digits.Length -gt 12) { return [int64](-1) }
+  return [int64]$digits
+}
+
+function Test-NyanMerchantTitle {
+  # '고양이 상인 뽑기' 제목 판정 (순수 - 진리표 대상). 조각 2개('고양이'+'뽑기') 요구 -
+  # 한 조각만으로는 다른 화면(뽑기 결과 팝업 등 미관측 화면)과의 오인 여지를 남기지 않습니다.
+  param([string]$Text)
+  $normalized = ([string]$Text) -replace '\s', ''
+  return ($normalized.Contains('고양이') -and $normalized.Contains('뽑기'))
+}
+
+function Get-NyanPriceTags {
+  # 카드 존 판독 단어들에서 가격표 토큰만 골라 좌표 목록으로 (순수 - 진리표 대상).
+  # 가격표 = 구분자(쉼표/마침표) 포함 + digits 3~6자리 (실측: '7,800'(1→7 오독)/'01,800'/
+  # '@1.600'/'97,600'). 금액은 오독 때문에 신뢰하지 않는 **위치 탐지 전용** - 지출은 골드
+  # 잔량 차감으로 계산합니다 (Codex 합의). '7' 단독·아이템명(구분자 없음)은 걸러집니다.
+  param($Words)
+  $priceTags = @()
+  foreach ($word in @($Words)) {
+    $tagText = [string]$word.Text
+    if ($tagText -notmatch '[,.]') { continue }
+    $tagDigits = ($tagText -replace '[^0-9]', '')
+    if ($tagDigits.Length -lt 3 -or $tagDigits.Length -gt 6) { continue }
+    $priceTags += , @{ X = [int]$word.X; Y = [int]$word.Y }
+  }
+  return $priceTags
+}
+
+function Test-NyanSameTag {
+  # 앵커 좌표(±12px)와 같은 가격표가 목록에 남아 있는지 (순수 - 진리표 대상).
+  # 구매 확인 = '클릭한 그 가격표의 좌표 소멸' - 같은 금액이 다른 카드에 남아 있어도
+  # 증거가 아니므로 전역 문자열 비교를 쓰지 않습니다 (Codex 조건).
+  param($Tags, [int]$X, [int]$Y)
+  foreach ($tag in @($Tags)) {
+    if ([Math]::Abs([int]$tag.X - $X) -le 12 -and [Math]::Abs([int]$tag.Y - $Y) -le 12) { return $true }
+  }
+  return $false
+}
+
+function Test-NyanUntilReached {
+  # 지정 시간 도달 검사 (기타). 구매 클릭 사이에서만 호출되므로 중간 정지가 안전합니다.
+  if ($null -eq $script:nyanUntilDeadline) { return }
+  if ((Get-Date) -ge $script:nyanUntilDeadline) {
+    Write-RunLog ("[완료] 지정 시간({0}) 도달 - 뽑기를 마칩니다" -f $script:nyanUntilDeadline.ToString('HH:mm'))
+    exit 4
+  }
+}
+
+function Read-NyanAmount {
+  # 우상단 재화(냥코인/골드) 판독 - 실패 시 -1
+  param([System.Diagnostics.Process]$Game, [int[]]$Region)
+  $amountText = Get-GameRegionOcrText -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
+    -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 4 -Engine $ocrKoreanEngine
+  return (Get-NyanNumberValue -Text $amountText)
+}
+
+function Read-NyanPriceTags {
+  # 카드 존 가격표 목록 판독 (기준 좌표)
+  param([System.Diagnostics.Process]$Game)
+  $cardWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNyanCards[0] -ReferenceY $rgNyanCards[1] `
+      -RegionWidth $rgNyanCards[2] -RegionHeight $rgNyanCards[3] -Scale 3 -Engine $ocrKoreanEngine)
+  return @(Get-NyanPriceTags -Words $cardWords)
+}
+
+function Invoke-NyanMerchantRun {
+  # 냥코인 뽑기 본체 (단일 연속 루프 - 모든 종료는 [완료] 사유 + exit 4. Codex 합의:
+  # 판마다 재기동하면 잔량 단조성·지출 누계·새로고침 래치가 끊깁니다).
+  # 상태: READY(가격표 안정 2연속 → 1개 구매) / PURCHASE_WAIT(그 좌표 소멸 확인 - 재클릭은
+  # 좌표 잔존 재확인 후 최대 1회) / REROLL_WAIT(가격표 0개 3연속 → 다시 뽑기 1회 →
+  # 재등장 2연속 대기 - 대기 중 재클릭 금지, 타임아웃 정지).
+  param([System.Diagnostics.Process]$Game)
+  $script:nyanUntilDeadline = Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME)
+  # 1) 시작 게이트: 제목 fail-closed (재화를 쓰는 자동화라 화면 확신 없이는 클릭 금지)
+  $titleConfirmed = $false
+  foreach ($titleTry in 1..3) {
+    $titleText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgNyanTitle[0] -ReferenceY $rgNyanTitle[1] `
+      -RegionWidth $rgNyanTitle[2] -RegionHeight $rgNyanTitle[3] -Scale 3 -Engine $ocrKoreanEngine
+    if (Test-NyanMerchantTitle -Text $titleText) { $titleConfirmed = $true; break }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $titleConfirmed) {
+    Write-RunLog "[완료] '고양이 상인 뽑기' 화면을 확인하지 못했습니다 - 게임에서 그 화면을 열어 둔 상태로 시작해 주세요 (조건부 정지)"
+    exit 4
+  }
+  $limitNotice = $(if ($nyanGoldLimitEnabled) { ' / 골드 상한 {0:N0}' -f $nyanGoldLimit } else { '' })
+  Write-RunLog ("[기타] 고양이 상인 - 냥코인 뽑기 시작 (목표 {0:N0}개{1})" -f $nyanTargetCoins, $limitNotice)
+  # 2) 시작 골드 (상한이 켜져 있으면 필수 - 못 읽으면 상한 검사가 불가능하므로 fail-closed)
+  $startGold = [int64](-1)
+  foreach ($goldTry in 1..5) {
+    $startGold = Read-NyanAmount -Game $Game -Region $rgNyanGold
+    if ($startGold -ge 0) { break }
+    Start-Sleep -Seconds 1
+  }
+  if ($nyanGoldLimitEnabled -and $startGold -lt 0) {
+    Write-RunLog '[완료] 시작 골드를 판독하지 못했습니다 - 골드 상한 검사가 불가능해 정지합니다 (조건부 정지)'
+    exit 4
+  }
+  if ($startGold -ge 0) { Write-RunLog ("[기타] 시작 골드 {0:N0}" -f $startGold) }
+  # 3) 메인 루프
+  $stableTag = $null          # READY 안정 확인용 직전 가격표 앵커
+  $emptyStreak = 0            # 가격표 0개 연속 수 (3연속 → 다시 뽑기)
+  $lastCoinValue = [int64](-1)
+  $coinFailStreak = 0
+  $goldFailStreak = 0
+  $purchaseCount = 0
+  while ($true) {
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림)
+      continue
+    }
+    Test-NyanUntilReached
+    # 냥코인: 같은 값 2연속(직전 판독과 동일)일 때만 목표 도달을 확정합니다 - 오독 한 번에
+    # 조기 종료하지 않기 위한 안정 요건 (Codex 조건. 뻥튀기 오독의 조기 정지는 골드를
+    # 아끼는 방향이라 치명적이지 않지만, 확정은 2연속으로)
+    $coinNow = Read-NyanAmount -Game $Game -Region $rgNyanCoin
+    if ($coinNow -ge 0) {
+      $coinFailStreak = 0
+      if ($coinNow -eq $lastCoinValue -and $coinNow -ge $nyanTargetCoins) {
+        Write-RunLog ("[완료] 목표 냥코인 도달 - 잔량 {0:N0}개 (목표 {1:N0}개, 구매 {2}회)" -f $coinNow, $nyanTargetCoins, $purchaseCount)
+        exit 4
+      }
+      $lastCoinValue = $coinNow
+    } else {
+      $coinFailStreak++
+      if ($coinFailStreak -ge 8) {
+        Write-RunLog '[완료] 냥코인 잔량 판독이 계속 실패합니다 - 화면을 확인해 주세요 (조건부 정지)'
+        exit 4
+      }
+    }
+    # 골드 상한 (잔량 차감 - Codex 합의: 가격 합산은 1→7 오독으로 부정확)
+    if ($nyanGoldLimitEnabled) {
+      $goldNow = Read-NyanAmount -Game $Game -Region $rgNyanGold
+      if ($goldNow -ge 0) {
+        $goldFailStreak = 0
+        if (($startGold - $goldNow) -ge $nyanGoldLimit) {
+          Write-RunLog ("[완료] 골드 사용 상한 도달 - 사용 {0:N0} (상한 {1:N0}, 구매 {2}회)" -f ($startGold - $goldNow), $nyanGoldLimit, $purchaseCount)
+          exit 4
+        }
+      } else {
+        $goldFailStreak++
+        if ($goldFailStreak -ge 8) {
+          Write-RunLog '[완료] 골드 잔량 판독이 계속 실패해 상한 검사가 불가능합니다 (조건부 정지)'
+          exit 4
+        }
+      }
+    }
+    # 가격표 탐색 (카드 존 한정)
+    $tags = Read-NyanPriceTags -Game $Game
+    if (@($tags).Count -gt 0) {
+      $emptyStreak = 0
+      $firstTag = $tags[0]
+      $tagStable = ($null -ne $stableTag -and
+        [Math]::Abs([int]$firstTag.X - [int]$stableTag.X) -le 12 -and
+        [Math]::Abs([int]$firstTag.Y - [int]$stableTag.Y) -le 12)
+      if (-not $tagStable) {
+        # 안정 2연속 요건: 새 판 연출 중의 흔들리는 프레임을 누르지 않습니다 (사용자 제약:
+        # 가격표가 뜬 뒤에만 클릭 가능)
+        $stableTag = $firstTag
+        Start-Sleep -Milliseconds 700
+        continue
+      }
+      # 구매: 가격표 자기앵커 클릭 (카드 몸통은 가격표 위쪽 - 실측 오프셋, 실기 1회로 확정)
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX ([int]$firstTag.X + 20) -ReferenceY ([int]$firstTag.Y - 50)
+      $purchaseCount++
+      Write-RunLog ("[기타] 카드 구매 클릭 {0}회째 (가격표 {1},{2})" -f $purchaseCount, [int]$firstTag.X, [int]$firstTag.Y)
+      # PURCHASE_WAIT: 클릭한 그 좌표의 가격표 소멸 = 구매 확인. 재클릭은 좌표 잔존을
+      # 재확인한 뒤 최대 1회 (Codex 조건 - 무조건 재클릭 금지 정책)
+      $purchaseGone = $false
+      $reclicked = $false
+      foreach ($purchaseTry in 1..8) {
+        Start-Sleep -Milliseconds 1000
+        $tagsNow = Read-NyanPriceTags -Game $Game
+        if (-not (Test-NyanSameTag -Tags $tagsNow -X ([int]$firstTag.X) -Y ([int]$firstTag.Y))) { $purchaseGone = $true; break }
+        if ($purchaseTry -ge 4 -and -not $reclicked) {
+          Focus-Game -Game $Game
+          Click-GamePoint -Game $Game -ReferenceX ([int]$firstTag.X + 20) -ReferenceY ([int]$firstTag.Y - 50)
+          $reclicked = $true
+          Write-RunLog '[기타] 구매가 확인되지 않아 같은 카드를 1회 재클릭합니다'
+        }
+      }
+      if (-not $purchaseGone) {
+        Write-RunLog '[완료] 카드 구매가 확인되지 않습니다 - 골드가 부족하거나 화면 인식 문제입니다 (조건부 정지)'
+        exit 4
+      }
+      Start-Sleep -Milliseconds 1200   # 공개 연출 + 재화 표기 갱신 안정 (목표 직후 과구매 방지)
+      $stableTag = $null
+      continue
+    }
+    # 가격표 0개
+    $stableTag = $null
+    $emptyStreak++
+    if ($emptyStreak -lt 3) {
+      Start-Sleep -Milliseconds 800
+      continue
+    }
+    # REROLL: 다시 뽑기 1회 ('뽑기' 앵커 → 폴백 고정점)
+    $rerollWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNyanReroll[0] -ReferenceY $rgNyanReroll[1] `
+        -RegionWidth $rgNyanReroll[2] -RegionHeight $rgNyanReroll[3] -Scale 4 -Engine $ocrKoreanEngine)
+    $rerollAnchor = $null
+    foreach ($rerollWord in $rerollWords) {
+      if (([string]$rerollWord.Text) -replace '\s', '' -eq '뽑기') { $rerollAnchor = $rerollWord; break }
+    }
+    Focus-Game -Game $Game
+    if ($null -ne $rerollAnchor) {
+      Click-GamePoint -Game $Game -ReferenceX ([int]$rerollAnchor.X) -ReferenceY ([int]$rerollAnchor.Y + 6)
+    } else {
+      Click-GamePoint -Game $Game -ReferenceX $ptNyanReroll[0] -ReferenceY $ptNyanReroll[1]
+    }
+    Write-RunLog '[기타] 가격표 소진 - 다시 뽑기 클릭'
+    # REROLL_WAIT: 가격표 재등장 2연속까지 대기. 대기 중 다시 뽑기 재클릭 금지 (Codex 조건)
+    $rerollSeen = 0
+    foreach ($rerollTry in 1..12) {
+      Start-Sleep -Milliseconds 1000
+      $tagsNow = Read-NyanPriceTags -Game $Game
+      if (@($tagsNow).Count -gt 0) {
+        $rerollSeen++
+        if ($rerollSeen -ge 2) { break }
+      } else {
+        $rerollSeen = 0
+      }
+    }
+    if ($rerollSeen -lt 2) {
+      Write-RunLog '[완료] 다시 뽑기 후 새 판(가격표)을 확인하지 못했습니다 (조건부 정지)'
+      exit 4
+    }
+    $emptyStreak = 0
+  }
+}
+
 try {
   $game = Get-GameProcess
   # 캡처 실패 대기 루프가 '게임이 아예 사라졌는지'를 확인할 수 있게 스크립트 스코프에 둡니다
@@ -11301,7 +11565,7 @@ try {
       # 던전의 '다시 하기 vs 선택 화면' 갈림길이 없음) - 리스트와 현재 위치만 남깁니다
       Write-RunLog "[설정] 생활 커스텀 리스트: $([string]$env:HONEYNOGI_CUSTOM_LIST) (현재 $([string]$env:HONEYNOGI_CUSTOM_POSITION))"
     }
-    foreach ($sectionName in @('dungeons', 'normalDungeon', 'huntingGround', 'life', 'timeoutsSeconds', 'afterEntry', 'revive', 'rdp', 'window', 'diagnostics')) {
+    foreach ($sectionName in @('dungeons', 'normalDungeon', 'huntingGround', 'life', 'etc', 'timeoutsSeconds', 'afterEntry', 'revive', 'rdp', 'window', 'diagnostics')) {
       $section = $config.$sectionName
       if ($null -eq $section) { continue }
       # 설명용 '_' 키와 부피 큰 profiles(좌표)는 빼고 실제 값만 한 줄 JSON으로 남깁니다
@@ -11425,6 +11689,13 @@ try {
   if ($mainCategory -eq 'life') {
     Invoke-LifeGatherCycle -Game $game
     throw '생활 사이클이 종료 코드 없이 반환됐습니다 - 내부 오류'
+  }
+
+  # 대분류 '기타' - 고양이 상인 냥코인 뽑기 (2026-08-15). 생활과 같은 이유로 아래
+  # Clear-EventOverlay 전에 분기합니다 (상인 화면을 '알 수 없는 화면'으로 오판 방지)
+  if ($mainCategory -eq 'etc') {
+    Invoke-NyanMerchantRun -Game $game
+    throw '기타(고양이 상인) 흐름이 종료 코드 없이 반환됐습니다 - 내부 오류'
   }
 
   # 아침 6시 리셋 후 뜨는 출석/이벤트/데일리 팝업(스텔라 픽 등)이 화면을 덮고 있으면

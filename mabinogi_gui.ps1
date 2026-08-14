@@ -224,7 +224,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '2.0.3'
+$appVersion = '2.1.0'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -426,7 +426,7 @@ function Update-ConfigToLatest {
     $script:customProgressResetSections = @()
     # 2) 값 섹션들: '_' 주석 키를 제외하고, 최신 구조에 존재하는 키만 사용자 값으로 덮어씀
     #    (최신 구조에서 사라진 키는 버리고, 새로 생긴 키는 최신 기본값 유지)
-    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life')) {
+    foreach ($sect in @('normalDungeon', 'deepDungeon', 'huntingGround', 'timeoutsSeconds', 'focus', 'repeat', 'diagnostics', 'window', 'rdp', 'ui', 'customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life', 'etc')) {
       if ($usr.PSObject.Properties[$sect] -and $def.PSObject.Properties[$sect]) {
         foreach ($prop in $usr.$sect.PSObject.Properties) {
           if ($prop.Name -like '_*') { continue }
@@ -1593,6 +1593,7 @@ function Update-ApprovalUi {
     # 대분류 전환도 승인 전에는 잠금 (승인 오버레이가 버튼 줄을 다 덮지만 이중 방어 - 리뷰 조건 A)
     $btnCatBattle.Enabled = $approved
     $btnCatLife.Enabled = $approved
+    $btnCatEtc.Enabled = $approved
   }
 }
 
@@ -1642,20 +1643,28 @@ $form.Controls.Add($lblStatus)
 # Apply-HoneyTheme 가 모든 버튼을 일반 스타일로 덮으므로 테마 적용 '후' 반드시 재호출.
 # 기본값 'battle' - 기존 사용자 화면 변화 없음. 전환 로직은 Set-MainCategory 단일 진입점.
 $script:mainCategory = 'battle'
+# 2026-08-15 '기타' 신설: 2버튼(254폭) → 3버튼(168폭), 총폭 514 불변 (시안 사용자 확정)
 $btnCatBattle = New-Object System.Windows.Forms.Button
 $btnCatBattle.Name = 'btnCatBattle'
 $btnCatBattle.Text = '전투'
 $btnCatBattle.Location = New-Object System.Drawing.Point(15, 44)
-$btnCatBattle.Size = New-Object System.Drawing.Size(254, 32)
+$btnCatBattle.Size = New-Object System.Drawing.Size(168, 32)
 $form.Controls.Add($btnCatBattle)
 $btnCatLife = New-Object System.Windows.Forms.Button
 $btnCatLife.Name = 'btnCatLife'
 $btnCatLife.Text = '생활'
-$btnCatLife.Location = New-Object System.Drawing.Point(275, 44)
-$btnCatLife.Size = New-Object System.Drawing.Size(254, 32)
+$btnCatLife.Location = New-Object System.Drawing.Point(188, 44)
+$btnCatLife.Size = New-Object System.Drawing.Size(168, 32)
 $form.Controls.Add($btnCatLife)
+$btnCatEtc = New-Object System.Windows.Forms.Button
+$btnCatEtc.Name = 'btnCatEtc'
+$btnCatEtc.Text = '기타'
+$btnCatEtc.Location = New-Object System.Drawing.Point(361, 44)
+$btnCatEtc.Size = New-Object System.Drawing.Size(168, 32)
+$form.Controls.Add($btnCatEtc)
 $btnCatBattle.Add_Click({ Set-MainCategory -Category 'battle' })
 $btnCatLife.Add_Click({ Set-MainCategory -Category 'life' })
+$btnCatEtc.Add_Click({ Set-MainCategory -Category 'etc' })
 # 아이콘은 Button.Image 대신 Paint 로 '중앙 글자 바로 왼쪽'에 직접 그림 (2026-08-05 사용자
 # 제보 반복 수렴: 묶음 중앙 = 글자 밀림 / 독립 정렬 = 아이콘이 구석에 붙어 글자와 멀어짐.
 # 기본 정렬로는 '글자 정중앙 + 아이콘 인접' 조합이 불가 - 그리기 좌표를 글자 폭에서 계산)
@@ -1844,6 +1853,27 @@ $btnManual.Add_Click({
       "   그 경우 게임이 스스로 멈추고 매크로는 '진행 없음' 한도로 정지합니다.`n" +
       " - 다른 대상의 채집이 진행 중이면 방해하지 않고 최대 3분 기다립니다."
       [System.Windows.Forms.MessageBox]::Show($lifeManualText, '생활 설명서',
+        [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+      return
+    }
+    # 기타(고양이 상인) 설명서 (2026-08-15)
+    if ($script:mainCategory -eq 'etc') {
+      $etcManualText = "냥코인 뽑기 사용법`n`n" +
+      "[동작]`n" +
+      " - 고양이 상인의 물음표 카드를 골드로 구매해 정체를 공개합니다.`n" +
+      " - 카드에서 '도둑 고양이'가 나오면 현상금(냥코인)을 받습니다.`n" +
+      " - 가격표가 다 사라지면 자동으로 [다시 뽑기]를 눌러 새 판을 엽니다.`n" +
+      " - 우상단 냥코인 잔량이 '목표 냥코인' 이상이 되면 스스로 멈춥니다.`n`n" +
+      "[사용법]`n" +
+      " 1. 게임에서 고양이 상인의 '뽑기' 화면을 엽니다.`n" +
+      " 2. 목표 냥코인을 정합니다.`n" +
+      " 3. (선택) '최대 사용 골드'를 켜면 그만큼 쓴 뒤 멈춥니다.`n" +
+      " 4. [시작]을 누릅니다.`n`n" +
+      "[주의]`n" +
+      " - 카드 구매에 골드가 실제로 소모됩니다.`n" +
+      " - 냥코인은 확률로 나오므로 목표가 크면 골드가 많이 들 수 있습니다.`n" +
+      "   '최대 사용 골드' 옵션을 켜 두는 것을 권장합니다."
+      [System.Windows.Forms.MessageBox]::Show($etcManualText, '기타 설명서',
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
       return
     }
@@ -3904,6 +3934,97 @@ $rbLifeProcess.Location = New-Object System.Drawing.Point(100, 2)
 $rbLifeProcess.Size = New-Object System.Drawing.Size(70, 22)
 $pnlLifeCategory.Controls.Add($rbLifeProcess)
 
+# 콘텐츠 선택 - 기타용 라디오 줄 (2026-08-15 신설 - 전투/생활 패널과 교대 표시)
+$pnlEtcCategory = New-Object System.Windows.Forms.Panel
+$pnlEtcCategory.Location = New-Object System.Drawing.Point(15, 20)
+$pnlEtcCategory.Size = New-Object System.Drawing.Size(484, 26)
+$pnlEtcCategory.Visible = $false
+$grpContent.Controls.Add($pnlEtcCategory)
+
+$rbEtcMerchant = New-Object System.Windows.Forms.RadioButton
+$rbEtcMerchant.Text = '고양이 상인'
+$rbEtcMerchant.Location = New-Object System.Drawing.Point(0, 2)
+$rbEtcMerchant.Size = New-Object System.Drawing.Size(110, 22)
+$rbEtcMerchant.Checked = $true
+$pnlEtcCategory.Controls.Add($rbEtcMerchant)
+
+# 상세 설정 - 기타: 냥코인 뽑기 (시안 확정 배치 - 카드 + 목표 냥코인 + 골드 상한 옵션 + 안내)
+$lblEtcFeature = New-Object System.Windows.Forms.Label
+$lblEtcFeature.Text = '기능'
+$lblEtcFeature.Location = New-Object System.Drawing.Point(15, 20)
+$lblEtcFeature.Size = New-Object System.Drawing.Size(200, 16)
+$lblEtcFeature.Visible = $false
+$grpContentDetail.Controls.Add($lblEtcFeature)
+
+$btnEtcNyanCard = New-Object System.Windows.Forms.Button
+$btnEtcNyanCard.Text = '냥코인 뽑기'
+$btnEtcNyanCard.Location = New-Object System.Drawing.Point(15, 40)
+$btnEtcNyanCard.Size = New-Object System.Drawing.Size(158, 34)
+$btnEtcNyanCard.Visible = $false
+$btnEtcNyanCard.TabStop = $false   # 기능이 하나뿐이라 표시용 카드 (선택 스타일은 테마 적용 후 지정)
+$grpContentDetail.Controls.Add($btnEtcNyanCard)
+
+$lblEtcTarget = New-Object System.Windows.Forms.Label
+$lblEtcTarget.Text = '목표 냥코인'
+$lblEtcTarget.Location = New-Object System.Drawing.Point(15, 92)
+$lblEtcTarget.Size = New-Object System.Drawing.Size(70, 18)
+$lblEtcTarget.Visible = $false
+$grpContentDetail.Controls.Add($lblEtcTarget)
+
+$numEtcTarget = New-Object System.Windows.Forms.NumericUpDown
+$numEtcTarget.Location = New-Object System.Drawing.Point(90, 88)
+$numEtcTarget.Size = New-Object System.Drawing.Size(96, 24)
+$numEtcTarget.Minimum = 1
+$numEtcTarget.Maximum = 99999999
+$numEtcTarget.ThousandsSeparator = $true
+$numEtcTarget.Value = 10
+$numEtcTarget.Visible = $false
+$grpContentDetail.Controls.Add($numEtcTarget)
+
+$lblEtcTargetSuffix = New-Object System.Windows.Forms.Label
+$lblEtcTargetSuffix.Text = '개'
+$lblEtcTargetSuffix.Location = New-Object System.Drawing.Point(190, 92)
+$lblEtcTargetSuffix.Size = New-Object System.Drawing.Size(24, 18)
+$lblEtcTargetSuffix.Visible = $false
+$grpContentDetail.Controls.Add($lblEtcTargetSuffix)
+
+# 골드 상한 - 체크 옵션 (기본 꺼짐. 사용자 지시: "체크박스로 옵션처럼". 켜면 워커가
+# '시작 골드 - 현재 골드'로 사용액을 재서 상한 도달 시 정지 - Codex 필수 권고의 절충)
+$chkEtcGoldLimit = New-Object System.Windows.Forms.CheckBox
+$chkEtcGoldLimit.Text = '최대 사용 골드'
+$chkEtcGoldLimit.Location = New-Object System.Drawing.Point(238, 90)
+$chkEtcGoldLimit.Size = New-Object System.Drawing.Size(104, 22)
+$chkEtcGoldLimit.Visible = $false
+$grpContentDetail.Controls.Add($chkEtcGoldLimit)
+
+$numEtcGoldLimit = New-Object System.Windows.Forms.NumericUpDown
+$numEtcGoldLimit.Location = New-Object System.Drawing.Point(344, 88)
+$numEtcGoldLimit.Size = New-Object System.Drawing.Size(110, 24)
+$numEtcGoldLimit.Minimum = 1000
+$numEtcGoldLimit.Maximum = 999999999
+$numEtcGoldLimit.ThousandsSeparator = $true
+$numEtcGoldLimit.Value = 1000000
+$numEtcGoldLimit.Enabled = $false
+$numEtcGoldLimit.Visible = $false
+$grpContentDetail.Controls.Add($numEtcGoldLimit)
+$chkEtcGoldLimit.Add_CheckedChanged({ $numEtcGoldLimit.Enabled = [bool]$chkEtcGoldLimit.Checked })
+
+$lblEtcGoldSuffix = New-Object System.Windows.Forms.Label
+$lblEtcGoldSuffix.Text = '골드'
+$lblEtcGoldSuffix.Location = New-Object System.Drawing.Point(458, 92)
+$lblEtcGoldSuffix.Size = New-Object System.Drawing.Size(40, 18)
+$lblEtcGoldSuffix.Visible = $false
+$grpContentDetail.Controls.Add($lblEtcGoldSuffix)
+
+$lblEtcHint = New-Object System.Windows.Forms.Label
+$lblEtcHint.Text = "고양이 상인 '뽑기' 화면을 열어 둔 상태에서 시작하면 목표 냥코인 개수에 도달할 때까지" + [Environment]::NewLine +
+  "카드 구매(골드 소모) → 다시 뽑기를 반복합니다." + [Environment]::NewLine +
+  "도둑 고양이를 찾으면 현상금(냥코인)을 받습니다."
+$lblEtcHint.Location = New-Object System.Drawing.Point(15, 124)
+$lblEtcHint.Size = New-Object System.Drawing.Size(484, 50)
+$lblEtcHint.Visible = $false
+$grpContentDetail.Controls.Add($lblEtcHint)
+
 # 상세 설정 - 채집: '채집 스킬' 슬라이더 줄
 $lblLifeSkillCaption = New-Object System.Windows.Forms.Label
 $lblLifeSkillCaption.Text = '채집 스킬'
@@ -4280,7 +4401,8 @@ $rbLifeGather.Add_CheckedChanged({ if ($null -ne $updateCategoryPanels) { & $upd
 function Update-MainCategoryVisual {
   # 대분류 버튼의 활성/비활성 스타일 전체 재설정 (활성 = 시작 버튼과 같은 꿀색 강조.
   # 전환 시 비활성 쪽의 폰트/테두리까지 원상 복구 - 리뷰 조건 E)
-  foreach ($catPair in @(, @($btnCatBattle, 'battle', 'catBattle')) + @(, @($btnCatLife, 'life', 'catLife'))) {
+  # 기타 버튼은 아이콘 리소스가 없어 글자만 - Paint 미구독이라 아이콘 키는 참조되지 않습니다
+  foreach ($catPair in @(, @($btnCatBattle, 'battle', 'catBattle')) + @(, @($btnCatLife, 'life', 'catLife')) + @(, @($btnCatEtc, 'etc', 'catEtc'))) {
     $catButton = $catPair[0]
     $catActive = ($script:mainCategory -eq [string]$catPair[1])
     $catIconKey = [string]$catPair[2]
@@ -4311,7 +4433,7 @@ function Set-MainCategory {
   # 조기 반환 경로에서 잠금이 남지 않게 Stop 이 스스로 UI 복원)
   if ($script:lifeSlideActive) { Stop-LifeSlideNow }
   if ($script:running) { return }
-  if ($Category -ne 'life') { $Category = 'battle' }
+  if ($Category -ne 'life' -and $Category -ne 'etc') { $Category = 'battle' }
   if ($script:mainCategory -eq $Category) { return }
   $script:mainCategory = $Category
   Update-MainCategoryVisual
@@ -4895,7 +5017,7 @@ function Add-ColoredLogLine {
     $lineColor = [System.Drawing.Color]::LightGreen                               # 완료 = 초록
   } elseif ($Text -match '\[준비\]') {
     $lineColor = [System.Drawing.Color]::MediumPurple                             # 준비 = 보라
-  } elseif ($Text -match '\[(던전|어비스|심층|사냥터|생활|커스텀|파티원|설정)\]') {
+  } elseif ($Text -match '\[(던전|어비스|심층|사냥터|생활|기타|커스텀|파티원|설정)\]') {
     # 콘텐츠(도메인) 태그도 **태그가 붙은 줄**입니다. 워커의 계약은 '심각도는 [오류]/[경고]
     # 로만 표시한다' 이므로, 도메인 태그만 달린 줄은 정상 진행 기록입니다.
     # 5차에서 '태그 우선'으로 고쳤지만 심각도 태그 7종만 앞세웠고 도메인 태그는 빠져 있어,
@@ -7271,10 +7393,27 @@ function Load-SettingsToUi {
   } catch {
     Add-GuiLog "[경고] 생활 설정 복원 중 오류 - 기본값으로 시작합니다 ($($_.Exception.Message))"
   }
+  # 저장된 기타(냥코인 뽑기) 설정 복원 (2026-08-15)
+  try {
+    if ($cfg.PSObject.Properties['etc'] -and $cfg.etc) {
+      $etcCfg = $cfg.etc
+      $etcTargetSaved = 10
+      try { if ($etcCfg.PSObject.Properties['nyanTargetCoins']) { $etcTargetSaved = [int64]$etcCfg.nyanTargetCoins } } catch { }
+      $numEtcTarget.Value = [Math]::Min([Math]::Max($etcTargetSaved, [int64]$numEtcTarget.Minimum), [int64]$numEtcTarget.Maximum)
+      try { if ($etcCfg.PSObject.Properties['goldLimitEnabled']) { $chkEtcGoldLimit.Checked = ConvertTo-StrictBoolean $etcCfg.goldLimitEnabled $false } } catch { }
+      $etcGoldSaved = 1000000
+      try { if ($etcCfg.PSObject.Properties['goldLimitGold']) { $etcGoldSaved = [int64]$etcCfg.goldLimitGold } } catch { }
+      $numEtcGoldLimit.Value = [Math]::Min([Math]::Max($etcGoldSaved, [int64]$numEtcGoldLimit.Minimum), [int64]$numEtcGoldLimit.Maximum)
+      $numEtcGoldLimit.Enabled = [bool]$chkEtcGoldLimit.Checked
+    }
+  } catch {
+    Add-GuiLog "[경고] 기타 설정 복원 중 오류 - 기본값으로 시작합니다 ($($_.Exception.Message))"
+  }
   # 대분류 복원은 생활 세부 값 복원과 분리 - 세부 복원이 실패해도 사용자가 쓰던 화면(생활)은
   # 유지되게 합니다 (리뷰 권고. Set-MainCategory 는 같은 값이면 조기 반환)
   try {
     if ([string]$cfg.mainCategory -eq 'life') { Set-MainCategory -Category 'life' }
+    elseif ([string]$cfg.mainCategory -eq 'etc') { Set-MainCategory -Category 'etc' }
   } catch { }
   # 저장된 사냥터 설정 복원
   try {
@@ -7663,6 +7802,22 @@ function Save-SettingsFromUi {
     if ($cfg.life.PSObject.Properties[$lifeKey]) { $cfg.life.$lifeKey = $lifeValues[$lifeKey] }
     else { $cfg.life | Add-Member -NotePropertyName $lifeKey -NotePropertyValue $lifeValues[$lifeKey] }
   }
+  # 기타(냥코인 뽑기) 설정 저장 (2026-08-15 - 생활과 같은 '값만 갱신' 방식)
+  $etcValues = @{
+    content          = 'catMerchant'
+    nyanTargetCoins  = [int64]$numEtcTarget.Value
+    goldLimitEnabled = [bool]$chkEtcGoldLimit.Checked
+    goldLimitGold    = [int64]$numEtcGoldLimit.Value
+  }
+  if (-not $cfg.PSObject.Properties['etc']) {
+    $cfg | Add-Member -NotePropertyName 'etc' -NotePropertyValue ([pscustomobject]@{
+      '_설명' = "'기타' 대분류 설정입니다 (2026-08-15 - 고양이 상인 냥코인 뽑기)"
+    })
+  }
+  foreach ($etcKey in @('content', 'nyanTargetCoins', 'goldLimitEnabled', 'goldLimitGold')) {
+    if ($cfg.etc.PSObject.Properties[$etcKey]) { $cfg.etc.$etcKey = $etcValues[$etcKey] }
+    else { $cfg.etc | Add-Member -NotePropertyName $etcKey -NotePropertyValue $etcValues[$etcKey] }
+  }
   # 던전 설정 저장 (전체 자동화: 선택 → 옵션 → 입장 → 클리어 → 다시 하기 반복)
   $ndSettings = [pscustomobject]@{
     '_설명'       = "'던전' 카테고리 전용 설정입니다 (던전 전체 자동화 - 은동전/더블 루팅/매칭 포함)"
@@ -7775,6 +7930,7 @@ function Set-UiRunning {
   # 표시가 실행 내용과 어긋남 (리뷰 조건 C. 미승인 시 잠금은 Update-ApprovalUi 담당)
   $btnCatBattle.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnCatLife.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
+  $btnCatEtc.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnSafeStop.Enabled = $IsRunning
   $btnKill.Enabled = $IsRunning
   # 대기 중에는 시작만, 실행 중에는 중지 2개만 표시 (시작 자리에 중지가 나타남 - 오클릭 방지)
@@ -8295,6 +8451,8 @@ $timer.Add_Tick({
           $code4Reason = ($script:lastWorkerDoneReason -replace '\s+', ' ').Trim()
           if ($code4Reason.Length -gt 80) { $code4Reason = $code4Reason.Substring(0, 80) + '…' }
           $code4Reason = "조건 정지: $code4Reason"
+        } elseif ($script:mainCategory -eq 'etc') {
+          $code4Reason = '조건 충족으로 정지 - 목표 냥코인 도달/화면 확인 등 (자세한 내용은 로그 참고)'
         } elseif ($script:mainCategory -eq 'life') {
           # 생활 폴백 - 숨겨진 전투 라디오(rbCatDeep 등)를 참조하면 엉뚱한 재화 문구 표시 (리뷰)
           $code4Reason = '조건 충족으로 정지 - 채집 시간 초과/미지원 항목 등 (자세한 내용은 로그 참고)'
@@ -8371,12 +8529,15 @@ function Invoke-StartAutomation {
     # 보존돼 있어, 게이트 없이는 던전 안내·커스텀 시작 경로가 그대로 실행됩니다
     # (2026-08-06 00:06 실기 제보: 생활 시작인데 혼합 리스트 안내가 표시됨)
     $isLifeStart = ($script:mainCategory -eq 'life')
+    # 기타(2026-08-15): 커스텀 미지원 - 보존된 커스텀 라디오 Checked 가 전투 커스텀 시작
+    # 경로를 타지 않게 가드합니다 (생활과 같은 이유)
+    $isEtcStart = ($script:mainCategory -eq 'etc')
     # 생활 커스텀 (2026-08-08): 채집일 때만. 가공은 아직 리스트 자체가 없습니다
     # ('$isLifeStart -and 채집'이 아니라 채집 라디오를 직접 봐야 - 가공 화면에서는 커스텀
     #  라디오가 비활성이지만 Checked 는 보존될 수 있음)
     $isLifeCustomStart = ($isLifeStart -and $rbCustomRepeat.Checked -and $rbLifeGather.Checked)
     $isCustomStart = ($isLifeCustomStart -or
-      ($rbCustomRepeat.Checked -and -not $rbCatHunting.Checked -and -not $isLifeStart))
+      ($rbCustomRepeat.Checked -and -not $rbCatHunting.Checked -and -not $isLifeStart -and -not $isEtcStart))
     $script:customConfigSection = $(if ($isLifeCustomStart) { 'lifeCustomRepeat' }
       elseif ($rbCatAbyss.Checked) { 'abyssCustomRepeat' }
       elseif ($rbCatDeep.Checked) { 'deepCustomRepeat' } else { 'customRepeat' })
@@ -8392,7 +8553,11 @@ function Invoke-StartAutomation {
         Add-GuiLog '[안내] 생활 커스텀 반복: 리스트 순서대로 항목을 실행하며, 한 항목의 지정 횟수를 모두 끝낸 뒤 다음 항목으로 넘어갑니다.'
       }
     }
-    if ($rbCatDungeon.Checked -and -not $isLifeStart) {
+    if ($isEtcStart) {
+      Add-GuiLog "[안내] 고양이 상인: '고양이 상인 뽑기' 화면을 열어 둔 상태로 시작하세요. 카드 구매에 골드가 실제로 소모됩니다."
+      Add-GuiLog '[안내] 목표 냥코인에 도달하면 스스로 멈춥니다 - 반복 설정과 무관하게 1회 실행입니다.'
+    }
+    if ($rbCatDungeon.Checked -and -not $isLifeStart -and -not $isEtcStart) {
       if ($isCustomStart) {
         # 커스텀 반복 시작 안내 (한 번만 표시: 열어 둔 던전 하나 / 우연한 만남 강제)
         Add-GuiLog '[안내] 커스텀 반복: 시작 시 열어 둔 던전 하나에서 리스트 순서대로 동작합니다.'
@@ -8405,7 +8570,7 @@ function Invoke-StartAutomation {
     if ($rbCatAbyss.Checked -and $isCustomStart) {
       Add-GuiLog '[안내] 어비스 커스텀 반복: 리스트 순서대로 항목을 한 판씩 실행합니다.'
     }
-    if ($rbCatDeep.Checked -and -not $isLifeStart) {
+    if ($rbCatDeep.Checked -and -not $isLifeStart -and -not $isEtcStart) {
       if ($isCustomStart) {
         Add-GuiLog '[안내] 심층 커스텀 반복: 시작 시 열어 둔 심층던전 하나에서 리스트 순서대로 동작합니다 (난이도는 어려움 고정).'
         Add-GuiLog "[안내] '커스텀 반복'은 설정과 무관하게 '우연한 만남'으로 진행합니다."
@@ -8828,20 +8993,33 @@ $updateCategoryPanels = {
   # 대분류(전투/생활) 게이트 (v2.0.0): 생활에서는 전투 카테고리 플래그를 전부 끕니다.
   # 전투 라디오의 Checked 는 건드리지 않아 전투 복귀 시 상태가 그대로 보존됩니다 (리뷰 조건 B).
   $isLife = ($script:mainCategory -eq 'life')
+  $isEtc = ($script:mainCategory -eq 'etc')   # 2026-08-15 신설 - 고양이 상인
+  $isBattle = (-not $isLife) -and (-not $isEtc)
   $isLifeGather = $isLife -and $rbLifeGather.Checked
   $isLifeProcess = $isLife -and (-not $rbLifeGather.Checked)
-  $isDungeon = (-not $isLife) -and $rbCatDungeon.Checked
-  $isDeep = (-not $isLife) -and $rbCatDeep.Checked
-  $isHunting = (-not $isLife) -and $rbCatHunting.Checked
-  $isAbyss = (-not $isLife) -and (-not $isDungeon -and -not $isDeep -and -not $isHunting)
+  $isDungeon = $isBattle -and $rbCatDungeon.Checked
+  $isDeep = $isBattle -and $rbCatDeep.Checked
+  $isHunting = $isBattle -and $rbCatHunting.Checked
+  $isAbyss = $isBattle -and (-not $isDungeon -and -not $isDeep -and -not $isHunting)
   # 설명서 버튼 글자를 선택한 콘텐츠에 맞게 전환
-  $btnManual.Text = $(if ($isLife) { '생활 설명서' } elseif ($isDungeon) { '던전 설명서' } elseif ($isDeep) { '심층 설명서' }
+  $btnManual.Text = $(if ($isEtc) { '기타 설명서' } elseif ($isLife) { '생활 설명서' } elseif ($isDungeon) { '던전 설명서' } elseif ($isDeep) { '심층 설명서' }
     elseif ($isHunting) { '사냥터 설명서' } else { '어비스 설명서' })
+  # ----- 기타 대분류 (2026-08-15): 반복 그룹을 숨기고(목표 냥코인이 반복을 대신 - Codex
+  # 합의: 비활성으로 남기면 동작에 영향 주는 것처럼 보임) 아래 블록을 60px 위로 당깁니다.
+  # 전투/생활 복귀 시 원위치 - 상수는 컨트롤 생성부의 값과 짝 (144/190/250)
+  $grpRepeat.Visible = -not $isEtc
+  $etcShiftTop = $(if ($isEtc) { -60 } else { 0 })
+  $btnStart.Top = 144 + $etcShiftTop
+  $btnSafeStop.Top = 144 + $etcShiftTop
+  $btnKill.Top = 144 + $etcShiftTop
+  $btnManual.Top = 144 + $etcShiftTop
+  $grpContent.Top = 190 + $etcShiftTop
+  $grpContentDetail.Top = 250 + $etcShiftTop
   # 커스텀 반복 라디오는 던전/어비스/심층 + 생활 채집에서 활성화합니다. 사냥터와 생활 가공은
   # 리스트 개념이 없어 전환할 수 없고, 선택 의도는 config 에 보존합니다.
   # (생활 채집 커스텀은 2026-08-08 신설 - 그전까지 생활 전체가 미지원이었습니다)
   # crSwitching 가드: 이 프로그램적 전환이 라디오 CheckedChanged 의 enabled 저장을 오염시키지 않게 함
-  $supportsCustom = (-not $isHunting) -and ((-not $isLife) -or $isLifeGather)
+  $supportsCustom = (-not $isEtc) -and (-not $isHunting) -and ((-not $isLife) -or $isLifeGather)
   $rbCustomRepeat.Enabled = $supportsCustom
   if (-not $supportsCustom) {
     if ($rbCustomRepeat.Checked) {
@@ -8874,8 +9052,28 @@ $updateCategoryPanels = {
   # 채집/가공·대분류 전환 시 진행 중 슬라이드를 즉시 정리 (오버레이 잔존 방지 - 리뷰 조건.
   # UI 갱신은 아래 흐름이 이어서 하므로 SkipUiRefresh)
   if ($script:lifeSlideActive) { Stop-LifeSlideNow -SkipUiRefresh }
-  $pnlCategory.Visible = -not $isLife
+  $pnlCategory.Visible = $isBattle
   $pnlLifeCategory.Visible = $isLife
+  $pnlEtcCategory.Visible = $isEtc
+  # 기타 상세 컨트롤 (냥코인 뽑기)
+  $lblEtcFeature.Visible = $isEtc
+  $btnEtcNyanCard.Visible = $isEtc
+  $lblEtcTarget.Visible = $isEtc
+  $numEtcTarget.Visible = $isEtc
+  $lblEtcTargetSuffix.Visible = $isEtc
+  $chkEtcGoldLimit.Visible = $isEtc
+  $numEtcGoldLimit.Visible = $isEtc
+  $lblEtcGoldSuffix.Visible = $isEtc
+  $lblEtcHint.Visible = $isEtc
+  if ($isEtc) {
+    # 카드 선택 스타일 (생활 스킬 카드와 동일 - Apply-HoneyTheme 가 일반 버튼 스타일로
+    # 덮으므로 표시 시점마다 재지정)
+    $btnEtcNyanCard.FlatStyle = 'Flat'
+    $btnEtcNyanCard.BackColor = $script:lifeCardSelectedBack
+    $btnEtcNyanCard.Font = $script:lifeCardFontBold
+    $btnEtcNyanCard.FlatAppearance.BorderColor = $script:themeHoney
+    $btnEtcNyanCard.FlatAppearance.BorderSize = 2
+  }
   $lblLifeSkillCaption.Visible = $isLifeGather
   $btnLifeSkillPrev.Visible = $isLifeGather
   $btnLifeSkillNext.Visible = $isLifeGather
@@ -8931,14 +9129,14 @@ $updateCategoryPanels = {
   if ($isLifeGather) { Update-LifeSliders }
   # 설정 그룹 내용 교대: 전투(체크 4개 + 클리어 대기 줄) ↔ 생활(진행 없음 줄).
   # 공용 버튼(권장 창 모드/적용된 설정/설정 저장)과 저장 안내 라벨은 양쪽 유지 (시안 확정)
-  $chkSpace.Visible = -not $isLife
-  $chkFood.Visible = -not $isLife
-  $chkRevive.Visible = -not $isLife
-  $chkAssist.Visible = -not $isLife
-  $btnClearHelp.Visible = -not $isLife
-  $lblClearWait.Visible = -not $isLife
-  $numClearWait.Visible = -not $isLife
-  $lblClearHuman.Visible = -not $isLife
+  $chkSpace.Visible = $isBattle
+  $chkFood.Visible = $isBattle
+  $chkRevive.Visible = $isBattle
+  $chkAssist.Visible = $isBattle
+  $btnClearHelp.Visible = $isBattle
+  $lblClearWait.Visible = $isBattle
+  $numClearWait.Visible = $isBattle
+  $lblClearHuman.Visible = $isBattle
   $lblGatherWait.Visible = $isLife
   $numGatherWait.Visible = $isLife
   $lblGatherHuman.Visible = $isLife
@@ -8946,7 +9144,16 @@ $updateCategoryPanels = {
   # (폭 158×28, x 15/183/351)로 통일됐습니다 (2026-08-13 시안 확정 - 전투는 체크 4개를
   # 가로 2줄로 압축하고 클리어 대기 줄을 자동부활 오른쪽으로 옮겨 그룹 높이 150을 유지).
   # 대분류별로 갈리는 것은 버튼 줄의 y(전투 110 / 생활 56)와 저장 안내 위치·그룹 높이뿐.
-  if ($isLife) {
+  if ($isEtc) {
+    # 기타: 진행 없음 줄도 없어 버튼 3개 한 줄만 (저장 안내는 버튼 줄 위 오른쪽)
+    $btnRecommendedWindow.Location = New-Object System.Drawing.Point(15, 44)
+    $btnAlwaysOn.Location = New-Object System.Drawing.Point(183, 44)
+    $btnSave.Location = New-Object System.Drawing.Point(351, 44)
+    $lblSaveInfo.Location = New-Object System.Drawing.Point(350, 20)
+    $lblSaveInfo.Size = New-Object System.Drawing.Size(159, 20)
+    $grpSettings.Height = 82
+  }
+  elseif ($isLife) {
     $btnRecommendedWindow.Location = New-Object System.Drawing.Point(15, 56)
     $btnAlwaysOn.Location = New-Object System.Drawing.Point(183, 56)
     $btnSave.Location = New-Object System.Drawing.Point(351, 56)
@@ -9041,7 +9248,10 @@ $updateCategoryPanels = {
   #  던전 + 소진 대응 5줄 = 182 / 더블 불가 대응까지 6줄 = 208 /
   #  던전 커스텀 반복 = 입력 줄 + 라디오 줄 0~2개 + 리스트 + 리스트 반복 줄: 라디오 줄 수에
   #  따라 리스트/버튼 열/하단 줄을 내리고 그룹 높이를 244~296 으로 재계산)
-  if ($isLife) {
+  if ($isEtc) {
+    # 기타(냥코인 뽑기): 기능 카드 + 목표/상한 줄 + 안내 3줄 고정
+    $grpContentDetail.Height = 184
+  } elseif ($isLife) {
     if ($isLifeCustom) {
       # 생활 커스텀: 슬라이더 두 줄(글자 카드 26)이 위로 접히고 그 아래 리스트 화면이 붙습니다.
       # 위치는 위쪽 표시 블록이 이미 계산해 뒀으므로 여기서는 높이만 맞춥니다

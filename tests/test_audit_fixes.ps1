@@ -343,21 +343,24 @@ Assert-Case 'GUI: 테마 후 대분류/슬라이더 스타일 재적용' `
 # updateCategoryPanels 생활 게이트 (조건 B): 전투 플래그 전부 (-not isLife) 게이트.
 # 2026-08-08 생활 채집에 커스텀 반복이 생기면서 커스텀 게이트만 '사냥터 제외 + 생활은
 # 채집만'으로 바뀌었습니다 (가공은 리스트 자체가 없어 여전히 제외)
-Assert-Case 'GUI: 카테고리 패널 갱신에 isLife 게이트' `
-  (($guiSource -match '\$isDungeon = \(-not \$isLife\) -and \$rbCatDungeon\.Checked') -and
-   ($guiSource -match '\$supportsCustom = \(-not \$isHunting\) -and \(\(-not \$isLife\) -or \$isLifeGather\)')) $true
+# 2026-08-15 기타 신설: 전투 플래그는 $isBattle(생활·기타 아님)로, 커스텀 게이트는 기타 제외
+Assert-Case 'GUI: 카테고리 패널 갱신에 3상태 게이트 (battle/life/etc)' `
+  (($guiSource -match '\$isDungeon = \$isBattle -and \$rbCatDungeon\.Checked') -and
+   ($guiSource -match '\$supportsCustom = \(-not \$isEtc\) -and \(-not \$isHunting\) -and \(\(-not \$isLife\) -or \$isLifeGather\)')) $true
 # 승인 오버레이 확장 (조건 A): (15,42) 유지 + 높이 158 + 미승인 시 대분류 잠금
 Assert-Case 'GUI: 승인 오버레이 514x158 + 대분류 승인 잠금' `
   (($guiSource -match '\$grpApproval\.Size = New-Object System\.Drawing\.Size\(514, 158\)') -and
    ($guiSource -match '\$btnCatBattle\.Enabled = \$approved')) $true
 # config 스키마 5 (조건 F): mainCategory 최상위 이전 + life 섹션 allowlist
-Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life allowlist' `
+Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life/etc allowlist' `
   (($guiSource -match "if \(\`$usr\.PSObject\.Properties\['mainCategory'\]\) \{ \`$def\.mainCategory = \`$usr\.mainCategory \}") -and
-   ($guiSource -match "'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life'\)")) $true
+   ($guiSource -match "'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life', 'etc'\)")) $true
 $auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-Case 'config: 스키마 8 + mainCategory 기본 battle + life 섹션' `
-  (([int]$auditConfigJson.configSchemaVersion -eq 8) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
-   ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily')) $true
+# 스키마 9 (2026-08-15): etc(기타 - 고양이 상인) 섹션 신설
+Assert-Case 'config: 스키마 9 + mainCategory 기본 battle + life/etc 섹션' `
+  (([int]$auditConfigJson.configSchemaVersion -eq 9) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
+   ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily') -and
+   ($null -ne $auditConfigJson.etc) -and ([string]$auditConfigJson.etc.content -eq 'catMerchant')) $true
 # 버전 번호를 고정값으로 박으면 올릴 때마다 이 테스트가 깨집니다 (2026-08-09 v2.0.1 에서 발생).
 # 여기서 지켜야 할 계약은 '어떤 번호인가'가 아니라 **$appVersion 이 GUI 에 단일 선언으로
 # 존재하고 형식이 유효한가**(빌드가 이 값을 exe 버전으로 삼음) 입니다.

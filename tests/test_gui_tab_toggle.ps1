@@ -148,8 +148,10 @@ Assert-Case 'v2 시프트: 최대 커스텀(546) 로그 Top' $r.LogTop 594
 # 시프트 배선: 상세 그룹이 실제로 (15,250) 으로 내려갔는지 + 대분류 버튼 줄 존재
 Assert-Case 'v2 배선: grpContentDetail Top 250' `
   ($guiSource -match '\$grpContentDetail\.Location = New-Object System\.Drawing\.Point\(15, 250\)') $true
-Assert-Case 'v2 배선: 대분류 버튼 2개 (15,44)/(275,44)' `
+# 2026-08-15 기타 신설: 2버튼(254폭) → 3버튼(168폭, x 15/188/361)
+Assert-Case 'v2 배선: 대분류 버튼 3개 (15,44)/(188,44)/(361,44)' `
   (($guiSource -match '\$btnCatBattle\.Location = New-Object System\.Drawing\.Point\(15, 44\)') -and
-   ($guiSource -match '\$btnCatLife\.Location = New-Object System\.Drawing\.Point\(275, 44\)')) $true
+   ($guiSource -match '\$btnCatLife\.Location = New-Object System\.Drawing\.Point\(188, 44\)') -and
+   ($guiSource -match '\$btnCatEtc\.Location = New-Object System\.Drawing\.Point\(361, 44\)')) $true
 
 exit $fails
