@@ -38,7 +38,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeFindLink', 'rgLifeQuestTracker')) {
+foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'lifeDetailDescSignatures', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeFindLink', 'rgLifeQuestTracker')) {
   $assign = $sourceAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and

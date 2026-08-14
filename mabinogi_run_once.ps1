@@ -8849,6 +8849,18 @@ $lifeDetailLabelFragments = @('집물', '집묻')
 # 위치 상한이 안전장치입니다.
 $lifeDetailLabelMaxIndex = 16
 
+# 상세 팝업 '설명문 시그니처' (실측 등록분만). 1글자 대상 '물'은 제목이 라벨 '채집물'에
+# 유착돼 제목 추출이 원천 불가하고(약한 order 회전의 링크 제목 게이트도 통과 불가),
+# 본문 이름 포함 구제(③)도 1글자를 차단합니다 - 유일하게 남는 대상 고유 증거가 설명문입니다.
+# 2026-08-14 네이티브 1908 실기 실사고(물 3회전 소진 - 조건부 정지)의 판독 원문(2회 동일):
+# '0채집물일상채집레벨1이상마실수있는맑은물.빈병으로물을뜰수있다.가까운위치찾기0'
+# **등록 전 오탐 검증 필수 - 다른 대상 실측 판독에 같은 조각이 없어야 합니다**:
+# '빈병으로물을뜰수있다'는 우물 실측('丁亞치|집물…깨끗한지하수를모아둔곳.빈병으로물을뜰수
+# 있다.')에도 그대로 있어 등록 금지. '마실수있는맑은물'은 실측 보유분 어디에도 없음.
+$lifeDetailDescSignatures = @{
+  '물' = @('마실수있는맑은물')
+}
+
 function Get-LifeDetailLabelIndex {
   # 판독 문자열에서 라벨 위치를 찾습니다 (순수 - 진리표 대상). 못 찾으면 -1.
   # 여러 조각 중 **가장 앞에 나오는** 것을 쓰되, 위치 상한을 넘으면 라벨로 보지 않습니다.
@@ -9280,6 +9292,15 @@ function Get-LifeDetailVerdict {
     $titleCandidate = $detailTitle.Substring(0, $detailTitle.Length - $trimCount)
     if (Test-LifeNameMatches -RowText $titleCandidate -TargetName $TargetName) { return 'match' }
   }
+  # ②.5 설명문 시그니처 (실측 등록분만 - $lifeDetailDescSignatures 정의 주석 참고):
+  #    라벨 뒤 본문에 등록 조각이 있으면 이 대상의 팝업으로 확정합니다. ① 오클릭 확정보다
+  #    뒤에 있어야 합니다 - 또렷한 다른 제목은 여전히 먼저 차단됩니다. 조각이 깨져 안
+  #    읽히면 아래 기존 경로 그대로이고, 잘못된 행의 팝업에는 조각 자체가 없어
+  #    unreadable → 회전 재시도로 남습니다 (안전 방향 불변).
+  $detailBody = ([string]$DetailText).Substring([Math]::Min($labelIndex + 2, ([string]$DetailText).Length))
+  foreach ($descSignature in @($lifeDetailDescSignatures[[string]$TargetName])) {
+    if ($descSignature -and $detailBody.Contains([string]$descSignature)) { return 'match' }
+  }
   # ③ 본문 구제 (실측: 젖소 '…특징인젖소'). 라벨 '집물' 두 글자는 반드시 제외하고, 2자
   #    이상 이름만 허용합니다 - '물' 같은 1글자는 라벨 자체에 들어 있어 전 팝업이 일치해
   #    다른 대상을 통과시켰습니다 (리뷰 블로커 반례).
@@ -9287,7 +9308,6 @@ function Get-LifeDetailVerdict {
   #    본문은 '백동이 섞인…백동 광석'이라 '백동광맥'은 없지만 '백동'은 확실 (라운드 5)
   $targetNorm = Get-LifeNormalizedName $TargetName
   if ($targetNorm.Length -ge 2) {
-    $detailBody = ([string]$DetailText).Substring([Math]::Min($labelIndex + 2, ([string]$DetailText).Length))
     # 전체 이름 경로에도 모호성 검사를 겁니다 (2026-08-07 감사 - high).
     # 본문에는 **항상 스킬 이름이** 들어가고('… 나무 베기 레벨 1 이상'), 목록의 다른 대상이
     # 목표 이름을 통째로 품는 경우도 많습니다(뾰족 나무 ⊃ 나무 / 철 광맥 ⊃ 광맥 /

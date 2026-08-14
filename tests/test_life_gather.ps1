@@ -21,7 +21,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeQuestTracker', 'rgLifeQuestWide', 'lifeListRowGap', 'lifeListFirstRowY')) {
+foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'lifeDetailDescSignatures', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeQuestTracker', 'rgLifeQuestWide', 'lifeListRowGap', 'lifeListFirstRowY')) {
   $assign = $sourceAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
@@ -91,6 +91,21 @@ Assert-Case "상세: 목표 '거미줄' + 거미줄 뭉치 팝업 → wrong-targ
   (Get-LifeDetailVerdict -DetailText '거미줄뭉치채집물일상채집레벨1이상' -TargetName '거미줄' -Order $dailyOrder) 'wrong-target'
 Assert-Case "상세: 목표 '물' + 물 팝업 → match" `
   (Get-LifeDetailVerdict -DetailText '물채집물일상채집레벨1이상깨끗한물.' -TargetName '물' -Order $dailyOrder) 'match'
+# ②.5 설명문 시그니처 (2026-08-14 네이티브 1908 실사고 - 물 3회전 소진): 제목이 통째로
+# 소실된 물 팝업을 설명문 고유 조각('마실수있는맑은물')으로 확정한다. 실측 판독 원문 그대로.
+Assert-Case "상세: 실측 제목 소실 물 팝업 → match (설명문 시그니처)" `
+  (Get-LifeDetailVerdict -DetailText '0채집물일상채집레벨1이상마실수있는맑은물.빈병으로물을뜰수있다.가까운위치찾기0' -TargetName '물' -Order $dailyOrder) 'match'
+# 오탐 가드: '빈병으로물을뜰수있다'는 우물 실측 설명에도 있어 시그니처로 등록하면 안 된다.
+# 등록 조각을 그쪽으로 바꾸면 이 케이스가 잡는다 (우물 팝업이 목표 '물'에 match 가 됨).
+Assert-Case "상세: 제목 깨진 우물 팝업 + 목표 '물' → unreadable (빈병 조각 미등록 가드)" `
+  (Get-LifeDetailVerdict -DetailText '丁亞치|집물일상채집레벨1이상깨끗한지하수를모아둔곳.빈병으로물을뜰수있다.' -TargetName '물' -Order $dailyOrder) 'unreadable'
+# ① 우선순위 가드: 또렷한 다른 제목은 시그니처보다 먼저 차단돼야 한다 (합성 문자열 -
+# 시그니처 검사가 ① 앞으로 이동하는 변이를 잡기 위한 순서 계약)
+Assert-Case "상세: 또렷한 우물 제목 + 본문에 물 시그니처 → wrong-target (① 우선)" `
+  (Get-LifeDetailVerdict -DetailText '우물채집물일상채집레벨1이상마실수있는맑은물.' -TargetName '물' -Order $dailyOrder) 'wrong-target'
+# 교차 가드: 시그니처는 등록 대상('물')에만 효력 - 물 팝업이 목표 '우물'을 통과시키지 않는다
+Assert-Case "상세: 제목 소실 물 팝업 + 목표 '우물' → unreadable (시그니처 교차 오염 없음)" `
+  (Get-LifeDetailVerdict -DetailText '0채집물일상채집레벨1이상마실수있는맑은물.빈병으로물을뜰수있다.가까운위치찾기0' -TargetName '우물' -Order $dailyOrder) 'unreadable'
 Assert-Case "상세: 목표 '거미줄' + 거미줄 팝업 → match" `
   (Get-LifeDetailVerdict -DetailText '거미줄채집물일상채집레벨1이상' -TargetName '거미줄' -Order $dailyOrder) 'match'
 Assert-Case '상세: 목록의 다른 대상과 일치 → wrong-target' `
