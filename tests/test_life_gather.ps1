@@ -1052,6 +1052,20 @@ Assert-Case "이름: 치환 솔솔H{섯 → 솔솔 버섯" (Test-LifeNameMatches
 Assert-Case "이름: 치환 산뜻H{섯 → 산뜻 버섯" (Test-LifeNameMatches -RowText '산뜻H{섯' -TargetName '산뜻 버섯') 'True'
 Assert-Case "이름: 치환 일반성 쑥쑥H{섯 → 쑥쑥 버섯" (Test-LifeNameMatches -RowText '쑥쑥H{섯' -TargetName '쑥쑥 버섯') 'True'
 Assert-Case "이름: 솔솔H{섯이 산뜻 버섯을 통과시키지 않음" (Test-LifeNameMatches -RowText '솔솔H{섯' -TargetName '산뜻 버섯') 'False'
+# 양털 깎기 행 깨짐 (2026-08-15 복슬 양 미발견 - 복슬은 이름 통째 소실이라 격자 추론이
+# 유일한 경로. 아래 이형들이 그 앵커를 살린다)
+Assert-Case "이름: 이형 -고스0 → 곱슬 양" (Test-LifeNameMatches -RowText '-고스0' -TargetName '곱슬 양') 'True'
+Assert-Case "이름: 이형 丁-터00 → 구름털 양" (Test-LifeNameMatches -RowText '丁-터00' -TargetName '구름털 양') 'True'
+Assert-Case "이름: 이형 머그르OE → 먹구름 양" (Test-LifeNameMatches -RowText '머그르OE' -TargetName '먹구름 양') 'True'
+Assert-Case "이름: 이형 그르OE → 먹구름 양 ('머' 소실형)" (Test-LifeNameMatches -RowText '그르OE' -TargetName '먹구름 양') 'True'
+Assert-Case "이름: 丁-터00이 먹구름 양을 통과시키지 않음" (Test-LifeNameMatches -RowText '丁-터00' -TargetName '먹구름 양') 'False'
+# 격자: 진단 s4 실측 행 배열 그대로 - 앵커 3개(order-strong)로 복슬 양 y 산출 (Codex 조건:
+# 동일 화면·동일 배율 배열로 운영 경로 재현. 실측 복슬 행 y~645, 허용 오차 ±19)
+$woolRows = @(@{ Text = 'Lv.34'; Y = 247 }, @{ Text = '-고스0'; Y = 398 }, @{ Text = '먹구름양'; Y = 485 }, @{ Text = '丁-터00'; Y = 564 })
+$woolOrder = @('양', '곱슬 양', '먹구름 양', '구름털 양', '복슬 양')
+$woolResult = Get-LifeTargetRowByOrder -Rows $woolRows -Order $woolOrder -TargetName '복슬 양' -RowGap $lifeListRowGap
+Assert-Case '격자: 실측 s4 배열로 복슬 양 order-strong 산출 (앵커 3+, y 630~664)' `
+  (($null -ne $woolResult) -and ([int]$woolResult.AnchorCount -ge 3) -and ([int]$woolResult.Y -ge 630) -and ([int]$woolResult.Y -le 664)) 'True'
 # '벼'→'斟'(한자) 실측 (2026-08-14 네이티브 1908 - 나무 베기 스크롤 탐색이 목록 끝까지 미발견)
 Assert-Case "이름: 이형 斟락나무 → 벼락 나무" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '벼락 나무') 'True'
 Assert-Case "이름: 斟락나무가 다른 나무를 통과시키지 않음" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '어스름 나무') 'False'
