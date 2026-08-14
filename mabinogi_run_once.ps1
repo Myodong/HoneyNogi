@@ -8936,7 +8936,11 @@ function Get-LifeNormalizedName {
 #    치환 여부를 '원문 기준'으로 판정하므로, '일럼이는및부리'처럼 깨짐이 겹친 문자열에서는
 #    '및무리' 조각이 원문에 없어 규칙이 아예 발동하지 않습니다.
 $lifeNameRepairPairs = @(@('나부', '나무'), @('부리', '무리'), @('곤춤', '곤충'), @('일럼', '일렁'),
-  @('OI', '이'), @('및', '빛'))
+  @('OI', '이'), @('및', '빛'),
+  # '버섯'→'Hd섯'/'H{섯' (2026-08-14 네이티브 1908 - 쑥쑥 버섯 미발견 정지의 진단 캡처에서
+  # 증폭Hd섯·솔솔H{섯·산뜻H{섯 3행 동시 실측 = 대상 무관 공통 깨짐. 쑥쑥 자체의 깨짐형은
+  # 중간 화면이라 미관측 - 탐색 궤적 계측이 다음 실측을 남긴다. Codex 합의: 공통 치환)
+  @('Hd섯', '버섯'), @('H{섯', '버섯'))
 
 function Get-LifeRepairedTexts {
   # 판독 문자열의 '깨짐 보정 사본들'을 돌려줍니다 (원문 + 규칙별 사본 + 전부 적용한 사본).
@@ -10395,6 +10399,10 @@ function Invoke-LifeMenuSequence {
       Write-RunLog "[생활] 목록 최상단 정렬 완료 (판독: $topRowsKey)"
     }
     $lastScrollSent = $false
+    # 탐색 궤적: 실제 탐색에 쓴 화면별 행 판독을 누적해 미발견 확정 시에만 덤프합니다
+    # (2026-08-14 쑥쑥 버섯 미발견 - 진단이 마지막 화면만 남아 중간 화면의 실제 깨짐형을
+    # 확보하지 못했다. 재판독이 아니라 탐색이 쓴 결과 그대로 - Codex 계약)
+    $scanTrail = @()
     # 여기도 판독에 성공한 회차만 예산을 소모합니다 (캡처 플래핑이 탐색 범위를 갉아먹지 않게)
     $scrollStep = -1
     while ($scrollStep -lt 11) {
@@ -10428,6 +10436,7 @@ function Invoke-LifeMenuSequence {
       # 끝 판정은 '스크롤을 실제로 보냈는데도' 행 구성이 그대로일 때만 - 전면화/커서 확인
       # 실패로 건너뛴 회차의 동일 화면을 끝으로 오인하면 일시 문제가 미발견 정지가 됨 (리뷰)
       $rowsKey = (($visibleRows | ForEach-Object { [string]$_.Text }) -join '|')
+      $scanTrail += ('스텝{0}: {1}' -f $scrollStep, $rowsKey)
       if ($lastScrollSent -and ($rowsKey -eq $previousRowsKey)) {
         Write-RunLog '[생활] 목록 끝까지 탐색했지만 대상을 찾지 못했습니다'
         break
@@ -10449,6 +10458,9 @@ function Invoke-LifeMenuSequence {
       return $false
     }
     Write-RunLog "[오류] 채집 대상 '$TargetName' 을 목록에서 찾지 못했습니다 - 미해금이거나 화면 인식 실패입니다."
+    if (@($scanTrail).Count -gt 0) {
+      Write-RunLog ('[진단] 탐색 궤적 (화면별 행 판독): ' + ($scanTrail -join ' → '))
+    }
     Write-LifeDiagnostics -Game $Game -Context '채집 대상 미발견'
     Write-RunLog '[완료] 채집 대상 미발견 - 조건부 정지'
     exit 4

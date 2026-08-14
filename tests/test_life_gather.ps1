@@ -1035,6 +1035,13 @@ Assert-Case "소유: *40고十맥 퀘스트 → 철 광맥 (광맥 축소 금지
   (Get-LifeQuestOwner -QuestText '채집 장소 탐색 *40고十맥 채집 3/10' -Order $miningOrderQ) '철 광맥'
 Assert-Case "소유: BH금광맥 퀘스트 → 백금 광맥 (광맥 축소 금지)" `
   (Get-LifeQuestOwner -QuestText '채집 장소 탐색 BH금광맥 채집 9/10' -Order $miningOrderQ) '백금 광맥'
+# '버섯'→'Hd섯'/'H{섯' 공통 치환 (2026-08-14 네이티브 1908 - 쑥쑥 버섯 미발견 정지 진단에서
+# 3행 동시 실측. 쑥쑥H{섯 케이스는 치환 일반성 배선 검증 - 실제 쑥쑥 깨짐형은 궤적 계측 대기)
+Assert-Case "이름: 치환 증폭Hd섯 → 증폭 버섯" (Test-LifeNameMatches -RowText '증폭Hd섯' -TargetName '증폭 버섯') 'True'
+Assert-Case "이름: 치환 솔솔H{섯 → 솔솔 버섯" (Test-LifeNameMatches -RowText '솔솔H{섯' -TargetName '솔솔 버섯') 'True'
+Assert-Case "이름: 치환 산뜻H{섯 → 산뜻 버섯" (Test-LifeNameMatches -RowText '산뜻H{섯' -TargetName '산뜻 버섯') 'True'
+Assert-Case "이름: 치환 일반성 쑥쑥H{섯 → 쑥쑥 버섯" (Test-LifeNameMatches -RowText '쑥쑥H{섯' -TargetName '쑥쑥 버섯') 'True'
+Assert-Case "이름: 솔솔H{섯이 산뜻 버섯을 통과시키지 않음" (Test-LifeNameMatches -RowText '솔솔H{섯' -TargetName '산뜻 버섯') 'False'
 # '벼'→'斟'(한자) 실측 (2026-08-14 네이티브 1908 - 나무 베기 스크롤 탐색이 목록 끝까지 미발견)
 Assert-Case "이름: 이형 斟락나무 → 벼락 나무" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '벼락 나무') 'True'
 Assert-Case "이름: 斟락나무가 다른 나무를 통과시키지 않음" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '어스름 나무') 'False'
