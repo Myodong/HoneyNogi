@@ -96,13 +96,18 @@ if ($guiRaw.Contains('^\[\d{4}-\d{2}-\d{2}\]\s*자동화 로그\s*\(시작')) {
 }
 Check-Equal 'GUI: 숫자 단독 노이즈 줄 숨김' `
   (Convert-WorkerLogLineForGui '1' $false) $null
-# 소멸 판정 계측은 화면 숨김·파일 보존 (2026-08-15 사용자 피드백 - [설정] 줄과 같은 방식)
+# [진단] 줄은 전체 화면 숨김·파일 보존 (2026-08-15 사용자 피드백 2회 - 소멸 판정 한정에서
+# 확대. 화면에는 [오류]/[경고]/[완료] 요약이 남는다)
 Check-Equal 'GUI: 소멸 판정 계측 줄 숨김' `
   (Convert-WorkerLogLineForGui "12:00:00 [진단] 소멸 판정 1/3 - 좁은 'x' / 넓은 'y' / HUD 보임" $false) $null
 Check-Equal 'GUI: 소멸 판정 근거 캡처 줄 숨김' `
   (Convert-WorkerLogLineForGui '12:00:00 [진단] 소멸 판정 근거 - 화면 캡처 저장: C:\x.png' $false) $null
-Check-Equal 'GUI: 오류 경로 [진단] 줄은 계속 표시' `
-  ([bool](Convert-WorkerLogLineForGui '12:00:00 [진단] 채집 대상 미발견 - 상세 영역 판독: ''x''' $false)) $true
+Check-Equal 'GUI: 오류 경로 [진단] 줄도 숨김 (2026-08-15 계약 반전)' `
+  (Convert-WorkerLogLineForGui '12:00:00 [진단] 채집 대상 미발견 - 상세 영역 판독: ''x''' $false) $null
+Check-Equal 'GUI: 메시지 중간에 인용된 [진단] 문자열은 숨기지 않음 (태그 앵커링)' `
+  ([bool](Convert-WorkerLogLineForGui '12:00:00 [오류] 어떤 문제 - 자세한 내용은 [진단] 줄 참고' $false)) $true
+Check-Equal 'GUI: 오류/완료 요약 줄은 계속 표시' `
+  ([bool](Convert-WorkerLogLineForGui '12:00:00 [완료] 채집 대상 미발견 - 조건부 정지' $false)) $true
 
 $workerPath = Join-Path $root 'mabinogi_run_once.ps1'
 $workerRaw = Get-Content -LiteralPath $workerPath -Raw -Encoding UTF8
