@@ -9730,12 +9730,26 @@ function Test-LifeQuestFragments {
   #    목표줄 N/M 도 조각 2개도 없이 이 문구만 남았다).
   # 오탐 검증: 주간 목표 하위 '던전클리어0/5' 류('집' 불일치), 이벤트 '12일남음'(슬래시
   # 없음), '정기의뢰(2)' 전부 불통과 - 진성 부재 판독(길드/이벤트만 남은 트래커)은 absent.
+  # ④ 분모 10 카운트 - 게임 이벤트 알림('검은 구멍 출현'/'아이스 급류 래셔')이 트래커에
+  #    끼어들어 ①~③이 전멸해도 카운트 'N/10'은 넓은 영역에 살아남는다 (2026-08-14 깔끔
+  #    버섯 7/10 오완료의 소멸 확정 판독 2건 모두 '7/10' 보유 - 진성 부재 실측에는 분모
+  #    10인 N/M이 없음: 길드 하위 /3·/5, 이벤트는 슬래시 없음). 상태 판정 전용 - 소유자
+  #    증거로 승격 금지 (Codex 조건). (?!\d) 는 '7/100' 오매치 방지.
   param([string]$QuestText)
   $normalized = ([string]$QuestText) -replace '\s', ''
   if ((Get-LifeQuestConceptHits -NormalizedText $normalized) -ge 2) { return $true }
-  if ($normalized -match '[집칩](\d+/\d*|\d*/\d+)') { return $true }
+  if ((Get-LifeQuestCompactMatch -NormalizedText $normalized).Success) { return $true }
+  if ($normalized -match '\d+/10(?!\d)') { return $true }
   if ($normalized.Contains('목적지로이동') -or $normalized.Contains('길을찾는중')) { return $true }
   return $false
+}
+
+function Get-LifeQuestCompactMatch {
+  # 콤팩트 목표줄('{대상}[집칩魯] N/M') 매치 (순수 - 진리표 대상). 상태 판정 ②와 소유자
+  # 입력 절단이 **공유**합니다 - 두 곳이 따로 들면 분기 드리프트가 생깁니다 (Codex 조건).
+  # '魯'는 '집' 깨짐 실측 2회 (사과나무 '자|魯6/10' 18:47, 깔끔 버섯 '훼魯7/10' 23:14).
+  param([string]$NormalizedText)
+  return [regex]::Match([string]$NormalizedText, '[집칩魯](\d+/\d*|\d*/\d+)')
 }
 
 function Get-LifeQuestConceptHits {
@@ -9758,9 +9772,12 @@ function Get-LifeQuestOwnerText {
   # - 콤팩트 목표줄이 있으면 그 매치 끝까지만 (뒤에 붙는 주간 목표/이벤트 줄을 버림)
   # - 없으면 조각 개념 2-of-3일 때만 전체 (제목줄이 읽히는 기존 형태)
   # - 이동 안내만으로 present 가 된 판독은 이름 근거가 없어 미확정('')
+  # 콤팩트 매치는 상태 판정 ②와 같은 헬퍼를 씁니다. 단 ④('N/10' 단독)는 이름 근거가
+  # 없으므로 소유자 증거로 승격하지 않습니다 (Codex 조건 - ④만으로 present 가 된 판독은
+  # 여기서 미확정('')).
   param([string]$QuestText)
   $normalized = ([string]$QuestText) -replace '\s', ''
-  $countMatch = [regex]::Match($normalized, '[집칩](\d+/\d*|\d*/\d+)')
+  $countMatch = Get-LifeQuestCompactMatch -NormalizedText $normalized
   if ($countMatch.Success) { return $normalized.Substring(0, $countMatch.Index + $countMatch.Length) }
   if ((Get-LifeQuestConceptHits -NormalizedText $normalized) -ge 2) { return $normalized }
   return ''

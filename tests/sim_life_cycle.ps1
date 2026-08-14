@@ -10,7 +10,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
     -Names @('Invoke-LifeGatherCycle', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeRequiredLevel', 'Get-LifeNormalizedName',
-      'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeQuestConceptHits', 'Get-LifeQuestOwnerText', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus',
+      'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeQuestConceptHits', 'Get-LifeQuestCompactMatch', 'Get-LifeQuestOwnerText', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus',
       # 지정 시간(시간 지정 모드) 검사는 스텁이 아니라 **본체**를 씁니다 (2026-08-11 실측 ① 대응
       # 수정) - 시나리오가 env 를 안 주면 파싱이 $null 이라 무동작 = 기존 시나리오 영향 없음.
       # 시간 도달 시나리오는 HONEYNOGI_UNTIL_TIME 을 지난 시각으로 넣어 exit 4 를 확인합니다.

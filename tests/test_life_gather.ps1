@@ -15,7 +15,7 @@ function Assert-Case {
 
 # ── 본체에서 순수 판정 함수/데이터 추출 ──
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
-    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestConceptHits', 'Get-LifeQuestOwnerText', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeListAtTop', 'Test-LifeTitleExplicitVariant', 'Test-LifeWindowClosePixels')) {
+    -Names @('Get-LifeNormalizedName', 'Test-LifeNameMatches', 'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Test-LifeBodyNameAmbiguous', 'Get-LifeDetailVerdict', 'Get-LifeDetailTitleFromWords', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeTitleFromDetailText', 'Get-LifeTitleVerdictFromDetail', 'Get-LifeConsensusVerdict', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus', 'Get-LifeTitleStripRegion', 'Test-LifeTitleNameMatches', 'Get-LifeTitleVerdict', 'Get-LifeRequiredLevel', 'Test-CaptureRecovered', 'Format-LifeMissingItemNotice', 'Select-LifeFindNearestWord', 'Test-LifeQuestFragments', 'Get-LifeQuestConceptHits', 'Get-LifeQuestCompactMatch', 'Get-LifeQuestOwnerText', 'Get-LifeQuestState', 'Get-LifeQuestCountText', 'Get-LifeTargetRows', 'Get-LifeTargetRowByOrder', 'Find-LifeTargetScan', 'Test-LifeListAtTop', 'Test-LifeTitleExplicitVariant', 'Test-LifeWindowClosePixels')) {
   Invoke-Expression $definition
 }
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
@@ -686,6 +686,16 @@ Assert-Case '조각: 이동 안내 → true' (Test-LifeQuestFragments -QuestText
 Assert-Case '조각: 진성 부재(길드 하위 N/M) → false' (Test-LifeQuestFragments -QuestText '[주간목표]모험가길드의정기의뢰(2)던전클리어0/5사냥터클리어4/5') 'False'
 Assert-Case '조각: 진성 부재(이벤트 줄) → false' (Test-LifeQuestFragments -QuestText '달걀을지켜라!12일남음시원한여름을보내는법C33일남음마음을전합니다19회=') 'False'
 Assert-Case "조각: 같은 개념 이형 중복은 1점 ('채집해집') → false" (Test-LifeQuestFragments -QuestText '채집해집') 'False'
+# ④ 분모 10 카운트 + ⑤ '집→魯' 깨짐 (2026-08-14 깔끔 버섯 7/10 오완료의 소멸 확정 판독)
+Assert-Case "조각: 이벤트 끼어듦 + 카운트 소실 → false (absent 유지 - 스트릭은 다음 판독이 리셋)" `
+  (Test-LifeQuestFragments -QuestText 'H해섯채집검은구멍출현') 'False'
+Assert-Case "조각: '집→魯' 깨짐 훼魯7/10 → true" (Test-LifeQuestFragments -QuestText '훼魯7/10') 'True'
+Assert-Case "조각: 전멸 판독이지만 N/10 생존 → true (④)" (Test-LifeQuestFragments -QuestText '4타세터서7/10레0OI') 'True'
+Assert-Case "조각: 7/100 은 분모 10 아님 → false (경계 가드)" (Test-LifeQuestFragments -QuestText '이벤트진행7/100') 'False'
+Assert-Case "소유 범위: 魯 깨짐도 콤팩트 절단 (헬퍼 공유)" `
+  (Get-LifeQuestOwnerText -QuestText '훼魯7/10[주간목표]모험가길드') '훼魯7/10'
+Assert-Case "소유 범위: ④ 단독(N/10만) 판독은 미확정 (owner 승격 금지)" `
+  (Get-LifeQuestOwnerText -QuestText '4타세터서7/10레0OI') ''
 # 소유자 증거 분리 (Codex 반례): 콤팩트 줄 뒤 주간 목표 줄의 긴 이름을 소유자로 집으면 안 됨
 Assert-Case '소유 범위: 콤팩트 목표줄까지만 → 나무' `
   (Get-LifeQuestOwner -QuestText (Get-LifeQuestOwnerText -QuestText '•나무채집0/10[주간목표]뾰족나무') -Order @('나무', '뾰족 나무')) '나무'
