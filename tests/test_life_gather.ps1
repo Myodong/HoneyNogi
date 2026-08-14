@@ -651,6 +651,7 @@ function Invoke-QuestStateCase {
   $script:mockHudVisible = $Hud
   $script:screenCaptureFailing = $CaptureFailing
   $script:questOcrCalls = @()
+  $script:lifeEmptyWideStreak = 0   # 유예 카운터는 케이스 간 독립 (연속 시퀀스 케이스만 직접 관리)
   $result = Get-LifeQuestState -Game $null
   $script:screenCaptureFailing = $false
   return $result
@@ -659,8 +660,20 @@ Assert-Case '퀘스트: 생성 직후 실측 (4번 캡처)' (Invoke-QuestStateCa
 Assert-Case "퀘스트: '탐색' 누락 실측 (5b)" (Invoke-QuestStateCase '채집 장소 •사과 나구 채집 4/10' $false) 'present'
 Assert-Case '퀘스트: 종료 후 실측 (6번) + HUD → absent' (Invoke-QuestStateCase '표] 모험가 길드의 정기 의뢰 (기 •심층 던전 들리어 0/3' $true) 'absent'
 Assert-Case '퀘스트: 종료 텍스트 + HUD 없음 → unknown (부재 오판 방지)' (Invoke-QuestStateCase '표] 모험가 길드의 정기 의뢰' $false) 'unknown'
-Assert-Case '퀘스트: 빈 판독 + HUD → absent' (Invoke-QuestStateCase '' $true) 'absent'
+# 2026-08-15 계약 변경(양파 8/10 오완료 실측): 넓은 판독까지 (거의) 빈 것은 트래커 UI 의
+# 일시 소멸(연출/페이드)일 수 있어 연속 2회까지 unknown 으로 유예. 3회째부터 기존 HUD 기반
+# absent 허용 - 추적 항목이 정말 없는 계정 상태도 유예 뒤 완료 (Codex 합의)
+Assert-Case '퀘스트: 빈 판독 + HUD 1회차 → unknown (공백 유예)' (Invoke-QuestStateCase '' $true) 'unknown'
+$script:lifeEmptyWideStreak = 0
+Set-MockQuestText -Narrow ''; $script:mockHudVisible = $true; $script:screenCaptureFailing = $false; $script:questOcrCalls = @()
+$emptySeq = @((Get-LifeQuestState -Game $null), (Get-LifeQuestState -Game $null), (Get-LifeQuestState -Game $null))
+Assert-Case '퀘스트: 빈 판독 3연속 → unknown,unknown,absent (유예 2회 소진 후 완료 보장)' (($emptySeq -join ',')) 'unknown,unknown,absent'
 Assert-Case '퀘스트: 빈 판독 + HUD 없음 → unknown' (Invoke-QuestStateCase '' $false) 'unknown'
+# 양파 오완료의 소멸 확정 판독 실측 - 1번(길드 줄 읽힘)은 absent 유지, 2번(넓은 4자)은 유예
+Assert-Case '퀘스트: 실측 1/3 (길드 줄 읽힘 + 재집10) → absent 유지 (단발은 리셋됨)' `
+  (Invoke-QuestStateCase '`《•코`협11.:니탈프재집10[주간목표]모험가길드의전기이근' $true -WideText '도시취0들표J.[주간목표]모험가길드의정기의뢰(2)달걀을지켜라!서원한여름을보내는법마음을전합니다&19일') 'absent'
+Assert-Case '퀘스트: 실측 2/3 (넓은 판독 4자) → unknown (공백 유예)' `
+  (Invoke-QuestStateCase '간표]모험가닐트의정)i의己' $true -WideText '』`夕才') 'unknown'
 Assert-Case '퀘스트: 캡처 실패 중 → unknown (텍스트 무관)' (Invoke-QuestStateCase '•채집 장소 탐색' $true $true) 'unknown'
 # 2026-08-14 계약 반전: '채집 N/M'은 채집(정지) 단계 트래커의 콤팩트 목표줄 그 자체다
 # (계측 실측 19:18:44 '채집0/10:즤뇨…' - 이름이 통째로 깨진 채 퀘스트 생존 중). 구 계약
@@ -670,7 +683,9 @@ Assert-Case "퀘스트: 콤팩트 목표줄('채집 N/M') → present (2026-08-1
 Assert-Case '퀘스트: 탐색 깨짐 실측 (채집+장소만) → present' (Invoke-QuestStateCase '채집 장소 탐 •백금 광맥 채집 010' $true) 'present'
 Assert-Case "퀘스트: '채집' 깨짐 + 장소/탐색 → present" (Invoke-QuestStateCase '차||집 장소 탐색' $true) 'present'
 Assert-Case "퀘스트: '장소' 깨짐 + 채집/탐색 → present" (Invoke-QuestStateCase '채집 잠소 탐색 사과나무' $true) 'present'
-Assert-Case "퀘스트: '탐색' 한 조각만 → present 아님" (Invoke-QuestStateCase '탐색 0/3' $true) 'absent'
+# 2026-08-15 ⑥ 파급: 조각 1개는 여전히 present 가 아니고, 판독이 짧아(6자) 공백 유예를
+# 타 unknown (부재로 안 셈 - 더 보수적. 3연속이면 absent 로 완료됨은 위 시퀀스 케이스가 고정)
+Assert-Case "퀘스트: '탐색' 한 조각만 → present 아님 (짧은 판독 유예 unknown)" (Invoke-QuestStateCase '탐색 0/3' $true) 'unknown'
 # 순수 판정 단독 진리표
 Assert-Case '조각: 채집+장소 → true' (Test-LifeQuestFragments -QuestText '•채집 장소 •사과 나부 채집 0/10') 'True'
 Assert-Case '조각: 주간 목표 문구 → false' (Test-LifeQuestFragments -QuestText '표] 모험가 길드의 정기 의뢰 •심층 던전 클리어 0/3') 'False'
@@ -686,6 +701,9 @@ Assert-Case '조각: 이동 안내 → true' (Test-LifeQuestFragments -QuestText
 Assert-Case '조각: 진성 부재(길드 하위 N/M) → false' (Test-LifeQuestFragments -QuestText '[주간목표]모험가길드의정기의뢰(2)던전클리어0/5사냥터클리어4/5') 'False'
 Assert-Case '조각: 진성 부재(이벤트 줄) → false' (Test-LifeQuestFragments -QuestText '달걀을지켜라!12일남음시원한여름을보내는법C33일남음마음을전합니다19회=') 'False'
 Assert-Case "조각: 같은 개념 이형 중복은 1점 ('채집해집') → false" (Test-LifeQuestFragments -QuestText '채집해집') 'False'
+# '재집' 이형 (실측 2회: '둥지재집0/10', '니탈프재집10')
+Assert-Case "조각: 재집+장소 → true ('재집' 이형)" (Test-LifeQuestFragments -QuestText '재집 장소 •감자') 'True'
+Assert-Case "조각: 채집재집 도 1점 → false (개념별 1점 유지)" (Test-LifeQuestFragments -QuestText '채집재집') 'False'
 # ④ 분모 10 카운트 + ⑤ '집→魯' 깨짐 (2026-08-14 깔끔 버섯 7/10 오완료의 소멸 확정 판독)
 Assert-Case "조각: 이벤트 끼어듦 + 카운트 소실 → false (absent 유지 - 스트릭은 다음 판독이 리셋)" `
   (Test-LifeQuestFragments -QuestText 'H해섯채집검은구멍출현') 'False'
@@ -739,7 +757,10 @@ $script:mockGameFront = $false
 Set-MockQuestText -Narrow '' -Wide ''
 $script:mockCoveredText = '설정 저장 빌드 로그 커밋'
 $script:mockHudVisible = $true
-Assert-Case '전면화: 성공했는데 재판독도 비면 HUD 근거로 absent' (Get-LifeQuestState -Game $null) 'absent'
+# 2026-08-15 ⑥ 파급: 전면화 후 재판독까지 비면 이제 첫 회는 공백 유예 unknown (3연속이면
+# absent 로 완료됨은 유예 시퀀스 케이스가 고정 - 부재로 안 세는 보수적 방향)
+$script:lifeEmptyWideStreak = 0
+Assert-Case '전면화: 성공했는데 재판독도 비면 유예 unknown (구 계약 absent)' (Get-LifeQuestState -Game $null) 'unknown'
 function Focus-Game { param($Game) }   # 원래 계약(전면화 성공 여부는 mockGameFront 로 제어)으로 복구
 $script:mockGameFront = $true
 $script:mockCoveredText = ''

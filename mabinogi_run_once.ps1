@@ -9765,7 +9765,8 @@ function Get-LifeQuestConceptHits {
   # '채집해집' 같은 문자열이 2점이 되면 안 됩니다 (Codex 지적).
   param([string]$NormalizedText)
   $conceptHits = 0
-  foreach ($conceptPieces in @(@('채집', '해집'), @('장소', '잠소'), @('탐색', '타색', '다색'))) {
+  # '재집' = '채집' 깨짐 실측 2회 (18:29 '둥지재집0/10', 2026-08-15 01:47 '니탈프재집10')
+  foreach ($conceptPieces in @(@('채집', '해집', '재집'), @('장소', '잠소'), @('탐색', '타색', '다색'))) {
     foreach ($piece in $conceptPieces) {
       if ($NormalizedText.Contains($piece)) { $conceptHits++; break }
     }
@@ -9809,12 +9810,12 @@ function Get-LifeQuestState {
       -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
       -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
   $script:lifeQuestStateEvidence = @{ Narrow = (([string]$stateNarrowText) -replace '\s', ''); Wide = ''; Hud = '' }
-  if (Test-LifeQuestFragments -QuestText $stateNarrowText) { return 'present' }
+  if (Test-LifeQuestFragments -QuestText $stateNarrowText) { $script:lifeEmptyWideStreak = 0; return 'present' }
   $stateWideText = (Get-GameRegionOcrText -Game $Game `
       -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
       -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)
   $script:lifeQuestStateEvidence.Wide = (([string]$stateWideText) -replace '\s', '')
-  if (Test-LifeQuestFragments -QuestText $stateWideText) { return 'present' }
+  if (Test-LifeQuestFragments -QuestText $stateWideText) { $script:lifeEmptyWideStreak = 0; return 'present' }
   # ② 안 읽혔을 때만 '다른 창이 가린 건 아닌지' 확인합니다 - 전면화 후 한 번 더 읽고,
   #    전면화조차 안 되면 판단을 포기합니다(unknown - 부재로 세지 않음. 2026-08-07 실사고:
   #    개발 창이 게임을 덮은 채 그 글자를 읽고 '퀘스트 없음'으로 완료 오판)
@@ -9826,12 +9827,27 @@ function Get-LifeQuestState {
         -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
         -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
     $script:lifeQuestStateEvidence.Narrow = (([string]$stateNarrowText) -replace '\s', '')
-    if (Test-LifeQuestFragments -QuestText $stateNarrowText) { return 'present' }
+    if (Test-LifeQuestFragments -QuestText $stateNarrowText) { $script:lifeEmptyWideStreak = 0; return 'present' }
     $stateWideText = (Get-GameRegionOcrText -Game $Game `
         -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
         -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)
     $script:lifeQuestStateEvidence.Wide = (([string]$stateWideText) -replace '\s', '')
-    if (Test-LifeQuestFragments -QuestText $stateWideText) { return 'present' }
+    if (Test-LifeQuestFragments -QuestText $stateWideText) { $script:lifeEmptyWideStreak = 0; return 'present' }
+  }
+  # ⑥ 넓은 판독 공백 유예 (2026-08-15 양파 8/10 오완료 실측): 우측 퀘스트 목록 전체가
+  #    거의/완전히 안 읽히는 것은 '채집 퀘스트만 없음'이 아니라 트래커 UI 의 일시 소멸
+  #    (연출/페이드)일 수 있습니다 - 진성 부재 실측 3건은 길드/이벤트 줄이 60자+ 읽혔고,
+  #    가짜 absent 의 넓은 판독은 0·4자였습니다. 연속 2회까지 unknown(부재로 안 셈)으로
+  #    유예하고, 계속 짧으면 3회째부터 기존 HUD 기반 absent 를 허용합니다 - 추적 항목이
+  #    정말 없는 계정 상태도 유예 뒤에는 완료됩니다 (Codex 합의: 무기한 unknown 금지).
+  if (([string]$script:lifeQuestStateEvidence.Wide).Length -lt 10) {
+    $script:lifeEmptyWideStreak = [int]$script:lifeEmptyWideStreak + 1
+    if ($script:lifeEmptyWideStreak -le 2) {
+      $script:lifeQuestStateEvidence.Hud = ('넓은 판독 공백 - 유예 {0}/2' -f $script:lifeEmptyWideStreak)
+      return 'unknown'
+    }
+  } else {
+    $script:lifeEmptyWideStreak = 0
   }
   # ③ 게임 화면이 확실한데도 퀘스트가 없을 때만 absent (게임플레이 HUD 가 증거)
   if (Test-HomeEndEscHud -Game $Game) { $script:lifeQuestStateEvidence.Hud = 'HUD 보임'; return 'absent' }
@@ -10774,6 +10790,8 @@ function Invoke-LifeGatherCycle {
     exit 4
   }
   $skillEntry = $lifeSkillMenuTable[$lifeSkillId]
+  # 넓은 판독 공백 유예 카운터는 사이클마다 초기화 (Get-LifeQuestState ⑥ 주석 참고)
+  $script:lifeEmptyWideStreak = 0
   Write-RunLog "[생활] 자동화 시작: $([string]$skillEntry.Name) - $lifeTargetName (진행이 ${lifeGatherWait}초 없으면 정지 / 절대 상한 ${lifeGatherHardCapSeconds}초)"
   $questSeen = $false
   $absentStreak = 0
