@@ -1019,6 +1019,9 @@ Assert-Case "이름: 공통 규칙 고요한빛부리 → 고요한 빛 무리" 
 Assert-Case "이름: 복합 깨짐 황폐한곤춤부리 → 황폐한 곤충 무리" (Test-LifeNameMatches -RowText '황폐한곤춤부리' -TargetName '황폐한 곤충 무리') 'True'
 Assert-Case "이름: 단일 깨짐 삭막한곤충부리 → 삭막한 곤충 무리" (Test-LifeNameMatches -RowText '삭막한곤충부리' -TargetName '삭막한 곤충 무리') 'True'
 Assert-Case "이름: 복합 치환이 다른 대상까지 통과시키지 않음" (Test-LifeNameMatches -RowText '황폐한곤춤부리' -TargetName '삭막한 곤충 무리') 'False'
+# '벼'→'斟'(한자) 실측 (2026-08-14 네이티브 1908 - 나무 베기 스크롤 탐색이 목록 끝까지 미발견)
+Assert-Case "이름: 이형 斟락나무 → 벼락 나무" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '벼락 나무') 'True'
+Assert-Case "이름: 斟락나무가 다른 나무를 통과시키지 않음" (Test-LifeNameMatches -RowText '斟락나무' -TargetName '어스름 나무') 'False'
 # '일렁'→'일럼' 실측 (2026-08-08 레벨 해금 후 첫 시도에서 발견 - s3~s6 전 배율에서 일관)
 Assert-Case "이름: 공통 규칙 일럼이는빛무리 → 일렁이는 빛 무리" (Test-LifeNameMatches -RowText '일럼이는빛무리' -TargetName '일렁이는 빛 무리') 'True'
 Assert-Case "이름: 복합(일럼+부리) → 일렁이는 빛 무리" (Test-LifeNameMatches -RowText '일럼이는빛부리' -TargetName '일렁이는 빛 무리') 'True'
