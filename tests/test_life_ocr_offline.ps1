@@ -38,7 +38,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeFindLink', 'rgQuestTracker')) {
+foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeFindLink', 'rgLifeQuestTracker')) {
   $assign = $sourceAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
@@ -229,14 +229,14 @@ try {
 
   # ── ④ 퀘스트 존재 판정: 채집 중 5장 = present 조각, 종료 후 = 조각 없음 ──
   foreach ($name in @('4_자동이동_퀘스트트래커', '4b_자동이동_몬스터지역통과', '5_채집중_게이지_획득', '5b_채집반복_카운트_경험치배지', '5c_채집_게이지낮음')) {
-    $questText = Get-RegionText -Source $bitmaps[$name] -Region $rgQuestTracker
+    $questText = Get-RegionText -Source $bitmaps[$name] -Region $rgLifeQuestTracker
     Assert ($questText.Contains('채집') -and $questText.Contains('장소')) "퀘스트 present [$name] (판독='$questText')"
   }
-  $endText = Get-RegionText -Source $bitmaps['6_채집종료후_퀘스트소멸'] -Region $rgQuestTracker
+  $endText = Get-RegionText -Source $bitmaps['6_채집종료후_퀘스트소멸'] -Region $rgLifeQuestTracker
   Assert (-not ($endText.Contains('채집') -and $endText.Contains('장소'))) "퀘스트 소멸 [6_채집종료후] (판독='$endText')"
 
   # ── ⑤ 카운트(로그 보조): 5b 에서 N/M 추출 ──
-  $countRaw = (Get-BitmapRegionOcr -Source $bitmaps['5b_채집반복_카운트_경험치배지'] -Region $rgQuestTracker -Scale 3).Text
+  $countRaw = (Get-BitmapRegionOcr -Source $bitmaps['5b_채집반복_카운트_경험치배지'] -Region $rgLifeQuestTracker -Scale 3).Text
   Assert ([regex]::Match([string]$countRaw, '(\d+)\s*/\s*(\d+)').Success) "카운트 추출 [5b]"
 } finally {
   foreach ($bmp in $bitmaps.Values) { $bmp.Dispose() }

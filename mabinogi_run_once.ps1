@@ -449,11 +449,11 @@ if (Test-Path -LiteralPath $configPath) {
 #    (안 올리면 옛 config 의 좌표가 게이트를 통과해 이번 사고가 재발합니다.
 #     두 값이 어긋나면 빌드 스크립트가 실패하도록 검사합니다)
 # v8(난이도 알약)·v9(제목 상단)·v10(카드 버튼 4영역)·v11(전리품 라벨)·v12(어비스 입장
-# 버튼)·v13(사냥터 난이도·더블 루팅) 모두 미배포(공개 배포는 7). 버전을 나눈 이유: 각
-# 단계의 실기 PC에 직전 버전 config가 이미 설치돼 있어, 같은 번호를 유지하면 GUI 이전
-# 게이트(사용자 버전 >= 기본 버전이면 이전 안 함)를 통과하지 못해 구 영역이 남는다
-# (교차 리뷰 지적 - v9 이후 동일 사유).
-$coordsVersionCurrent = 13
+# 버튼)·v13(사냥터 난이도·더블 루팅)·v14(퀘스트 추적기) 모두 미배포(공개 배포는 7).
+# 버전을 나눈 이유: 각 단계의 실기 PC에 직전 버전 config가 이미 설치돼 있어, 같은 번호를
+# 유지하면 GUI 이전 게이트(사용자 버전 >= 기본 버전이면 이전 안 함)를 통과하지 못해
+# 구 영역이 남는다 (교차 리뷰 지적 - v9 이후 동일 사유).
+$coordsVersionCurrent = 14
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -686,7 +686,21 @@ $ptStellaCard   = @(Get-ConfigValue $config @('clickPoints', 'stellaCard') @(640
 $ptStellaClose  = @(Get-ConfigValue $config @('clickPoints', 'stellaClose') @(1229, 67))   # 전체 화면 UI 공용 닫기(X) 위치 (스텔라 픽/인벤토리 실측 동일)
 # 우측 퀘스트 추적기 첫 줄 영역: 던전 안에서는 '<던전 이름> 클리어' 목표가 고정 표시되므로
 # 이 글자로 '던전 안'과 '필드(던전 밖)'를 구분합니다 (HUD는 양쪽 다 보여서 구분 불가).
-$rgQuestTracker = @(Get-ConfigValue $config @('ocrRegions', 'questTracker') @(980, 212, 285, 55))
+# 상단 212→190 (2026-08-14 15:49 실사고, coordsVersion 14): 네이티브 1908 창은 추적기
+# 첫 줄('…1층 2구역 소탕')이 ref y204(밴드 ~196..212)로 상단 212에 잘려 '구역' 소실 →
+# 클리어 대기 연장 안전망(Test-CombatStillRunning)이 발동하지 못하고 60초 하드 타임아웃
+# (기본 한도 600초 안에 끝나는 판에서는 연장 경로가 실행되지 않아 조용히 숨어 있었음).
+# 상단 190 = 첫 줄에 6px 여유 + 탭 행('이벤트/퀘스트', 네이티브 글자 하단 ~186) 배제.
+# 1272에서 탭이 영역에 들어와도 소비처 매칭이 전부 조각('구역/소탕/정찰/던전명')이라 무해.
+# 하단 267·x 불변 - 구 범위가 신 범위의 부분집합이라 기존 소비처 전부 보존.
+$rgQuestTracker = @(Get-ConfigValue $config @('ocrRegions', 'questTracker') @(980, 190, 285, 77))
+# 생활(채집) 전용 추적기 영역 = v13까지의 구 영역 그대로 (2026-08-14 분리, 하드코딩).
+# 위 전투용 확장(190,77)을 생활에 그대로 쓰면 ①탭 행 유입으로 카운트('N/M') 판독이 깨지고
+# ②Get-LifeQuestCountText 의 '마지막 매치' 계약(다음 퀘스트 N/N 오염 금지)이 흔들립니다
+# (3후보 스윕 실측 - 흐름캡처 5b 카운트 소실). 생활은 1272 실기(08-13 4판)와 네이티브 실기
+# (08-14 채집 진행 로그 정상) 둘 다 이 영역으로 검증됐으므로 그대로 보존합니다.
+# 하드코딩인 이유: 카운트 계약이 영역 형상에 강결합이라 사용자 override 면을 열지 않음.
+$rgLifeQuestTracker = @(980, 212, 285, 55)
 
 # 캐릭터가 던전에서 먼 곳에 있어 상세 화면에 '이동하기'가 뜬 경우, 자동 이동으로
 # 던전에 도착(상세 화면이 다시 열리며 '입장하기' 표시)할 때까지 기다리는 최대 시간(초)
@@ -9688,8 +9702,8 @@ function Get-LifeQuestState {
   # ① 먼저 그냥 읽습니다 - 퀘스트 조각이 보이면 게임 화면이라는 증거이므로 전면화가
   #    필요 없습니다 (전면화는 사용자 조작을 방해하니 꼭 필요할 때만 - 사용자 지시)
   if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
-      -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
-      -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+      -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
+      -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
   if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
       -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
       -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
@@ -9701,8 +9715,8 @@ function Get-LifeQuestState {
     Start-Sleep -Milliseconds 700
     if (-not (Test-GameForeground -Game $Game)) { return 'unknown' }
     if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
-        -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
-        -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
+        -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
+        -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
     if (Test-LifeQuestFragments -QuestText (Get-GameRegionOcrText -Game $Game `
         -ReferenceX $rgLifeQuestWide[0] -ReferenceY $rgLifeQuestWide[1] `
         -RegionWidth $rgLifeQuestWide[2] -RegionHeight $rgLifeQuestWide[3] -Scale 3 -Engine $ocrKoreanEngine)) { return 'present' }
@@ -9733,12 +9747,13 @@ function Get-LifeQuestCountText {
   #   모두 매치 1개뿐**이라 첫/마지막이 동일했습니다. 즉 정상 화면에서는 동작이 안 바뀌고,
   #   노이즈가 섞인 화면에서만 개선됩니다.
   #
-  #   이 함수가 안전한 전제는 $rgQuestTracker 가 **추적기 첫 줄만** 덮는다는 계약입니다
+  #   이 함수가 안전한 전제는 $rgLifeQuestTracker 가 **추적기 채집 줄만** 덮는다는 계약입니다
   #   (정의부 주석 참고). 영역 높이를 넓히면 다음 퀘스트의 'N/N' 이 뒤에 붙어 마지막 매치가
-  #   오히려 틀려집니다 - 넓히려면 이 함수를 함께 재설계할 것.
+  #   오히려 틀려집니다 - 그래서 2026-08-14 전투용 확장(v14) 때 생활은 구 영역을 전용
+  #   변수로 분리해 보존했습니다 (3후보 스윕 실측: 확장 영역은 5b 카운트가 깨짐).
   param([System.Diagnostics.Process]$Game)
-  $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
-      -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
+      -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
   $countMatches = [regex]::Matches([string]$questText, '(\d+)\s*/\s*(\d+)')
   if ($countMatches.Count -gt 0) {
     $countMatch = $countMatches[$countMatches.Count - 1]
@@ -10754,8 +10769,8 @@ function Invoke-LifeGatherCycle {
     # 들어와, 줄 구분 없이 이름을 찾으면 남의 줄에 있는 더 긴 이름을 소유자로 집습니다
     # (2026-08-07 감사 실측: '주간 목표 뾰족 나무' + '채집 장소 탐색 나무' → '뾰족 나무' 반환).
     # 좁은 영역으로 못 정하면 아래 '미확정 = 내 것' 기본값이 안전하게 받아 줍니다.
-    $initialQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
-        -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    $initialQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
+        -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
     # 후보는 **전 스킬의 대상 전체**입니다 - 현재 스킬 목록만 대조하면 다른 스킬의 잔여
     # 퀘스트를 현재 스킬의 짧은 대상으로 오인합니다 ('사과 나무' → '나무' - 2026-08-07 감사).
     # 단, **그 판독이 채집 퀘스트 줄일 때만** 이름을 찾습니다 - present 는 넓은 영역으로도
@@ -10903,8 +10918,8 @@ function Invoke-LifeGatherCycle {
         # 다른 대상의 채집 퀘스트가 아직 진행 중이면 새 퀘스트를 만들 수 없습니다
         # (2026-08-06 라운드 7 실측: 얽힌 거미줄/증폭·산뜻 버섯이 이 상태로 3회 소진).
         # 재시도해도 결과가 같으므로 안내 후 정지합니다 - 그 채집이 끝난 뒤 다시 시작하면 됩니다
-        $leftoverQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
-            -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+        $leftoverQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
+            -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
         if (Test-LifeQuestFragments -QuestText $leftoverQuestText) {
           # 소유 판정은 초기 확인과 같은 규칙(긴 이름 우선 + 이형·치환)을 씁니다 - 부분 문자열
           # 비교는 '우물'을 '물'로, '얽힌 거미줄'을 '거미줄'로 오인합니다 (2026-08-07 감사).

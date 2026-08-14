@@ -90,7 +90,7 @@ function Get-GameRegionOcrText {
   if ($script:questTrackerText) { return $script:questTrackerText }
   return "채집 장소 탐색 $lifeTargetName 채집 0/10"
 }
-$rgQuestTracker = @(980, 212, 285, 55)
+$rgLifeQuestTracker = @(980, 212, 285, 55)
 $ocrKoreanEngine = $null
 $ptNoticeClose = @(1228, 67)
 $script:screenCaptureFailing = $false

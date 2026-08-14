@@ -21,7 +21,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
-foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgQuestTracker', 'rgLifeQuestWide', 'lifeListRowGap', 'lifeListFirstRowY')) {
+foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeQuestTracker', 'rgLifeQuestWide', 'lifeListRowGap', 'lifeListFirstRowY')) {
   $assign = $sourceAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
@@ -585,7 +585,7 @@ function Get-GameRegionOcrText {
   # ROI 는 **4튜플 전체**를 비교합니다. X/Y 만 보면 폭·높이가 잘못 넘어가도 통과합니다.
   $roi = ('{0},{1},{2},{3}' -f $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight)
   $roiTag = ''
-  if ($roi -eq (($rgQuestTracker -join ','))) { $roiTag = 'narrow' }
+  if ($roi -eq (($rgLifeQuestTracker -join ','))) { $roiTag = 'narrow' }
   elseif ($roi -eq (($rgLifeQuestWide -join ','))) { $roiTag = 'wide' }
   else {
     "FAIL 퀘스트 OCR 스텁: 예상 밖 ROI ($roi) - 좁은/넓은 판독 배선 확인 필요"
