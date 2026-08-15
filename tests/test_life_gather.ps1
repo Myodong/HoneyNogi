@@ -1210,8 +1210,9 @@ Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($worke
 #   Start-Sleep 으로 시작해 캡처 실패 시 continue 하는데, 그러면 그 회전에 캡처 시도가 0이라
 #   플래그가 영영 안 풀리고 바로 다음 줄이 한도를 40초로 되돌려 무한 회전이었습니다
 #   (채집에서 2026-08-07 에 고친 것과 같은 형태가 던전/사냥터에 남아 있었음).
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 12곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1 + 검증 종료 루프 1 + 냥코인 뽑기 1)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '12'
+# 2026-08-15 +1: 냥코인 REROLL_WAIT 캡처 실패 동결 블록(시계 정지+복구 탐침) 신설로 13곳
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 13곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1 + 검증 종료 루프 1 + 냥코인 뽑기 2)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '13'
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `
@@ -1501,8 +1502,10 @@ Assert-Case 'GUI: 코드 4 사유 폴백에 생활 분기 (숨겨진 전투 라�
 # 전투는 워커가 결과 화면에서 나가기를 눌러 조기 종료하지만, 생활에는 그런 지점이 없어
 # (채집을 중간에 버리면 퀘스트만 날아감) 진행 중인 채집을 마친 뒤 GUI 가 다음 사이클을
 # 시작하지 않는 방식입니다 - 안내 문구가 그 차이를 그대로 말해야 합니다.
-Assert-Case 'GUI: 안전 중지 안내가 대분류별로 갈림' `
-  ([bool]($guiText -match "if \(\`$script:mainCategory -eq 'life'\) \{[\s\S]{0,300}?이번 채집을 마치면 멈춥니다[\s\S]{0,400}?\} else \{[\s\S]{0,300}?던전에서 나오는 대로 멈춥니다")) 'True'
+# 2026-08-15 개정: '기타'(냥코인 뽑기) 안전 중지 배선 신설로 elseif etc 분기가 끼었습니다
+# (판 종료가 안전 경계 - 상세 가드는 test_nyan_merchant.ps1). 3분기 순서 전체를 단언합니다.
+Assert-Case 'GUI: 안전 중지 안내가 대분류별로 갈림 (life/etc/전투 3분기)' `
+  ([bool]($guiText -match "if \(\`$script:mainCategory -eq 'life'\) \{[\s\S]{0,300}?이번 채집을 마치면 멈춥니다[\s\S]{0,700}?elseif \(\`$script:mainCategory -eq 'etc'\) \{[\s\S]{0,400}?이번 판을 마치면 멈춥니다[\s\S]{0,400}?\} else \{[\s\S]{0,300}?던전에서 나오는 대로 멈춥니다")) 'True'
 Assert-Case 'GUI: 생활 안전 중지 로그가 소요 시간까지 안내' `
   ($guiText.Contains('진행 중인 채집을 끝까지 마친 뒤 다음 사이클을 시작하지 않습니다')) 'True'
 Assert-Case 'GUI: 전투 안전 중지 문구는 그대로 유지' `

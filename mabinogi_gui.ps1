@@ -4018,8 +4018,7 @@ $grpContentDetail.Controls.Add($lblEtcGoldSuffix)
 
 $lblEtcHint = New-Object System.Windows.Forms.Label
 $lblEtcHint.Text = "고양이 상인 '뽑기' 화면을 열어 둔 상태에서 시작하면 목표 냥코인 개수에 도달할 때까지" + [Environment]::NewLine +
-  "카드 구매(골드 소모) → 다시 뽑기를 반복합니다." + [Environment]::NewLine +
-  "도둑 고양이를 찾으면 현상금(냥코인)을 받습니다."
+  "카드 구매(골드 소모) → 다시 뽑기를 반복합니다."
 $lblEtcHint.Location = New-Object System.Drawing.Point(15, 124)
 $lblEtcHint.Size = New-Object System.Drawing.Size(484, 50)
 $lblEtcHint.Visible = $false
@@ -8555,7 +8554,7 @@ function Invoke-StartAutomation {
     }
     if ($isEtcStart) {
       Add-GuiLog "[안내] 고양이 상인: '고양이 상인 뽑기' 화면을 열어 둔 상태로 시작하세요. 카드 구매에 골드가 실제로 소모됩니다."
-      Add-GuiLog '[안내] 목표 냥코인에 도달하면 스스로 멈춥니다 - 반복 설정과 무관하게 1회 실행입니다.'
+      Add-GuiLog '[안내] 목표 냥코인에 도달하면 스스로 멈춥니다.'
     }
     if ($rbCatDungeon.Checked -and -not $isLifeStart -and -not $isEtcStart) {
       if ($isCustomStart) {
@@ -8897,6 +8896,11 @@ $btnSafeStop.Add_Click({
     if ($script:mainCategory -eq 'life') {
       $lblStatus.Text = '안전 중지 예약됨 - 이번 채집을 마치면 멈춥니다 (다시 누르면 취소)'
       Add-GuiLog '안전 중지 예약: 진행 중인 채집을 끝까지 마친 뒤 다음 사이클을 시작하지 않습니다 (채집이 끝날 때까지 몇 분 걸릴 수 있습니다). 버튼을 다시 누르면 취소.'
+    } elseif ($script:mainCategory -eq 'etc') {
+      # 냥코인 뽑기는 판(가격표 소진) 단위가 안전 경계 - 워커가 다시 뽑기 클릭 직전에 신호를
+      # 소비하고 정지합니다 (2026-08-15 실기 결함 수정: 배선 부재 + '던전에서 나오는 대로' 오안내)
+      $lblStatus.Text = '안전 중지 예약됨 - 이번 판을 마치면 멈춥니다 (다시 누르면 취소)'
+      Add-GuiLog '안전 중지 예약: 지금 판의 남은 카드를 모두 구매한 뒤 다시 뽑기 전에 멈춥니다. (버튼을 다시 누르면 취소)'
     } else {
       $lblStatus.Text = '안전 중지 예약됨 - 던전에서 나오는 대로 멈춥니다 (다시 누르면 취소)'
       Add-GuiLog '안전 중지 예약: 던전에서 나와 밖이 확인되면 멈춥니다. (버튼을 다시 누르면 취소)'
