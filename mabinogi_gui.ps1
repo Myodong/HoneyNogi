@@ -1670,6 +1670,7 @@ $btnCatEtc.Add_Click({ Set-MainCategory -Category 'etc' })
 # 기본 정렬로는 '글자 정중앙 + 아이콘 인접' 조합이 불가 - 그리기 좌표를 글자 폭에서 계산)
 $btnCatBattle.Add_Paint({ Invoke-MainCatButtonPaint -Sender $this -PaintArgs $_ })
 $btnCatLife.Add_Paint({ Invoke-MainCatButtonPaint -Sender $this -PaintArgs $_ })
+$btnCatEtc.Add_Paint({ Invoke-MainCatButtonPaint -Sender $this -PaintArgs $_ })
 
 # --- 사용 승인 안내 (미승인일 때만 표시 - 설정 영역 위에 겹쳐 나타남, 팝업 아님) ---
 # 높이 158: 대분류 버튼 줄 신설로 y144 의 시작 버튼 줄까지 덮어야 함 (리뷰 조건 A -
@@ -3838,9 +3839,11 @@ $script:lifeSkillIconB64 = @{
   fishing = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAATnSURBVEhLjZVZbFVVFIZPe+fpnD2cPZ3biwEHDAkSAymGFC8iJmqhULGlVUzkDQlUVIL6YhH1BQkR8EGDhvgixgQKBMJgEBAfHAnlycjUBF/a+IDWGmmCv9n70Gs4DLqSlbPvvXuvb6+1/nWu5/2Hlcv3hZTqx2mg1lMqtxMidlAqthAS9tFyrc3zWgrJM//LfF/cTSnfRokcZkyDsQiMGcTr2EkQgRD+MyHsdcaYn4xxWyOErSaE/8a5AGUclIagVIBSeQsXYCwEIeynSoU+kYyVtCbfDz6xh7LZItLpHDKZHCi1EOt3gsTPIODrkkEbVvbJx77PQAKB9icXo3NJFzo6liCTyaOpKYVS0QejEpwp5zeD4t8olSuTsb1yofyClAaHD32BDz/4CEePHMPIyK/47tvv0de3Fq+ufw33T52GdCqHQr58W4DNhDF5jTHW2ghOKa35Zf8PrSJcOD+E/fsPYO/evbh08SKOHfsSx4+fhLXR0VHs3LkT06fPQJOXQRDYkt0MYkyBEHna87pSDsADvlVyCRowTKpNxpQp92L+/PlYsWIF6vV5eKrzaRw4cBD423Fw5coV9K15CalUDpUKbfThRoiB76tuz8or5GJEhAqCKwQ+RSadQ2vrbFy+/Avq9UfgeZ777qHZc7Bv3/6YAuDdTZudEAKfgDHh+jPhnGlQIo56UsrHpNAIuQUYhKFEPlfAokWLXZDe3uVIpTKghCObyTvQKy+va0A29G9EqjkNzkSj+dZDbgFy1BNCrNciQhgacGEghEYhX8LChR0uQFfXMmTTeRcg5BIkYC6jlStXNSCdnUuRas66oEmIJ0P9vpJViNDe3kCENwK6u3uQyxbAaAg7eEIo97SQTZs2uz3nzp2HUhH8CksADDzB9Y4JgHOhkM8X0d6+yB3u6XkG2WwOShk3bLaEQir4FYIgoBgcPOv2vbXxHXhe6hYAYbZo1QIpIudJQHd3rxuy3bsHsPHNt10PpNRun10vW9aLXZ9+hueWPw8bhwRhozz2whaw5o6Arh40Nadx5sxZXL06jhkPPIhy2XcQm41dr1q1Gj/+cBoHDx5CsVgBI/I6QMNTqjpbyRbYMlmXwqCQr2Bh+5IGwPOaceLEV+7z4cNHXHlcqYRCLleIZwTA+Pg4Zs1qRbFQdqpkLBzxZs6cmZEyOmezmIAUCwEWdyx1h2wmtqGnTn2NsbExDAzsQ612l9O9zTiXLTkhTFh//wYnaztXjPFdbpKF0OuM+RdQKVHMqy9wB7Zt3Y65bXWMjf2JPbsH4HlN7vZKGAegRCKKahgaGnL7BwcHY8UxAULCuQ6glCpJbS5pHUNscygR2Pre9sbNLl64hLa2Okqliqu/FgZK2N61uLdt/xsb3L6TJ09dD873NF521qIoWmBMFVobJ0l7y0qFuFeFHaQpk+9BqeRDhREUN87tgCpRBecaUkWunFOnTrNyHmaMVW8AWJPSrI0hkYPYm1pIoVBxGTmlhQYqNNDWHSByWdt3T7FYtv9sf2nd8nAydsOkNC9qHV3TuuogdkJjldUghXWrtFjSFhC7gVFVSGmGpZQLkjFvMiHEHK3NN1FUhdFV6OuAGBILwZbGiCoi2QIjDbTUn1NqJiVj3cmapZTPKhUdVbL6u1Y1GD3JTatdW4gJo2HDzS7J5aPJwxP2Dymw9f+Tl5meAAAAAElFTkSuQmCC'
   catLife = 'iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAGnSURBVDhPxdJPiE9RGMbx8S+SIgumTP78JNkiJpGoWSiU1WRBiSILQ7OwUEZsLAhZShZW7JSFUpKyZEVZz4qwUKQsPq+Oee+v68zFpORbt8593/d57nPuOQMD/4OIWI3zdf2vwV58iYiFdW/GRMS8iFhc1jgdU/TyfWk9/0ciYhGe4QweFDecw21cr+dnBA5lsj74hmX17C/BKoyWQ8DDDsNPuIVx7ImIJbXHT2AMk7VRF3iJbbXHNCJiLtbgRIfJh4jYHhGDta5P+SfY3FEvW3uPj2k2ia840J4rNwLDJUgjPJwBehGxEhsjYhYuYQg30nA3duF46nbmbsZSP5UaG1JwB0dzPd4kwLGsDWWiBRFxP2tb8Q6vI2JOE7mkeZMDO3Az13fTcEsR5GwPr7K/v9yGXF9pAjQprmXjBS7mFgoX0mgT5peTzbm3OFv+ab6P1IZr8bll9IM8hBU5c7DuF/Ckv93KdCSvRS0Yzf69jt5zLK+9+mAdHleik9l7VNWvlgOqPaYREbPLl1vCU1l/2qpN1LrfgiO5nfLsK7WIuNyqra81/4TvZ+zNNSBx/2oAAAAASUVORK5CYII='
   catBattle = 'iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAEpSURBVDhP3ZTNKkVRGIbPgAy5ACMjBshMOZSiGChjl6EwZehEyBUY+rkJ12CiXAEiwimp59U6fVur1zrbyUR5ag/2t7736du7tVaj8S+RNAqsA1vxrEnq876ekNQEHmQAY977I8CspCeXJYAp769F0gLwEuFbYEbS9q+EIXuL4B0wkerAeTbkiOeKAIvAazbZeKpLOsum2/VckYKsM5nJjj3XARhIi2kbxPu8ySZT3WSH7vlC0hDQjsYT4N5lwGkm23PHN9K2AJ6z0E2Xf1b+zBLAdDbdUdTyyQ48U4ukfuA6wu/AVSZreX8tkgaBy0qQA+x4fy0uS6cC2Ace433DM7UAm5msDSxFPR2x6vyueq4rwArwkW4SYNnW5oCLavv0TNxzw17/Uz4BYO8JTHUO+5AAAAAASUVORK5CYII='
+  catEtc = 'iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAADQSURBVDhP7dTBKoVRFIbhMxBFJqdMFG4Ao1Pch7sxdAluQGZuABOUsc7UfaCMeJa2tr/zL5s6/kzkrW/wrd16W6M9Gv02WMqzH4N13OOo9IhYxhY2ciJis+TbA7AXEYGb2k/whIdGHvFcdrKnA5MqPK/9uvSvwGlELGRPR0N4mSUfYIqV7Ogxp/Ag739iTuFtRCxmR4+G8CqLZsFxdvRoCM/wipdGyrxkkj0dM8KL2sfYxXYjOzWr2dORhYP5Fw4H+1X4/jkMBmu4w2F++zu8ASXM53NtJAuMAAAAAElFTkSuQmCC'
 }
-# 맵에는 대분류 버튼 아이콘 2종(catBattle=공격력/catLife=생활력, 20px)도 함께 들어 있어
-# 같은 디코드/실패 로그/종료 해제 계약을 공유합니다 (2026-08-05 사용자 제공)
+# 맵에는 대분류 버튼 아이콘 3종(catBattle=공격력/catLife=생활력/catEtc=일 아이콘, 20px)도 함께
+# 들어 있어 같은 디코드/실패 로그/종료 해제 계약을 공유합니다 (2026-08-05 사용자 제공,
+# catEtc 는 2026-08-15 사용자 제공 work1.png 64px → 20px 축소 내장)
 $script:lifeSkillIcons = @{}
 $script:lifeSkillIconLoadFailures = @()
 foreach ($lifeIconId in @($script:lifeSkillIconB64.Keys)) {
@@ -3866,7 +3869,7 @@ foreach ($lifeIconId in @($script:lifeSkillIconB64.Keys)) {
 # 원본이 흰색(투명 배경) 아이콘이라 꿀색 활성 버튼에서만 보임 → 비활성(크림)용으로
 # themeText 진갈색 틴트 사본을 만들어 상태별로 교체 (Update-MainCategoryVisual 담당.
 # 사본도 lifeSkillIcons 에 넣어 종료 해제 계약 공유)
-foreach ($catIconId in @('catBattle', 'catLife')) {
+foreach ($catIconId in @('catBattle', 'catLife', 'catEtc')) {
   if (-not $script:lifeSkillIcons.ContainsKey($catIconId)) { continue }
   $catSrcIcon = $script:lifeSkillIcons[$catIconId]
   $catDarkIcon = New-Object System.Drawing.Bitmap($catSrcIcon.Width, $catSrcIcon.Height)
@@ -3884,9 +3887,12 @@ function Invoke-MainCatButtonPaint {
   # Button.Image 방식은 '글자 정중앙 + 아이콘 인접'을 만들 수 없음 (2026-08-05 정렬 수렴)
   param($Sender, $PaintArgs)
   try {
-    $paintIsBattle = ($Sender.Name -eq 'btnCatBattle')
-    $paintIconKey = $(if ($paintIsBattle) { 'catBattle' } else { 'catLife' })
-    $paintActive = ($script:mainCategory -eq $(if ($paintIsBattle) { 'battle' } else { 'life' }))
+    # 2026-08-15: 기타 버튼 아이콘(catEtc) 추가로 2분기(battle/life)에서 3분기로 일반화
+    $paintCategory = $(switch ($Sender.Name) {
+        'btnCatBattle' { 'battle' } 'btnCatLife' { 'life' } default { 'etc' } })
+    $paintIconKey = $(switch ($paintCategory) {
+        'battle' { 'catBattle' } 'life' { 'catLife' } default { 'catEtc' } })
+    $paintActive = ($script:mainCategory -eq $paintCategory)
     if (-not $paintActive) {
       if ($script:lifeSkillIcons.ContainsKey($paintIconKey + 'Dark')) { $paintIconKey = $paintIconKey + 'Dark' }
     }
@@ -4400,7 +4406,7 @@ $rbLifeGather.Add_CheckedChanged({ if ($null -ne $updateCategoryPanels) { & $upd
 function Update-MainCategoryVisual {
   # 대분류 버튼의 활성/비활성 스타일 전체 재설정 (활성 = 시작 버튼과 같은 꿀색 강조.
   # 전환 시 비활성 쪽의 폰트/테두리까지 원상 복구 - 리뷰 조건 E)
-  # 기타 버튼은 아이콘 리소스가 없어 글자만 - Paint 미구독이라 아이콘 키는 참조되지 않습니다
+  # 기타 버튼도 2026-08-15 부터 아이콘(catEtc = work1.png 내장) 포함 - 3버튼 모두 Paint 구독
   foreach ($catPair in @(, @($btnCatBattle, 'battle', 'catBattle')) + @(, @($btnCatLife, 'life', 'catLife')) + @(, @($btnCatEtc, 'etc', 'catEtc'))) {
     $catButton = $catPair[0]
     $catActive = ($script:mainCategory -eq [string]$catPair[1])

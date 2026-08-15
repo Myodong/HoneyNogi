@@ -386,9 +386,10 @@ foreach ($iconId in $iconIds) {
   } catch { }
 }
 Assert-Case 'GUI: 생활 아이콘 base64 9종 실디코드(24x24 + 사본 분리)' $iconDecodeOk 9
-# 대분류 버튼 아이콘 2종 (공격력=전투/생활력=생활, 20px - 2026-08-05 사용자 제공)
+# 대분류 버튼 아이콘 3종 (공격력=전투/생활력=생활, 20px - 2026-08-05 사용자 제공.
+# 2026-08-15 +1: catEtc = 기타(work1.png 64px → 20px 축소 내장, 사용자 제공))
 $catIconOk = 0
-foreach ($catIconId in @('catBattle', 'catLife')) {
+foreach ($catIconId in @('catBattle', 'catLife', 'catEtc')) {
   $catIconMatch = [regex]::Match($guiSource, "(?m)^  $catIconId = '([A-Za-z0-9+/=]+)'")
   if (-not $catIconMatch.Success) { continue }
   try {
@@ -400,18 +401,22 @@ foreach ($catIconId in @('catBattle', 'catLife')) {
     $catIconBmp.Dispose()
   } catch { }
 }
-Assert-Case 'GUI: 대분류 버튼 아이콘 2종 실디코드(20x20)' $catIconOk 2
+Assert-Case 'GUI: 대분류 버튼 아이콘 3종 실디코드(20x20)' $catIconOk 3
 # 글자 정중앙 + 아이콘이 글자 바로 왼쪽 (2026-08-05 정렬 수렴: 묶음 중앙 = 글자 밀림 /
 # 독립 정렬 = 아이콘이 구석 - Button.Image 로는 불가 → Paint 로 글자 폭 기준 직접 그리기)
 Assert-Case 'GUI: 대분류 아이콘 - Paint 직접 그리기(글자 폭 기준 인접 좌표)' `
   ($guiSource -match 'MeasureText\(\$Sender\.Text, \$Sender\.Font\)[\s\S]{0,300}?- \$paintIcon\.Width - 6') $true
-Assert-Case 'GUI: 대분류 Paint 배선 2곳 + 상태 변경 시 Invalidate' `
-  (([regex]::Matches($guiSource, 'Add_Paint\(\{ Invoke-MainCatButtonPaint -Sender \$this -PaintArgs \$_ \}\)').Count -eq 2) -and
+# 2026-08-15 개정: 기타 버튼도 아이콘 포함 - Paint 배선 3곳
+Assert-Case 'GUI: 대분류 Paint 배선 3곳 + 상태 변경 시 Invalidate' `
+  (([regex]::Matches($guiSource, 'Add_Paint\(\{ Invoke-MainCatButtonPaint -Sender \$this -PaintArgs \$_ \}\)').Count -eq 3) -and
    ($guiSource -match '\$catButton\.Invalidate\(\)')) $true
 # 흰 원본 아이콘은 크림 비활성 버튼에서 안 보임 → 진갈색 틴트 사본을 상태별 사용 (스모크 실측)
-Assert-Case 'GUI: 대분류 아이콘 비활성용 틴트 사본 생성+상태별 사용' `
+# 2026-08-15: 틴트 대상 목록에 catEtc 포함 필수 - 빠지면 비활성 기타 버튼에서 아이콘이
+# 안 보임 (흰 원본이 크림 배경에 그려짐. 변이 검증에서 미적발로 드러나 가드 추가)
+Assert-Case 'GUI: 대분류 아이콘 비활성용 틴트 사본 생성+상태별 사용 (3종 전부)' `
   (($guiSource -match "\`$script:lifeSkillIcons\[\`$catIconId \+ 'Dark'\] = \`$catDarkIcon") -and
-   ($guiSource -match "ContainsKey\(\`$paintIconKey \+ 'Dark'\)")) $true
+   ($guiSource -match "ContainsKey\(\`$paintIconKey \+ 'Dark'\)") -and
+   ($guiSource.Contains("foreach (`$catIconId in @('catBattle', 'catLife', 'catEtc'))"))) $true
 # 카드 정렬 회귀 가드 (2026-08-05 실기 제보: TopCenter/BottomCenter 분리 정렬은 카드 높이
 # 56 에서 아이콘·글자가 겹침 - '중앙 쌓기' 조합을 고정. 크기 134×56 은 스킬/대상 카드 2곳)
 Assert-Case 'GUI: 생활 카드 아이콘 중앙 쌓기 정렬(겹침 회귀 방지)' `
