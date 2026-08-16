@@ -1808,6 +1808,14 @@ $script:cursorFailureStreak = 0
 $script:lastClickPerformed = $false
 # 커서 대피(Move-CursorOutsideGame) 실패 경고 억제 상태 (2026-08-09 - 무음 catch 금지)
 $script:cursorParkWarnActive = $false
+# ── 사용자 조작 양보 상태 (2026-08-16 v2.1.1 - 가방 확인 등 조작 중 커서 뺏기 금지) ──
+# 우리 주입(mouse_event/keybd_event)의 마지막 시각. 실측(2026-08-16): SetCursorPos 는
+# GetLastInputInfo.dwTime 을 갱신하지 않고 mouse_event/keybd_event 만 갱신하므로,
+# 주입 직후 이 값을 찍어 두면 'dwTime 이 이보다 나중 = 사용자 입력'으로 구분됩니다
+# (단순 유휴 검사는 우리 주입이 유휴를 리셋해 금지 - Wait-GameRestoredIfMinimized 주석 실측).
+$script:lastSelfInputTick = [uint32]0   # 시작 직후 관측되는 dwTime(시작 버튼 클릭)을 사용자로 오인하지 않게 워커 시작 시각으로 초기화 (아래 본문)
+$script:lastUserInputTick = [uint32]0   # 마지막으로 확인된 '사용자' 입력 tick (0 = 아직 관측 없음)
+$script:lastYieldClickNoticeTick = [uint32]0   # 클릭 취소 안내 5초 스로틀
 $script:lastMinimizedRestoreAt = $null
 # 게임 창 핸들이 사라진 상태가 **연속으로** 얼마나 이어졌는지 재는 전용 시계.
 # 캡처 실패 시작 시각과 섞으면 '전환 중 오탐 방지' 유예가 무의미해집니다 (4차 점검)
@@ -2239,6 +2247,64 @@ function Get-UserIdleSeconds {
   return [double]$elapsedMs / 1000.0
 }
 
+function Get-TickDeltaMilliseconds {
+  # 부호 있는 tick 차 To-From (순수 - 진리표 대상). uint32 랩어라운드를 가까운 방향으로
+  # 해석합니다(±24.8일). Get-TickElapsedMilliseconds 는 '항상 앞으로' 가정이라, 주입 직후의
+  # dwTime 처럼 기준보다 몇 ms '과거'일 수 있는 값을 비교하면 랩으로 오인해 거대 양수가
+  # 나옵니다 - 사용자 입력 판별에는 이 부호 있는 판정이 필요합니다 (2026-08-16 v2.1.1).
+  param([uint32]$From, [uint32]$To)
+  $tickDelta = [int64]$To - [int64]$From
+  if ($tickDelta -gt 2147483647) { $tickDelta -= 4294967296 }
+  elseif ($tickDelta -lt -2147483648) { $tickDelta += 4294967296 }
+  return [int64]$tickDelta
+}
+
+function Update-UserInputObservation {
+  # 마지막 입력(dwTime)이 '우리 주입' 시각보다 나중이면 사용자 입력으로 보고 tick 을
+  # 보존합니다 (2026-08-16 실측: SetCursorPos 는 dwTime 미갱신, mouse_event/keybd_event 만
+  # 갱신). **주입 직전에도 호출**해 증거를 보존합니다 (Codex 반례 - 주입이 dwTime 을 덮어
+  # 직전 사용자 조작이 사라짐). 여유 50ms = 주입 tick 과 dwTime 의 틱 해상도(15.6ms) 겹침
+  # 오인 방지.
+  if ($script:lastSelfInputTick -eq [uint32]0) {
+    # 첫 호출: 워커 시작 이전의 입력(시작 버튼 클릭 등)을 사용자 조작으로 오인하지 않도록
+    # 기준을 지금으로 둡니다
+    $script:lastSelfInputTick = [HoneyNogiInput]::GetTickCount()
+    return
+  }
+  $observedInfo = New-Object HoneyNogiInput+LASTINPUTINFO
+  $observedInfo.cbSize = [uint32][System.Runtime.InteropServices.Marshal]::SizeOf($observedInfo)
+  if (-not [HoneyNogiInput]::GetLastInputInfo([ref]$observedInfo)) { return }
+  if ((Get-TickDeltaMilliseconds -From $script:lastSelfInputTick -To ([uint32]$observedInfo.dwTime)) -gt 50) {
+    $script:lastUserInputTick = [uint32]$observedInfo.dwTime
+  }
+}
+
+function Register-SelfInput {
+  # 주입(mouse_event/keybd_event) 직후 호출 - 이 시각까지의 dwTime 은 사용자 판별에서 제외
+  $script:lastSelfInputTick = [HoneyNogiInput]::GetTickCount()
+}
+
+function Test-UserRecentlyActive {
+  # 사용자가 최근 IdleMs 안에 (우리 주입 제외) 입력했는가 - 양보 루프/클릭 취소 게이트 공용
+  param([int]$IdleMs = 2500)
+  Update-UserInputObservation
+  if ($script:lastUserInputTick -eq [uint32]0) { return $false }
+  $sinceUserMs = Get-TickElapsedMilliseconds -CurrentTick ([HoneyNogiInput]::GetTickCount()) `
+    -PreviousTick $script:lastUserInputTick
+  return ($sinceUserMs -lt $IdleMs)
+}
+
+function Test-CursorOverGame {
+  # 커서 밑 창의 루트가 게임인가 (양보 루프 조건 - Move-CursorOutsideGame 본문과 같은 기준.
+  # 실패는 false = 양보하지 않고 기존 경로로, 기존 경로가 자기 실패 규칙으로 기록)
+  param([System.Diagnostics.Process]$Game)
+  $overPoint = New-Object HoneyNogiInput+POINT
+  if (-not [HoneyNogiInput]::GetCursorPos([ref]$overPoint)) { return $false }
+  $overWindow = [HoneyNogiInput]::WindowFromPoint($overPoint)
+  if ($overWindow -eq [IntPtr]::Zero) { return $false }
+  return ([HoneyNogiInput]::GetAncestor($overWindow, 2) -eq $Game.MainWindowHandle)
+}
+
 function Test-GameCovered {
   param([System.Diagnostics.Process]$Game)
 
@@ -2351,6 +2417,7 @@ function Focus-Game {
   $focusOk = $false
   for ($focusTry = 1; $focusTry -le 2; $focusTry++) {
     [HoneyNogiInput]::ShowWindowAsync($Game.MainWindowHandle, 9) | Out-Null
+    Update-UserInputObservation   # 주입 전 사용자 입력 증거 보존 (v2.1.1)
     [HoneyNogiInput]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
     try {
       Start-Sleep -Milliseconds 80
@@ -2358,6 +2425,7 @@ function Focus-Game {
       Start-Sleep -Milliseconds 80
     } finally {
       [HoneyNogiInput]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+      Register-SelfInput
     }
     Start-Sleep -Milliseconds 350
     if (Test-GameForeground -Game $Game) { $focusOk = $true; break }
@@ -2431,6 +2499,18 @@ function Click-ScreenPoint {
   # (2026-08-09 실기: 이 구분이 없어 원인 판별이 늦어짐). 반환값 대신 스크립트 변수를
   # 쓰는 것은 PS 5.1 파이프라인 출력 오염을 피하기 위함입니다 (호출부 80여 곳).
   $script:lastClickPerformed = $false
+  # 사용자 조작 중 클릭 취소 (2026-08-16 v2.1.1 - Codex 조건: 판독과 클릭 사이에 사용자가
+  # 화면을 바꿨을 수 있어, 조작 중에는 기다리지 말고 이번 클릭을 버립니다. 기존 커서 확인
+  # 실패 스킵과 같은 상태 기반 재시도 계약 - 호출부는 lastClickPerformed=false 로 인지하고
+  # 다음 감지에서 재시도. 안내는 5초 스로틀 - 조작이 길면 클릭 시도마다 한 줄씩 쌓임 방지)
+  if (Test-UserRecentlyActive) {
+    if ((Get-TickElapsedMilliseconds -CurrentTick ([HoneyNogiInput]::GetTickCount()) `
+          -PreviousTick $script:lastYieldClickNoticeTick) -gt 5000) {
+      $script:lastYieldClickNoticeTick = [HoneyNogiInput]::GetTickCount()
+      Write-RunLog '[안내] 사용자 마우스 조작 감지 - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
+    }
+    return
+  }
   $cursorReady = $false
   for ($cursorTry = 1; $cursorTry -le 2; $cursorTry++) {
     [HoneyNogiInput]::SetCursorPos($X, $Y) | Out-Null
@@ -2465,9 +2545,12 @@ function Click-ScreenPoint {
   }
   if (-not $cursorReady) { return }
   Start-Sleep -Milliseconds 250
+  # 주입 직전 사용자 입력 증거 보존 + 직후 자기 주입 시각 기록 (사용자 판별용 - v2.1.1)
+  Update-UserInputObservation
   [HoneyNogiInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 100
   [HoneyNogiInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Register-SelfInput
   $script:lastClickPerformed = $true
 }
 
@@ -2618,6 +2701,25 @@ function Move-CursorOutsideGame {
   #   잡히므로 건드리지 않고, 게임이 보이는 자리면 게임이 잡히므로 대피합니다.
   # ※ 유휴 검사(Get-UserIdleSeconds)는 쓰면 안 됩니다. 우리 클릭(mouse_event)이 유휴를 0으로
   #   리셋해서 **정작 클릭 직후 대피(제보 시나리오 그 자체)를 항상 막습니다**(실측 확인).
+  # ── 사용자 조작 양보 (2026-08-16 v2.1.1 사용자 요청: 가방 확인 등 게임 조작 중 커서
+  # 뺏기 금지) ── 커서가 게임 위에 있고 사용자가 최근 2.5초 내 입력했으면, 대피하지 않고
+  # 여기서 기다립니다. 모든 판독 경로가 이 함수를 거치므로 판독도 자연히 미뤄집니다
+  # (깨진 판독으로 오판하느니 대기가 안전). 손을 떼면 2.5초 뒤 자동 재개.
+  # 상한 없음 (Codex: 조작 중 상한 도달로 커서를 뺏으면 요청을 정면으로 깸).
+  # 양보 시간은 각 흐름의 타임아웃에서 제외하지 않습니다 - 조작이 해당 단계 타임아웃보다
+  # 길면 조건부 정지가 날 수 있음을 감수 (실기에서 문제 되면 캡처 실패 동결 배선을 검토).
+  # 조건을 매 회전 재검사하므로 커서가 게임 밖으로 나가면(=조작 끝) 즉시 풀립니다.
+  $userYieldClock = $null
+  while ((Test-CursorOverGame -Game $Game) -and (Test-UserRecentlyActive)) {
+    if ($null -eq $userYieldClock) {
+      $userYieldClock = [System.Diagnostics.Stopwatch]::StartNew()
+      Write-RunLog '[안내] 사용자 마우스 조작 감지 - 조작이 끝날 때까지 자동화를 잠시 양보합니다'
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  if ($null -ne $userYieldClock) {
+    Write-RunLog ('[안내] 사용자 조작이 끝나 자동화를 재개합니다 (양보 {0}초)' -f [int]$userYieldClock.Elapsed.TotalSeconds)
+  }
   # 실패 사유는 **한 곳에서만** 기록합니다 (예외든 API 실패든 같은 억제 규칙).
   # API 는 예외가 아니라 $false 를 돌려주므로 catch 로는 안 잡힙니다 - 그대로 return 하면
   # 또 무음이 됩니다 (2026-08-09 3차 점검 지적).
@@ -8676,9 +8778,11 @@ function Get-KeyDisplayName {
 function Press-KeyOnce {
   param([byte]$VirtualKey)
 
+  Update-UserInputObservation   # 주입 전 사용자 입력 증거 보존 (v2.1.1)
   [HoneyNogiInput]::keybd_event($VirtualKey, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 120
   [HoneyNogiInput]::keybd_event($VirtualKey, 0, 2, [UIntPtr]::Zero)
+  Register-SelfInput
 }
 
 function Press-KeyVerified {
@@ -9658,6 +9762,12 @@ function Invoke-LifeListScroll {
   # 게임 전면 + 커서 확인 후에만 입력하고, 실제 드래그 수행 여부를 반환합니다.
   param([System.Diagnostics.Process]$Game, [int]$Steps)
   if ($Steps -eq 0) { return $false }
+  # 사용자 조작 중 드래그 취소 (2026-08-16 v2.1.1 - 클릭 취소와 같은 계약: 호출부가 $false
+  # 를 받아 다음 탐색 회차에서 재시도)
+  if (Test-UserRecentlyActive) {
+    Write-RunLog '[생활] 목록 스크롤: 사용자 마우스 조작 감지로 건너뜀 (다음 회차에서 재시도)'
+    return $false
+  }
   # 이 함수도 아래에서 Get-ScaledScreenPoint 를 직접 부르므로 최소화 복원 계약에 포함합니다
   # (Click-GamePoint 에만 넣으면 여기서 예외가 그대로 나가 채집 회차가 죽습니다 - 5차 점검).
   Wait-GameRestoredIfMinimized -Game $Game
@@ -9702,6 +9812,7 @@ function Invoke-LifeListScroll {
   # 버튼을 누른 뒤에는 무슨 일이 있어도 떼야 합니다 (예외/중단으로 눌린 채 남으면 이후 모든
   # 입력이 드래그로 처리됨 - 리뷰 조건). 이동 성공 여부는 마지막 커서 위치로 확인합니다.
   $dragMoved = $false
+  Update-UserInputObservation   # 주입 전 사용자 입력 증거 보존 (v2.1.1)
   [HoneyNogiInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)   # 왼쪽 버튼 누름
   try {
     Start-Sleep -Milliseconds 150
@@ -9723,6 +9834,7 @@ function Invoke-LifeListScroll {
     }
   } finally {
     [HoneyNogiInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)   # 버튼 뗌 (항상)
+    Register-SelfInput
   }
   if (-not $dragMoved) {
     Write-RunLog '[생활] 목록 스크롤: 커서 이동을 확인하지 못했습니다 - 이번 스크롤은 무효로 처리'

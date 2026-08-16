@@ -40,8 +40,12 @@ $click = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Clic
 $entry = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-AfterEntryKeys'))
 
 # ── ① 상수 값 고정 (접두 매칭 불가) ─────────────────────────────────────────
+# 2026-08-16 개정: v2.1.1 사용자 양보 루프(500ms 폴링)가 함수 앞부분에 끼어 '첫 번째
+# 슬립' 앵커가 무효화됨 - 프레임 대기는 SetCursorPos 실패 throw 뒤의 슬립으로 앵커 이동
 Assert-Case '상수: 대피 후 프레임 대기 120ms' `
-  (Get-Captured $park 'Start-Sleep -Milliseconds (\d+)(?!\d)') 120
+  (Get-Captured $park 'SetCursorPos 실패[\s\S]{0,600}?Start-Sleep -Milliseconds (\d+)(?!\d)') 120
+Assert-Case '상수: 사용자 양보 폴링 500ms' `
+  (Get-Captured $park 'while \(\(Test-CursorOverGame[\s\S]{0,700}?Start-Sleep -Milliseconds (\d+)(?!\d)') 500
 Assert-Case '상수: 대피 후 위치 비교 허용 오차 3px' `
   (Get-Captured $park 'Abs\(\$after\.X - \[int\]\$cursor\.X\) -le (\d+)(?!\d)') 3
 Assert-Case '상수: 대피 지점 여백 기본 12px' `

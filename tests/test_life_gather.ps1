@@ -1283,7 +1283,8 @@ $stripWords = @(
 Assert-Case '제목 띠: 라벨 후보 중 최소 Y 채택' `
   ((Get-LifeTitleStripRegion -Words $stripWords) -join ',') '440,174,300,36'
 Assert-Case "배선: '생활 스킬' 클릭 후 화면 전환 확인 게이트" ($workerText.Contains("'생활 스킬' 화면 전환을 확인하지 못했습니다")) 'True'
-Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,700}Test-GameForeground -Game \$Game') 'True'
+# 2026-08-16 범위 확장: v2.1.1 사용자 조작 취소 게이트가 함수 도입부에 끼어 700자 초과
+Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,1300}Test-GameForeground -Game \$Game') 'True'
 # 2차 리뷰 반영 계약 (리뷰): deadline 하드 상한 + 캡처 실패 판독 무효 + 휠 증거
 Assert-Case '배선: deadline 은 준비 정리(이벤트 스킵) 뒤에 생성' ($workerText -match '\[void\]\(Clear-EventOverlay -Game \$Game\)[\s\S]{0,500}\$cycleDeadline = \(Get-Date\)\.AddSeconds') 'True'
 Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*Test-LifeUntilReached\s*\r?\n\s*if \(\(Get-Date\) -gt \$cycleDeadline\) \{ break \}') 'True'
