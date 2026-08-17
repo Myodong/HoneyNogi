@@ -1520,6 +1520,19 @@ function Resolve-DgObservedStage {
   return "$observedFloor-$observedArea"
 }
 
+function Test-DgQuestStageMatch {
+  # 퀘스트 트래커 문구의 'N층 M구역'이 목표 스테이지('N-M')와 일치하는가 (순수 - 진리표
+  # 대상. 2026-08-17 06:00 실사고 대응: '다시 하기' 직후 우연한 만남 파티의 재입장이 옵션
+  # 화면을 생략하고 곧장 입장 - 오류 캡처의 트래커 실측 '던전클리어심층2층1구역클리어').
+  # '층N구역' 인접 요구 - 필드의 주간 퀘스트('심층 던전 클리어' 등)에는 층·구역 숫자 쌍이
+  # 없어 오인하지 않습니다. 숫자 불명/부재는 false (fail-closed).
+  param([string]$QuestText, [string]$Stage)
+  $normalized = ([string]$QuestText) -replace '\s', ''
+  $stageMatch = [regex]::Match($normalized, '([12])층([123])구역')
+  if (-not $stageMatch.Success) { return $false }
+  return (('{0}-{1}' -f $stageMatch.Groups[1].Value, $stageMatch.Groups[2].Value) -eq [string]$Stage)
+}
+
 function Get-DgOptObservedStage {
   param([System.Diagnostics.Process]$Game, [string]$TitleText)
 
@@ -5518,6 +5531,13 @@ function Invoke-PurchasePopupSweep {
   # 주간 리셋이 자동으로 띄우는 협동 미션 전체 창 (2026-08-03 06:02 실사고 - 이 스윕을
   # 쓰는 입장/매칭 대기·복귀 대기·시작 판정이 일괄 커버됩니다)
   if (Close-CoopMissionBoardScreen -Game $Game) { return $true }
+  # 주간 리셋 '새로운 한 주' 팝업 (2026-08-17 06:02 타 PC 실사고: 입장하기 클릭 → 로딩 대기
+  # 중 이 팝업이 화면을 덮어 입장 감지가 45초 내내 가려짐 + 재시작 회차의 시작 판정이 덮인
+  # 화면을 결과 화면으로 오판해 완료 마커까지 오기록. 복귀 대기 루프들만 별도 호출하고
+  # 있었고 이 스윕에는 빠져 있었음). 이미 읽어 둔 하단 문구로 게이트해 평상시 추가 판독
+  # 비용 없음 - 실측 하단 문구 '〔㉬ 닫기 Space 협동 미션 참여하기'. 협동 전체 창(위)이
+  # 먼저 자기 제목 ROI로 판정하므로 교차 오인 없음. 함수 내부가 자체 재판독으로 재확인.
+  if ($bottomText.Contains('협동') -and $bottomText.Contains('참여') -and (Close-WeeklyCoopResetPopup -Game $Game)) { return $true }
   # 네트워크 불안정 팝업 - '다시 시도하기'로 재접속 (2026-08-01 타 PC(1810 창) 실사고)
   if (Close-NetworkUnstablePopup -Game $Game) { return $true }
   return $false
@@ -6801,9 +6821,23 @@ function Invoke-NormalDungeonCycle {
   }
 
   if ($script:customMode -and $script:customRecoveryOnly -and $insideAlready) {
-    # 완료 마커는 결과 화면 도달 뒤에만 기록되므로 복구 시작이 던전 내부라면 소유 상태가
-    # 모순됩니다. 이미 완료된 항목을 다시 싸워 계상하는 대신 입력 없이 오류로 중단합니다.
-    throw '완료 항목 마무리 복구 중 던전 내부 화면이 감지됐습니다 - 항목을 다시 실행하지 않고 안전하게 중단합니다.'
+    # 완료 마커는 결과 화면 도달 뒤에만 기록되므로 복구 시작이 던전 내부라면 원칙적으로
+    # 모순입니다. 단 2026-08-17 06:00 실사고(월요일 주간 리셋)로 '다시 하기 직후 파티
+    # 재입장'이 실측돼, 퀘스트 트래커의 층·구역이 현재 항목과 일치하면(재판독 포함 2연속)
+    # 모순이 아니라 그 재입장분입니다 - 클리어 대기로 복구해 완주 후 다시 하기 → 옵션 복귀
+    # → exit 0 = GUI가 복구 완료로 한 번만 전진합니다 (Codex 합의). 불일치/판독 불명은
+    # 기존대로 오류 중단 (fail-closed - 이미 완료된 항목을 다시 싸워 계상하지 않음).
+    $recoveryStageOk = $false
+    if (Test-DgQuestStageMatch -QuestText $questText -Stage $ndStage) {
+      Start-Sleep -Seconds 1
+      $recoveryRecheck = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+          -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+      $recoveryStageOk = (-not $script:screenCaptureFailing) -and (Test-DgQuestStageMatch -QuestText $recoveryRecheck -Stage $ndStage)
+    }
+    if (-not $recoveryStageOk) {
+      throw '완료 항목 마무리 복구 중 던전 내부 화면이 감지됐습니다 - 항목을 다시 실행하지 않고 안전하게 중단합니다.'
+    }
+    Write-RunLog '[커스텀] 마무리 복구: 같은 구역의 던전 내부 확인(파티 재입장분) - 클리어 대기부터 정리를 진행합니다'
   }
 
   # 0-커스텀-2. 복구 판 계상 판정 (판정식: Test-CustomCleanupOnly): 사용자가 새로 시작했는데
@@ -6816,6 +6850,16 @@ function Invoke-NormalDungeonCycle {
   if ($script:customCleanupOnly) {
     Write-RunLog '[커스텀] 새 시작인데 던전 안/결과 화면 감지 - 이 판은 계상하지 않고 화면 정리만 진행합니다'
   }
+
+  # 재입장 루프 (2026-08-17 v2.1.2): '다시 하기' 직후 우연한 만남 파티의 재입장이 옵션
+  # 화면을 생략하고 곧장 입장하는 사례가 실측됨(월요일 06:00 주간 리셋 회차 오류 캡처 -
+  # 던전 내부에서 파티 전투 중). 아래 옵션 복귀 대기가 던전 내부(트래커 층·구역 일치
+  # 2연속)를 확인하면: 커스텀은 insideAlready 재진입으로 이 루프를 한 번 더 돌아 그 판을
+  # 마저 완주(같은 항목 귀속 - 2판 1계상은 무한 반복에서 무해), 비커스텀은 회차 완료로
+  # 처리해 다음 회차의 기존 '던전 안' 시작 감지에 위임(지정 횟수 계상 보존). Codex 합의.
+  # 선택/옵션/입장 구간은 insideAlready 게이트가 재진입 때 건너뜁니다.
+  $reenteredInside = $false
+  :dgClearCycle while ($true) {
 
   if (-not $onResultScreen) {
 
@@ -7895,6 +7939,7 @@ function Invoke-NormalDungeonCycle {
   Write-RunLog "[던전] '다시 하기' 클릭 - 옵션 화면 복귀 대기"
   $optionsDeadline = (Get-Date).AddSeconds(40)
   $backToOptions = $false
+  $insideStreak = 0   # 던전 내부(파티 재입장) 연속 확인 수 (2연속 확정 - v2.1.2)
   while ((Get-Date) -lt $optionsDeadline) {
     Start-Sleep -Seconds 2
     if ($script:screenCaptureFailing) {
@@ -7945,18 +7990,62 @@ function Invoke-NormalDungeonCycle {
       Write-RunLog "[던전] 결과 화면이 남아 있어 '다시 하기'를 다시 클릭합니다"
       Focus-Game -Game $Game
       Click-ScreenPoint -X $retryAgainPoint.X -Y $retryAgainPoint.Y
+      continue
     }
+    # 던전 내부 감지 (2026-08-17 06:00 실사고 - 오류 캡처 실측: 우연한 만남 파티의 재입장이
+    # 옵션 화면을 생략하고 곧장 입장해 이 대기가 40초 초과 → exit 1 → 복구 회차 안전 중단
+    # 연쇄). HUD + 퀘스트 트래커의 층·구역이 목표 스테이지와 일치해야 하고 2연속으로
+    # 확인합니다. 캡처 실패가 섞인 표본은 버리고 연속을 초기화합니다 (Codex 조건).
+    # 옵션/결과 화면에서는 HUD가 가려져 오탐 여지가 없고, 위의 양성 신호들이 항상 먼저 봅니다.
+    if (-not $script:screenCaptureFailing) {
+      $waitQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+          -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+      if (-not $script:screenCaptureFailing -and (Test-HomeEndEscHud -Game $Game) -and
+          (Test-DgQuestStageMatch -QuestText $waitQuestText -Stage $ndStage)) {
+        $insideStreak++
+        if ($insideStreak -ge 2) {
+          $reenteredInside = $true
+          break
+        }
+      } else {
+        $insideStreak = 0
+      }
+    } else {
+      $insideStreak = 0
+    }
+  }
+  if ($reenteredInside) {
+    if ($script:customMode) {
+      # 커스텀: 재입장된 판은 방금 완료한 이 항목의 것 - 완주 후 다시 하기부터 재시도.
+      # 새 입장이므로 입장 후 키(자동출발 등)를 한 번 실행하고, insideAlready 재진입으로
+      # 선택/옵션/입장 구간을 건너뛰어 클리어 대기로 돌아갑니다.
+      Write-RunLog '[던전] 다시 하기 후 옵션 화면 없이 던전 재입장 확인(파티 재입장) - 이번 판을 마저 완주하고 다시 하기부터 다시 진행합니다'
+      Invoke-AfterEntryKeys -Game $Game -LogPrefix '[던전]'
+      $onResultScreen = $false
+      $insideAlready = $true
+      $reenteredInside = $false
+      continue dgClearCycle
+    }
+    # 비커스텀: 결과 도달까지 끝난 회차라 완료로 처리 - 다음 회차의 기존 시작 감지
+    # ('던전 안 상태 감지 - 클리어 대기부터 재개')가 재입장분을 자기 회차로 계상합니다.
+    Write-RunLog '[던전] 다시 하기 후 옵션 화면 없이 던전 재입장 확인(파티 재입장) - 회차를 완료로 처리합니다 (다음 회차가 클리어 대기부터 재개)'
+    break dgClearCycle
   }
   if (-not $backToOptions) {
     throw '다시 하기 → 진입 옵션 화면 대기 시간이 초과됐습니다.'
   }
+  break dgClearCycle
+
+  }  # end :dgClearCycle
   if ($script:customCleanupOnly) {
     # 수동 진행분 정리 완료: 화면은 옵션 화면까지 복귀됐고, 판은 계상하지 않습니다.
     # 코드 10 = 준비 실행 - GUI가 회차로 세지 않고 같은 항목을 새로 시작합니다.
     Write-RunLog '[커스텀] 수동 진행분 화면 정리 완료 - 판으로 계상하지 않습니다 (준비 실행)'
     exit 10
   }
-  Write-RunLog '[던전] 다시 하기 → 옵션 화면 복귀 - 회차 완료'
+  if (-not $reenteredInside) {
+    Write-RunLog '[던전] 다시 하기 → 옵션 화면 복귀 - 회차 완료'
+  }
   exit 0
 }
 
