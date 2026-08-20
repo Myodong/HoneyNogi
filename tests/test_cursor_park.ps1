@@ -256,8 +256,9 @@ Assert-Case '알약: 대피가 픽셀 표본 루프보다 앞' `
 # 이 함수 안에 클릭이 있으면 '클릭 직후 대피' 위험이 생깁니다 - 순수 판정 함수로 유지합니다
 Assert-Case '알약: 판정 함수 안에 클릭이 없다' `
   ([bool]($pillBody -match 'Click-(GamePoint|ScreenPoint)')) 'False'
-# 진단 문자열의 분모는 실제 표본 수(dy 9행 × dx 3열 = 27)여야 합니다. 그물을 넓힐 때
-# 문자열만 옛 18 로 남아 제보 로그의 히트율을 실제보다 높게 보이게 했습니다.
+# 진단 문자열의 분모는 실제 표본 수(dy 수 × dx 수 - 2026-08-20 dx 촘촘화로 9×7=63)여야
+# 합니다. 그물을 넓힐 때 문자열만 옛 값으로 남아 제보 로그의 히트율을 실제보다 높게
+# 보이게 했습니다 (동적 계산이라 그물이 또 바뀌어도 이 가드는 자동 정합).
 $pillCode = (($pillBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 $pillDyCount = ([regex]::Match($pillCode, 'foreach \(\$dy in @\(([^)]*)\)\)').Groups[1].Value -split ',').Count
 $pillDxCount = ([regex]::Match($pillCode, 'foreach \(\$dx in @\(([^)]*)\)\)').Groups[1].Value -split ',').Count

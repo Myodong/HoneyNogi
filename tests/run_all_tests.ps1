@@ -17,7 +17,7 @@ $testDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $tests = @(Get-ChildItem -Path $testDir -Filter 'test_*.ps1' | Sort-Object Name)
 
 # 기대 테스트 개수 (추가/삭제 시 함께 갱신). 숫자가 어긋나면 실패로 끝냅니다.
-$expectedTestCount = 64   # 2026-08-16 +1: test_user_yield / 2026-08-17 +1: test_dg_party_reenter (v2.1.2)
+$expectedTestCount = 65   # 2026-08-16 +1: test_user_yield / 08-17 +1: test_dg_party_reenter / 08-20 +1: test_dg_pill_highlight (v2.1.2)
 
 $failedTests = @()
 $erroredTests = @()
