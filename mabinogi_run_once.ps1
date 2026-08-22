@@ -4716,8 +4716,10 @@ function Test-KnownScreen {
   # 자동화가 알고 있는 화면(어비스 선택 / 상세 / 던전 밖 HUD / 보상 / ESC 메뉴 /
   # 던전 선택·옵션 / 사냥터 첫 화면) 중 하나라도 감지되면 true.
   # 출석/이벤트 같은 전체 화면 오버레이 여부를 판단할 때 씁니다.
-  if (Test-AbyssSelectionScreen -Game $Game) { return $true }
+  # HUD 를 최우선으로 봅니다 (2026-08-22 - 호출부는 '어느 화면인지'가 아니라 bool 만 쓰므로
+  # 순서는 의미 불변. 가장 흔한 시작 상태(필드)에서 어비스 선택 OCR 2회를 생략 - Codex 제안)
   if (Test-HomeEndEscHud -Game $Game) { return $true }
+  if (Test-AbyssSelectionScreen -Game $Game) { return $true }
   if (Test-ExitButton -Game $Game) { return $true }
   if (Test-AbyssMenu -Game $Game) { return $true }
   $title = Get-DetailTitleText -Game $Game
@@ -9024,7 +9026,9 @@ $lifeTitleVariants = @{
   '광맥'       = @('고十OH')
   '은광맥'     = @('으과DH')
   '석탄광맥'   = @('A-IEY광DH')
-  '동광맥'     = @('도과DH')
+  # '도과口H' = 2026-08-22 개발 PC 1908 실측 (6사이클 전부 동일한 s3 상세 판독
+  # '도과口H자|집물…' - text 행 근거 한정 조기 확정으로 s4 재판독을 생략하는 근거)
+  '동광맥'     = @('도과DH', '도과口H')
   '백동광맥'   = @('BHE고十DH')
   '백금광맥'   = @('BHZ고十DH')
   '양'         = @('0홀')
@@ -9498,7 +9502,11 @@ function Get-LifeDetailVerdict {
   # unreadable 구분 근거(전수 배치 01:04 실측): 우물 제목 '丁亞'(한글 0자), 젖소 'C0자'
   # (한글 1/3) 처럼 깨진 제목을 오클릭으로 확정해 3회 소진하던 사고 - 정상 오클릭이면
   # 제목이 그 대상 이름으로 또렷이(한글 비율 0.8+) 읽힌다는 실측 성질을 이용합니다.
-  param([string]$DetailText, [string]$TargetName, [string[]]$Order = @(), [string]$SkillName = '')
+  # -AllowTitleVariants: 제목 전용 이형 표까지 제목 일치로 인정 (2026-08-22 - **text 행 근거
+  # 호출부만** 켭니다. order 계열이 켜면 약한 추정이 링크 단계 최종 게이트를 우회하므로 금지
+  # - Codex 설계. 아래 ② 주석의 2026-08-12 기각과의 관계도 그쪽 참고)
+  param([string]$DetailText, [string]$TargetName, [string[]]$Order = @(), [string]$SkillName = '',
+    [switch]$AllowTitleVariants)
   $labelIndex = Get-LifeDetailLabelIndex -Text ([string]$DetailText)
   if ($labelIndex -lt 0) { return 'no-label' }
   $detailTitle = ([string]$DetailText).Substring(0, $labelIndex)
@@ -9522,14 +9530,19 @@ function Get-LifeDetailVerdict {
     }
   }
   # ② 제목이 목표와 일치 (깨진 '채' 잔여 최대 2자만 끝에서 제거)
-  #    (2026-08-12 검토: 여기를 제목 이형 표 매칭으로 넓히는 안은 기각 - 이 함수가 받는
-  #    상세 영역 판독은 관측상 제목을 통째로 놓쳐 '채집물…'로 시작하므로(동 광맥 실사고
-  #    5회 전부) 넓혀도 고쳐지는 관측 사례가 없다. 제목이 실제로 읽히는 곳은 링크 영역
-  #    판독이라 그쪽 폴백으로 해결 - 상세 검증 루프의 order 분기 참고)
+  #    (2026-08-12 검토: 여기를 제목 이형 표 매칭으로 **무조건** 넓히는 안은 기각 - 당시
+  #    실사고(타 PC 1908)의 상세 판독은 제목을 통째로 놓쳐 '채집물…'로 시작했고(관측 5회
+  #    전부) order 경로는 링크 단계 게이트가 최종 판정이라 여기를 넓히면 우회가 됩니다.
+  #    2026-08-22 갱신: 개발 PC 1908 은 s3 상세 판독에 깨진 제목이 살아 있음('도과口H자|…'
+  #    6사이클 전부 실측) → **text 행 근거 호출부가 -AllowTitleVariants 로 켤 때만** 제목
+  #    전용 이형 일치를 인정해 s4 재판독을 생략합니다. order 계열은 스위치를 못 켜므로
+  #    기각 사유(게이트 우회)는 그대로 지켜집니다 - Codex 설계.)
   for ($trimCount = 0; $trimCount -le 2; $trimCount++) {
     if (($detailTitle.Length - $trimCount) -lt 1) { break }
     $titleCandidate = $detailTitle.Substring(0, $detailTitle.Length - $trimCount)
-    if (Test-LifeNameMatches -RowText $titleCandidate -TargetName $TargetName) { return 'match' }
+    if ($AllowTitleVariants) {
+      if (Test-LifeTitleNameMatches -Title $titleCandidate -TargetName $TargetName) { return 'match' }
+    } elseif (Test-LifeNameMatches -RowText $titleCandidate -TargetName $TargetName) { return 'match' }
   }
   # ②.5 설명문 시그니처 (실측 등록분만 - $lifeDetailDescSignatures 정의 주석 참고):
   #    라벨 뒤 본문에 등록 조각이 있으면 이 대상의 팝업으로 확정합니다. ① 오클릭 확정보다
@@ -10100,6 +10113,16 @@ function Get-LifeQuestCountText {
   #   오히려 틀려집니다 - 그래서 2026-08-14 전투용 확장(v14) 때 생활은 구 영역을 전용
   #   변수로 분리해 보존했습니다 (3후보 스윕 실측: 확장 영역은 5b 카운트가 깨짐).
   param([System.Diagnostics.Process]$Game)
+  # 직전 상태 판정(Get-LifeQuestState)이 같은 ROI 를 방금 읽어 증거로 보존해 둡니다 -
+  # 그 원문에서 수량이 파싱되면 재판독을 생략합니다 (2026-08-22 - 판독 1회/폴 절약.
+  # 실패 시에만 기존 재판독 폴백 - Codex 설계. 호출부는 present 판정 직후라 증거는
+  # 같은 회전의 판독이고, 마지막 매치 규칙은 공백 제거 원문에서도 동일하게 성립).
+  $savedNarrow = [string]$(if ($script:lifeQuestStateEvidence) { $script:lifeQuestStateEvidence.Narrow } else { '' })
+  $savedMatches = [regex]::Matches($savedNarrow, '(\d+)\s*/\s*(\d+)')
+  if ($savedMatches.Count -gt 0) {
+    $savedMatch = $savedMatches[$savedMatches.Count - 1]
+    return ('{0}/{1}' -f $savedMatch.Groups[1].Value, $savedMatch.Groups[2].Value)
+  }
   $questText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
       -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine)
   $countMatches = [regex]::Matches([string]$questText, '(\d+)\s*/\s*(\d+)')
@@ -10451,8 +10474,10 @@ function Close-LifeOpenWindows {
     Start-Sleep -Seconds 1
     $closed = $true
   }
+  $lifeWindowStillOpen = $false
   foreach ($closeTry in 1..2) {
-    if (-not ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game))) { break }
+    $lifeWindowStillOpen = ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game))
+    if (-not $lifeWindowStillOpen) { break }
     Focus-Game -Game $Game
     Invoke-LifeWindowCloseClick -Game $Game
     # 클릭이 **실제로 나갔을 때만** '눌렀다'로 씁니다. Click-ScreenPoint 는 커서 확인 실패 시
@@ -10467,7 +10492,13 @@ function Close-LifeOpenWindows {
     Start-Sleep -Milliseconds 1200
     $closed = $true
   }
-  if ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game)) {
+  # 후조건 확인은 **마지막 클릭 뒤 상태가 미지일 때만** 재판독합니다 (2026-08-22 - 창이
+  # 없던 정상 경로는 루프의 마지막 판정이 곧 후조건이라 같은 판독 한 벌을 반복하고 있었음.
+  # 판정 의미 불변 - Codex 제안).
+  if ($lifeWindowStillOpen) {
+    $lifeWindowStillOpen = ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game))
+  }
+  if ($lifeWindowStillOpen) {
     Write-RunLog '[생활] 경고: 창 닫기 2회 후에도 창이 남아 있습니다 (다음 단계에서 재처리)'
   }
   return $closed
@@ -10519,8 +10550,11 @@ function Invoke-LifeMenuSequence {
     if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
     if (-not (Press-LifeMenuKey -Game $Game)) { return $false }
     $infoSeen = $false
-    foreach ($infoTry in 1..5) {
-      Start-Sleep -Milliseconds 900
+    # 간격 재배분 (2026-08-22): 총 sleep 예산 4.5초·5회는 그대로 두고 첫 두 확인만 앞당깁니다
+    # (450+450+900+900+1800 = 4500ms). 창이 빨리 열리는 정상 경로에서 ~0.45초 절약, 실패
+    # 예산은 불변 (회수만 늘리면 OCR 횟수가 늘어 벽시계 상한이 오히려 길어짐 - Codex 정정).
+    foreach ($infoDelayMs in @(450, 450, 900, 900, 1800)) {
+      Start-Sleep -Milliseconds $infoDelayMs
       if (Test-LifeInfoScreen -Game $Game) { $infoSeen = $true; break }
     }
     if (-not $infoSeen) {
@@ -10533,7 +10567,9 @@ function Invoke-LifeMenuSequence {
   # 2) 좌측 '생활 스킬' 메뉴 클릭 → 화면 전환 확인 (스킬 창은 좌측 메뉴가 없는 레이아웃이라
   #    '생활력' 신호 소멸 = 전환 증거. 전환 확인 전에는 다음 클릭 금지 - 클릭 정책/리뷰 조건)
   if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
-  Focus-Game -Game $Game
+  # 무조건 전면화 → 전면 확인 게이트 (2026-08-22 - 이미 전면이면 즉시 통과해 ~0.5초 절약,
+  # 전면 확인 실패 시엔 클릭을 차단하므로 안전은 강화 - Codex 제안. 아래 두 클릭도 동일)
+  if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX $ptLifeSkillMenu[0] -ReferenceY $ptLifeSkillMenu[1]
   $menuMoved = $false
   foreach ($moveTry in 1..4) {
@@ -10557,7 +10593,7 @@ function Invoke-LifeMenuSequence {
   # 셀 클릭 직전 재검사 - 직전 검사(생활 스킬 클릭 전) 뒤 전환 확인 루프로 최대 4초쯤 지났을
   # 수 있습니다 (2026-08-11 교차 리뷰: 입력 직전 검사가 빠진 두 곳 중 하나)
   if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
-  Focus-Game -Game $Game
+  if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX ([int]$SkillEntry.Cell[0]) -ReferenceY ([int]$SkillEntry.Cell[1])
   Start-Sleep -Milliseconds 1200
   $skillVerified = $false
@@ -10735,7 +10771,7 @@ function Invoke-LifeMenuSequence {
     Write-RunLog '[생활] 대상 행 클릭 직전에 화면이 멈췄습니다 - 목록을 다시 확인합니다'
     return $false
   }
-  Focus-Game -Game $Game
+  if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX $ptLifeListCenter[0] -ReferenceY $targetRowY
   Start-Sleep -Milliseconds 1200
   # 5) 상세 팝업 검증: 라벨('집물' 조각 - 실기 깨짐 대응) + 제목이 설정 대상과 일치해야 함
@@ -10755,8 +10791,11 @@ function Invoke-LifeMenuSequence {
     foreach ($detailScale in @(3, 4)) {
       $detailText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
           -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale $detailScale -Engine $ocrKoreanEngine) -replace '\s', ''
+      # text 행 근거일 때만 제목 전용 이형 일치를 인정 - s3 에서 확정되면 s4 재판독 생략
+      # (2026-08-22 측정: 사이클당 ~2초 절약. order 계열은 링크 게이트 우회 방지로 미허용)
       $detailVerdict = Get-LifeDetailVerdict -DetailText $detailText -TargetName $TargetName `
-        -Order @($SkillEntry.Order) -SkillName ([string]$SkillEntry.Name)
+        -Order @($SkillEntry.Order) -SkillName ([string]$SkillEntry.Name) `
+        -AllowTitleVariants:($targetRowSource -eq 'text')
       if ($detailVerdict -eq 'match') { $detailMatched = $true; break }
       if ($detailVerdict -eq 'wrong-target') { $detailWrongCount++ }
       if ($detailVerdict -eq 'unreadable') { $detailUnreadableCount++ }
@@ -11055,8 +11094,12 @@ function Invoke-LifeGatherCycle {
   # 맵 이동 로딩 화면에서는 퀘스트도 HUD 도 없어 'unknown' 만 나옵니다 - 그 상태로 '없음'
   # 판정을 내리면 이동 중에 메뉴를 열게 되므로, present/absent 가 확정될 때까지 기다립니다
   # (최대 약 60초. 로딩은 보통 10~30초 - 2026-08-07 사용자 지적)
-  Focus-Game -Game $Game
-  Start-Sleep -Milliseconds 700
+  # 이미 전면이면 전면화·안정 대기를 생략합니다 (2026-08-22 - 연속 사이클의 정상 상태는
+  # 항상 전면이라 0.7초+전면화가 매번 낭비였음. 실제로 전면을 바꾼 경우에만 대기 유지)
+  if (-not (Test-GameForeground -Game $Game)) {
+    Focus-Game -Game $Game
+    Start-Sleep -Milliseconds 700
+  }
   $initialState = 'unknown'
   $initialAbsentProbe = 0
   $loadingNoticed = $false
@@ -11130,8 +11173,13 @@ function Invoke-LifeGatherCycle {
     # 들어와, 줄 구분 없이 이름을 찾으면 남의 줄에 있는 더 긴 이름을 소유자로 집습니다
     # (2026-08-07 감사 실측: '주간 목표 뾰족 나무' + '채집 장소 탐색 나무' → '뾰족 나무' 반환).
     # 좁은 영역으로 못 정하면 아래 '미확정 = 내 것' 기본값이 안전하게 받아 줍니다.
-    $initialQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
-        -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    # 직전 present 판정의 좁은 판독 원문을 재사용하고, 비어 있을 때만 재판독합니다
+    # (2026-08-22 - present 가 넓은 판독으로 잡히면 좁은 원문이 빌 수 있어 폴백 유지)
+    $initialQuestText = [string]$(if ($script:lifeQuestStateEvidence) { $script:lifeQuestStateEvidence.Narrow } else { '' })
+    if (-not $initialQuestText) {
+      $initialQuestText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeQuestTracker[0] -ReferenceY $rgLifeQuestTracker[1] `
+          -RegionWidth $rgLifeQuestTracker[2] -RegionHeight $rgLifeQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    }
     # 후보는 **전 스킬의 대상 전체**입니다 - 현재 스킬 목록만 대조하면 다른 스킬의 잔여
     # 퀘스트를 현재 스킬의 짧은 대상으로 오인합니다 ('사과 나무' → '나무' - 2026-08-07 감사).
     # 단, **그 판독이 채집 퀘스트 줄일 때만** 이름을 찾습니다 - present 는 넓은 영역으로도

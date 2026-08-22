@@ -99,6 +99,44 @@ Assert-Case "상세: 실측 제목 소실 물 팝업 → match (설명문 시그
 # 등록 조각을 그쪽으로 바꾸면 이 케이스가 잡는다 (우물 팝업이 목표 '물'에 match 가 됨).
 Assert-Case "상세: 제목 깨진 우물 팝업 + 목표 '물' → unreadable (빈병 조각 미등록 가드)" `
   (Get-LifeDetailVerdict -DetailText '丁亞치|집물일상채집레벨1이상깨끗한지하수를모아둔곳.빈병으로물을뜰수있다.' -TargetName '물' -Order $dailyOrder) 'unreadable'
+# ── text 행 근거 한정 제목 전용 이형 조기 확정 (2026-08-22 - s4 재판독 생략 ~2초/사이클.
+#    실측: 개발 PC 1908 광석 캐기 6사이클 전부 s3 상세가 '도과口H자|집물…'로 동일 -
+#    Codex 설계: -AllowTitleVariants 스위치는 text 행 근거 호출부만 켬, order 계열 금지) ──
+$miningOrder = @('광맥', '철 광맥', '은 광맥', '석탄 광맥', '동 광맥', '백동 광맥', '백금 광맥')
+$dongDetail = '도과口H자|집물광석개기레벨10이상동이섞인단단한돌무더기.곡괭이로동광석을갤수있다.[사냥터]여신의뜰,구름황야가까운위치찾기0'
+Assert-Case "상세: 실측 '도과口H' + 스위치 켬 → match (제목 전용 이형 조기 확정)" `
+  (Get-LifeDetailVerdict -DetailText $dongDetail -TargetName '동 광맥' -Order $miningOrder -AllowTitleVariants) 'match'
+Assert-Case "상세: 같은 판독 + 스위치 끔 → unreadable (order 계열 기존 계약 불변)" `
+  (Get-LifeDetailVerdict -DetailText $dongDetail -TargetName '동 광맥' -Order $miningOrder) 'unreadable'
+Assert-Case "상세: 같은 판독 + 목표 '철 광맥' + 스위치 켬 → match 아님 (이형 대상 오인 금지)" `
+  ((Get-LifeDetailVerdict -DetailText $dongDetail -TargetName '철 광맥' -Order $miningOrder -AllowTitleVariants) -eq 'match') 'False'
+Assert-Case "제목 이형: '도과口H' → '동 광맥' 일치 (등록·정규화 무결)" `
+  (Test-LifeTitleNameMatches -Title '도과口H' -TargetName '동 광맥') 'True'
+# 배선: 스위치는 text 행 근거 호출부만 켠다 (order 계열이 켜면 링크 게이트 우회 - 금지)
+$titleVariantWiringText = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))   # $workerText 는 이 지점보다 아래(1199행)에서 정의됨
+Assert-Case '배선: -AllowTitleVariants 는 text 행 근거 조건부 전달 1곳 (무조건 켬 없음)' `
+  (('{0}/{1}' -f [regex]::Matches($titleVariantWiringText, "-AllowTitleVariants:\(\`$targetRowSource -eq 'text'\)").Count,
+    [regex]::Matches($titleVariantWiringText, '-AllowTitleVariants:\(').Count)) '1/1'
+
+# ── 사이클 오버헤드 절감 배선 (2026-08-22 - Codex 상호 검토 5건. 경계 원칙: 양성 신호의
+#    조기 확인·이미 얻은 증거의 재사용만 허용, '없음' 부정 증거의 확인 간격은 불변) ──
+Assert-Case '배선: 전면 게이트 5곳 (기존 2 + 2026-08-22 무조건 전면화 교체 3 - 생활 스킬/셀/행 클릭)' `
+  ([regex]::Matches($titleVariantWiringText, 'if \(-not \(Confirm-LifeGameFront -Game \$Game\)\) \{ return \$false \}').Count) 5
+$infoDelayMatch = [regex]::Match($titleVariantWiringText, 'foreach \(\$infoDelayMs in @\(([^)]+)\)\)')
+$infoDelays = @($infoDelayMatch.Groups[1].Value -split ',' | ForEach-Object { [int]$_.Trim() })
+Assert-Case '배선: 내 정보 폴 재배분 - 5회·총 4500ms 예산 보존 + 첫 확인 450ms 전진' `
+  (('{0}/{1}/{2}' -f $infoDelays.Count, ($infoDelays | Measure-Object -Sum).Sum, $infoDelays[0])) '5/4500/450'
+Assert-Case '배선: 알려진 화면 판정은 HUD 최우선 (필드 시작의 어비스 OCR 생략)' `
+  ([bool]($titleVariantWiringText -match 'Test-HomeEndEscHud -Game \$Game\) \{ return \$true \}\r?\n\s*if \(Test-AbyssSelectionScreen -Game \$Game\)')) 'True'
+Assert-Case '배선: 잔존 창 후조건은 클릭 경로만 재판독 (정상 경로 중복 제거)' `
+  ([bool]($titleVariantWiringText -match 'if \(\$lifeWindowStillOpen\) \{\r?\n\s*\$lifeWindowStillOpen = \(\(Test-LifeWindowOpen')) 'True'
+Assert-Case '배선: 수량 파싱은 저장 원문 우선 + 실패 시 재판독 폴백' `
+  (($titleVariantWiringText -match '\$savedNarrow = \[string\]\$\(if \(\$script:lifeQuestStateEvidence\)') -and
+   ($titleVariantWiringText -match '\$savedMatches\.Count -gt 0[\s\S]{0,220}\$questText = \(Get-GameRegionOcrText')) 'True'
+Assert-Case '배선: 초기 소유자 판독도 저장 원문 우선 + 공백 시 재판독 폴백' `
+  (($titleVariantWiringText -match '\$initialQuestText = \[string\]\$\(if \(\$script:lifeQuestStateEvidence\)') -and
+   ($titleVariantWiringText -match 'if \(-not \$initialQuestText\) \{')) 'True'
+
 # ① 우선순위 가드: 또렷한 다른 제목은 시그니처보다 먼저 차단돼야 한다 (합성 문자열 -
 # 시그니처 검사가 ① 앞으로 이동하는 변이를 잡기 위한 순서 계약)
 Assert-Case "상세: 또렷한 우물 제목 + 본문에 물 시그니처 → wrong-target (① 우선)" `
@@ -511,8 +549,10 @@ Assert-Case '배선(지정시간): 옛 사이클 한도 직접 전달이 남아 
 # 메뉴 시퀀스 입력 직전 가드 (교차 리뷰 - C 입력/스킬 셀 클릭 앞)
 Assert-Case '배선(지정시간): C 입력 직전 한도 재검사' `
   ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n\s*if \(-not \(Press-LifeMenuKey')) 'True'
-Assert-Case '배선(지정시간): 스킬 셀 클릭 직전 한도 재검사' `
-  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n\s*Focus-Game -Game \$Game\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
+# 2026-08-22 개정: 무조건 전면화가 Confirm-LifeGameFront 게이트로 교체됨 (전면이면 즉시
+# 통과 - 오버헤드 절감. 실패 시 클릭 차단이라 안전 강화)
+Assert-Case '배선(지정시간): 스킬 셀 클릭 직전 한도 재검사 + 전면 게이트' `
+  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n\s*if \(-not \(Confirm-LifeGameFront -Game \$Game\)\) \{ return \$false \}\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
 
 # (c) GUI 배선 - env 전달 조건과 초 정규화
 $guiRaw = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
@@ -1402,8 +1442,10 @@ Assert-Case '배선: 잔여 타 대상 퀘스트면 재시도 대신 안내 정�
 # 시작 시점에 다른 대상 채집이 진행 중이면 메뉴를 아예 열지 않는다 (사용자 실기 관찰:
 # 이동 중인데 다른 대상을 눌러 진행 중인 채집을 방해)
 # 트래커가 잠깐 가려져 '없음'으로 오판하면 남의 채집을 방해 (2026-08-07 사용자 지적)
-Assert-Case '배선: 초기 퀘스트 확인은 전면화 + 확정될 때까지 판독 (present 우선, 로딩 대기)' `
-  (($workerText -match 'Focus-Game -Game \$Game\s*\r?\n\s*Start-Sleep -Milliseconds 700\s*\r?\n\s*\$initialState') -and
+# 2026-08-22 개정: 전면화+0.7초는 '이미 전면이 아닐 때만' (연속 사이클 정상 상태는 항상
+# 전면이라 매번 낭비였음 - 실제 전환 시에만 안정 대기 유지)
+Assert-Case '배선: 초기 퀘스트 확인은 조건부 전면화 + 확정될 때까지 판독 (present 우선, 로딩 대기)' `
+  (($workerText -match 'if \(-not \(Test-GameForeground -Game \$Game\)\) \{\s*\r?\n\s*Focus-Game -Game \$Game\s*\r?\n\s*Start-Sleep -Milliseconds 700\s*\r?\n\s*\}\s*\r?\n\s*\$initialState') -and
    # 거리 상한 대신 **순서**로 봅니다. 주석이 늘 때마다 숫자를 올려야 하는 단언은 결국
    # 느슨해지고(7차에 실제로 터짐), 여기서 지키려는 계약은 '같은 루프 안에서 present 를
    # 확정한다' 이지 '몇 글자 안에' 가 아닙니다.
