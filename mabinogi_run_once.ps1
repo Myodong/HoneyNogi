@@ -3889,6 +3889,10 @@ function Wait-ForDungeonClearScreen {
         # 판정의 HUD 부재 조건은 본문과 동일 - 리뷰 조건. 탐침만 하고 처리·로그는 본문이 담당)
       } elseif ($script:screenCaptureFailing) {
         # 위 최종 탐침 도중 캡처 실패가 새로 시작된 경우도 동결 처리에 맡깁니다 (리뷰 조건)
+      } elseif (Close-QuestRewardScreen -Game $Game -LogPrefix "$($script:contentTag) ") {
+        # 마감 도달 순간 보상 전체 화면이 덮여 있던 경우 (2026-08-27 Codex 경계 지적 -
+        # 마지막 폴 간격에 처음 뜨면 본문 처리 전에 여기서 timeout 확정됨): 닫고 이번
+        # 바퀴는 throw 하지 않음 - 다음 바퀴의 정상 판정/연장 판정이 실제 화면을 처리
       } else {
         throw '던전 클리어 화면 감지 대기 시간이 초과됐습니다.'
       }
@@ -3896,7 +3900,16 @@ function Wait-ForDungeonClearScreen {
     $pollCounter++
 
     # 클리어 감지가 목적이므로 가장 먼저, 매 바퀴 확인합니다 (지연 최소화)
-    if (Test-DungeonClearPrompt -Game $Game) {
+    $clearPromptDetected = Test-DungeonClearPrompt -Game $Game
+    # 퀘스트 클리어 보상 전체 화면 (2026-08-27 실사고: 사냥 클리어 대기 중 '주간 목표' 보상
+    # 화면이 덮여 확인을 못 누르고 대기만 함 - 2026-07-28 입장 대기 실사고와 같은 화면인데
+    # 이 대기에는 미배선이었음. 어비스/던전/사냥터가 이 함수를 공용하므로 셋 다 커버).
+    # 게이트는 방금 클리어 판정이 읽고 스태시한 같은 폴의 하단 문구라 추가 판독 0회.
+    # 클리어 반환보다 먼저 처리합니다 - 합성 판독문에서 두 판정이 동시에 참일 수 있는데,
+    # 보상 화면이 덮여 있으면 그쪽이 실제 화면입니다 (Codex 순서 조건).
+    if (-not $script:screenCaptureFailing -and
+        (Close-QuestRewardScreen -Game $Game -LogPrefix "$($script:contentTag) " -BottomText $script:lastClearPromptText)) { continue }
+    if ($clearPromptDetected) {
       Write-RunLog "$($script:contentTag) 클리어 문구(화면을 터치) 감지"
       return 'clear'
     }
@@ -4434,6 +4447,10 @@ function Test-DungeonClearPrompt {
   # '화면을'이나 '터치'만 단독으로 쓰면 다른 안내와 겹칠 수 있어 두 조각 조합을 요구합니다.
   $ocrText = Get-GameOcrText -Game $Game
   $normalized = $ocrText -replace '\s', ''
+  # 판독문 스태시 (2026-08-27): 클리어 대기 루프가 이 판정을 매 폴 부르므로, 같은 폴에서
+  # 보상 화면 게이트가 이 원문을 재사용해 추가 판독 없이 감지합니다 (모든 조기 return 전에
+  # 저장 - 캡처 실패면 '' 로 갱신돼 게이트도 닫힘, fail-closed. Codex 확인)
+  $script:lastClearPromptText = $normalized
   if ($normalized.Contains('화면을') -and $normalized.Contains('터')) { return $true }
   if ($normalized.Contains('화면을') -and $normalized.Contains('주세요')) { return $true }
   if ($normalized.Contains('치해') -and $normalized.Contains('면')) { return $true }
@@ -5478,6 +5495,33 @@ function Test-GameRestartPopup {
   return ($restartText.Contains('오랫동안') -and $restartText.Contains('실행되'))
 }
 
+function Close-QuestRewardScreen {
+  # 퀘스트 클리어 보상 전체 화면('아이템을 누르면 상세 정보…' + 확인) 감지·닫기.
+  # 실측 2화면: 2026-07-28 '법황청의 특별 의뢰'(입장 로딩 대기를 덮음) / 2026-08-27
+  # '[주간 목표] 모험가 길드의 정기 의뢰'(사냥터 클리어 대기를 덮여 확인을 못 누름 - 캡처
+  # 재현: 하단 '아이템을누르면상세정보테볼수있습니다확인'). 스윕과 클리어 대기가 이 한 벌을
+  # 공유합니다 (검증 로직 두 벌 금지 원칙).
+  # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키 입력은 쓰지 않음 (상태 기반 클릭).
+  # BottomText: 호출부가 이미 읽은 하단 문구(공백 제거)를 넘기면 재판독을 생략합니다.
+  # 전달 여부는 PSBoundParameters 로 판정 (Codex - [string] 타입은 null 을 '' 로 바꿔
+  # 생략 판정이 깨지므로 비타입).
+  param([System.Diagnostics.Process]$Game, [string]$LogPrefix = '', $BottomText = $null)
+  if ($script:screenCaptureFailing) { return $false }
+  $rewardBottom = $(if ($PSBoundParameters.ContainsKey('BottomText')) { [string]$BottomText }
+    else { (Get-GameOcrText -Game $Game) -replace '\s', '' })
+  if (-not ($rewardBottom.Contains('아이템을누르') -or $rewardBottom.Contains('상세정보'))) { return $false }
+  $confirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
+    -RegionWidth 470 -RegionHeight 55 -SearchText '확인'
+  if ($confirmPoint) {
+    Focus-Game -Game $Game
+    Click-ScreenPoint -X $confirmPoint.X -Y $confirmPoint.Y
+    Write-RunLog "[안내] ${LogPrefix}퀘스트 클리어 보상 화면 감지 - 확인 클릭"
+    Start-Sleep -Seconds 1
+    return $true
+  }
+  return $false
+}
+
 function Invoke-PurchasePopupSweep {
   param([System.Diagnostics.Process]$Game)
 
@@ -5513,22 +5557,11 @@ function Invoke-PurchasePopupSweep {
     Start-Sleep -Seconds 1
     return $true
   }
-  # 퀘스트 클리어 보상 전체 화면 (2026-07-28 23:12 실기: 입장 로딩 중 '법황청의 특별 의뢰'
-  # 완료 화면이 덮여 입장 감지가 45초 내내 가려짐). 하단 안내 문구('아이템을 누르면 상세
-  # 정보...')가 이 화면 전용이라 그 문구가 보일 때만 '확인' 버튼 글자를 찾아 클릭합니다.
-  # Space 배지가 있지만 위험 화면 오입력 금지 정책상 키 입력은 쓰지 않음 (상태 기반 클릭).
+  # 하단 문구 한 번 판독 - 아래 보상 화면 게이트와 주간 리셋 게이트가 공유합니다
   $bottomText = (Get-GameOcrText -Game $Game) -replace '\s', ''
-  if ($bottomText.Contains('아이템을누르') -or $bottomText.Contains('상세정보')) {
-    $confirmPoint = Find-GameTextPoint -Game $Game -ReferenceX 400 -ReferenceY 628 `
-      -RegionWidth 470 -RegionHeight 55 -SearchText '확인'
-    if ($confirmPoint) {
-      Focus-Game -Game $Game
-      Click-ScreenPoint -X $confirmPoint.X -Y $confirmPoint.Y
-      Write-RunLog '[안내] 퀘스트 클리어 보상 화면 감지 - 확인 클릭 (입장 대기 중)'
-      Start-Sleep -Seconds 1
-      return $true
-    }
-  }
+  # 퀘스트 클리어 보상 전체 화면 - 공용 소함수 (위 정의 참고. 이미 읽은 하단 문구를
+  # 넘겨 재판독을 생략합니다)
+  if (Close-QuestRewardScreen -Game $Game -BottomText $bottomText) { return $true }
   # 협동 미션 완료 전체 화면 (공용 소함수 - 클리어 대기 루프도 같은 함수를 씁니다)
   if (Close-CoopMissionScreen -Game $Game) { return $true }
   # 주간 리셋이 자동으로 띄우는 협동 미션 전체 창 (2026-08-03 06:02 실사고 - 이 스윕을

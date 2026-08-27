@@ -214,4 +214,34 @@ Assert-Case '배선: 스윕이 재시작 팝업을 닫기 탐색보다 먼저 �
 Assert-Case '배선: 감지 시 명확한 사유로 조건부 정지 (exit 4)' `
   ([bool]($sweepCode -match '(?s)너무 오랫동안 실행되고 있습니다[^\r\n]*재시작[^\r\n]*\r?\n\s*exit 4')) 'True'
 
+# ── 퀘스트 클리어 보상 전체 화면 - 클리어 대기 배선 (2026-08-27 실사고: 사냥 완료 대기 중
+#    '[주간 목표]' 보상 화면이 덮여 확인을 못 누름. 처리기는 스윕에만 있었고(07-28 입장 대기
+#    실사고분) 클리어 대기(어비스/던전/사냥터 공용)에는 미배선. 공용 소함수로 추출 + 같은 폴
+#    의 클리어 문구 판독 스태시를 재사용해 추가 판독 0회 - Codex 합의) ──
+$rewardFnCode = ((([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Close-QuestRewardScreen'))) -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+Assert-Case '보상: 공용 소함수 게이트(아이템을누르/상세정보) + 확인 탐색 영역(400,628)' `
+  (($rewardFnCode.Contains("'아이템을누르'") -and $rewardFnCode.Contains("'상세정보'")) -and
+   ($rewardFnCode -match '-ReferenceX 400 -ReferenceY 628')) 'True'
+Assert-Case '보상: BottomText 전달 여부는 PSBoundParameters 로 판정 (재판독 생략 정밀화)' `
+  ($rewardFnCode.Contains("PSBoundParameters.ContainsKey('BottomText')")) 'True'
+Assert-Case '보상: 스윕은 이미 읽은 하단 문구를 넘겨 재판독 생략' `
+  ([bool]($workerSource -match 'if \(Close-QuestRewardScreen -Game \$Game -BottomText \$bottomText\) \{ return \$true \}')) 'True'
+Assert-Case '보상: 클리어 문구 판정이 판독문을 스태시 (조기 return 전)' `
+  ([bool]($workerSource -match '\$normalized = \$ocrText -replace[\s\S]{0,420}\$script:lastClearPromptText = \$normalized[\s\S]{0,80}화면을')) 'True'
+Assert-Case '보상: 클리어 대기 배선 - 스태시 재사용 + 보상 처리가 clear 반환보다 먼저 (합성 판독 오인 방지)' `
+  ([bool]($workerSource -match '\$clearPromptDetected = Test-DungeonClearPrompt -Game \$Game[\s\S]{0,900}Close-QuestRewardScreen -Game \$Game -LogPrefix[\s\S]{0,120}-BottomText \$script:lastClearPromptText\)\) \{ continue \}\r?\n\s+if \(\$clearPromptDetected\)')) 'True'
+Assert-Case '보상: 마감 최종 탐침에도 배선 (마지막 폴 간격 등장 시 timeout 확정 방지)' `
+  ([bool]($workerSource -match "elseif \(Close-QuestRewardScreen -Game \`$Game -LogPrefix[\s\S]{0,500}throw '던전 클리어 화면 감지 대기 시간이 초과됐습니다\.'")) 'True'
+# 실측 판독 재현 (2026-08-27 캡처: rgClearExit s3 = '아이템을누르면상세정보테볼수있습니다확인')
+# - 게이트가 실제 사고 판독문에서 발화하고, 클리어 문구 조각들에는 전부 불발이어야 함
+$rewardMeasured = '아이템을누르면상세정보테볼수있습니다확인'
+Assert-Case '보상: 실측 판독문에서 게이트 발화' `
+  ($rewardMeasured.Contains('아이템을누르') -or $rewardMeasured.Contains('상세정보')) 'True'
+foreach ($clearPair in @(@('화면을', '터'), @('화면을', '주세요'), @('치해', '면'), @('화면', '치'))) {
+  if ($rewardMeasured.Contains([string]$clearPair[0]) -and $rewardMeasured.Contains([string]$clearPair[1])) {
+    "FAIL 보상: 실측 판독문이 클리어 조각 '$($clearPair -join '+')'에 걸림 (배타성 붕괴)"; $fails++
+  }
+}
+"OK   보상: 실측 판독문이 클리어 문구 조각 4조합 전부 불발 (Codex 배타성 확인)"
+
 exit $fails
