@@ -124,6 +124,28 @@ Assert-Case '프로세스 선정: PID 1006 포함(대소문자 무시)' (@($sele
 Assert-Case '프로세스 선정: 경로 미지정 시 전부 보존(실패 폐쇄)' `
   (@(Select-OldGuiProcesses -Snapshots $procSnapshots -CurrentVersion '1.2.0' -GuiScriptPath '').Count) 0
 
+# ---- 5-1. 임베디드 호스트 GUI 판정 (v2.1.4 작업 관리자 브랜딩) ----
+# 호스트 GUI(HoneyNogi.exe --embedded-host)는 명령줄에 gui.ps1 경로가 없습니다.
+# 식별 = 엄격 제목(구버전) + '--embedded-host' 플래그 이중 확인 계약.
+$hostedCmd = '"C:\Users\U\Desktop\HoneyNogi.exe" --embedded-host'
+$hostedSnapshots = @(
+  @{ Id = 2001; Title = '꿀비노기 컨트롤 패널 v1.1.3'; CommandLine = $hostedCmd }        # 구버전 호스트 GUI = 대상
+  @{ Id = 2002; Title = '꿀비노기 컨트롤 패널 v1.2.0'; CommandLine = $hostedCmd }        # 현재 버전 호스트 GUI = 보존
+  @{ Id = 2003; Title = '';                             CommandLine = $hostedCmd }        # 제목 없음(기동 직후/런처) = 보존
+  @{ Id = 2004; Title = '꿀비노기 컨트롤 패널 v1.1.3'                                     # 호스트 워커(--run)는 GUI 판정 밖
+     CommandLine = '"C:\Users\U\Desktop\HoneyNogi.exe" --run "C:\Users\U\AppData\Local\HoneyNogi\mabinogi_run_once.ps1"' }
+)
+$hostedSelected = @(Select-OldGuiProcesses -Snapshots $hostedSnapshots -CurrentVersion '1.2.0' -GuiScriptPath $guiScriptPath)
+Assert-Case '호스트 GUI 선정: 구버전 1개만(현재 버전/무제목/--run 보존)' $hostedSelected.Count 1
+Assert-Case '호스트 GUI 선정: PID 2001 포함' (@($hostedSelected | Where-Object { $_.Id -eq 2001 }).Count) 1
+# 호스트 GUI 식별에는 gui.ps1 경로가 안 쓰이므로 경로 미지정이어도 선정됩니다
+# (실패 폐쇄 규칙은 powershell 후보 전용 - 호스트는 플래그가 식별자)
+Assert-Case '호스트 GUI 선정: 경로 미지정이어도 플래그로 선정' `
+  (@(Select-OldGuiProcesses -Snapshots $hostedSnapshots -CurrentVersion '1.2.0' -GuiScriptPath '').Count) 1
+# 혼합 스냅샷: powershell 구버전 + 호스트 구버전이 함께 잡혀야 합니다
+$mixedSelected = @(Select-OldGuiProcesses -Snapshots ($procSnapshots + $hostedSnapshots) -CurrentVersion '1.2.0' -GuiScriptPath $guiScriptPath)
+Assert-Case '혼합 선정: powershell 2개 + 호스트 1개' $mixedSelected.Count 3
+
 # ---- 6. 릴리스 해시 대장 검증 + 삭제 대상 선정 ----
 $manifestGood = [pscustomobject]@{ releases = @(
     [pscustomobject]@{ version = '1.1.3'; sha256 = $h1 }

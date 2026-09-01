@@ -12039,9 +12039,12 @@ try {
     if ([string]::IsNullOrWhiteSpace($repeatInfo)) { $repeatInfo = '(GUI 정보 없음 - 워커 단독 실행)' }
     $appVersionInfo = [string]$env:HONEYNOGI_APP_VERSION
     if ([string]::IsNullOrWhiteSpace($appVersionInfo)) { $appVersionInfo = '?' }
+    # 실행 호스트 표기 (v2.1.4 임베디드 호스트 시험): 제보 로그만으로 powershell/임베디드
+    # (HoneyNogi.exe --run) 어느 쪽에서 돌았는지 구분하기 위한 분석용 한 단어입니다.
+    $hostModeInfo = $(if ($Host.Name -eq 'HoneyNogiHost') { '임베디드' } else { 'powershell' })
     # 대분류가 '생활'이면 contentCategory(전투 하위 선택)는 참고용으로만 남습니다.
     # 생활 상세 설정(스킬/대상/대기 등)은 아래 섹션 목록의 'life' 한 줄 JSON 으로 남습니다.
-    Write-RunLog "[설정] 꿀비노기 v$appVersionInfo, 대분류 '$mainCategory', 콘텐츠 '$contentCategory', 반복 $repeatInfo, coordsVersion $(Get-ConfigValue $config @('coordsVersion') '?')"
+    Write-RunLog "[설정] 꿀비노기 v$appVersionInfo($hostModeInfo), 대분류 '$mainCategory', 콘텐츠 '$contentCategory', 반복 $repeatInfo, coordsVersion $(Get-ConfigValue $config @('coordsVersion') '?')"
     if ($script:customMode) {
       # 커스텀 리스트는 압축 문자열 한 줄로만 남깁니다 (타 PC 제보 분석 요건 -
       # customRepeat 섹션을 아래 목록에 넣으면 items 배열 전체가 JSON으로 쏟아져 제외)

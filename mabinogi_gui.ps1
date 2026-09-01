@@ -29,6 +29,20 @@ public static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(Unma
   [Win32.TaskbarAppId]::SetCurrentProcessExplicitAppUserModelID('HoneyNogi.ControlPanel') | Out-Null
 } catch { }
 
+# ----- 임베디드 호스트 모드 감지 (v2.1.4 작업 관리자 브랜딩) -----
+# HoneyNogi.exe --embedded-host 로 실행되면 이 스크립트는 powershell.exe 가 아니라 exe 안의
+# PowerShell 호스트(HoneyNogiHost)에서 돕니다. 이때 워커/리사이즈 헬퍼도 같은 exe 의
+# --run 으로 띄워야 작업 관리자 전체가 '꿀비노기'(꿀단지 아이콘)로 표시됩니다.
+# 판별은 호스트 이름($Host.Name) + exe 가 주입한 경로 환경변수의 **이중 확인**입니다
+# (프로세스 이름 비교는 이름 바꾼 exe/저장소 직접 실행에서 어긋나므로 금지 - 설계 합의).
+# 환경변수만으로 판별하지 않는 이유: 임베디드 GUI 가 띄운 자식에게 변수가 상속되므로,
+# powershell 로 뜬 프로세스가 변수만 보고 임베디드로 오판할 수 있습니다.
+$script:hostedExePath = ''
+if ($Host.Name -eq 'HoneyNogiHost' -and -not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_HOST_EXE) -and
+    (Test-Path -LiteralPath $env:HONEYNOGI_HOST_EXE)) {
+  $script:hostedExePath = [string]$env:HONEYNOGI_HOST_EXE
+}
+
 # ----- 중복 실행 방지 뮤텍스는 '구버전 정리' 다음으로 이동 (2026-07-27) -----
 # 구버전 GUI가 뮤텍스를 쥔 채 실행 중이면 새 버전이 '이미 실행 중'으로 종료되므로,
 # 신규 버전 최초 실행 1회의 구버전 정리(구버전 프로세스 종료 포함)를 뮤텍스 검사보다
@@ -170,7 +184,12 @@ function Apply-RecommendedWindowSize {
   )
   try {
     Set-Content -LiteralPath $helper -Value ($lines -join "`r`n") -Encoding UTF8
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $helper + '"'))
+    if ($script:hostedExePath) {
+      # 임베디드 호스트: 헬퍼도 같은 exe(--run)로 (작업 관리자 브랜딩 - 워커 스폰과 같은 분기)
+      Start-Process -FilePath $script:hostedExePath -ArgumentList @('--run', ('"' + $helper + '"'))
+    } else {
+      Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $helper + '"'))
+    }
     if ($Width -gt 0) { Add-GuiLog "[안내] 게임 창을 $Width x $Height(으)로 변경합니다" }
     else { Add-GuiLog '[안내] 게임 창을 권장 크기로 변경합니다 (OCR 인식 최적 - 1908x1076 또는 1272x717)' }
     # 결과 타이머 시작 (헬퍼가 남긴 결과 파일을 읽어 성공/거부/게임 없음을 로그로 안내).
@@ -567,6 +586,13 @@ function Stop-ExistingAutomation {
   try {
     $existing = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
       Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -match $pattern })
+    # 임베디드 호스트 워커(HoneyNogi*.exe --run …run_once.ps1)도 같은 기준으로 정리합니다
+    # (v2.1.4 작업 관리자 브랜딩). powershell 열거만으로는 호스트 워커가 안 잡혀 남은 채
+    # 게임을 계속 조작하고, 새 워커는 뮤텍스 코드 2 로 죽습니다. '--run' 동시 확인으로
+    # 임베디드 GUI 자신(--embedded-host)은 대상에서 자연 제외됩니다.
+    $existing += @(Get-CimInstance Win32_Process -Filter "Name LIKE 'HoneyNogi%.exe'" |
+      Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and
+        $_.CommandLine -match '--run' -and $_.CommandLine -match $pattern })
     foreach ($proc in $existing) {
       try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop; $killed++ } catch { $failed++ }
     }
@@ -845,8 +871,14 @@ function Select-OldGuiProcesses {
     if (-not $snapshot) { continue }
     if ([int]$snapshot.Id -eq $PID) { continue }
     if (-not (Test-OldGuiTitle -Title ([string]$snapshot.Title) -CurrentVersion $CurrentVersion)) { continue }
-    if ([string]$GuiScriptPath -eq '') { continue }
-    if (([string]$snapshot.CommandLine).IndexOf([string]$GuiScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+    # 임베디드 호스트 GUI(HoneyNogi.exe --embedded-host)는 명령줄에 gui.ps1 경로가 없습니다
+    # (v2.1.4). 식별은 엄격 제목(버전 파싱 + 현재보다 낮음) + '--embedded-host' 플래그의
+    # 이중 확인 - 제목이 위조 수준으로 일치하지 않는 한 다른 앱을 잡을 수 없습니다.
+    $snapshotCmd = [string]$snapshot.CommandLine
+    if ($snapshotCmd.IndexOf('--embedded-host', [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+      if ([string]$GuiScriptPath -eq '') { continue }
+      if ($snapshotCmd.IndexOf([string]$GuiScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+    }
     $selected += , $snapshot
   }
   return $selected
@@ -1247,6 +1279,11 @@ function Invoke-OldProcessShutdown {
   $guiScriptPath = Join-Path $scriptRoot 'mabinogi_gui.ps1'
   $cimRows = @()
   try { $cimRows = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction Stop) } catch { }
+  # 임베디드 호스트 프로세스(HoneyNogi*.exe)도 열거합니다 (v2.1.4 작업 관리자 브랜딩).
+  # 호스트 GUI/워커는 powershell 이 아니라서 기존 열거에 안 잡히면 구버전 정리가 통째로
+  # 비켜가고, 구 호스트 GUI 가 뮤텍스를 쥔 채 새 버전이 '이미 실행 중'으로 죽습니다.
+  # 워커 스냅샷은 아래 CommandLine 대조($workerScript 포함 여부)가 이름과 무관하게 잡아 줍니다.
+  try { $cimRows += @(Get-CimInstance -ClassName Win32_Process -Filter "Name LIKE 'HoneyNogi%.exe'" -ErrorAction Stop) } catch { }
   $commandLineByPid = @{}
   foreach ($cimRow in $cimRows) { $commandLineByPid[[int]$cimRow.ProcessId] = [string]$cimRow.CommandLine }
   # 워커 스냅샷: 우리 추출 경로의 run_once 만. .Handle 접근으로 핸들을 지금 바인딩해
@@ -1265,15 +1302,18 @@ function Invoke-OldProcessShutdown {
   $processByPid = @{}
   $snapshots = @()
   $currentGuiElsewhere = $false
-  foreach ($psProc in @(Get-Process -Name 'powershell' -ErrorAction SilentlyContinue)) {
+  foreach ($psProc in @(@(Get-Process -Name 'powershell' -ErrorAction SilentlyContinue) +
+      @(Get-Process -Name 'HoneyNogi*' -ErrorAction SilentlyContinue))) {
     try { [void]$psProc.Handle } catch { }   # 스냅샷 시점 핸들 바인딩 - 이후 Kill 이 PID 재사용본을 잡지 않음 (리뷰 #3)
     $processByPid[[int]$psProc.Id] = $psProc
     $procTitle = [string]$psProc.MainWindowTitle
     $procCmd = [string]$commandLineByPid[[int]$psProc.Id]
     $snapshots += , @{ Id = $psProc.Id; Title = $procTitle; CommandLine = $procCmd }
     # 현재 버전 GUI 가 이미 떠 있는지 (동시 기동 레이스에서 그쪽 워커를 죽이지 않기 위함 - 리뷰 #1/#2)
+    # 임베디드 호스트 GUI 는 명령줄에 gui.ps1 경로가 없고 '--embedded-host' 플래그가 있습니다 (v2.1.4)
     if ([int]$psProc.Id -ne $PID -and $procTitle -eq ('꿀비노기 컨트롤 패널 v' + $appVersion) -and
-        $procCmd.IndexOf($guiScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        ($procCmd.IndexOf($guiScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+         $procCmd.IndexOf('--embedded-host', [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) {
       $currentGuiElsewhere = $true
     }
   }
@@ -1440,7 +1480,7 @@ try {
 if (-not $guiMutexAcquired) {
   [System.Windows.Forms.MessageBox]::Show(
     '컨트롤 패널이 이미 실행 중입니다. 기존 창을 사용해 주세요.' + [Environment]::NewLine +
-    '(기존 창이 안 보이면 작업 관리자에서 powershell.exe 를 확인하세요)',
+    '(기존 창이 안 보이면 작업 관리자에서 powershell.exe 또는 꿀비노기를 확인하세요)',
     '꿀비노기', [System.Windows.Forms.MessageBoxButtons]::OK,
     [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
   try { $script:guiMutex.Dispose() } catch { }
@@ -8129,7 +8169,14 @@ function Start-NextCycle {
   # 프로세스 생성 실패 시 UI 잠금·절전 방지가 복원되지 않던 문제 방어 (2026-08-01 전수 점검:
   # 종료 타이머 조건이 running && worker 라 worker 가 null 이면 자동 복구 경로가 없었음)
   try {
-    $script:worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList $arguments -PassThru
+    if ($script:hostedExePath) {
+      # 임베디드 호스트: 워커도 같은 exe(--run)로 - 작업 관리자에 '꿀비노기'로 표시됩니다.
+      # exe 는 /target:winexe(창 없는 GUI 서브시스템)라 -WindowStyle 이 필요 없습니다.
+      $script:worker = Start-Process -FilePath $script:hostedExePath -ArgumentList @(
+        '--run', ('"' + $workerScript + '"')) -PassThru
+    } else {
+      $script:worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList $arguments -PassThru
+    }
   } catch {
     $script:worker = $null
   }
@@ -8404,7 +8451,7 @@ $timer.Add_Tick({
         }
       } elseif ($exitCode -eq 2) {
         # 다른 인스턴스가 이미 실행 중(뮤텍스 충돌): 이중 조작을 피하기 위해 이 GUI는 멈춥니다
-        Stop-AllRun -IsError '다른 자동화 인스턴스가 이미 실행 중 (중복 실행 방지) - 작업 관리자에서 powershell.exe 를 종료한 뒤 다시 시작해 주세요'
+        Stop-AllRun -IsError '다른 자동화 인스턴스가 이미 실행 중 (중복 실행 방지) - 작업 관리자에서 powershell.exe(또는 꿀비노기)를 종료한 뒤 다시 시작해 주세요'
         $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
       } elseif ($exitCode -eq 3) {
         # 미개발 구간 도달: 구현된 데까지 완료하고 정상 정지 (오류 아님, 상세는 로그 참고)
@@ -8735,7 +8782,7 @@ function Invoke-StartAutomation {
       # 강제 종료된 워커가 키/마우스 '누름-뗌' 사이였을 수 있으므로 입력 상태를 정리합니다
       Release-StuckInput
     }
-    if ($cleanup.Failed -gt 0) { Add-GuiLog "[경고] 기존 자동화 프로세스 $($cleanup.Failed)개를 종료하지 못했습니다 - 새 회차가 '중복 실행'으로 멈추면 작업 관리자에서 powershell.exe 를 직접 종료해 주세요." }
+    if ($cleanup.Failed -gt 0) { Add-GuiLog "[경고] 기존 자동화 프로세스 $($cleanup.Failed)개를 종료하지 못했습니다 - 새 회차가 '중복 실행'으로 멈추면 작업 관리자에서 powershell.exe(또는 꿀비노기)를 직접 종료해 주세요." }
     # 진행 기록을 초기화할 때 무효화하지 **못한** 마커가 있으면 여기서 반드시 소비합니다.
     # 실패를 메모리 플래그로만 들고 있으면 프로그램을 껐다 켜는 순간 사라지고, 그 사이 파일
     # 잠금이 풀리면 옛 마커가 멀쩡한 유효 마커로 되살아납니다. 특히 옛 진행이 1바퀴 0번이면
@@ -9457,6 +9504,10 @@ $hotkeyTimer.Add_Tick({
 
 $script:uiReady = $true
 Add-GuiLog '컨트롤 패널이 준비됐습니다. [시작]을 누르면 반복을 시작합니다.'
+# 임베디드 호스트 시험 모드 표시 (v2.1.4): 시험 중 어떤 모드로 떠 있는지 로그로 확인 가능
+if ($script:hostedExePath) {
+  Add-GuiLog '[안내] 임베디드 호스트 모드로 실행 중 - 작업 관리자에 꿀비노기로 표시됩니다.'
+}
 # 폼 생성 전(구버전 정리)에 모아 둔 안내를 로그로 출력합니다
 foreach ($cleanupLine in @($script:cleanupLogLines)) { Add-GuiLog $cleanupLine }
 # 생활 스킬 아이콘 디코드 실패 경고 (실패해도 글자 카드로 동작 - 리뷰 조건: 조용한 생략 금지)

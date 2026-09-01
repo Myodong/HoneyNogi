@@ -121,8 +121,10 @@ Assert-Case '워커: referenceResolution 1272x717 강제' `
 # ── GUI ──────────────────────────────────────────────────────────────────────
 Assert-Case 'GUI: preparedStreak 은 코드 10 외 전부 초기화' `
   ($guiSource -match 'if \(\$exitCode -ne 10\) \{ \$script:preparedStreak = 0 \}') $true
+# v2.1.4: 워커 스폰이 임베디드 호스트/기존 powershell 2분기가 되어 try 와 스폰 사이에
+# if 분기·주석이 들어옴 - 계약(스폰 실패 → catch null → 복원)은 그대로, 거리만 확장
 Assert-Case 'GUI: Start-Process 실패 시 실행 상태 복원' `
-  ($guiSource -match 'try \{\s+\$script:worker = Start-Process[\s\S]{0,400}?워커 시작 실패') $true
+  ($guiSource -match 'try \{[\s\S]{0,400}?\$script:worker = Start-Process[\s\S]{0,1200}?워커 시작 실패') $true
 Assert-Case 'GUI: Kill 실패 재시도 + 잔존 경고' `
   ($guiSource -match '자동화 프로세스를 종료하지 못했습니다') $true
 Assert-Case 'GUI: 임시/백업 청소 실패는 저장 실패 아님' `
@@ -265,8 +267,10 @@ Assert-Case 'GUI: [완료] 사유 수집 3곳(기본/복구/최종 폴링)' `
   ([regex]::Matches($guiSource, "match '\\\[완료\\\]\\s\*\(\.\+\)'").Count) 3
 Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백(생활 분기 선행)' `
   ($guiSource -match '\$code4Reason = "조건 정지: \$code4Reason"[\s\S]{0,400}elseif \(\$script:mainCategory -eq ''life''\)[\s\S]{0,400}elseif \(\$rbCatDeep\.Checked\)') $true
+# v2.1.4: 계약은 '사유 초기화가 워커 스폰보다 앞' - 스폰 앵커를 powershell 고정 문자열에서
+# 첫 스폰($script:worker = Start-Process)으로 바꿈 (임베디드 분기가 먼저 와도 성립)
 Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
-  ($guiSource -match '\$script:lastWorkerDoneReason = ''''[\s\S]{0,400}Start-Process -FilePath ''powershell\.exe''') $true
+  ($guiSource -match '\$script:lastWorkerDoneReason = ''''[\s\S]{0,900}?\$script:worker = Start-Process') $true
 
 # ── v1.2.1: 오클릭 사고(08-02 22:02 - 커서 간섭 클릭이 재화줄을 눌러 화면 가림) ──
 # ★ 앵커를 **로그 문구에서 코드 구조로** 격상했습니다 (2026-08-10). 원래는 경고 문구
