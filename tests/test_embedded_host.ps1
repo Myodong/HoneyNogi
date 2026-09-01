@@ -74,11 +74,17 @@ Assert-Case '호스트: SetShouldExit 는 저장만(즉시 Environment.Exit 금�
   ($launcherCode.Contains('Environment.Exit')) 'False'
 Assert-Case '호스트: RawUI WindowTitle setter(워커 1974행 제목 설정)' `
   ($launcherText -match 'public override string WindowTitle \{ get [^\r\n]+ set \{') $true
-Assert-Case '호스트: --embedded-host / --run 모드' `
-  ($launcherText.Contains('"--embedded-host"') -and $launcherText.Contains('"--run"')) 'True'
+# --embedded-host 인자는 별도 비교 없이 '레거시가 아닌 모든 인자 = 임베디드' 설계로 흡수
+# (시험 기간 바로가기 하위 호환 - 기본 전환 단언이 그 계약을 지킴)
+Assert-Case '호스트: --run 모드 존재' ($launcherText.Contains('"--run"')) 'True'
 Assert-Case '호스트: --run 오류 팝업 금지(무인 운용 - showErrorPopup false)' `
   ($launcherText -match '"--run"[\s\S]{0,400}?RunHostedScript\([^\r\n]+,\s*false\)') $true
-Assert-Case '호스트: 기본 모드 powershell 스폰 보존(1단계 옵트인 계약)' `
+# 2026-09-01 사용자 확정: 더블클릭 기본이 임베디드 (옵트인 시험 졸업). 레거시 powershell
+# 스폰은 --legacy-powershell 폴백으로만 남습니다 - 폴백이 사라지면 탈출구가 없어집니다.
+Assert-Case '호스트: 기본 = 임베디드(레거시 인자만 예외)' `
+  ($launcherCode.Contains('bool embeddedGui = !legacyGui;') -and
+   $launcherText.Contains('"--legacy-powershell"')) 'True'
+Assert-Case '호스트: 레거시 폴백 powershell 스폰 보존(탈출구)' `
   ($launcherText.Contains('System32\WindowsPowerShell\v1.0\powershell.exe')) 'True'
 # 2026-09-01 실측: API(Invoke) 경로에서는 exit 가 SetShouldExit 를 부르지 않고 런스페이스
 # 전역 $LASTEXITCODE 에만 남습니다. 이 회수가 빠지면 워커 코드 0/4/10 분기가 전부 0 이 되어
