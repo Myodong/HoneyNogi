@@ -64,9 +64,14 @@ Assert-Case '정리: Select-OldGuiProcesses 호스트 분기' `
 # ---- 5. launcher.cs 설계 합의 앵커 ----
 Assert-Case '호스트: 실행 정책 Bypass 명시(기본 Restricted 실측)' `
   ($launcherText.Contains('ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass')) 'True'
-Assert-Case '호스트: 파일 명령 실행(AddCommand - $PSScriptRoot 보존)' `
-  ($launcherText.Contains('ps.AddCommand(scriptPath)')) 'True'
-Assert-Case '호스트: AddScript 금지($PSScriptRoot 파괴)' ($launcherCode.Contains('AddScript(')) 'False'
+# 2026-09-01 실사용 고장(v2.1.4): AddCommand(경로) 실행은 스크립트 함수를 새 스크립트
+# 스코프에 가둬, GUI 셀 편집의 GetNewClosure 클로저 delegate 가 Invoke-CellEditApply 를
+# CommandNotFound 로 못 찾았다. -File 과 같은 실행 의미(함수 글로벌 정의)는 **글로벌
+# dot-source**(". '경로'") 뿐 - 아래 실행형 진리표가 그 기전을 영구 재현한다.
+Assert-Case '호스트: 글로벌 dot-source 실행(". 경로" - 함수 글로벌 정의)' `
+  ($launcherCode.Contains('ps.AddScript(". ''" + scriptPath.Replace("''", "''''") + "''")')) 'True'
+Assert-Case '호스트: AddCommand(경로) 실행 금지(스코프 격리 - 셀 편집 고장 기전)' `
+  ($launcherCode.Contains('ps.AddCommand(scriptPath)')) 'False'
 Assert-Case '호스트: STA + 현재 스레드(WinForms/WinRT OCR)' `
   ($launcherText.Contains('ApartmentState = ApartmentState.STA') -and
    $launcherText.Contains('ThreadOptions = PSThreadOptions.UseCurrentThread')) 'True'
@@ -103,6 +108,46 @@ Assert-Case '빌드: AssemblyTitle 꿀비노기(작업 관리자 표시명)' `
 # ---- 7. 워커 [설정] 호스트 표기 ----
 Assert-Case '워커: [설정] 줄에 호스트 구분 표기' `
   ($workerText.Contains('$hostModeInfo') -and $workerText.Contains('v$appVersionInfo($hostModeInfo)')) 'True'
+
+# ---- 8. 실행형 재현: GetNewClosure delegate 함수 조회 (2026-09-01 v2.1.4 실사용 고장) ----
+# GUI 셀 편집(gui.ps1 3085/5597)은 GetNewClosure 클로저를 [Action] delegate 로 실행한다.
+# 클로저는 새 동적 모듈에 묶여 함수 조회가 '자기 모듈 → 글로벌 폴백'뿐이므로, 러너가
+# 스크립트를 AddCommand(새 스크립트 스코프)로 실행하면 함수를 못 찾아 CommandNotFound.
+# 글로벌 dot-source 만 -File 과 같은 의미(함수 글로벌 정의)다. 앵커가 아니라 **실제 실행**
+# 으로 두 방식을 재현해 계약을 고정한다 (임시 러너는 기본 runspace - 호스트 구현과 무관한
+# 스코프 기전 자체의 진리표).
+$reproDir = Join-Path ([IO.Path]::GetTempPath()) ('honeynogi_host_repro_' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $reproDir | Out-Null
+$reproScript = Join-Path $reproDir 'closure_probe.ps1'
+@'
+function Test-EmbeddedHostReproTarget { return 'found' }
+$probe = 'not-run'
+try {
+    $action = [Action]({ $global:embeddedHostRepro = (Test-EmbeddedHostReproTarget) }.GetNewClosure())
+    $action.Invoke()
+    $probe = [string]$global:embeddedHostRepro
+} catch { $probe = 'EX:' + $_.Exception.GetType().Name }
+Set-Content -LiteralPath (Join-Path $PSScriptRoot 'closure_result.txt') -Value $probe -Encoding UTF8
+'@ | Set-Content -LiteralPath $reproScript -Encoding UTF8
+$reproResult = Join-Path $reproDir 'closure_result.txt'
+function Invoke-HostReproRunner {
+  param([string]$Mode)
+  Remove-Item -LiteralPath $reproResult -ErrorAction SilentlyContinue
+  $reproRunspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+  $reproRunspace.Open()
+  $reproPs = [System.Management.Automation.PowerShell]::Create()
+  $reproPs.Runspace = $reproRunspace
+  if ($Mode -eq 'dot') { $null = $reproPs.AddScript(". '" + $reproScript.Replace("'", "''") + "'").AddCommand('Out-Null') }
+  else { $null = $reproPs.AddCommand($reproScript).AddCommand('Out-Null') }
+  try { $null = $reproPs.Invoke() } catch { }
+  $reproPs.Dispose(); $reproRunspace.Dispose()
+  if (Test-Path -LiteralPath $reproResult) { return ([IO.File]::ReadAllText($reproResult)).Trim() }
+  return '(no result)'
+}
+Assert-Case '재현: dot-source 러너는 클로저 delegate 가 함수를 찾는다' (Invoke-HostReproRunner -Mode 'dot') 'found'
+Assert-Case '재현: AddCommand 러너는 CommandNotFound (금지 근거 - 셀 편집 고장 기전)' `
+  ((Invoke-HostReproRunner -Mode 'cmd') -like 'EX:*') 'True'
+Remove-Item -Recurse -Force $reproDir -ErrorAction SilentlyContinue
 
 if ($fails -gt 0) { Write-Output "FAIL 합계: $fails"; exit 1 }
 Write-Output '전체 통과'
