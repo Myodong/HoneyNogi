@@ -90,9 +90,10 @@ Assert-Case '배선: 전환 직후 역방향 생략 2곳(던전/사냥터)' `
    # Set-DgToggleCard 의 $true 는 클릭 후 판독 실패('재확인 생략')일 때도 나오므로,
    # Ok 만으로 생략하면 검증 없이 넘어가는 셈이었습니다.
    ([regex]::Matches($workerSource, 'if \(\$coinToggleClicked -and \$coinToggleOk -and \$coinToggleRechecked\)').Count -eq 2)) $true
-Assert-Case '배선: 역방향 루프 팝업 대기 2곳(던전/사냥터, 시도 미계상)' `
+# v2.1.6 +1: 던전 해제 확인 루프의 사용자 양보 미계상(2026-09-07)이 $offTry-- 1곳 추가
+Assert-Case '배선: 역방향 루프 팝업 대기 2곳(던전/사냥터, 시도 미계상 - 양보 포함 3곳)' `
   (([regex]::Matches($workerSource, '\$imeOffWaitTotal -ge 40').Count -eq 2) -and
-   ([regex]::Matches($workerSource, '\$offTry--').Count -eq 2)) $true
+   ([regex]::Matches($workerSource, '\$offTry--').Count -eq 3)) $true
 Assert-Case '배선: 역방향 트리거 팝업 건너뜀 안내 2곳' `
   ([regex]::Matches($workerSource, '소모량 역방향 확인을 건너뜁니다').Count -eq 2) $true
 

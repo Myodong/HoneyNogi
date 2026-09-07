@@ -457,11 +457,14 @@ Assert-Case '배선(워커): 미사용 역방향 해제 = 상태 기반 1회 + �
 # 표시 잔존은 경고 진행, 카드 미확인일 때만 정지 유지 (던전+사냥터 2곳, 리뷰 승인)
 # 2026-08-09 리뷰: 이 '확정 판독'이 소모량 잔상을 이기는 근거이므로, 반환 $true 만으로는
 # 부족하고 상태를 실제로 재판독($script:dgToggleRechecked)했어야 합니다.
-Assert-Case '배선(워커): 역방향 카드 확인 우선 계약(잔상 허용) 2곳' `
-  (([regex]::Matches($workerSource, '\$offCardConfirmed = \(\[bool\]\(Set-DgToggleCard').Count -eq 2) -and
+# v2.1.6 +1: 소탕 해제 폴백의 양보 후 증거 재확보(2026-09-07)가 offCardConfirmed 대입을
+# 1곳 추가 - 확정 판독 계약(rechecked 동시 요구)은 세 곳 모두 동일. elseif 잔상 분기는
+# 던전/사냥터 2곳 그대로.
+Assert-Case '배선(워커): 역방향 카드 확인 우선 계약(잔상 허용) 3곳' `
+  (([regex]::Matches($workerSource, '\$offCardConfirmed = \(\[bool\]\(Set-DgToggleCard').Count -eq 3) -and
    ([regex]::Matches($workerSource, 'elseif \(\$offCardConfirmed\)').Count -eq 2)) $true
-Assert-Case '배선(워커): 역방향 확정 판독이 Rechecked 를 요구 2곳' `
-  ([regex]::Matches($workerSource, "Label '?[^\r\n]*'?\)\s*-and\r?\n\s*\`$script:dgToggleRechecked\)").Count) 2
+Assert-Case '배선(워커): 역방향 확정 판독이 Rechecked 를 요구 3곳' `
+  ([regex]::Matches($workerSource, "Label '?[^\r\n]*'?\)\s*-and\r?\n\s*\`$script:dgToggleRechecked\)").Count) 3
 # 2026-07-28 23:56 실기: 옵션 확정은 선확인 5회 + 클릭 후 재클릭 없는 수동 확인(2초x3) +
 # 최종 재클릭 1회 계약 (재클릭마다 연출이 다시 시작되는 자기 방해 방지 - 리뷰 계약)
 Assert-Case '배선(워커): 옵션 확정 수동 확인 계약(선확인 5회/수동 3회/최종 재클릭 1회)' `

@@ -137,12 +137,21 @@ Check-Equal '워커의 회차별 커스텀 매칭 안내 제거' `
 # 2026-07-28 심층던전 추가: 시작 태그가 모드 변수([던전]/[심층] = $script:contentTag)로 바뀜
 Check-Equal '던전 시작 로그는 간결한 항목 라벨과 매칭만 표시' `
   ($workerRaw.Contains('Write-RunLog "$($script:contentTag) 자동화 시작: $(Format-CustomItemLabel -Item $dungeonRunItem), 매칭 ''$ndMatching''"')) $true
+# v2.1.6 태그 동적화 전수 가드: Write-RunLog 의 '[던전]' 리터럴 태그는 0곳이어야 한다
+# (공용 흐름 76곳 일괄 전환 - 새 로그가 리터럴로 들어오면 심층 회차에 [던전]으로 찍히는
+# 회귀. LogTag 기본값·태그 판정식·contentTag 대입은 Write-RunLog 가 아니라 안 걸림)
+Check-Equal '워커: Write-RunLog [던전] 리터럴 잔존 0곳' `
+  ([regex]::Matches($workerRaw, 'Write-RunLog\s+["'']\[던전\]').Count) 0
+# LogTag/LogPrefix 파라미터로 리터럴이 재유입되는 변이도 차단 (Codex 지적 - 위 가드의 사각)
+Check-Equal '워커: -LogTag/-LogPrefix [던전] 리터럴 잔존 0곳' `
+  ([regex]::Matches($workerRaw, "-Log(Tag|Prefix)\s+'\[던전\]").Count) 0
+# v2.1.6 태그 동적화: 아래 3곳도 [던전] 리터럴 → $script:contentTag (심층 [심층] 교정)
 Check-Equal '던전 선택 로그는 스테이지 대신 구역으로 표시' `
-  ($workerRaw.Contains('Write-RunLog "[던전] 구역 $ndStage 선택 확인 (진입 버튼: ${stageFloor}층 ${stageArea}구역 진입)"')) $true
+  ($workerRaw.Contains('Write-RunLog "$($script:contentTag) 구역 $ndStage 선택 확인 (진입 버튼: ${stageFloor}층 ${stageArea}구역 진입)"')) $true
 Check-Equal '던전 공물 소모량 확인 로그 간소화' `
-  ($workerRaw.Contains('Write-RunLog "[던전] 공물 소모량 ${actualCost}개 확인"')) $true
+  ($workerRaw.Contains('Write-RunLog "$($script:contentTag) 공물 소모량 ${actualCost}개 확인"')) $true
 Check-Equal '던전 우연한 만남 토글 끔 로그 간소화' `
-  ($workerRaw.Contains('Write-RunLog "[던전] ''우연한 만남'' 토글 끔"')) $true
+  ($workerRaw.Contains('Write-RunLog "$($script:contentTag) ''우연한 만남'' 토글 끔"')) $true
 Check-Equal '원본 로그에서도 콘텐츠 단계 번호 제거' `
   ([regex]::Matches($workerRaw, '\[(?:던전|사냥터|어비스|파티원)\]\s*\d+\.').Count) 0
 
@@ -182,6 +191,22 @@ Check-Equal 'GUI: 비커스텀 워커 회차 완료 내용 유지' `
   '10:00:00 [던전] 다시 하기 → 옵션 화면 복귀 - 회차 완료'
 Check-Equal 'GUI: 커스텀 복구 세부 로그 숨김' `
   (Convert-WorkerLogLineForGui '10:00:00 [커스텀] 1바퀴째 1/5번 완료 항목 마무리 복구 - 어려움 1-2' $true) $null
+
+# ── v2.1.6 태그 동적화 (2026-09-07): 심층 회차가 공용 흐름에서 [심층] 태그로 찍히게 되어
+# GUI 생략/요약 필터도 두 태그를 받는다 - 요약 반환은 매치된 태그를 그대로 따라야 한다 ──
+Check-Equal 'GUI: 심층 - 클리어 동작을 완료 요약으로 변환(태그 보존)' `
+  (Convert-WorkerLogLineForGui '10:00:00 [심층] 던전 클리어 - 화면 터치' $true) `
+  '10:00:00 [심층] 클리어 완료'
+Check-Equal 'GUI: 심층 - 결과 화면 상세를 확인 요약으로 변환(태그 보존)' `
+  (Convert-WorkerLogLineForGui '10:00:00 [심층] 결과 화면 확인 (나가기 / 다시 하기)' $true) `
+  '10:00:00 [심층] 결과 화면 확인'
+Check-Equal 'GUI: 심층 - 마족공물 카드 설정 성공 로그 숨김' `
+  (Convert-WorkerLogLineForGui '10:00:00 [심층] 마족공물(소탕) = 미사용(도전) 확인' $true) $null
+Check-Equal 'GUI: 심층 - 입장하기 클릭 숨김' `
+  (Convert-WorkerLogLineForGui '10:00:00 [심층] 입장하기 클릭' $true) $null
+Check-Equal 'GUI: 심층 - 비커스텀 회차 완료 내용 유지' `
+  (Convert-WorkerLogLineForGui '10:00:00 [심층] 다시 하기 → 옵션 화면 복귀 - 회차 완료' $false) `
+  '10:00:00 [심층] 다시 하기 → 옵션 화면 복귀 - 회차 완료'
 
 # ── 진단 꼬리 제거 (2026-08-11 사용자 요청) - 파일 원본은 그대로, 화면 표시에서만 지움 ──
 # 아래는 전부 당일 실사용/실측 로그의 원문입니다 (재현 가능한 자산)

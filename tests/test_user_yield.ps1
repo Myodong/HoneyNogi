@@ -50,8 +50,10 @@ Assert-Case '배선: 양보 시작/재개 안내 로그' `
    ($workerText.Contains('사용자 조작이 끝나 자동화를 재개합니다 (양보 {0}초)'))) 'True'
 # 클릭 취소 게이트: 조작 중에는 기다리지 않고 이번 클릭을 버림 (Codex 조건 - 판독과 클릭
 # 사이에 화면이 바뀌었을 수 있어 옛 좌표 클릭 금지. lastClickPerformed=false 계약 재사용)
+# v2.1.6: false 초기화와 게이트 사이에 생략 원인 메타 초기화($lastClickSkipReason = '')가
+# 끼어듦 - 주석과 그 초기화 줄만 허용 (계약 = 게이트가 초기화 직후라는 순서 불변)
 Assert-Case '배선: Click-ScreenPoint 사용자 조작 취소 게이트 (lastClickPerformed=false 직후)' `
-  ([bool]($workerText -match '\$script:lastClickPerformed = \$false\r?\n(?:\s*#[^\r\n]*\r?\n)*\s+if \(Test-UserRecentlyActive\) \{')) 'True'
+  ([bool]($workerText -match "\`$script:lastClickPerformed = \`$false\r?\n(?:\s*(?:#[^\r\n]*|\`$script:lastClickSkipReason = '')\r?\n)*\s+if \(Test-UserRecentlyActive\) \{")) 'True'
 Assert-Case '배선: 생활 드래그도 사용자 조작 취소 게이트' `
   ($workerText.Contains('목록 스크롤: 사용자 마우스 조작 감지로 건너뜀')) 'True'
 

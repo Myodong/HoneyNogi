@@ -243,7 +243,7 @@ $script:esRelease   = [uint32]2147483648   # 0x80000000 (ES_CONTINUOUS only)
 # 앱 버전 (단일 관리 지점): 여기만 올리면 GUI 제목·로그·exe 파일 속성(빌드 시 자동 추출)에
 # 모두 반영됩니다. 파일명은 HoneyNogi.exe 로 고정 - 업데이트는 늘 '덮어쓰기 한 번'.
 # ※ 좌표 버전(coordsVersion)과는 별개입니다 (그쪽은 화면 좌표 변경 시에만 올림)
-$appVersion = '2.1.5'
+$appVersion = '2.1.6'
 
 $scriptRoot = $PSScriptRoot
 $configPath = Join-Path $scriptRoot 'config.json'
@@ -704,25 +704,27 @@ function Convert-WorkerLogLineForGui {
 
   # 정상 적용 성공은 시작 요약과 최종 검증 로그로 충분합니다. 실패/경고는 이 패턴에 걸리지 않아
   # 그대로 표시됩니다.
-  if ($Line -match "\[던전\]\s*'우연한 만남'\s*토글\s*(켬|켜짐 확인)" -or
-      $Line -match '\[던전\].*난이도.*(재?클릭|추가 클릭 생략)' -or
-      $Line -match '\[던전\]\s*(은동전\(소탕\)|더블 루팅)\s*=' -or
-      $Line -match '\[던전\]\s*입장하기 클릭') {
+  # v2.1.6 태그 동적화: 심층 회차가 공용 흐름에서 [심층] 태그로 찍히게 되어(사용자 지적 -
+  # 기존엔 [던전] 하드코딩), 이 생략/요약 필터도 두 태그를 함께 받습니다. 문구는 불변.
+  if ($Line -match "\[(?:던전|심층)\]\s*'우연한 만남'\s*토글\s*(켬|켜짐 확인)" -or
+      $Line -match '\[(?:던전|심층)\].*난이도.*(재?클릭|추가 클릭 생략)' -or
+      $Line -match '\[(?:던전|심층)\]\s*(은동전\(소탕\)|마족공물\(소탕\)|더블 루팅)\s*=' -or
+      $Line -match '\[(?:던전|심층)\]\s*입장하기 클릭') {
     return $null
   }
 
   # 클리어 과정의 세부 단계는 파일에 남기고 GUI에서는 성공 요약 두 줄로 통합합니다.
   $timePrefix = ''
   if ($Line -match '^(\d{2}:\d{2}:\d{2}\s+)') { $timePrefix = $Matches[1] }
-  if ($Line -match '\[던전\]\s*(던전 클리어 - 화면 터치|클리어 화면을 이미 지나친 상태)') { return "${timePrefix}[던전] 클리어 완료" }
-  if ($Line -match '\[던전\]\s*결과 화면 확인') { return "${timePrefix}[던전] 결과 화면 확인" }
-  if ($Line -match '\[던전\]\s*던전 클리어 화면 감지 대기 시작|\[던전\]\s*클리어 문구\(화면을 터치\) 감지|\[던전\]\s*결과 화면 감지 \(클리어 화면이 이미 지나감\)|\[던전\]\s*결과 화면 대기') {
+  if ($Line -match '(\[(?:던전|심층)\])\s*(던전 클리어 - 화면 터치|클리어 화면을 이미 지나친 상태)') { return "${timePrefix}$($Matches[1]) 클리어 완료" }
+  if ($Line -match '(\[(?:던전|심층)\])\s*결과 화면 확인') { return "${timePrefix}$($Matches[1]) 결과 화면 확인" }
+  if ($Line -match '\[(?:던전|심층)\]\s*던전 클리어 화면 감지 대기 시작|\[(?:던전|심층)\]\s*클리어 문구\(화면을 터치\) 감지|\[(?:던전|심층)\]\s*결과 화면 감지 \(클리어 화면이 이미 지나감\)|\[(?:던전|심층)\]\s*결과 화면 대기') {
     return $null
   }
 
   if ($CustomActive -and
       ($Line -match '\[커스텀\]\s*완료 마커 기록' -or
-       $Line -match '\[던전\]\s*다시 하기 → 옵션 화면 복귀 - 회차 완료' -or
+       $Line -match '\[(?:던전|심층)\]\s*다시 하기 → 옵션 화면 복귀 - 회차 완료' -or
        $Line -match '\[커스텀\]\s*다음 층 화면 전환 확인 - 회차 완료' -or
        $Line -match '\[커스텀\].*완료 항목 마무리 복구\s*-' -or
        $Line -match '\[커스텀\]\s*마무리 목표 화면이')) {

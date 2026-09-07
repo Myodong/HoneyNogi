@@ -113,8 +113,9 @@ Assert-Case '배선: 옵션 대기의 던전 내부 감지 (트래커 층·구�
    ($workerText -match '\$insideStreak -ge 2')) 'True'
 Assert-Case '배선: 캡처 실패 표본은 연속 초기화' `
   ([bool]($workerText -match '\} else \{\r?\n\s+\$insideStreak = 0\r?\n\s+\}\r?\n\s+\} else \{\r?\n\s+\$insideStreak = 0')) 'True'
+# v2.1.6 태그 동적화: LogPrefix 가 리터럴 '[던전]'에서 $script:contentTag 로 (심층 [심층] 교정)
 Assert-Case '배선: 커스텀 재진입 (AfterEntryKeys + insideAlready 재진입 + continue)' `
-  ([bool]($workerText -match "Invoke-AfterEntryKeys -Game \`$Game -LogPrefix '\[던전\]'\r?\n\s+\`$onResultScreen = \`$false\r?\n\s+\`$insideAlready = \`$true\r?\n\s+\`$reenteredInside = \`$false\r?\n\s+continue dgClearCycle")) 'True'
+  ([bool]($workerText -match "Invoke-AfterEntryKeys -Game \`$Game -LogPrefix \`$script:contentTag\r?\n\s+\`$onResultScreen = \`$false\r?\n\s+\`$insideAlready = \`$true\r?\n\s+\`$reenteredInside = \`$false\r?\n\s+continue dgClearCycle")) 'True'
 Assert-Case '배선: 비커스텀은 회차 완료 처리 후 루프 종료' `
   ([bool]($workerText -match '회차를 완료로 처리합니다[^\r\n]*\r?\n\s+break dgClearCycle')) 'True'
 Assert-Case '배선: 옵션 대기 타임아웃 오류는 유지 (fail-closed)' `
@@ -124,7 +125,7 @@ Assert-Case '배선: 마무리 복구 완화 - 같은 구역 재판독 2연속 +
    ($workerText -match '\$recoveryStageOk = \(-not \$script:screenCaptureFailing\) -and \(Test-DgQuestStageMatch -QuestText \$recoveryRecheck -Stage \$ndStage\)') -and
    ($workerText.Contains("throw '완료 항목 마무리 복구 중 던전 내부 화면이 감지됐습니다 - 항목을 다시 실행하지 않고 안전하게 중단합니다.'"))) 'True'
 Assert-Case '배선: 재입장 회차의 완료 로그는 옵션 복귀 문구를 쓰지 않음' `
-  ([bool]($workerText -match 'if \(-not \$reenteredInside\) \{\r?\n\s+Write-RunLog ''\[던전\] 다시 하기 → 옵션 화면 복귀 - 회차 완료''')) 'True'
+  ([bool]($workerText -match 'if \(-not \$reenteredInside\) \{\r?\n\s+Write-RunLog "\$\(\$script:contentTag\) 다시 하기 → 옵션 화면 복귀 - 회차 완료"')) 'True'
 # 타 PC 제보(06:02): 주간 리셋 '새로운 한 주' 팝업이 팝업 스윕에 빠져 있어 입장 로딩 대기
 # 45초 초과 + 재시작 시작 판정 오판(결과 화면 오인 - 완료 마커 오기록). 스윕에 게이트 추가 -
 # 협동 전체 창 처리 뒤, 이미 읽은 하단 문구로 게이트 (평상시 추가 판독 없음)

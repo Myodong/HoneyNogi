@@ -114,8 +114,9 @@ Assert-Case '문구: 경고가 갱신된 streak 를 쓴다' `
 Assert-Case '문구: 회복이 초기화 전 streak 를 쓴다' `
   ([bool]($clickCode -match '정상으로 돌아왔습니다 \(연속 \$\{cursorStreakBefore\}회')) 'True'
 # 안전 게이트 자체는 그대로여야 합니다 - 커서 미확인이면 클릭을 쏘지 않습니다
+# v2.1.6 양보 확장: 반환 직전에 생략 원인 메타 기록 추가 (계약 = mouse_event 전 반환 불변)
 Assert-Case '안전: 커서 미확인이면 mouse_event 전에 반환' `
-  ([bool]($clickCode -match '(?s)if \(-not \$cursorReady\) \{ return \}.*mouse_event')) 'True'
+  ([bool]($clickCode -match "(?s)if \(-not \`$cursorReady\) \{ \`$script:lastClickSkipReason = 'cursor-not-ready'; return \}.*mouse_event")) 'True'
 Assert-Case '안전: 성공 표시는 mouse_event 뒤에만' `
   ([bool]($clickCode -match 'mouse_event\(0x0004[\s\S]{0,120}\$script:lastClickPerformed = \$true')) 'True'
 Assert-Case '배선: streak 초기 상태가 선언돼 있다' `

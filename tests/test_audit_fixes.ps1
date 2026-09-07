@@ -278,8 +278,9 @@ Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
 #   2단계로 바꾸자 이 단언이 깨졌습니다. 이 단언이 지키려는 것은 문구가 아니라 **안전 게이트**
 #   (커서를 확인 못 하면 클릭을 쏘지 않는다)이므로, 문구가 어떻게 바뀌든 살아남게 고칩니다.
 #   판정 → 게이트 → mouse_event 순서가 유지되는지를 봅니다.
+# v2.1.6 양보 확장: 반환 직전에 생략 원인 메타('cursor-not-ready') 기록이 계약에 추가됨
 Assert-Case '워커: 커서 미확인 시 클릭 건너뜀(강행 제거)' `
-  ($workerSource -match 'Get-CursorClickWarnAction[\s\S]{0,1500}if \(-not \$cursorReady\) \{ return \}[\s\S]{0,300}mouse_event\(0x0002') $true
+  ($workerSource -match "Get-CursorClickWarnAction[\s\S]{0,1500}if \(-not \`$cursorReady\) \{ \`$script:lastClickSkipReason = 'cursor-not-ready'; return \}[\s\S]{0,300}mouse_event\(0x0002") $true
 Assert-Case '워커: 보유한 재화 화면 감지 조각(유한/보유+재화)' `
   ($workerSource -match "Contains\('보유'\) -or \`$ccTitle\.Contains\('유한'\)\) -and \`$ccTitle\.Contains\('재화'\)") $true
 Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 대기)' `
@@ -288,8 +289,11 @@ Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 �
 # ── v1.2.1: 월요일 6시 주간 리셋 팝업이 복귀 대기를 막던 사고(08-03 06:02) ─────────
 Assert-Case '워커: 주간 리셋 팝업 소함수 추출' `
   ($workerSource -match 'function Close-WeeklyCoopResetPopup[\s\S]{0,900}협동[\s\S]{0,300}참여') $true
-Assert-Case '워커: 복귀 대기 2곳+다음 층 대기+생활 사이클 3곳에 주간 리셋 팝업 배선' `
-  ([regex]::Matches($workerSource, "if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[").Count) 6
+# v2.1.6 태그 동적화: 던전/심층 공용 흐름의 배선 2곳(복귀 대기·다음 층 대기)이 리터럴
+# '[던전] '에서 동적 태그로 바뀌어 아래 두 카운트로 분해 (합계 = 기존 6곳 계약과 동일 +
+# 클리어/결과 대기 2곳은 별도 단언). 리터럴 잔존 = 사냥터 1 + 생활 사이클 3.
+Assert-Case '워커: 주간 리셋 팝업 배선 - 리터럴 태그 4곳(사냥터1+생활3)' `
+  ([regex]::Matches($workerSource, "if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[").Count) 4
 Assert-Case '워커: 복귀 대기 공지 팝업 닫기 2곳' `
   ([regex]::Matches($workerSource, '공지 게시판 팝업 감지 - X로 닫기 \(복귀 대기 중\)').Count) 2
 Assert-Case '워커: 이벤트 스킵이 소함수 호출로 치환' `
@@ -323,11 +327,14 @@ Assert-Case '워커: 협동 창 닫기 - 이벤트 스킵 선두 배선' `
 # 배선 ③④: 클리어 대기 + 결과 대기 (주간 리셋 팝업과 협동 창 각 2곳)
 Assert-Case '워커: 협동 창 닫기 - 클리어/결과 대기 배선 2곳' `
   ([regex]::Matches($workerSource, 'if \(Close-CoopMissionBoardScreen -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}').Count) 2
-Assert-Case '워커: 주간 리셋 팝업 - 클리어/결과 대기 배선 2곳' `
-  ([regex]::Matches($workerSource, 'if \(Close-WeeklyCoopResetPopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}').Count) 2
+# v2.1.6 태그 동적화로 4곳 = 클리어/결과 대기 2 + 복귀 대기 1 + 다음 층 대기 1
+Assert-Case '워커: 주간 리셋 팝업 - 동적 태그 배선 4곳(클리어·결과2+복귀+다음층)' `
+  ([regex]::Matches($workerSource, 'if \(Close-WeeklyCoopResetPopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}').Count) 4
 # 배선 ⑤: '다음 층으로' 전환 대기 - 복귀 대기와 같은 블로커 계약 (스윕+주간 리셋)
 Assert-Case '워커: 다음 층 대기 - 스윕+주간 리셋 배선(재클릭 판정 앞)' `
-  ($workerSource -match "if \(Invoke-PurchasePopupSweep -Game \`$Game\) \{ continue \}\s+if \(Close-WeeklyCoopResetPopup -Game \`$Game -LogPrefix '\[던전\] '\) \{ continue \}\s+\`$floorAgainPoint = Find-DgNextFloorButtonPoint") $true
+  ($workerSource -match ('if \(Invoke-PurchasePopupSweep -Game \$Game\) \{ continue \}\s+' +
+    'if \(Close-WeeklyCoopResetPopup -Game \$Game -LogPrefix "\$\(\$script:contentTag\) "\) \{ continue \}\s+' +
+    '\$floorAgainPoint = Find-DgNextFloorButtonPoint')) $true
 
 # ── v2.0.0: 대분류(전투/생활) GUI 단계 (2026-08-05 시안 확정, 리뷰 조건 A~G) ─────────
 # 시작 이중 차단 (조건 D): 버튼 핸들러 서두 + 승인 비동기 콜백 경유(Invoke-StartAutomation) 서두
@@ -669,8 +676,9 @@ Assert-Case 'v10: dgCoinButtonAlt 워커 기본값 일치' `
 Assert-Case 'v10: dgLootButtonAlt 워커 기본값 일치' `
   ($workerSource -match "'dgLootButtonAlt'\) @\(388, 448, 205, 95\)") $true
 # 자기앵커 배선: 던전 호출부 6곳만 스위치 사용, 사냥터 4곳은 기존 고정점 동작 유지
-Assert-Case 'v10: -AnchorClickToText 던전 호출부 6곳' `
-  ([regex]::Matches($workerSource, 'Set-DgToggleCard[^\r\n]*-AnchorClickToText').Count) 6
+# v2.1.6 +1: 소탕 해제 폴백의 양보 후 증거 재확보 재호출 (2026-09-07)
+Assert-Case 'v10: -AnchorClickToText 던전 호출부 7곳' `
+  ([regex]::Matches($workerSource, 'Set-DgToggleCard[^\r\n]*-AnchorClickToText').Count) 7
 Assert-Case 'v10: 사냥터 호출부는 자기앵커 미사용 (Ht 영역 + 스위치 없음)' `
   ([regex]::Matches($workerSource, 'Set-DgToggleCard[^\r\n]*rgHt[^\r\n]*-AnchorClickToText').Count) 0
 # 소모량 정정 1회 클릭: 고정점 블라인드 클릭 제거, 스냅샷 좌표만 사용
