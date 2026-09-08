@@ -1866,6 +1866,9 @@ $script:lastSelfInputTick = [uint32]0   # 시작 직후 관측되는 dwTime(시�
 $script:lastUserInputTick = [uint32]0   # 마지막으로 확인된 '사용자' 입력 tick (0 = 아직 관측 없음)
 $script:lastYieldClickNoticeTick = [uint32]0   # 클릭 취소 안내 5초 스로틀
 $script:lastUserInputKind = ''       # 마지막 사용자 입력 종류 추정 ('마우스 이동' / '키/버튼 입력') - 로그 표기용
+$script:userInputConfirmedTick = [uint32]0   # 지속 확인을 통과한 마지막 사용자 입력 tick (Test-UserRecentlyActive)
+$script:inputDiagNoticeTick = [uint32]0      # 입력 판정 진단 로그 10초 스로틀 (Write-UserInputDiag)
+$script:lastAbsorbedInputTick = [uint32]0    # 흡수된 관측 tick - 같은 dwTime 재후보 방지 (주입 시각과 분리, Codex P1)
 $script:lastObservedCursor = $null   # 입력 종류 추정의 커서 기준점 (Update-ObservedCursor)
 # 누적 양보 시간(ms) - 시간 상한 루프(Invoke-ClickUntil 등)가 자기 기준값과의 차만큼 마감을
 # 늘리는 데 씁니다 (2026-09-08 - Codex: 반환값 대신 누적 변수, 정수 초 변환은 오차 누적이라 ms).
@@ -2329,7 +2332,11 @@ function Update-UserInputObservation {
   $observedInfo = New-Object HoneyNogiInput+LASTINPUTINFO
   $observedInfo.cbSize = [uint32][System.Runtime.InteropServices.Marshal]::SizeOf($observedInfo)
   if (-not [HoneyNogiInput]::GetLastInputInfo([ref]$observedInfo)) { return }
-  if ((Get-TickDeltaMilliseconds -From $script:lastSelfInputTick -To ([uint32]$observedInfo.dwTime)) -gt 50) {
+  # 흡수된 관측 tick(lastAbsorbedInputTick)과 같거나 과거인 dwTime 은 다시 후보가 되지 않습니다 - 주입 시각
+  # (lastSelfInputTick)은 Register-SelfInput 만 갱신 (흡수로 옮기면 여파 창이 뒤로 연장돼 창 밖 조작까지
+  # 흡수 - Codex P1)
+  if ((Get-TickDeltaMilliseconds -From $script:lastSelfInputTick -To ([uint32]$observedInfo.dwTime)) -gt 50 -and
+      ($script:lastAbsorbedInputTick -eq [uint32]0 -or (Get-TickDeltaMilliseconds -From $script:lastAbsorbedInputTick -To ([uint32]$observedInfo.dwTime)) -gt 0)) {
     $script:lastUserInputTick = [uint32]$observedInfo.dwTime
     # 입력 종류 추정 (2026-09-08 사용자 지적 "꿀비 자기 클릭에 양보하는 것 같다" 진단용): GetLastInputInfo
     # 는 종류를 주지 않으므로, 마지막 관측 이후 커서가 움직였으면 '마우스 이동', 아니면 '키/버튼 입력'
@@ -2353,16 +2360,114 @@ function Update-ObservedCursor {
 }
 
 function Register-SelfInput {
-  # 주입(mouse_event/keybd_event) 직후 호출 - 이 시각까지의 dwTime 은 사용자 판별에서 제외
+  # 주입(mouse_event/keybd_event) 직후 호출 - 이 시각까지의 dwTime 은 사용자 판별에서 제외.
+  # 흡수 tick 도 초기화: 새 주입 이후의 dwTime 은 어차피 주입 기준으로 걸러지고, 흡수 tick 을 영영 남기면
+  # 2^31ms(24.86일) 뒤 부호 비교가 뒤집혀 새 사용자 입력을 막을 수 있음 (Codex P3)
   $script:lastSelfInputTick = [HoneyNogiInput]::GetTickCount()
+  $script:lastAbsorbedInputTick = [uint32]0
   Update-ObservedCursor
 }
 
+function Test-UserInputContinuing {
+  # 순수부 (진리표): 새 사용자 입력 후보가 직전에 **확정된 조작의 연장**인가 - 확정 시각과 IdleMs 안이면
+  # 재확인 없이 조작으로 인정 (조작 중 매 관측마다 350ms 를 기다리지 않기 위함)
+  param([uint32]$Candidate, [uint32]$ConfirmedTick, [int]$IdleMs)
+  if ($ConfirmedTick -eq [uint32]0) { return $false }
+  return ((Get-TickDeltaMilliseconds -From $ConfirmedTick -To $Candidate) -lt $IdleMs)
+}
+
+function Test-UserInputBurstEnded {
+  # 순수부 (진리표): 후보 뒤 **두 번의 재확인(각 350ms) 모두에서 진전이 전혀 없을 때만** '이미 끝난 짧은
+  # 묶음' = 자기 입력 여파로 흡수. 어느 창에서든 dwTime 이 나아갔으면 사용자로 확정합니다(안전한 쪽 -
+  # 둘째 창에서 조작을 시작한 사용자를 놓치지 않음, Codex P2).
+  # 2026-09-08 실측(20ms 샘플러 + 사용자 확인 "마우스 안 움직였다"): 자동화 자신의 클릭 뒤 커서를
+  # 옮기는 짧은 이벤트 묶음(1~3건, 수백 ms 안에 종료 - 게임 커서 워프 / 원격 세션 포인터 처리 추정)이
+  # 따라오고, 자동출발 Space 뒤 1.0초에 게임이 커서를 창 안쪽으로 옮기는 4건/92ms + 1.7초 1건이 관측됨
+  # → 매 회차 "양보 1초" 오발동. 실제 사용자 이동은 2~4초에 51~52건 연속. 관측이 묶음 도중에 걸리면
+  # 흡수되지 않아 짧은 양보가 남을 수 있음(허용 - 위양성은 지연일 뿐, 위음성이 위험).
+  param([uint32]$Candidate, [uint32]$RecheckDw1, [uint32]$RecheckDw2)
+  if ((Get-TickDeltaMilliseconds -From $Candidate -To $RecheckDw1) -gt 0) { return $false }
+  if ((Get-TickDeltaMilliseconds -From $Candidate -To $RecheckDw2) -gt 0) { return $false }
+  return $true
+}
+
+function Test-UserInputNearSelfInput {
+  # 순수부 (진리표): 후보가 우리 마지막 주입 **뒤** (0, WindowMs] 안에 있는가 - 이 창 안의 후보만 흡수
+  # 대상. 실측된 자기 입력 여파는 클릭 뒤 ~0.1초, Space 뒤 1.0~1.7초에 몰려 있고, 그 밖의 후보는 우리
+  # 입력과 무관한 사용자 조작이라 예전 규칙(마지막 입력 뒤 2.5초 유휴 보호)을 그대로 씁니다
+  # (2026-09-08 반박 검토 major: 흡수를 무조건 적용하면 '이동 후 정지'(툴팁 읽기 등) 조작이 관측 사이에
+  # 끝났을 때 통째로 버려져 v2.1.1 의 손 뗀 뒤 2.5초 보호가 0초가 됨). 하한 0: 주입보다 과거인 후보는
+  # 주입 직전 관측이 보존한 진짜 사용자 입력이라 여파가 아님 (Codex P1).
+  param([uint32]$Candidate, [uint32]$SelfTick, [int]$WindowMs)
+  $sinceSelf = Get-TickDeltaMilliseconds -From $SelfTick -To $Candidate
+  return ($sinceSelf -gt 0 -and $sinceSelf -le $WindowMs)
+}
+
+function Write-UserInputDiag {
+  # 판정 진단 (2026-09-08 21:10 실기: 샘플러상 단발 이벤트 뒤 4초 무갱신인데도 양보가 나 모델과 어긋남 -
+  # 판정 시점의 실제 tick 을 남겨 확정. Codex: 분기명 + now/self/candidate/confirmed/recheck 전부 필요).
+  # 값은 자기 주입 시각 기준 ms. 10초 스로틀 (연장 분기는 조작 중 매 관측이라 기록하지 않음).
+  param([string]$Branch, [uint32]$Now, [uint32]$Candidate, [uint32]$RecheckDw1, [uint32]$RecheckDw2)
+  if ((Get-TickElapsedMilliseconds -CurrentTick ([HoneyNogiInput]::GetTickCount()) -PreviousTick $script:inputDiagNoticeTick) -le 10000) { return }
+  $script:inputDiagNoticeTick = [HoneyNogiInput]::GetTickCount()
+  $self = [uint32]$script:lastSelfInputTick
+  $rel = { param([uint32]$t) if ($t -eq [uint32]0) { '-' } else { '{0:+#;-#;0}ms' -f (Get-TickDeltaMilliseconds -From $self -To $t) } }
+  Write-RunLog ("[진단] 입력 판정 {0}: now {1} / 후보 {2} / 확정 {3} / 재확인1 {4} / 재확인2 {5} / 흡수 {6} (자기 주입 기준)" -f `
+      $Branch, (& $rel $Now), (& $rel $Candidate), (& $rel ([uint32]$script:userInputConfirmedTick)), (& $rel $RecheckDw1), (& $rel $RecheckDw2), (& $rel ([uint32]$script:lastAbsorbedInputTick)))
+}
+
+function Get-LastInputTick {
+  $tickInfo = New-Object HoneyNogiInput+LASTINPUTINFO
+  $tickInfo.cbSize = [uint32][System.Runtime.InteropServices.Marshal]::SizeOf($tickInfo)
+  if (-not [HoneyNogiInput]::GetLastInputInfo([ref]$tickInfo)) { return [uint32]0 }
+  return [uint32]$tickInfo.dwTime
+}
+
 function Test-UserRecentlyActive {
-  # 사용자가 최근 IdleMs 안에 (우리 주입 제외) 입력했는가 - 양보 루프/클릭 취소 게이트 공용
+  # 사용자가 최근 IdleMs 안에 (우리 주입 제외) 입력했는가 - 양보 루프/클릭 취소 게이트 공용.
+  # 새 후보는 '지속 확인'을 거칩니다 (Test-UserInputPersisted 주석): 직전 확정 조작의 연장이 아니면
+  # 350ms 뒤 dwTime 이 더 나아갔을 때만 조작으로 확정하고, 아니면 단발 이벤트 = 자기 입력 여파로
+  # 흡수(기준 시각을 그 이벤트로 옮겨 같은 dwTime 이 다시 후보가 되지 않게). 부작용: 사용자의 단발
+  # 클릭 1회·느린 타이핑(키 간격 > 350ms)은 조작으로 안 잡힘 - 이동을 동반하는 실제 조작이 양보의
+  # 대상이라 감수 (2026-09-08).
   param([int]$IdleMs = 2500)
   Update-UserInputObservation
   if ($script:lastUserInputTick -eq [uint32]0) { return $false }
+  if ($script:lastUserInputTick -ne $script:userInputConfirmedTick) {
+    $candidate = [uint32]$script:lastUserInputTick
+    $diagNow = [HoneyNogiInput]::GetTickCount()
+    $diagBranch = ''
+    # 흡수 판정은 ①확정 조작의 연장이 아니고 ②우리 주입 **뒤** (0, 2.5초] 의 후보일 때만 - 그 밖은 사용자
+    # 조작으로 바로 확정 (Test-UserInputNearSelfInput 주석 - 흡수 범위를 자기 입력 여파가 실측된 창으로 한정)
+    if (Test-UserInputContinuing -Candidate $candidate -ConfirmedTick $script:userInputConfirmedTick -IdleMs $IdleMs) {
+      $diagBranch = '연장'
+    } elseif (-not (Test-UserInputNearSelfInput -Candidate $candidate -SelfTick $script:lastSelfInputTick -WindowMs 2500)) {
+      $diagBranch = '창 밖 즉시 확정'
+    } else {
+      Start-Sleep -Milliseconds 350
+      $recheckDw1 = Get-LastInputTick
+      Start-Sleep -Milliseconds 350
+      $recheckDw2 = Get-LastInputTick
+      if (Test-UserInputBurstEnded -Candidate $candidate -RecheckDw1 $recheckDw1 -RecheckDw2 $recheckDw2) {
+        # 이미 끝난 짧은 묶음 = 자기 입력 여파로 흡수. 주입 시각(lastSelfInputTick)은 건드리지 않고(Codex P1 -
+        # 여파 창 연장 방지) 흡수 tick 만 기록해 같은 dwTime 이 다시 후보가 되지 않게 함
+        $script:lastAbsorbedInputTick = $candidate
+        $script:lastUserInputTick = $script:userInputConfirmedTick
+        Write-UserInputDiag -Branch '흡수' -Now $diagNow -Candidate $candidate -RecheckDw1 $recheckDw1 -RecheckDw2 $recheckDw2
+        return $false
+      }
+      $diagBranch = '지속 확정'
+      $latest = $candidate
+      if ((Get-TickDeltaMilliseconds -From $latest -To $recheckDw1) -gt 0) { $latest = $recheckDw1 }
+      if ((Get-TickDeltaMilliseconds -From $latest -To $recheckDw2) -gt 0) { $latest = $recheckDw2 }
+      $script:lastUserInputTick = $latest
+      Write-UserInputDiag -Branch $diagBranch -Now $diagNow -Candidate $candidate -RecheckDw1 $recheckDw1 -RecheckDw2 $recheckDw2
+    }
+    if ($diagBranch -eq '창 밖 즉시 확정') {
+      Write-UserInputDiag -Branch $diagBranch -Now $diagNow -Candidate $candidate -RecheckDw1 0 -RecheckDw2 0
+    }
+    $script:userInputConfirmedTick = $script:lastUserInputTick
+  }
   $sinceUserMs = Get-TickElapsedMilliseconds -CurrentTick ([HoneyNogiInput]::GetTickCount()) `
     -PreviousTick $script:lastUserInputTick
   return ($sinceUserMs -lt $IdleMs)
