@@ -187,8 +187,14 @@ Assert-Case '배선: Click-GamePoint 직후에도 대피하지 않는다' `
 # 12곳 = 위 10곳 + **옵션 지도 2곳**(보조 판정 지도 라벨 / 구역 카드 글자 탐색 -
 #   2026-08-11 23:55 실사고: 예비 좌표 클릭 커서가 지도 2-1 라벨 위에 남아 오류 캡처
 #   재현에서 커서 위 2-1 만 'IL?-1결'로 깨짐. 커서 없는 2-2/2-3 은 배율 6 정상).
-Assert-Case '배선: 대피는 판독 직전에만 정확히 12곳' `
-  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$Game\s*$').Count) 12
+# 2026-09-09 +12: 사용자 양보 후 **재판독하는 지점 전부**에 대피 추가 (실사고: '입문' 클릭 직후
+#   재탐색이 그 글자를 커서에 가려 못 읽고 정지 - 어비스/던전/사냥터 난이도·토글·생활·구역 전환).
+#   새로 넣은 12곳은 줄 끝 주석이 붙어 아래 '줄 전체' 패턴에는 안 잡히므로, 주석 유무와 무관하게
+#   세는 두 번째 단언으로 총량을 관리합니다.
+Assert-Case '배선: 대피(줄 끝 주석 없는 형태)는 판독 직전에만 정확히 12곳' `
+  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$Game\s*$').Count) 12   # 양보 재판독분은 줄 끝 주석을 달아 이 계수와 분리
+Assert-Case '배선: 대피 호출 총량 (양보 재판독 12곳 포함 - 늘리면 이 숫자도 함께)' `
+  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$[Gg]ame').Count) 24
 # 생활의 네 자리를 이름으로도 고정합니다 (개수만 맞추고 엉뚱한 데 넣는 것을 막음)
 Assert-Case '배선: 생활 창 열림 판정이 판독 전에 대피' `
   ([bool]([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-LifeWindowOpen')) -match

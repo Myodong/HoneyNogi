@@ -32,6 +32,7 @@ function Get-DgOptObservedStage {
 }
 function Get-DgOptStageCardPoint { param($Game, $Stage) return $script:mockCardPoint }
 function Focus-Game { param($Game) }
+function Move-CursorOutsideGame { param($Game) }   # v2.1.7: 양보 재판독 직전 커서 대피 (모의 - 판정에 영향 없음)
 function Invoke-MockClickOutcome {
   # 클릭 결과 큐: 'performed'(기본) / 'user-active' / 'cursor-not-ready' - 실제 Click-ScreenPoint 의
   # 메타 계약($script:lastClickPerformed / $script:lastClickSkipReason)을 그대로 흉내냅니다
@@ -264,9 +265,9 @@ Assert-Case '첫 클릭 허용은 커스텀 시작 stay-select 호출 1곳뿐 (0
 # v2.1.7 양보 계약 배선: 사전 게이트(Focus 전) + 사후 경합 백업 둘 다 시도 회수 미소모 + 보조 판정 잠금 해제 + 재판독
 $switchBody = [string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('Set-DgOptionStage'))
 Assert-Case '배선: 사전 양보 게이트(대기 → try 미소모 → 잠금 해제 → 재판독) 가 clicks++ 앞' `
-  ([bool]($switchBody -match 'if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \$Game -Context "구역 \$\{Stage\} 전환"\s+\$try--\s+\$observedTried = \$false\s+\$titleText = & \$ReadTitle\s+continue\s+\}\s+\$clicks\+\+')) 'True'
+  ([bool]($switchBody -match 'if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \$Game -Context "구역 \$\{Stage\} 전환"\s+Move-CursorOutsideGame -Game \$Game[^\r\n]*\s+\$try--\s+\$observedTried = \$false\s+\$titleText = & \$ReadTitle\s+continue\s+\}\s+\$clicks\+\+')) 'True'
 Assert-Case '배선: 사후 경합 백업(user-active → clicks 되돌림 → 대기 → try 미소모 → 잠금 해제 → 재판독)' `
-  ([bool]($switchBody -match "elseif \(\`$script:lastClickSkipReason -eq 'user-active'\) \{(?:\s*#[^\r\n]*)*\s+\`$clicks--\s+Wait-UserYieldEnd -Game \`$Game -Context `"구역 \`$\{Stage\} 전환`"\s+\`$try--\s+\`$observedTried = \`$false\s+\`$titleText = & \`$ReadTitle\s+continue")) 'True'
+  ([bool]($switchBody -match "elseif \(\`$script:lastClickSkipReason -eq 'user-active'\) \{(?:\s*#[^\r\n]*)*\s+\`$clicks--\s+Wait-UserYieldEnd -Game \`$Game -Context `"구역 \`$\{Stage\} 전환`"\s+Move-CursorOutsideGame -Game \`$Game[^\r\n]*\s+\`$try--\s+\`$observedTried = \`$false\s+\`$titleText = & \`$ReadTitle\s+continue")) 'True'   # v2.1.7: 재판독 직전 커서 대피 추가
 Assert-Case '배선: 클릭 로그는 lastClickPerformed 참일 때만' `
   ([bool]($switchBody -match 'if \(\$script:lastClickPerformed\) \{\s+Write-RunLog "\$LogTag 구역 \$\{Stage\} 카드 클릭 - \$clickHow \(시도')) 'True'
 

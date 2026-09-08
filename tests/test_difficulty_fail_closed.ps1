@@ -41,15 +41,17 @@ Assert-Case '사냥터: 옛 경고 진행 문구가 남아 있지 않음' `
 
 # ── 던전 선택 화면 ──
 Assert-Case '던전 선택: 생략 재전송 루프 (진입 버튼 잔존일 때만)' `
-  ([bool]($workerRaw -match '(?s)\$ndDiffClicked = \$false.{0,600}Get-DgStageEnterButtonText.{0,120}진입')) 'True'
+  ([bool]($workerRaw -match '(?s)\$ndDiffClicked = \$false.{0,1200}Get-DgStageEnterButtonText.{0,200}진입')) 'True'   # v2.1.7 재개 블록으로 거리 확장
 Assert-Case '던전 선택: 매우 어려움 확인 실패는 기존 throw 유지' `
   ([bool]($workerRaw -match "매우 어려움' 선택 강조를 확인하지 못했습니다 - 오난이도 입장을 막기 위해 중단합니다")) 'True'
 Assert-Case '던전 선택: 일반/어려움 확인 실패도 정지 (신설)' `
   ([bool]($workerRaw -match "(?s)if \(-not \`$diffConfirmed\) \{[^}]*난이도 '\`$ndDifficulty' 선택을 확인하지 못했습니다[^}]*exit 4")) 'True'
 
 # ── 어비스 상세 ──
+# v2.1.7: 양보 재개는 목표 던전 확정(Test-AbyssDetailTargetConfirmed)으로, 커서 미확인 재전송은 기존
+# Test-DetailTitleMatches 유지 - 둘 다 루프 안에 있어야 함
 Assert-Case '어비스: 생략 재전송 루프 (상세 제목 일치일 때만)' `
-  ([bool]($workerRaw -match '(?s)\$abyssDiffClicked = \$false.{0,600}Test-DetailTitleMatches -Game \$game')) 'True'
+  ([bool]($workerRaw -match '(?s)\$abyssDiffClicked = \$false.{0,1600}Test-AbyssDetailTargetConfirmed -Game \$game.{0,900}Test-DetailTitleMatches -Game \$game')) 'True'
 Assert-Case '어비스: 확인 실패는 커스텀 여부와 무관하게 정지' `
   ([bool]($workerRaw -match "(?s)if \(-not \`$abyssDiffConfirmed\) \{[^}]*선택을 확정하지 못했습니다[^}]*exit 4")) 'True'
 Assert-Case '어비스: 옛 커스텀 한정 게이트가 남아 있지 않음' `

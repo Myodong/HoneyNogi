@@ -547,12 +547,13 @@ Assert-Case '배선(지정시간): 메뉴 호출이 clamp 된 한도를 사용' 
 Assert-Case '배선(지정시간): 옛 사이클 한도 직접 전달이 남아 있지 않다' `
   ([bool]($workerRaw -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline \$cycleDeadline')) 'False'
 # 메뉴 시퀀스 입력 직전 가드 (교차 리뷰 - C 입력/스킬 셀 클릭 앞)
+# v2.1.7: 한도 재검사와 입력 사이에 사용자 양보 게이트(Test-LifeYieldBeforeInput)가 들어감 - 둘 다 필수
 Assert-Case '배선(지정시간): C 입력 직전 한도 재검사' `
-  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n\s*if \(-not \(Press-LifeMenuKey')) 'True'
+  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Press-LifeMenuKey')) 'True'
 # 2026-08-22 개정: 무조건 전면화가 Confirm-LifeGameFront 게이트로 교체됨 (전면이면 즉시
 # 통과 - 오버헤드 절감. 실패 시 클릭 차단이라 안전 강화)
-Assert-Case '배선(지정시간): 스킬 셀 클릭 직전 한도 재검사 + 전면 게이트' `
-  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n\s*if \(-not \(Confirm-LifeGameFront -Game \$Game\)\) \{ return \$false \}\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
+Assert-Case '배선(지정시간): 스킬 셀 클릭 직전 한도 재검사 + 양보 게이트 + 전면 게이트' `
+  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Confirm-LifeGameFront -Game \$Game\)\) \{ return \$false \}\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
 
 # (c) GUI 배선 - env 전달 조건과 초 정규화
 $guiRaw = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
@@ -1407,11 +1408,19 @@ Assert-Case "배선: '가까운 위치 찾기' 링크는 글자 탐색으로만 
    ($workerText -match "링크를 찾지 못했습니다 - 이번 회전 중단") -and
    (-not $workerText.Contains('ptLifeFindNearest'))) 'True'
 Assert-Case '배선: 링크 클릭 직전 deadline 재검사 (OCR/전면화 시간 반영)' `
-  ($workerText -match 'Select-LifeFindNearestWord[\s\S]{0,6000}\(Get-Date\) -gt \$Deadline[\s\S]{0,300}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') 'True'
+  ($workerText -match 'Select-LifeFindNearestWord[\s\S]{0,6000}\(Get-Date\) -gt \$Deadline[\s\S]{0,900}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') 'True'
 # 링크 클릭 후 고정 1500ms 는 제거 (2026-08-12): 생성 확인 루프가 첫 판독 전에 또 1500ms 를
 # 자는 이중 대기였음 - present 2회 계약과 판독 간격은 루프 쪽이 그대로 담당
+# v2.1.7: 링크 클릭 뒤에 전송 확인 분기(생략이면 사이클 실패)가 들어감 - 고정 대기(Start-Sleep)는 여전히 없음
 Assert-Case '배선: 링크 클릭 후 고정 대기 없음 (생성 확인 루프 선행 대기가 담당)' `
-  ($workerText -match 'Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\) -ReferenceY \(\[int\]\$linkWord\.Y\)\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*return \$true') 'True'
+  ($workerText -match 'Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\) -ReferenceY \(\[int\]\$linkWord\.Y\)\r?\n(?:[^\r\n]*\r?\n)*?\s*return \$true') 'True'
+# 클릭 ~ return $true 구간에 고정 대기가 없어야 함 (구간을 잘라내 검사 - 함수 밖 Start-Sleep 오탐 방지)
+$lifeLinkSegment = [regex]::Match($workerText, 'Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)[\s\S]{0,900}?return \$true').Value
+Assert-Case '배선: 링크 클릭 후 Start-Sleep 없음 (이중 대기 제거 계약)' `
+  (($lifeLinkSegment.Length -gt 0) -and (-not $lifeLinkSegment.Contains('Start-Sleep'))) 'True'
+# 문자열 존재만 보면 조건을 $false 로 바꾸는 변이를 놓칩니다 (2026-09-09 변이 검증 적발) - 조건까지 단언
+Assert-Case '배선: 링크 클릭이 전송되지 않으면 퀘스트 확인으로 넘어가지 않음' `
+  ([bool]($workerText -match 'if \(-not \$script:lastClickPerformed\) \{(?:\s*#[^\r\n]*)*\s*if \(\$script:lastClickSkipReason -eq ''user-active''\) \{ \$script:lifeMenuYielded = \$true \}\s*\r?\n\s*Write-RunLog "\[생활\] ''가까운 위치 찾기'' 클릭이 전송되지 않았습니다[\s\S]{0,200}?return \$false')) 'True'
 Assert-Case '배선: 상세 unreadable 2회는 행 매칭 근거로 진행 (오클릭 확정 아님)' `
   ($workerText -match 'if \(\$detailUnreadableCount -ge 2\)') 'True'
 # 격자 신뢰도 계약 (라운드 6 + 2026-08-12 개정): order-strong 만 즉시 통과. 약한 order 는

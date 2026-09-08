@@ -37,6 +37,7 @@ function Start-Sleep {
   $script:vclock = $script:vclock.AddMilliseconds($ms)
 }
 function Focus-Game { param($Game) }
+function Move-CursorOutsideGame { param($Game) }   # v2.1.7: 양보 재판독 직전 커서 대피 (모의 - 판정에 영향 없음)
 function Write-RunLog { param([string]$Message) $script:runLogs += $Message }
 function Test-SafeStopDuringCaptureFail {}
 function Test-CaptureRecovered { param($Game) return $true }
@@ -160,7 +161,8 @@ function Test-DifficultySelectedAt {
 }
 $script:lastPillProbe = ''
 # 3a. 조작 4회전(3회 상한 초과) → 시도 미소모로 기다렸다가 클릭 1회 → 다음 확인에서 선택
-Reset-Mock -ActiveSeq @($true, $true, $true, $true) -SelectedSeq @($false, $false, $false, $false, $false, $true)
+#     (v2.1.7: 양보 게이트가 선택 확인보다 **앞** - 옛 좌표를 성공으로 인정하지 않기 위함, Codex P1)
+Reset-Mock -ActiveSeq @($true, $true, $true, $true) -SelectedSeq @($false, $true)
 $ok = Confirm-DifficultySelected -Game $game -ClickPoint @{ X = 1; Y = 2 } -Label '어려움'
 Assert-Case '난이도 확인: 조작 4회전 후 성공(tryNo 미소모)' "$ok/$($script:yieldCalls)/$($script:performedCount)" 'True/4/1'
 # 3b. 경합 생략(user-active) 도 미소모
@@ -289,14 +291,81 @@ Assert-Case '배선: 결과 화면 대기 루프 양보 4곳(서두 게이트 + 
   ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '결과 화면 대기'").Count) 4
 # 반박 검토 반영: 5개 시간 상한 루프의 만료 판정이 전부 누적 양보를 반영 (ClickUntil 외·내부 while 2 +
 # VerifiedExit + 결과 화면 + 다음 층 + 다시 하기 = 6 조건식)
-Assert-Case '배선: 시간 상한 루프 만료 판정 6곳이 Get-YieldAdjustedDeadline 경유' `
-  ([regex]::Matches($workerCode, '-lt \(Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$\w+\) -SeenYieldMs \(\[ref\]\$\w+\)\)\)').Count) 6
+# 09-08 어비스 배치 +3: Return-ToAbyssSelection(60초) + 이동하기 2곳(30초) / +1: 사냥터 첫 화면 복귀(40초)
+Assert-Case '배선: 시간 상한 루프 만료 판정 10곳이 Get-YieldAdjustedDeadline 경유' `
+  ([regex]::Matches($workerCode, '-lt \(Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$\w+\) -SeenYieldMs \(\[ref\]\$\w+\)\)\)').Count) 10
+# 2차 배치 잔여분 (생활·냥 상인·더블 루팅 정정) - 2026-09-08 사용자 지시로 전량 처리
+Assert-Case '생활: 메뉴 사이클 입력 5곳 양보 게이트 + 회전 미계상(while 전환)' `
+  (([regex]::Matches($workerCode, 'Test-LifeYieldBeforeInput -Game \$Game -Step').Count -eq 5) -and
+   ($workerCode.Contains('while ($menuTry -lt 3 -and -not $menuOk -and (Get-Date) -le $cycleDeadline)')) -and
+   ($workerCode -match '\$script:lifeMenuYielded\) \{[\s\S]{0,200}?\$menuTry--')) 'True'
+Assert-Case '생활: 링크 클릭 전송 확인(생략이면 퀘스트 확인으로 안 넘어감)' `
+  ($workerCode.Contains("[생활] '가까운 위치 찾기' 클릭이 전송되지 않았습니다")) 'True'
+# 시계 동결은 **두 경로 모두**(사전 게이트·경합 백업) 필요 - 하나만 세면 한쪽 제거를 놓칩니다
+# (2026-09-09 변이 검증 적발: M4 가 한 곳만 지워도 통과했음)
+Assert-Case '냥 상인: 구매·재클릭·다시 뽑기 3곳 양보(재클릭 기회·구매 확인 시계 보호)' `
+  (([regex]::Matches($workerCode, "Wait-UserYieldEnd -Game \`$Game -Context '냥 상인").Count -ge 5) -and
+   ([regex]::Matches($workerCode, '\$purchaseWaitClock\.Stop\(\)\s+Wait-UserYieldEnd -Game \$Game -Context ''냥 상인 구매 확인''\s+\$purchaseWaitClock\.Start\(\)').Count -eq 2)) 'True'
+Assert-Case '냥 상인: 안전 중지 확인은 여전히 클릭 직전 마지막 동작(양보 게이트는 그 앞)' `
+  ([bool]($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \`$Game -Context '냥 상인 다시 뽑기'\s+continue\s+\}[\s\S]{0,900}Test-Path -LiteralPath \`$safeStopFlagPath")) 'True'
+Assert-Case '더블 루팅 정정 2곳: 양보 후 소모량 재확인으로 정정 필요성 재판단' `
+  (([regex]::Matches($workerCode, "Wait-UserYieldEnd -Game \`$Game -Context '더블 루팅 정정'").Count -eq 2) -and
+   ([regex]::Matches($workerCode, '양보 중 공물 소모량이 예상').Count -eq 2)) 'True'
+Assert-Case '사냥터: 첫 화면 복귀 루프 양보(서두 게이트 + 재클릭·정리 Space)' `
+  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '사냥터 첫 화면 복귀'").Count) 3
+
+# ---- 4d. 어비스 경로 배치 (2026-09-08 22:51 실사고: 마우스 사용 중 난이도 3회 소진 → 코드 4 정지) ----
+Assert-Case '어비스: 난이도 루프 재개(대기 → 목표 던전 확정 → 재탐색) + 시도 미소모' `
+  (($workerCode.Contains("if (`$script:lastClickSkipReason -eq 'user-active') { `$abyssDiffTry--; `$abyssDiffRefind = `$true; continue }")) -and
+   ($workerCode.Contains("`$abyssDiffStopReason = '양보 후 난이도 글자 재탐색 실패'; break")) -and
+   ($workerCode.Contains("`$abyssDiffStopReason = '양보 후 목표 던전 상세 화면을 확인하지 못함'; break"))) 'True'
+# 제목이 읽히면 목표 일치 필수, 안 읽히면 3회 재판독 후 거짓 (Test-DetailTitleMatches 의 '입장 버튼만으로
+# 통과'는 양보 재개에 쓰면 다른 던전도 통과 - Codex P1)
+Assert-Case '어비스: 양보 재개 전용 목표 던전 판정(fail-closed)' `
+  (($workerCode -match 'function Test-AbyssDetailTargetConfirmed[\s\S]{0,700}if \(\$titleNow\) \{ return \$titleNow\.Contains\(\$dungeonMatch\) \}[\s\S]{0,200}return \$false')) 'True'
+Assert-Case '어비스: 탭 확인 실패는 정지(반환을 버리지 않음) 4곳' `
+  ([regex]::Matches($workerCode, "if \(-not \(Confirm-TabSelected -Game \`$game[^\r\n]*\)\) \{").Count) 4
+Assert-Case '탭 확인: 양보 시 재클릭 기회 미소모 + 경합 pending' `
+  (($workerCode.Contains('$script:tabConfirmYieldPending = $true')) -and
+   ($workerCode -match '\(\(Test-UserRecentlyActive\)\) -or \$script:tabConfirmYieldPending|\(Test-UserRecentlyActive\) -or \$script:tabConfirmYieldPending')) 'True'
+Assert-Case '이벤트 화면: Space 주입 전 양보 게이트(대기 후 재판독)' `
+  ([bool]($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \`$Game -Context '이벤트 화면 처리'\s+return \`$false")) 'True'
+# unknownSince 보정은 누적 변수 차분으로 (서두 게이트뿐 아니라 판독 헬퍼 안 커서 대피 양보까지 - Codex P2)
+Assert-Case '어비스: 선택 화면 복귀 루프 서두 게이트 + 알 수 없는 화면 20초 판정에서 양보 제외' `
+  (($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀' -Deadline \(\[ref\]\`$deadline\) -SeenYieldMs \(\[ref\]\`$seenYieldMs\)\s+continue") -and
+   ($workerCode.Contains('if ($null -eq $unknownSince) { $unknownSince = Get-Date; $unknownSeenYieldMs = [double]$script:userYieldTotalMs }')) -and
+   ($workerCode -match '\$unknownSince = \$unknownSince\.AddMilliseconds\(\[double\]\$script:userYieldTotalMs - \$unknownSeenYieldMs\)')) 'True'
+Assert-Case '어비스: X 후보 순환 - 조작 생략은 유지, 커서 미확인은 다음 후보로' `
+  (($workerCode -match "\`$xAttempts\+\+\s+Write-RunLog `"\[안내\] 복귀 중 닫기\(X\) 후보[^\r\n]*커서 미확인")) 'True'
+Assert-Case '어비스: 복구 ESC 키 주입 전 양보 게이트(Press-KeyOnce 에는 게이트 없음)' `
+  ([bool]($workerCode -match "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'[^\r\n]*\r?\n\s+continue\s+\}\s+Focus-Game -Game \`$Game\s+Press-KeyOnce -VirtualKey 0x1B")) 'True'
+Assert-Case '난이도 확인: 양보 후 RefindPoint 재탐색(호출부 5곳 전달) + 실패 시 재클릭 금지' `
+  (([regex]::Matches($workerCode, '-RefindPoint \{').Count -eq 5) -and
+   ($workerCode.Contains('Write-RunLog "[경고] 양보 후 난이도 ''$Label'' 글자를 다시 찾지 못했습니다 - 재클릭하지 않고 확인 실패로 처리합니다"')) -and
+   ($workerCode.Contains('$script:difficultyConfirmYieldPending = $true'))) 'True'
+Assert-Case '토글 3곳: user-active 생략 뒤에는 유휴 여부와 무관하게 재판독(옛 상태 재사용 금지)' `
+  (([regex]::Matches($workerCode, "elseif \(\`$script:lastClickSkipReason -eq 'user-active'\) \{ \`$\w+Recheck = \`$true \}").Count -eq 3) -and
+   ([regex]::Matches($workerCode, '\$\w+Recheck -or \(Test-UserRecentlyActive\)').Count -eq 3)) 'True'
+Assert-Case '어비스: 복귀 루프 클릭 로그 정직화 5곳(메뉴/ESC/공지 X/나가기 + 생략 시 마감 연장)' `
+  (([regex]::Matches($workerCode, "클릭 건너뜀 \(\`$\(if \(\`$script:lastClickSkipReason -eq 'user-active'\)").Count -ge 4) -and
+   ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count -ge 6)) 'True'
+Assert-Case '어비스: 스텔라·X 후보 카운터는 실제 클릭 뒤에만 증가(생략으로 상한 소진 금지)' `
+  (($workerCode -match '\$script:lastClickPerformed\) \{\s+\$stellaHandled\+\+') -and
+   ($workerCode -match '\$script:lastClickPerformed\) \{\s+\$xAttempts\+\+')) 'True'
+Assert-Case '어비스: 이동하기 루프 2곳 서두 게이트 + 경합 백업(마감 연장)' `
+  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$game -Context '이동하기 클릭'").Count) 4
+Assert-Case '어비스: 파티찾기 토글 단발 전송 확인 루프(양보 중 사용자가 끄면 클릭 생략)' `
+  (($workerCode.Contains("while (-not `$abyssToggleSent -and `$toggleState -eq 'on')")) -and
+   ($workerCode.Contains("[어비스] '우연한 만남' 토글 꺼짐 확인 (양보 중 전환됨 - 파티찾기 준비)"))) 'True'
 Assert-Case "배선: '다음 층으로' 양보 사실을 '다시 하기' 게이트에 전달(옛 좌표 낙하 경로 차단)" `
   (($workerCode.Contains('$yieldedBeforeRetry = $true')) -and
    ($workerCode.Contains('if ($yieldedBeforeRetry -or (Test-UserRecentlyActive)) {'))) 'True'
 Assert-Case "배선: 40초 루프의 '계속하기'·공지 닫기 로그는 실제 클릭일 때만" `
   (([regex]::Matches($workerCode, "'계속하기' 클릭을 건너뜀").Count -eq 2) -and
    ($workerCode.Contains('공지 게시판 X 닫기 클릭을 건너뜀'))) 'True'
+# 어비스 복귀 루프의 클릭 생략 → 즉시 마감 연장 (메뉴·ESC·공지 X·나가기 4곳 + 스텔라 2·X 후보 1 = elseif)
+Assert-Case '배선: 어비스 복귀 루프 클릭 생략 시 즉시 마감 연장 7곳' `
+  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count) 9   # 서두 게이트 1 + 복구 ESC 게이트 1 + 클릭 생략 7
 
 # ---- 4c. Codex 리뷰 반영 (2026-09-08): 양보 후 입장 판정은 긍정 증거 / 결과 화면 인계 / 재탐색 실패 폐기 ----
 $rgQuestTracker = @(0, 0, 10, 10); $ocrKoreanEngine = $null
@@ -345,7 +414,7 @@ Assert-Case '배선: 우연한 만남 켜기/끄기 재탐색 실패 = 앵커 �
 Assert-Case '배선: 사냥터 정정 재탐색 실패 = 정정 없이 종료(옛 절대 좌표 폐기)' `
   ([bool]($workerCode -match 'if \(-not \$htDiffRefound\) \{\s+Write-RunLog[^\r\n]+\s+break')) 'True'
 Assert-Case '배선: 40초 루프 팝업 클릭의 조작 생략은 즉시 마감 연장(3곳)' `
-  ([regex]::Matches($workerCode, "(?m)^\s*if \(\`$script:lastClickSkipReason -eq 'user-active'\) \{\s+Invoke-UserYieldWithDeadline").Count) 3   # ^if 만 - elseif 경합 백업과 구분
+  ([regex]::Matches($workerCode, "(?<!else)if \(\`$script:lastClickSkipReason -eq 'user-active'\) \{\s+Invoke-UserYieldWithDeadline -Game \`$Game -Context `"'(?:다음 층으로' 전환|다시 하기' 복귀) 대기`"").Count) 3
 Assert-Case '배선: 결과 화면 인계 - 호출부 2곳이 PastResultCondition 전달 + 다시 하기/새 임무 선택 클릭 생략' `
   (([regex]::Matches($workerCode, '-PastResultCondition \{').Count -eq 2) -and
    ($workerCode.Contains('if ($script:resultScreenSkippedByUser) {') -and

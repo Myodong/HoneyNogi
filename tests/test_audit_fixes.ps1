@@ -516,8 +516,9 @@ Assert-Case '어비스 메뉴: 고정 좌표 대신 글자 탐색으로 클릭' 
   ($workerSource -match "Find-GameTextPoint[^\r\n]*\`$rgAbyssMenu\[0\][\s\S]{0,200}-SearchText '어비스' -ExactText '어비스'") $true
 Assert-Case '어비스 메뉴: 글자를 못 찾으면 클릭하지 않고 재시도' `
   ($workerSource -match "메뉴에서 '어비스' 글자를 찾지 못했습니다") $true
+# v2.1.7: ESC 주입 앞에 사용자 양보 게이트가 들어가 거리 한도를 300 → 900 으로 넓힘 (계약 동일)
 Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복귀' `
-  ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,300}Press-KeyOnce -VirtualKey 0x1B') $true
+  ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,900}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
 Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v14 - 네이티브 1908 계열)' `
@@ -552,7 +553,7 @@ $enterBtnRegion = $auditConfigJson.ocrRegions.enterButton
 Assert-Case 'config: enterButton 영역이 워커 기본값과 일치' (($enterBtnRegion -join ',')) '880,630,280,48'
 # 이동 클릭 루프 정직성 (2026-08-09 계약 배선 - 실제 전송된 클릭만 계수 + 0회면 도착 대기 금지)
 Assert-Case 'v12: 이동 클릭 루프 2곳이 lastClickPerformed 검사' `
-  ([regex]::Matches($workerSource, "이동 클릭을 건너뜀 \(커서 확인 실패\)").Count) 2
+  ([regex]::Matches($workerSource, "이동 클릭을 건너뜀 \(커서 미확인\)").Count) 2   # v2.1.7 문구: '확인 실패' → '미확인'
 Assert-Case 'v12: 실제 클릭 0회면 도착 대기 진입 금지 (throw) 2곳' `
   ([regex]::Matches($workerSource, "'이동하기' 클릭을 한 번도 보내지 못했습니다").Count) 2
 # 지역 제한 거부 토스트 (2026-08-13 21:51 진단 클릭 실측: '일반 필드에서만 입장 신청할 수
