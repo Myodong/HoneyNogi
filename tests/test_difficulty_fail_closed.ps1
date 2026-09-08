@@ -19,8 +19,10 @@ function Assert-Case {
 $workerRaw = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
 
 # ── 사냥터 ──
+# v2.1.7: 루프 서두에 사용자 양보 재개 블록(대기 → 첫 화면 확인 → 난이도 재탐색)이 들어가 거리 한도를
+# 600 → 1600 으로 넓힘 (계약 자체는 그대로 - 전송 확인 후 같은 화면일 때만 재전송)
 Assert-Case '사냥터: 생략 재전송 루프 (같은 화면 = 입장 버튼 잔존일 때만)' `
-  ([bool]($workerRaw -match '(?s)\$htDiffClicked = \$false.{0,600}if \(\$script:lastClickPerformed\) \{ \$htDiffClicked = \$true; break \}.{0,300}Find-HtEntryButtonPoint')) 'True'
+  ([bool]($workerRaw -match '(?s)\$htDiffClicked = \$false.{0,1600}if \(\$script:lastClickPerformed\) \{ \$htDiffClicked = \$true; break \}.{0,300}Find-HtEntryButtonPoint')) 'True'
 Assert-Case '사냥터: 전송 실패 지속이면 정지 (exit 4)' `
   ([bool]($workerRaw -match "(?s)if \(-not \`$htDiffClicked\) \{[^}]*클릭을 전송하지 못했습니다[^}]*exit 4")) 'True'
 Assert-Case "사냥터: '클릭' 로그가 전송 확인 뒤" `
@@ -56,8 +58,10 @@ Assert-Case '어비스: 옛 커스텀 한정 게이트가 남아 있지 않음' 
 # ── 옵션 화면 (기존 계약 보존 + 생략 재전송) ──
 $optBody = [string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('Set-DgOptionDifficulty'))
 $optCode = (($optBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+# v2.1.7: 루프 조건과 제목 확인 사이에 사용자 양보 분기(user-active → 회수 미소모 + 재탐색)가 들어가
+# 거리 한도를 200 → 700 으로 넓힘 (커서 실패의 '제목 구역 확인 후 재전송' 계약은 else 분기에 그대로)
 Assert-Case '옵션: 생략 재전송은 lastClickPerformed 조건 + 제목 구역 확인' `
-  ([bool]($optCode -match '(?s)-not \$script:lastClickPerformed[\s\S]{0,200}Read-DgTitleText[^\r\n]*Contains\(''구역''\)')) 'True'
+  ([bool]($optCode -match '(?s)-not \$script:lastClickPerformed[\s\S]{0,700}Read-DgTitleText[^\r\n]*Contains\(''구역''\)')) 'True'
 Assert-Case '옵션: 실제 클릭 후 수동 확인 3회 유지 (자기 방해 방지 계약)' `
   ([bool]($optCode -match '(?s)passiveTry = 1; \$passiveTry -le 3')) 'True'
 Assert-Case '옵션: 최종 1회 재클릭 계약 유지' `

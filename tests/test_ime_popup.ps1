@@ -65,8 +65,10 @@ Assert-Case '배선: 팝업 전용 판독 영역 정의' ($workerSource -match '
 # 2026-08-01 전수 점검: 클릭 '전' 사전 게이트 추가(가려진 좌표를 확인 없이 재클릭하지 않기
 # 위한 재클릭 정책 준수) - 던전/사냥터 각 사전+사후 4곳 + 사냥터 '소탕만 계속' 폴백 바퀴
 # 미계상 1곳(마지막 회전에서 발견돼도 재입장 보장 - 교차 리뷰) = 총 5곳
-Assert-Case '배선: 입장 루프 팝업/폴백 시도 미계상 5곳' `
-  ([regex]::Matches($workerCode, '\$enterTry--').Count -eq 5) $true
+# v2.1.7 +4: 던전·사냥터 입장 루프의 사용자 양보(사전 게이트 + 클릭 직전 경합 백업, 각 2곳)도 시도
+# 미계상 - 2026-09-08 전수 분류 (양보 회전이 입장 5회를 소진해 정지하는 기전). 총 9곳
+Assert-Case '배선: 입장 루프 팝업/폴백/양보 시도 미계상 9곳' `
+  ([regex]::Matches($workerCode, '\$enterTry--').Count -eq 9) $true
 Assert-Case '배선: 팝업 대기 40초 한도 안전 정지' `
   ([regex]::Matches($workerSource, '\$imePopupWaitTotal -ge 40').Count -eq 4) $true
 

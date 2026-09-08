@@ -1622,18 +1622,54 @@ function Set-DgOptionStage {
     }
     $unclearReads = 0
     if ($clicks -ge 3) { break }
+    # 사용자 조작 중이면 클릭하지 않고 끝날 때까지 기다립니다 (2026-09-08 09:07 실사고 -
+    # v2.1.6 배포 직후: 조작 중 Click-ScreenPoint 가 클릭을 버리는데 이 루프는 그걸 모른 채
+    # "카드 클릭" 로그를 찍고 3회를 7초 만에 소진 → 코드 4 정지. 어제 Set-DgToggleCard 에
+    # 넣은 것과 같은 기전의 두 번째 실사고). 계약은 Set-DgToggleCard 와 동일: 시도 회수($try)
+    # 미소모 + 대기 + **재판독부터** (대기 후 옛 좌표 강행 클릭 금지 - v2.1.1 stale-click
+    # 계약). Focus-Game 의 ALT 주입 전에 양보해야 조작 중 포커스를 뺏지 않습니다. 보조 판정
+    # 잠금($observedTried)도 풀어 새 화면 상태에서 다시 1회 허용합니다 (Codex 조건 - 아래
+    # 클릭 후 초기화와 같은 '화면 상태별 1회' 계약. 잠긴 채 재개하면 제목 불명 지속 시
+    # 보조 판정 없이 남은 회수를 소진).
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context "구역 ${Stage} 전환"
+      $try--
+      $observedTried = $false
+      $titleText = & $ReadTitle
+      continue
+    }
     $clicks++
     $target = Get-DgOptStageCardPoint -Game $Game -Stage $Stage
     if (-not $target) {
       return [pscustomobject]@{ Ok = $false; Title = $titleText; Reason = 'not-found' }
     }
     Focus-Game -Game $Game
+    $clickHow = $(if ($target.ContainsKey('Screen')) { '글자 탐색' } else { '예비 좌표' })
     if ($target.ContainsKey('Screen')) {
       Click-ScreenPoint -X $target.Screen.X -Y $target.Screen.Y
-      Write-RunLog "$LogTag 구역 ${Stage} 카드 클릭 - 글자 탐색 (${clicks}/3)"
     } else {
       Click-GamePoint -Game $Game -ReferenceX $target.Reference[0] -ReferenceY $target.Reference[1]
-      Write-RunLog "$LogTag 구역 ${Stage} 카드 클릭 - 예비 좌표 (${clicks}/3)"
+    }
+    # 클릭이 **실제로 나갔을 때만** '클릭'으로 기록합니다 - 생략된 클릭을 눌렀다고 적으면
+    # 로그가 거짓이 되어 오늘 사고처럼 "3번 눌렀는데 왜 안 바뀌지?"로 진단이 헛돕니다.
+    # N/3 은 실제 클릭 수가 아니라 **시도 예산** - 커서 확인 실패도 소모합니다 (유한 종료
+    # 유지, Codex 표). lastClickPerformed 는 입력 전송 여부일 뿐, 게임 반영은 아래 제목
+    # 재판독이 확인합니다.
+    if ($script:lastClickPerformed) {
+      Write-RunLog "$LogTag 구역 ${Stage} 카드 클릭 - $clickHow (시도 ${clicks}/3)"
+    } elseif ($script:lastClickSkipReason -eq 'user-active') {
+      # 사전 게이트와 클릭 사이의 경합 창(Focus/좌표 탐색 ~수백 ms)에 조작이 시작된 경우 -
+      # 같은 양보 계약: 방금 올린 시도 회수도 되돌립니다
+      $clicks--
+      Wait-UserYieldEnd -Game $Game -Context "구역 ${Stage} 전환"
+      $try--
+      $observedTried = $false
+      $titleText = & $ReadTitle
+      continue
+    } else {
+      # '커서 미확인' - '실패' 단어를 쓰면 GUI 심각도 판정이 오류 줄로 칠합니다 (test_log_severity 대조).
+      # 뒷문구 없음: 3/3 이면 다음 회전은 재시도가 아니라 한도 종료라 "다음 회전에서 재시도"가 거짓 (Codex)
+      Write-RunLog "$LogTag 구역 ${Stage} 카드 클릭 건너뜀 (커서 미확인, 시도 ${clicks}/3)"
     }
     Start-Sleep -Milliseconds 1100
     $titleText = & $ReadTitle
@@ -1829,6 +1865,10 @@ $script:cursorParkWarnActive = $false
 $script:lastSelfInputTick = [uint32]0   # 시작 직후 관측되는 dwTime(시작 버튼 클릭)을 사용자로 오인하지 않게 워커 시작 시각으로 초기화 (아래 본문)
 $script:lastUserInputTick = [uint32]0   # 마지막으로 확인된 '사용자' 입력 tick (0 = 아직 관측 없음)
 $script:lastYieldClickNoticeTick = [uint32]0   # 클릭 취소 안내 5초 스로틀
+# 누적 양보 시간(ms) - 시간 상한 루프(Invoke-ClickUntil 등)가 자기 기준값과의 차만큼 마감을
+# 늘리는 데 씁니다 (2026-09-08 - Codex: 반환값 대신 누적 변수, 정수 초 변환은 오차 누적이라 ms).
+# 워커 전체에서 증가만 하고, 각 타이머 소유자가 시작 시 기준값을 저장해 차분만 반영합니다.
+$script:userYieldTotalMs = [double]0
 $script:lastMinimizedRestoreAt = $null
 # 게임 창 핸들이 사라진 상태가 **연속으로** 얼마나 이어졌는지 재는 전용 시계.
 # 캡처 실패 시작 시각과 섞으면 '전환 중 오탐 방지' 유예가 무의미해집니다 (4차 점검)
@@ -2509,18 +2549,33 @@ function Wait-UserYieldEnd {
   # 기존 흐름의 소비 지점이 처리합니다 (Codex 확인 - 별도 계약은 필요해질 때).
   param([System.Diagnostics.Process]$Game, [string]$Context = '자동화')
   if (-not (Test-UserRecentlyActive)) { return }
-  $yieldStart = Get-Date
-  Write-RunLog "[안내] 사용자 마우스 조작 감지 - 조작이 끝날 때까지 ${Context}를 멈추고 기다립니다"
-  $yieldHeartbeat = $yieldStart
+  $yieldClock = [System.Diagnostics.Stopwatch]::StartNew()
+  $particle = Get-KoreanObjectParticle -Word $Context
+  Write-RunLog "[안내] 사용자 마우스 조작 감지 - 조작이 끝날 때까지 ${Context}${particle} 멈추고 기다립니다"
+  $yieldHeartbeat = Get-Date
   while (Test-UserRecentlyActive) {
     Test-SafeStopDuringCaptureFail
     Start-Sleep -Seconds 1
     if (((Get-Date) - $yieldHeartbeat).TotalSeconds -ge 60) {
       $yieldHeartbeat = Get-Date
-      Write-RunLog "[안내] 사용자 조작이 계속되고 있어 ${Context} 대기 중입니다 ($([int]((Get-Date) - $yieldStart).TotalSeconds)초 경과)"
+      Write-RunLog "[안내] 사용자 조작이 계속되고 있어 ${Context} 대기 중입니다 ($([int]$yieldClock.Elapsed.TotalSeconds)초 경과)"
     }
   }
-  Write-RunLog "[안내] 사용자 조작 종료 - ${Context}를 다시 진행합니다 ($([int]((Get-Date) - $yieldStart).TotalSeconds)초 양보)"
+  $yieldClock.Stop()
+  # 시간 상한 루프의 마감 연장용 누적 (선언부 주석 참고)
+  $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $yieldClock.Elapsed.TotalMilliseconds
+  Write-RunLog "[안내] 사용자 조작 종료 - ${Context}${particle} 다시 진행합니다 ($([int]$yieldClock.Elapsed.TotalSeconds)초 양보)"
+}
+
+function Get-KoreanObjectParticle {
+  # 로그 문구용 목적격 조사 - 한글 마지막 글자의 받침 유무로 '을'/'를' (2026-09-08 실기 로그
+  # "구역 2-2 전환를" 어색함 수정). 한글이 아니면 '을(를)'.
+  param([string]$Word)
+  if ([string]::IsNullOrEmpty($Word)) { return '을(를)' }
+  $code = [int][char]$Word[$Word.Length - 1]
+  if ($code -lt 0xAC00 -or $code -gt 0xD7A3) { return '을(를)' }
+  if ((($code - 0xAC00) % 28) -ne 0) { return '을' }
+  return '를'
 }
 
 function Click-ScreenPoint {
@@ -2762,6 +2817,9 @@ function Move-CursorOutsideGame {
     Start-Sleep -Milliseconds 500
   }
   if ($null -ne $userYieldClock) {
+    # 이 양보도 시간 상한 루프의 마감 연장 대상입니다 (Codex: Wait-UserYieldEnd 를 안 거치는
+    # 유일한 양보라 누락되면 판독 직전 대피에서 보낸 시간이 마감에서 빠짐)
+    $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $userYieldClock.Elapsed.TotalMilliseconds
     Write-RunLog ('[안내] 사용자 조작이 끝나 자동화를 재개합니다 (양보 {0}초)' -f [int]$userYieldClock.Elapsed.TotalSeconds)
   }
   # 실패 사유는 **한 곳에서만** 기록합니다 (예외든 API 실패든 같은 억제 규칙).
@@ -4612,6 +4670,10 @@ function Invoke-ClickUntil {
   # 실패했지만 별도 신호(예: IME 팝업 감지 + 좌상단 제목)가 '원래 화면 그대로'를 보증할 때,
   # 팝업에 안 덮이는 예비 지점을 대신 클릭합니다 (사이클당 1클릭 유지 - 2026-07-29 실기).
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  # 양보 기준값 - 사용자 조작으로 기다린 시간만큼 마감을 늘립니다 (2026-09-08 전수 분류:
+  # 조작 중 클릭이 생략되는 동안 시간 상한이 그대로 소모돼 초과 throw. 만료 판정보다 먼저
+  # 보정하고, 마감을 새로 잡을 때는 기준값도 같이 갱신 - Codex 조건)
+  $seenYieldMs = [double]$script:userYieldTotalMs
   while ((Get-Date) -lt $deadline) {
     # 조건이 참이어도 캡처 실패 중이면 믿지 않습니다: 실패 중 OCR은 빈 문자열을 돌려주므로
     # '-not (화면 감지)' 형태의 부정형 조건이 클릭도 안 했는데 참이 되는 오판을 막습니다.
@@ -4620,11 +4682,23 @@ function Invoke-ClickUntil {
       # 화면 캡처가 안 되는 동안은 결과 확인이 불가능하므로 클릭하지 않고 기다립니다.
       Test-SafeStopDuringCaptureFail
       $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      $seenYieldMs = [double]$script:userYieldTotalMs
       Start-Sleep -Milliseconds 700
       continue
     }
     $sourceStillVisible = ($null -eq $SourceCondition) -or (& $SourceCondition)
     if ($script:screenCaptureFailing) { continue }
+    # 사용자 조작 중이면 클릭하지 않고 끝날 때까지 기다린 뒤 마감을 연장하고 **조건 확인부터**
+    # 다시 합니다 (대기 중 목표 화면에 도달했으면 위 Condition 이 잡음 - 옛 판단으로 클릭 금지)
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context $Description
+      $deadline = $deadline.AddMilliseconds([double]$script:userYieldTotalMs - $seenYieldMs)
+      $seenYieldMs = [double]$script:userYieldTotalMs
+      continue
+    }
+    # 이번 회전에 클릭이 없을 수도 있어(소스 미확인·예비 조건 불충족) 생략 원인 메타를 비웁니다 -
+    # 지난 호출의 'user-active' 가 남아 아래 백업 분기를 오발동하면 재클릭 간격 없이 도는 바쁜 루프
+    $script:lastClickSkipReason = ''
     if ($sourceStillVisible) {
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $Point[0] -ReferenceY $Point[1]
@@ -4633,6 +4707,13 @@ function Invoke-ClickUntil {
       Write-RunLog "[안내] $Description - 원래 버튼이 팝업에 가려져 예비 지점을 클릭합니다"
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $FallbackPoint[0] -ReferenceY $FallbackPoint[1]
+    }
+    # 경합 창 백업: 게이트 통과 후 클릭 직전에 조작이 시작돼 생략됐으면 같은 양보 경로
+    if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+      Wait-UserYieldEnd -Game $Game -Context $Description
+      $deadline = $deadline.AddMilliseconds([double]$script:userYieldTotalMs - $seenYieldMs)
+      $seenYieldMs = [double]$script:userYieldTotalMs
+      continue
     }
     $nextClick = (Get-Date).AddSeconds($ReclickEverySeconds)
     while ((Get-Date) -lt $nextClick -and (Get-Date) -lt $deadline) {
@@ -5239,12 +5320,14 @@ function Invoke-VerifiedContentExit {
   )
   $fieldStreak = 0
   $verifyDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $seenYieldMs = [double]$script:userYieldTotalMs   # 양보 마감 연장 기준값 (Invoke-ClickUntil 과 같은 계약)
   while ((Get-Date) -lt $verifyDeadline) {
     Start-Sleep -Milliseconds 1500
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림)
       $verifyDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      $seenYieldMs = [double]$script:userYieldTotalMs
       continue
     }
     $exitCenterNow = (Get-GameOcrText -Game $Game) -replace '\s', ''
@@ -5261,7 +5344,22 @@ function Invoke-VerifiedContentExit {
       continue
     }
     $fieldStreak = 0
+    # 사용자 조작 중이면 재클릭하지 않고 기다린 뒤 마감을 연장하고 팝업·필드 증거 판독부터 다시
+    # (2026-09-08 전수 분류 - 40초 상한이 조작 중 그대로 소모돼 '복귀 미확인' 정지)
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context '나가기 확인'
+      $verifyDeadline = $verifyDeadline.AddMilliseconds([double]$script:userYieldTotalMs - $seenYieldMs)
+      $seenYieldMs = [double]$script:userYieldTotalMs
+      continue
+    }
+    $script:lastClickSkipReason = ''   # 상태 기반 재클릭은 클릭이 없을 수도 있어 지난 메타 잔존 방지
     & $ReclickIfSource
+    if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+      Wait-UserYieldEnd -Game $Game -Context '나가기 확인'
+      $verifyDeadline = $verifyDeadline.AddMilliseconds([double]$script:userYieldTotalMs - $seenYieldMs)
+      $seenYieldMs = [double]$script:userYieldTotalMs
+      continue
+    }
   }
   return $false
 }
@@ -6014,8 +6112,21 @@ function Confirm-DifficultySelected {
       return $true
     }
     if ($tryNo -lt 3) {
+      # 사용자 조작 중이면 재클릭하지 않고 기다립니다 (시도 미소모 - 2026-09-08 전수 분류).
+      # 다음 회전의 선택 판정이 곧 재판독입니다. '같은 좌표만' 계약(재탐색 금지)은 그대로 -
+      # 화면 자체가 바뀐 경우의 유효성은 호출부 몫 (Codex).
+      if (Test-UserRecentlyActive) {
+        Wait-UserYieldEnd -Game $Game -Context "난이도 '$Label' 확인"
+        $tryNo--
+        continue
+      }
       Focus-Game -Game $Game
       Click-ScreenPoint -X $ClickPoint.X -Y $ClickPoint.Y
+      if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+        Wait-UserYieldEnd -Game $Game -Context "난이도 '$Label' 확인"
+        $tryNo--
+        continue
+      }
       Start-Sleep -Milliseconds 1200
     }
   }
@@ -6071,14 +6182,35 @@ function Set-DgOptionDifficulty {
   # 클릭 1회 → 재클릭 없이 2초 간격 수동 확인 (리뷰 계약 - 확인 실패마다 재클릭하면
   # 눌림/전환 연출이 다시 시작돼 확인이 영원히 연출 구간에 걸리는 자기 방해 루프.
   # 23:56 실기: 오류 3초 뒤 캡처는 판정 완벽 통과 = 기다리기만 하면 되는 상태였음)
+  # 사용자 조작 중이면 확정 클릭 전에 기다렸다가 **탐색·선확인부터** 다시 합니다 (2026-09-08
+  # 전수 분류 - 루프 밖에서 얻은 $point 재사용 금지, 대기 중 사용자가 골랐으면 클릭 생략 - Codex)
+  if (Test-UserRecentlyActive) {
+    Wait-UserYieldEnd -Game $Game -Context "난이도 '$Label' 확정"
+    if (-not (Resume-DgOptionDifficultyAfterYield -Game $Game -Label $Label -PointRef ([ref]$point))) { return $false }
+    if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) {
+      Write-RunLog "$($script:contentTag) 난이도 '$Label' 이미 선택 확인 - 클릭 생략 (양보 후 재확인)"
+      return $true
+    }
+  }
   Focus-Game -Game $Game
   Click-ScreenPoint -X $point.X -Y $point.Y
   # 생략(커서 확인 실패)이면 재전송 (2026-08-11 ③). 생략된 클릭은 눌림 연출이 시작되지 않아
   # 위 자기 방해 계약과 충돌하지 않습니다 - '실제로 나간 클릭'만 재클릭 금지 대상입니다.
-  # 재전송은 옵션 화면(제목 '구역')이 그대로일 때만, 최대 2회.
+  # 재전송은 옵션 화면(제목 '구역')이 그대로일 때만, 최대 2회. 생략 원인이 사용자 조작이면
+  # 회수 미소모 + 대기 + 탐색·선확인부터 (커서 실패만 2회 소모 - 기존 계약).
   for ($optDispatchTry = 1; $optDispatchTry -le 2 -and -not $script:lastClickPerformed; $optDispatchTry++) {
-    Start-Sleep -Milliseconds 700
-    if (-not ((Read-DgTitleText -Game $Game).Contains('구역'))) { break }
+    if ($script:lastClickSkipReason -eq 'user-active') {
+      $optDispatchTry--
+      Wait-UserYieldEnd -Game $Game -Context "난이도 '$Label' 확정"
+      if (-not (Resume-DgOptionDifficultyAfterYield -Game $Game -Label $Label -PointRef ([ref]$point))) { return $false }
+      if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) {
+        Write-RunLog "$($script:contentTag) 난이도 '$Label' 이미 선택 확인 - 클릭 생략 (양보 후 재확인)"
+        return $true
+      }
+    } else {
+      Start-Sleep -Milliseconds 700
+      if (-not ((Read-DgTitleText -Game $Game).Contains('구역'))) { break }
+    }
     Focus-Game -Game $Game
     Click-ScreenPoint -X $point.X -Y $point.Y
   }
@@ -6089,9 +6221,24 @@ function Set-DgOptionDifficulty {
     Start-Sleep -Milliseconds 2000
   }
   # 전부 실패했을 때만 같은 좌표를 최종 1회 재클릭하고 다시 수동 확인 (그래도 실패면
-  # 기존 계약대로 경고 후 $false - Strict 처리는 호출부 몫)
-  Focus-Game -Game $Game
-  Click-ScreenPoint -X $point.X -Y $point.Y
+  # 기존 계약대로 경고 후 $false - Strict 처리는 호출부 몫).
+  # 사용자 조작 중이면 대기 후 **현재 선택 상태부터** 다시 보고, 아직 필요할 때만 최종 미전송
+  # 클릭을 보냅니다 (함수 전체 재시작으로 최초·최종 예산을 초기화하지 않음 - Codex).
+  $finalClickSent = $false
+  while (-not $finalClickSent) {
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context "난이도 '$Label' 재클릭"
+      if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) {
+        Write-RunLog "$($script:contentTag) 난이도 '$Label' 선택 확인 (양보 후 재확인 - 재클릭 생략, 옵션 화면)"
+        return $true
+      }
+      continue
+    }
+    Focus-Game -Game $Game
+    Click-ScreenPoint -X $point.X -Y $point.Y
+    if ($script:lastClickPerformed) { $finalClickSent = $true }
+    elseif ($script:lastClickSkipReason -ne 'user-active') { break }   # 커서 미확인 - 기존대로 확인만 이어감
+  }
   Start-Sleep -Milliseconds 900
   for ($finalTry = 1; $finalTry -le 3; $finalTry++) {
     if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) {
@@ -6106,6 +6253,20 @@ function Set-DgOptionDifficulty {
     Write-RunLog "[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 - 현재 상태로 진행합니다 (표본: $($script:lastPillProbe))"
   }
   return $false
+}
+
+function Resume-DgOptionDifficultyAfterYield {
+  # Set-DgOptionDifficulty 의 양보 후 재개 공통부: 옵션 화면에서 난이도 글자를 **다시 탐색**해
+  # 좌표를 갱신합니다 (대기 중 화면이 바뀌었을 수 있어 루프 밖 좌표 재사용 금지 - Codex).
+  # 못 찾으면 $false - 호출부는 기존 '글자 미발견' 계약대로 경고 후 실패 반환 (fail-closed).
+  param([System.Diagnostics.Process]$Game, [string]$Label, [ref]$PointRef)
+  $refound = Find-DgDifficultyPoint -Game $Game -Region $rgDgOptDifficulty -Label $Label -HardX $dgOptHardX
+  if (-not $refound) {
+    Write-RunLog "[경고] 양보 후 옵션 화면에서 난이도 '$Label' 글자를 다시 찾지 못했습니다 - 클릭하지 않고 실패 처리합니다"
+    return $false
+  }
+  $PointRef.Value = $refound
+  return $true
 }
 
 function Test-TabSelectedAt {
@@ -6590,9 +6751,22 @@ function Invoke-DgBackToSelection {
       continue
     }
     if ($backInputs -ge 4) { break }
+    # 사용자 조작 중이면 클릭하지 않고 기다립니다 (회전·클릭 예산 미소모 - 2026-09-08 전수 분류).
+    # 루프 상단의 제목 재판독이 재개점 - 대기 중 사용자가 돌아가 있으면 클릭 없이 성공
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context '선택 화면 복귀'
+      $backTry--
+      continue
+    }
     $backInputs++
     Focus-Game -Game $Game
     Click-GamePoint -Game $Game -ReferenceX $ptDgBackArrow[0] -ReferenceY $ptDgBackArrow[1]
+    if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+      $backInputs--
+      Wait-UserYieldEnd -Game $Game -Context '선택 화면 복귀'
+      $backTry--
+      continue
+    }
     Write-RunLog "$($script:contentTag) 선택 화면으로 뒤로 가기: 좌상단 < 클릭 (${backInputs}/4)"
     Start-Sleep -Milliseconds 1500
   }
@@ -6767,6 +6941,15 @@ function Invoke-NormalDungeonCycle {
       }
       $tabSwitched = $false
       for ($tabTry = 1; $tabTry -le 3 -and -not $tabSwitched; $tabTry++) {
+        # 사용자 조작 중이면 클릭하지 않고 기다린 뒤 **목표 탭 도달 여부부터** 확인합니다 (사용자가
+        # 탭을 눌렀을 수 있음 - Codex). 시도 미소모 (2026-09-08 전수 분류 - 양보 회전이 3회를
+        # 소진해 코드 4 정지하는 같은 기전)
+        if (Test-UserRecentlyActive) {
+          Wait-UserYieldEnd -Game $Game -Context "'$tabTargetLabel' 탭 전환"
+          $tabTry--
+          if (Test-DgTabProbeMatchesMode -ProbeText ([string](Get-DgStageEnterButtonText -Game $Game)) -DeepTab $deepMode) { $tabSwitched = $true }
+          continue
+        }
         # 탭 단어 탐색 후 클릭 (실측 예비 좌표: 심층 던전 탭 중앙 150,128 / 던전 탭 66,128)
         $tabWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX 20 -ReferenceY 100 `
             -RegionWidth 280 -RegionHeight 50 -Scale 3 -Engine $ocrKoreanEngine)
@@ -6776,6 +6959,13 @@ function Invoke-NormalDungeonCycle {
         }
         Focus-Game -Game $Game
         Click-GamePoint -Game $Game -ReferenceX ([int]$tabPoint.X) -ReferenceY ([int]$tabPoint.Y)
+        if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+          # 경합 창 백업 - 같은 양보 계약 (대기 → 도달 확인 → 재탐색부터)
+          Wait-UserYieldEnd -Game $Game -Context "'$tabTargetLabel' 탭 전환"
+          $tabTry--
+          if (Test-DgTabProbeMatchesMode -ProbeText ([string](Get-DgStageEnterButtonText -Game $Game)) -DeepTab $deepMode) { $tabSwitched = $true }
+          continue
+        }
         Start-Sleep -Milliseconds 1200
         # 전환 확인: 빈 판독이 '심층 없음 = 던전 탭'으로 오인되지 않게 '진입' 존재까지 요구 (리뷰)
         if (Test-DgTabProbeMatchesMode -ProbeText ([string](Get-DgStageEnterButtonText -Game $Game)) -DeepTab $deepMode) {
@@ -7135,6 +7325,13 @@ function Invoke-NormalDungeonCycle {
   if ($script:customMode) {
     $diffOk = $false
     for ($diffTry = 1; $diffTry -le 3; $diffTry++) {
+      # 사용자 조작 중이면 클릭하지 않고 기다립니다 (시도 미소모 - 2026-09-08 전수 분류).
+      # 다음 회전이 글자 탐색부터 다시 = 재판독 (Focus-Game 의 ALT 주입 전에 양보)
+      if (Test-UserRecentlyActive) {
+        Wait-UserYieldEnd -Game $Game -Context "난이도 '$ndDifficulty' 선택"
+        $diffTry--
+        continue
+      }
       $difficultyPoint = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX $dgSelHardX
       if (-not $difficultyPoint) {
         Write-RunLog "[커스텀] 난이도 '$ndDifficulty' 글자를 찾지 못했습니다 - 잠시 후 재탐색 (${diffTry}/3)"
@@ -7143,6 +7340,12 @@ function Invoke-NormalDungeonCycle {
       }
       Focus-Game -Game $Game
       Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
+      if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+        # 경합 창 백업 - 클릭 로그·확인 호출 전에 판정 (Codex)
+        Wait-UserYieldEnd -Game $Game -Context "난이도 '$ndDifficulty' 선택"
+        $diffTry--
+        continue
+      }
       Write-RunLog "$($script:contentTag) 난이도 '$ndDifficulty' 클릭"
       Start-Sleep -Milliseconds 900
       # 사후 검증 반환값을 그대로 사용합니다 (내부의 같은 좌표 1회 재클릭은 기존 그대로)
@@ -7161,15 +7364,30 @@ function Invoke-NormalDungeonCycle {
     # 클릭 생략(커서 확인 실패) 시 선택 화면이 그대로일 때만 재전송 (2026-08-11 ③ - 사냥터와
     # 같은 계약. 선택 화면 여부는 하단 '진입' 버튼으로 확인)
     $ndDiffClicked = $false
+    $ndDiffStopReason = '커서 확인 실패 지속'
+    $ndDiffRefind = $false
     for ($ndDiffTry = 1; $ndDiffTry -le 3; $ndDiffTry++) {
+      # 사용자 조작 중이면(또는 클릭 직전 경합으로 생략됐으면) 대기 후 **선택 화면 확인 → 난이도
+      # 재탐색**부터 다시 합니다 (루프 밖에서 얻은 좌표 재사용 금지 - Codex. 2026-09-08 전수
+      # 분류). 이 회전은 대기 후 그대로 클릭까지 가므로 시도를 소모하지 않고, 커서 미확인만
+      # 기존대로 3회를 소모합니다.
+      if ($ndDiffRefind -or (Test-UserRecentlyActive)) {
+        $ndDiffRefind = $false
+        Wait-UserYieldEnd -Game $Game -Context "난이도 '$ndDifficulty' 클릭"
+        if (-not ((([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', '').Contains('진입'))) { $ndDiffStopReason = '양보 후 선택 화면이 아님'; break }
+        $ndDiffFresh = Find-DgDifficultyPoint -Game $Game -Region $rgDgDifficulty -Label $ndDifficulty -HardX $dgSelHardX
+        if (-not $ndDiffFresh) { $ndDiffStopReason = '양보 후 난이도 글자 재탐색 실패'; break }
+        $difficultyPoint = $ndDiffFresh
+      }
       Focus-Game -Game $Game
       Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
       if ($script:lastClickPerformed) { $ndDiffClicked = $true; break }
+      if ($script:lastClickSkipReason -eq 'user-active') { $ndDiffTry--; $ndDiffRefind = $true; continue }
       Start-Sleep -Milliseconds 700
       if (-not ((([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', '').Contains('진입'))) { break }
     }
     if (-not $ndDiffClicked) {
-      Write-RunLog "[완료] 난이도 '$ndDifficulty' 클릭을 전송하지 못했습니다 (커서 확인 실패 지속) - 오난이도 판 방지를 위해 정지합니다"
+      Write-RunLog "[완료] 난이도 '$ndDifficulty' 클릭을 전송하지 못했습니다 ($ndDiffStopReason) - 오난이도 판 방지를 위해 정지합니다"
       exit 4
     }
     Write-RunLog "$($script:contentTag) 난이도 '$ndDifficulty' 클릭"
@@ -7215,6 +7433,13 @@ function Invoke-NormalDungeonCycle {
         $stageLabelSeen = $true
         Start-Sleep -Milliseconds 300
       } else {
+      # 사용자 조작 중이면 클릭하지 않고 기다립니다 (시도 미소모 - 2026-09-08 전수 분류).
+      # 대기 후에는 클릭 지점 계산부터 다시 (아래 '매 시도마다 다시 계산' 계약이 곧 재판독)
+      if (Test-UserRecentlyActive) {
+        Wait-UserYieldEnd -Game $Game -Context "구역 ${ndStage} 선택"
+        $stageTry--
+        continue
+      }
       # 포커스/선택 상태가 클릭마다 바뀔 수 있어 매 시도마다 클릭 지점을 다시 계산합니다.
       # 오선택된 미등록 배치 후보는 제외 목록으로 넘겨 같은 후보를 반복 클릭하지 않습니다.
       $stagePlan = Get-NdStageClickPoint -Game $Game -Stage $ndStage -ExcludeTypes $triedCandidateTypes
@@ -7238,6 +7463,12 @@ function Invoke-NormalDungeonCycle {
       if ([string]$stagePlan.Source -like '라벨*') { $stageLabelSeen = $true }
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $stagePlan.Point[0] -ReferenceY $stagePlan.Point[1]
+      if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+        # 경합 창 백업 - 클릭 결과 판독·후보 제외·오선택 복구로 넘어가지 않고 대기 후 좌표부터 다시 (Codex)
+        Wait-UserYieldEnd -Game $Game -Context "구역 ${ndStage} 선택"
+        $stageTry--
+        continue
+      }
       Write-RunLog "$($script:contentTag) 구역 ${ndStage} 클릭 ($($stagePlan.Source))"
       Start-Sleep -Milliseconds 900
       }
@@ -7798,20 +8029,43 @@ function Invoke-NormalDungeonCycle {
       exit 4
     }
     if ($toggleState -ne 'on') {
-      Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX ([int]$chancePoint.X) -ReferenceY ([int]$chancePoint.Y)
-      Start-Sleep -Milliseconds 900
-      $toggleAfterOn = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
-      for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOn -ne 'on'; $toggleProbe++) {
+      # 사용자 조작 중이면 대기 후 **앵커·상태를 다시 읽고**(사용자가 켰을 수 있음) 필요할 때만
+      # 클릭합니다. 실제 전송 뒤에만 아래 probe 로 - 단발 토글 계약 (2026-09-08 전수 분류, Codex:
+      # 생략된 클릭으로 probe 를 시작하면 켜지지 않은 채 정지). 커서 미확인은 기존대로 probe 가 판정.
+      $chanceClickSent = $false
+      while (-not $chanceClickSent -and $toggleState -ne 'on') {
+        if (Test-UserRecentlyActive) {
+          Wait-UserYieldEnd -Game $Game -Context "'우연한 만남' 토글 켜기"
+          $chanceRefound = Find-DgChanceTogglePoint -Game $Game
+          if ($chanceRefound) { $chancePoint = $chanceRefound }
+          $toggleState = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
+          if ($toggleState -eq 'unknown') {
+            Write-RunLog "[완료] '우연한 만남' 토글 상태를 양보 후 다시 확인하지 못했습니다 - 매칭 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+            exit 4
+          }
+          continue
+        }
+        Focus-Game -Game $Game
+        Click-GamePoint -Game $Game -ReferenceX ([int]$chancePoint.X) -ReferenceY ([int]$chancePoint.Y)
+        if ($script:lastClickPerformed) { $chanceClickSent = $true }
+        elseif ($script:lastClickSkipReason -ne 'user-active') { break }
+      }
+      if ($toggleState -eq 'on') {
+        Write-RunLog "$($script:contentTag) '우연한 만남' 토글 켜짐 확인 (양보 중 전환됨)"
+      } else {
         Start-Sleep -Milliseconds 900
         $toggleAfterOn = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
-      }
-      if ($toggleAfterOn -eq 'on') {
-        Write-RunLog "$($script:contentTag) '우연한 만남' 토글 켬"
-      } else {
-        # 켬 확인 실패 = solo 오입장 위험 - 경고 진행(구 계약)이 아니라 정지 (교차 리뷰)
-        Write-RunLog "[완료] '우연한 만남' 토글을 켠 것을 확인하지 못했습니다 - 매칭 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
-        exit 4
+        for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOn -ne 'on'; $toggleProbe++) {
+          Start-Sleep -Milliseconds 900
+          $toggleAfterOn = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
+        }
+        if ($toggleAfterOn -eq 'on') {
+          Write-RunLog "$($script:contentTag) '우연한 만남' 토글 켬"
+        } else {
+          # 켬 확인 실패 = solo 오입장 위험 - 경고 진행(구 계약)이 아니라 정지 (교차 리뷰)
+          Write-RunLog "[완료] '우연한 만남' 토글을 켠 것을 확인하지 못했습니다 - 매칭 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+          exit 4
+        }
       }
     } else {
       Write-RunLog "$($script:contentTag) '우연한 만남' 토글 켜짐 확인"
@@ -7849,8 +8103,26 @@ function Invoke-NormalDungeonCycle {
         $enterTry--
         continue
       }
+      # 사용자 조작 중이면 클릭하지 않고 기다립니다 (시도 미소모 - 2026-09-08 전수 분류). 대기 후에는
+      # 옵션 화면을 벗어났는지 먼저 봅니다 - 사용자가 직접 입장시켰을 수 있음 (아래 클릭 후 판정과
+      # 같은 조건). 아직 옵션 화면이면 다음 회전이 캡처·IME 확인부터 다시 (Codex 재개 순서)
+      if (Test-UserRecentlyActive) {
+        Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
+        $enterTry--
+        $titleNow = Read-DgTitleText -Game $Game
+        if (-not $titleNow.Contains('구역') -and -not $script:screenCaptureFailing) { $entered = $true; break }
+        continue
+      }
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgEnterFinal[0] -ReferenceY $ptDgEnterFinal[1]
+      if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+        # 경합 창 백업 - 팝업 처리·재화 폴백으로 넘어가기 전에 판정 (Codex)
+        Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
+        $enterTry--
+        $titleNow = Read-DgTitleText -Game $Game
+        if (-not $titleNow.Contains('구역') -and -not $script:screenCaptureFailing) { $entered = $true; break }
+        continue
+      }
       Start-Sleep -Milliseconds 1200
 
       # 7-1. '던전에 입장하시겠습니까?' 확인 팝업(도전 미수락 시)이 뜨면 처리합니다.
@@ -7988,25 +8260,48 @@ function Invoke-NormalDungeonCycle {
       exit 4
     }
     if ($toggleState -eq 'on') {
-      Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX ([int]$chanceOffPoint.X) -ReferenceY ([int]$chanceOffPoint.Y)
-      Start-Sleep -Milliseconds 900
-      # 끄기 확인도 'off' 확정을 요구합니다 (기존에는 'on'만 아니면 통과 → unknown 이 꺼짐으로 둔갑)
-      $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
-      for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOff -ne 'off'; $toggleProbe++) {
+      # 사용자 조작 중이면 대기 후 앵커·상태를 다시 읽고(사용자가 껐을 수 있음) 필요할 때만 클릭 -
+      # 켜기 분기와 같은 단발 토글 계약 (2026-09-08 전수 분류, Codex)
+      $chanceOffSent = $false
+      while (-not $chanceOffSent -and $toggleState -eq 'on') {
+        if (Test-UserRecentlyActive) {
+          Wait-UserYieldEnd -Game $Game -Context "'우연한 만남' 토글 끄기"
+          $chanceOffRefound = Find-DgChanceTogglePoint -Game $Game
+          if ($chanceOffRefound) { $chanceOffPoint = $chanceOffRefound }
+          $toggleState = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
+          if ($toggleState -eq 'unknown') {
+            Write-RunLog "[완료] '우연한 만남' 토글 상태를 양보 후 다시 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+            exit 4
+          }
+          continue
+        }
+        Focus-Game -Game $Game
+        Click-GamePoint -Game $Game -ReferenceX ([int]$chanceOffPoint.X) -ReferenceY ([int]$chanceOffPoint.Y)
+        if ($script:lastClickPerformed) { $chanceOffSent = $true }
+        elseif ($script:lastClickSkipReason -ne 'user-active') { break }
+      }
+      if ($toggleState -ne 'on') {
+        # 대기 중 사용자가 껐음 ('off' 확정 - unknown 은 위에서 정지)
+        Write-RunLog "$($script:contentTag) '우연한 만남' 토글 꺼짐 확인 (양보 중 전환됨)"
+      } else {
         Start-Sleep -Milliseconds 900
+        # 끄기 확인도 'off' 확정을 요구합니다 (기존에는 'on'만 아니면 통과 → unknown 이 꺼짐으로 둔갑)
         $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
+        for ($toggleProbe = 1; $toggleProbe -le 3 -and $toggleAfterOff -ne 'off'; $toggleProbe++) {
+          Start-Sleep -Milliseconds 900
+          $toggleAfterOff = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
+        }
+        if ($toggleAfterOff -eq 'on') {
+          throw "'우연한 만남' 토글을 끄지 못해 파티찾기를 진행할 수 없습니다 (토글이 켜진 상태에서는 파티 찾기 버튼이 없음)"
+        }
+        if ($toggleAfterOff -ne 'off') {
+          # 클릭 후 재확인이 unknown = 판별 불가 - 최초 unknown 과 같은 조건부 정지(코드 4)로
+          # 통일합니다 (교차 리뷰 지적: throw(코드 1)면 오류 재시도를 소모하는 비대칭)
+          Write-RunLog "[완료] '우연한 만남' 토글을 끈 뒤 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+          exit 4
+        }
+        Write-RunLog "$($script:contentTag) '우연한 만남' 토글 끔"
       }
-      if ($toggleAfterOff -eq 'on') {
-        throw "'우연한 만남' 토글을 끄지 못해 파티찾기를 진행할 수 없습니다 (토글이 켜진 상태에서는 파티 찾기 버튼이 없음)"
-      }
-      if ($toggleAfterOff -ne 'off') {
-        # 클릭 후 재확인이 unknown = 판별 불가 - 최초 unknown 과 같은 조건부 정지(코드 4)로
-        # 통일합니다 (교차 리뷰 지적: throw(코드 1)면 오류 재시도를 소모하는 비대칭)
-        Write-RunLog "[완료] '우연한 만남' 토글을 끈 뒤 상태를 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
-        exit 4
-      }
-      Write-RunLog "$($script:contentTag) '우연한 만남' 토글 끔"
     }
     # 클릭하면 자동으로 파티 매칭이 진행되고, 파티가 구성되면 게임이 알아서
     # 던전에 입장합니다. 여기서는 클릭 후 아래의 입장 감지에서 매칭 완료를 기다립니다.
@@ -8472,15 +8767,30 @@ function Invoke-HuntingGroundCycle {
     #   ②'클릭' 로그는 실제 전송됐을 때만 (거짓 로그 제거)
     #   ③확인 실패면 같은 화면 한정 1회 정정 재클릭 → 그래도 실패면 정지 (오난이도 판 방지)
     $htDiffClicked = $false
+    $htDiffStopReason = '커서 확인 실패 지속'
+    $htDiffRefind = $false
     for ($diffDispatchTry = 1; $diffDispatchTry -le 3; $diffDispatchTry++) {
+      # 사용자 조작 중이면(또는 클릭 직전 경합으로 생략됐으면) 대기 후 **첫 화면 확인 → 난이도
+      # 재탐색**부터 (루프 밖 좌표 재사용 금지 - Codex. 2026-09-08 전수 분류). 대기 후 그대로
+      # 클릭까지 가므로 시도 미소모, 커서 미확인만 기존대로 3회 소모 - 던전 비커스텀과 동일 계약
+      if ($htDiffRefind -or (Test-UserRecentlyActive)) {
+        $htDiffRefind = $false
+        Wait-UserYieldEnd -Game $Game -Context "난이도 '$htDifficulty' 클릭"
+        if (-not (Find-HtEntryButtonPoint -Game $Game)) { $htDiffStopReason = '양보 후 첫 화면이 아님'; break }
+        $htDiffFresh = Find-GameTextPoint -Game $Game -ReferenceX $rgHtDifficulty[0] -ReferenceY $rgHtDifficulty[1] `
+          -RegionWidth $rgHtDifficulty[2] -RegionHeight $rgHtDifficulty[3] -Scale 4 -SearchText $difficultySearch -ExactText $difficultyKey
+        if (-not $htDiffFresh) { $htDiffStopReason = '양보 후 난이도 글자 재탐색 실패'; break }
+        $difficultyPoint = $htDiffFresh
+      }
       Focus-Game -Game $Game
       Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
       if ($script:lastClickPerformed) { $htDiffClicked = $true; break }
+      if ($script:lastClickSkipReason -eq 'user-active') { $diffDispatchTry--; $htDiffRefind = $true; continue }
       Start-Sleep -Milliseconds 700
       if (-not (Find-HtEntryButtonPoint -Game $Game)) { break }
     }
     if (-not $htDiffClicked) {
-      Write-RunLog "[완료] 난이도 '$htDifficulty' 클릭을 전송하지 못했습니다 (커서 확인 실패 지속) - 오난이도 판 방지를 위해 정지합니다"
+      Write-RunLog "[완료] 난이도 '$htDifficulty' 클릭을 전송하지 못했습니다 ($htDiffStopReason) - 오난이도 판 방지를 위해 정지합니다"
       exit 4
     }
     Write-RunLog "[사냥터] 난이도 '$htDifficulty' 클릭"
@@ -8488,14 +8798,26 @@ function Invoke-HuntingGroundCycle {
     # 사후 검증: 클릭이 빗나가 다른 난이도로 바뀌지 않았는지 선택 강조로 확인 (첫 좌표 재사용)
     $htDiffConfirmed = [bool](Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $htDifficulty)
     if (-not $htDiffConfirmed) {
-      # 같은 화면(첫 화면 입장 버튼 잔존)일 때만 성공 전송 기준 1회 정정 재클릭 후 재확인
-      if (Find-HtEntryButtonPoint -Game $Game) {
+      # 같은 화면(첫 화면 입장 버튼 잔존)일 때만 성공 전송 기준 1회 정정 재클릭 후 재확인.
+      # 사용자 조작 중이면 대기 후 화면·선택 상태·좌표를 다시 확인하고 정정 기회를 보존 (Codex -
+      # 예전에는 생략되면 probe 없이 곧바로 정지)
+      while (Find-HtEntryButtonPoint -Game $Game) {
+        if (Test-UserRecentlyActive) {
+          Wait-UserYieldEnd -Game $Game -Context "난이도 '$htDifficulty' 정정"
+          $htDiffRefound = Find-GameTextPoint -Game $Game -ReferenceX $rgHtDifficulty[0] -ReferenceY $rgHtDifficulty[1] `
+            -RegionWidth $rgHtDifficulty[2] -RegionHeight $rgHtDifficulty[3] -Scale 4 -SearchText $difficultySearch -ExactText $difficultyKey
+          if ($htDiffRefound) { $difficultyPoint = $htDiffRefound }
+          if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $difficultyPoint) { $htDiffConfirmed = $true; break }
+          continue
+        }
         Focus-Game -Game $Game
         Click-ScreenPoint -X $difficultyPoint.X -Y $difficultyPoint.Y
         if ($script:lastClickPerformed) {
           Start-Sleep -Milliseconds 900
           $htDiffConfirmed = [bool](Confirm-DifficultySelected -Game $Game -ClickPoint $difficultyPoint -Label $htDifficulty)
+          break
         }
+        if ($script:lastClickSkipReason -ne 'user-active') { break }
       }
     }
     if (-not $htDiffConfirmed) {
@@ -8683,8 +9005,22 @@ function Invoke-HuntingGroundCycle {
         $enterTry--
         continue
       }
+      # 사용자 조작 중이면 클릭하지 않고 기다립니다 (시도 미소모 - 던전 입장과 같은 계약). 대기 후
+      # 입장됐는지는 '입장 버튼 소멸 + 팝업 아님'(아래 클릭 후 판정과 동일 조건)으로만 인정
+      if (Test-UserRecentlyActive) {
+        Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
+        $enterTry--
+        if (-not (Find-HtEntryButtonPoint -Game $Game) -and -not $script:screenCaptureFailing -and -not (Test-DgImePopupVisible -Game $Game)) { $entered = $true; break }
+        continue
+      }
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptDgEnterFinal[0] -ReferenceY $ptDgEnterFinal[1]
+      if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+        Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
+        $enterTry--
+        if (-not (Find-HtEntryButtonPoint -Game $Game) -and -not $script:screenCaptureFailing -and -not (Test-DgImePopupVisible -Game $Game)) { $entered = $true; break }
+        continue
+      }
       Start-Sleep -Milliseconds 1200
       Resolve-DgEnterConfirmPopup -Game $Game | Out-Null
       $stillEntry = [bool](Find-HtEntryButtonPoint -Game $Game)

@@ -11,6 +11,10 @@ function Focus-Game { param($Game) }
 function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY); $script:clickCount++ }
 function Test-SafeStopDuringCaptureFail {}
 function Start-Sleep { param([int]$Milliseconds) }
+# v2.1.7 사용자 양보 게이트 모의 (이 테스트는 조작 없음 경로만 - 양보 진리표는 test_yield_batch.ps1)
+function Test-UserRecentlyActive { $false }
+function Wait-UserYieldEnd { param($Game, $Context) }
+$script:userYieldTotalMs = [double]0
 
 $fails = 0
 function Check-Equal {
