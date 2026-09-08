@@ -128,8 +128,9 @@ Assert-Case '배선: streak 초기 상태가 선언돼 있다' `
 Assert-Case '컷신: 실제 클릭일 때만 성공 로그 (2곳)' `
   ([regex]::Matches($workerRaw,
     'Click-ScreenPoint -X \$skipScene[^\r\n]*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(\$script:lastClickPerformed\) \{').Count) 2
+# v2.1.7: 문구 '커서 확인 실패' → '커서 미확인' (실패 단어의 심각도 오탐 방지 + 사용자 조작 생략과 구분)
 Assert-Case '컷신: 건너뜀도 사유를 남긴다 (2곳)' `
-  ([regex]::Matches($workerRaw, '컷신 - 커서 확인 실패로 장면 넘기기 클릭을 건너뜀').Count) 2
+  ([regex]::Matches($workerRaw, '컷신 - 커서 미확인으로 장면 넘기기 클릭을 건너뜀').Count) 2
 # 무조건 기록으로 되돌아가면(클릭 바로 다음 줄에 성공 로그) 여기서 걸립니다
 Assert-Case '컷신: 무조건 성공 기록으로 되돌아가지 않는다' `
   ([bool]($workerRaw -match

@@ -1865,6 +1865,8 @@ $script:cursorParkWarnActive = $false
 $script:lastSelfInputTick = [uint32]0   # 시작 직후 관측되는 dwTime(시작 버튼 클릭)을 사용자로 오인하지 않게 워커 시작 시각으로 초기화 (아래 본문)
 $script:lastUserInputTick = [uint32]0   # 마지막으로 확인된 '사용자' 입력 tick (0 = 아직 관측 없음)
 $script:lastYieldClickNoticeTick = [uint32]0   # 클릭 취소 안내 5초 스로틀
+$script:lastUserInputKind = ''       # 마지막 사용자 입력 종류 추정 ('마우스 이동' / '키/버튼 입력') - 로그 표기용
+$script:lastObservedCursor = $null   # 입력 종류 추정의 커서 기준점 (Update-ObservedCursor)
 # 누적 양보 시간(ms) - 시간 상한 루프(Invoke-ClickUntil 등)가 자기 기준값과의 차만큼 마감을
 # 늘리는 데 씁니다 (2026-09-08 - Codex: 반환값 대신 누적 변수, 정수 초 변환은 오차 누적이라 ms).
 # 워커 전체에서 증가만 하고, 각 타이머 소유자가 시작 시 기준값을 저장해 차분만 반영합니다.
@@ -2329,12 +2331,31 @@ function Update-UserInputObservation {
   if (-not [HoneyNogiInput]::GetLastInputInfo([ref]$observedInfo)) { return }
   if ((Get-TickDeltaMilliseconds -From $script:lastSelfInputTick -To ([uint32]$observedInfo.dwTime)) -gt 50) {
     $script:lastUserInputTick = [uint32]$observedInfo.dwTime
+    # 입력 종류 추정 (2026-09-08 사용자 지적 "꿀비 자기 클릭에 양보하는 것 같다" 진단용): GetLastInputInfo
+    # 는 종류를 주지 않으므로, 마지막 관측 이후 커서가 움직였으면 '마우스 이동', 아니면 '키/버튼 입력'
+    # (채팅 타이핑 등 키보드 입력도 시스템 전체 입력이라 조작으로 잡힘 - 로그에서 구분되게).
+    # 자기 SetCursorPos 는 Update-ObservedCursor 로 기준을 갱신해 우리 이동이 '마우스 이동'으로 오인되지 않게.
+    $kindPt = New-Object HoneyNogiInput+POINT
+    if ([HoneyNogiInput]::GetCursorPos([ref]$kindPt) -and $null -ne $script:lastObservedCursor -and
+        ($kindPt.X -ne $script:lastObservedCursor.X -or $kindPt.Y -ne $script:lastObservedCursor.Y)) {
+      $script:lastUserInputKind = '마우스 이동'
+    } else {
+      $script:lastUserInputKind = '키/버튼 입력'
+    }
   }
+  Update-ObservedCursor
+}
+
+function Update-ObservedCursor {
+  # 입력 종류 추정의 커서 기준점 갱신 - 관측 시점마다 + 우리가 커서를 옮긴 직후(클릭·대피)
+  $obsPt = New-Object HoneyNogiInput+POINT
+  if ([HoneyNogiInput]::GetCursorPos([ref]$obsPt)) { $script:lastObservedCursor = @{ X = $obsPt.X; Y = $obsPt.Y } }
 }
 
 function Register-SelfInput {
   # 주입(mouse_event/keybd_event) 직후 호출 - 이 시각까지의 dwTime 은 사용자 판별에서 제외
   $script:lastSelfInputTick = [HoneyNogiInput]::GetTickCount()
+  Update-ObservedCursor
 }
 
 function Test-UserRecentlyActive {
@@ -2551,7 +2572,7 @@ function Wait-UserYieldEnd {
   if (-not (Test-UserRecentlyActive)) { return }
   $yieldClock = [System.Diagnostics.Stopwatch]::StartNew()
   $particle = Get-KoreanObjectParticle -Word $Context
-  Write-RunLog "[안내] 사용자 마우스 조작 감지 - 조작이 끝날 때까지 ${Context}${particle} 멈추고 기다립니다"
+  Write-RunLog "[안내] 사용자 입력 감지($($script:lastUserInputKind)) - 조작이 끝날 때까지 ${Context}${particle} 멈추고 기다립니다"
   $yieldHeartbeat = Get-Date
   while (Test-UserRecentlyActive) {
     Test-SafeStopDuringCaptureFail
@@ -2565,6 +2586,69 @@ function Wait-UserYieldEnd {
   # 시간 상한 루프의 마감 연장용 누적 (선언부 주석 참고)
   $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $yieldClock.Elapsed.TotalMilliseconds
   Write-RunLog "[안내] 사용자 조작 종료 - ${Context}${particle} 다시 진행합니다 ($([int]$yieldClock.Elapsed.TotalSeconds)초 양보)"
+}
+
+function Invoke-UserYieldWithDeadline {
+  # 시간 상한 루프용 양보: 조작 종료까지 대기 + 양보한 시간만큼 마감 연장 + 기준값 갱신
+  # (Invoke-ClickUntil / Invoke-VerifiedContentExit 의 인라인 구현과 같은 계약 - 만료 판정보다
+  # 먼저 보정, 차분만 반영해 중복 가산 방지. 2026-09-08 결과 화면·다시 하기·다음 층 루프에 적용).
+  # 호출부는 이 함수 뒤에 반드시 continue 로 루프 서두(재판독)로 돌아갑니다 - 대기 후 옛 좌표 클릭 금지.
+  param([System.Diagnostics.Process]$Game, [string]$Context, [ref]$Deadline, [ref]$SeenYieldMs)
+  Wait-UserYieldEnd -Game $Game -Context $Context
+  $Deadline.Value = $Deadline.Value.AddMilliseconds([double]$script:userYieldTotalMs - [double]$SeenYieldMs.Value)
+  $SeenYieldMs.Value = [double]$script:userYieldTotalMs
+}
+
+function Get-YieldAdjustedDeadline {
+  # 시간 상한 루프의 **만료 판정 직전**에 호출: 지난 판정 이후 어디서든 누적된 양보 시간을 마감에
+  # 반영하고 마감을 돌려줍니다 (while 조건에 씀). 양보 게이트뿐 아니라 판독 헬퍼 안의
+  # Move-CursorOutsideGame 양보(팝업 스윕 등 - 이 루프 코드가 직접 부르지 않는 곳)도 누적 변수에는
+  # 잡히는데 마감에는 반영되지 않아 초과 throw 가 가능했음 (2026-09-08 반박 검토 major 2건).
+  # 차분만 반영하고 기준값을 갱신하므로 같은 양보가 두 번 더해지지 않습니다.
+  param([ref]$Deadline, [ref]$SeenYieldMs)
+  $delta = [double]$script:userYieldTotalMs - [double]$SeenYieldMs.Value
+  if ($delta -gt 0) {
+    $Deadline.Value = $Deadline.Value.AddMilliseconds($delta)
+    $SeenYieldMs.Value = [double]$script:userYieldTotalMs
+  }
+  return $Deadline.Value
+}
+
+function Resolve-DgEntryAfterYield {
+  # 던전 입장하기 루프의 **양보 후** 판정 (2026-09-08 Codex P1: "제목에 '구역'이 없다 = 입장"으로 보면
+  # 사용자가 대기 중 던전 UI 를 닫고 필드로 나간 경우도 입장으로 오인 - 필드에도 HUD 가 있어 이후
+  # 입장 감지까지 통과하고 필드에서 클리어 대기에 들어감). 긍정 증거 = HUD + 퀘스트 추적기의
+  # 'N구역' 목표(던전 안에서만 표시 - 파티찾기 입장 감지와 같은 신호). 로딩(실측 3~7초)을 덮도록
+  # 최대 TimeoutSeconds 폴링. 반환: 'options'(옵션 화면 그대로 - 다음 회전이 클릭) / 'entered' / 'unknown'
+  param([System.Diagnostics.Process]$Game, [int]$TimeoutSeconds = 15)
+  $probeDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ($true) {
+    if (-not $script:screenCaptureFailing) {
+      if ((Read-DgTitleText -Game $Game).Contains('구역')) { return 'options' }
+      $questNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+          -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+      if ((Test-HomeEndEscHud -Game $Game) -and $questNow.Contains('구역')) { return 'entered' }
+    }
+    if ((Get-Date) -ge $probeDeadline) { return 'unknown' }
+    Start-Sleep -Seconds 2
+  }
+}
+
+function Resolve-HtEntryAfterYield {
+  # 사냥터 입장하기 루프의 양보 후 판정 - 던전과 같은 취지. 긍정 증거 = 퀘스트 추적기 '소탕'/'정찰'
+  # (사냥터 입장 완료 감지와 같은 신호). 첫 화면(입장 버튼) 또는 IME 팝업이 덮은 상태면 'options'.
+  param([System.Diagnostics.Process]$Game, [int]$TimeoutSeconds = 15)
+  $probeDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ($true) {
+    if (-not $script:screenCaptureFailing) {
+      if ((Find-HtEntryButtonPoint -Game $Game) -or (Test-DgImePopupVisible -Game $Game)) { return 'options' }
+      $questNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+          -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+      if ($questNow.Contains('소탕') -or $questNow.Contains('정찰')) { return 'entered' }
+    }
+    if ((Get-Date) -ge $probeDeadline) { return 'unknown' }
+    Start-Sleep -Seconds 2
+  }
 }
 
 function Get-KoreanObjectParticle {
@@ -2606,7 +2690,7 @@ function Click-ScreenPoint {
     if ((Get-TickElapsedMilliseconds -CurrentTick ([HoneyNogiInput]::GetTickCount()) `
           -PreviousTick $script:lastYieldClickNoticeTick) -gt 5000) {
       $script:lastYieldClickNoticeTick = [HoneyNogiInput]::GetTickCount()
-      Write-RunLog '[안내] 사용자 마우스 조작 감지 - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
+      Write-RunLog "[안내] 사용자 입력 감지($($script:lastUserInputKind)) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)"
     }
     return
   }
@@ -2812,7 +2896,7 @@ function Move-CursorOutsideGame {
   while ((Test-CursorOverGame -Game $Game) -and (Test-UserRecentlyActive)) {
     if ($null -eq $userYieldClock) {
       $userYieldClock = [System.Diagnostics.Stopwatch]::StartNew()
-      Write-RunLog '[안내] 사용자 마우스 조작 감지 - 조작이 끝날 때까지 자동화를 잠시 양보합니다'
+      Write-RunLog "[안내] 사용자 입력 감지($($script:lastUserInputKind)) - 조작이 끝날 때까지 자동화를 잠시 양보합니다"
     }
     Start-Sleep -Milliseconds 500
   }
@@ -2864,6 +2948,7 @@ function Move-CursorOutsideGame {
     if (-not [HoneyNogiInput]::SetCursorPos([int]$park.X, [int]$park.Y)) {
       throw "SetCursorPos 실패 (목표 $($park.X),$($park.Y))"
     }
+    Update-ObservedCursor   # 우리 대피 이동을 '마우스 이동' 입력으로 오인하지 않게 기준점 갱신
     # 실제로 옮겼을 때만 한 프레임 분량을 기다립니다. 호버 UI 가 걷히려면 게임이 새 프레임을
     # 한 장 더 그려야 하는데, 대피 직후 곧바로 캡처하면 호버가 남은 옛 프레임을 읽습니다.
     # (30fps 면 33ms, 60fps 면 17ms - 여유 있게 120ms. 이미 창 밖이라 무동작이면 여기 오지
@@ -4317,8 +4402,12 @@ function Wait-ForDungeonClearScreen {
         #  정리는 5~8차에 이 구분을 넣었는데 컷신 2곳만 빠져 있었습니다).
         if ($script:lastClickPerformed) {
           Write-RunLog "$($script:contentTag) 컷신 - 장면 넘기기 클릭"
+        } elseif ($script:lastClickSkipReason -eq 'user-active') {
+          # 사유를 구분해 기록합니다 (2026-09-08 18:16 실기: 조작으로 생략된 클릭이 '커서 확인 실패'로
+          # 적혀 진단이 헛돌음). 이 루프는 600초 감시형이라 대기 없이 다음 감지에서 재시도합니다.
+          Write-RunLog "$($script:contentTag) 컷신 - 사용자 조작으로 장면 넘기기 클릭을 건너뜀 (다음 감지에서 재시도)"
         } else {
-          Write-RunLog "$($script:contentTag) 컷신 - 커서 확인 실패로 장면 넘기기 클릭을 건너뜀 (다음 감지에서 재시도)"
+          Write-RunLog "$($script:contentTag) 컷신 - 커서 미확인으로 장면 넘기기 클릭을 건너뜀 (다음 감지에서 재시도)"
         }
         Start-Sleep -Seconds 2
       }
@@ -4674,7 +4763,9 @@ function Invoke-ClickUntil {
   # 조작 중 클릭이 생략되는 동안 시간 상한이 그대로 소모돼 초과 throw. 만료 판정보다 먼저
   # 보정하고, 마감을 새로 잡을 때는 기준값도 같이 갱신 - Codex 조건)
   $seenYieldMs = [double]$script:userYieldTotalMs
-  while ((Get-Date) -lt $deadline) {
+  # 만료 판정 직전에 누적 양보를 반영 - Condition/SourceCondition 스크립트블록 안 판독 헬퍼의 커서 대피
+  # 양보까지 잡습니다 (아래 명시 연장은 게이트 직후의 즉시 반영용)
+  while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs))) {
     # 조건이 참이어도 캡처 실패 중이면 믿지 않습니다: 실패 중 OCR은 빈 문자열을 돌려주므로
     # '-not (화면 감지)' 형태의 부정형 조건이 클릭도 안 했는데 참이 되는 오판을 막습니다.
     if ((& $Condition) -and -not $script:screenCaptureFailing) { return }
@@ -4716,7 +4807,7 @@ function Invoke-ClickUntil {
       continue
     }
     $nextClick = (Get-Date).AddSeconds($ReclickEverySeconds)
-    while ((Get-Date) -lt $nextClick -and (Get-Date) -lt $deadline) {
+    while ((Get-Date) -lt $nextClick -and (Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs))) {
       if ((& $Condition) -and -not $script:screenCaptureFailing) { return }
       # 클릭 후 대기 중 캡처가 실패하면(RDP 끊김 등) 바깥 루프의 실패 처리로 나가
       # 제한 시간을 연장합니다 - 여기서 그냥 기다리면 실패 구간이 제한 시간을 소모해
@@ -5321,7 +5412,7 @@ function Invoke-VerifiedContentExit {
   $fieldStreak = 0
   $verifyDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $seenYieldMs = [double]$script:userYieldTotalMs   # 양보 마감 연장 기준값 (Invoke-ClickUntil 과 같은 계약)
-  while ((Get-Date) -lt $verifyDeadline) {
+  while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$verifyDeadline) -SeenYieldMs ([ref]$seenYieldMs))) {
     Start-Sleep -Milliseconds 1500
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
@@ -5815,25 +5906,49 @@ function Wait-ForResultScreen {
   param(
     [System.Diagnostics.Process]$Game,
     [scriptblock]$FindRetryButton,
-    [string]$MissingMessage
+    [string]$MissingMessage,
+    [scriptblock]$PastResultCondition = $null
   )
 
   # 클리어 터치 후 엔딩 컷신을 넘기며 결과 화면을 기다립니다 (던전/사냥터 공통).
+  # PastResultCondition (2026-09-08 Codex P2): 사용자 조작 양보 중에 사용자가 직접 결과 화면을 넘겨
+  #   **다음 화면**(던전 = 옵션 화면 / 사냥터 = 첫 화면)에 도달했는지의 판정. 이 호출에서 양보가 한 번
+  #   이상 있었을 때만 검사하고, 참이면 $script:resultScreenSkippedByUser 를 세우고 $null 을 돌려줍니다 -
+  #   호출부는 반복 버튼 클릭(다시 하기 / 새 임무 선택 - 첫 화면에서 그 자리는 '파티 찾기')을 생략해야
+  #   합니다. 양보가 없으면 검사하지 않아 기존 흐름 불변.
+  $script:resultScreenSkippedByUser = $false
+  $yieldedHere = $false
   #  - 컷신 '장면 넘기기' 클릭 (탐색이 캡처 상태 탐침을 겸함 - 실패 중에는 제한 시간 동결)
   #  - 클리어 터치가 등급 연출에 무시된 경우 '화면을 터치'가 남아 있으면 재터치
   #  - 은동전 소탕의 전리품 공개 화면은 '발견한 전리품' 라벨 지점 클릭으로 진행
   #    (라벨은 카드/버튼이 아니라 어디를 눌러도 진행만 되는 안전한 지점)
   # 반환: 반복 버튼 지점(던전 = 다시 하기 / 사냥터 = 새 임무 선택). 못 찾으면 throw.
   $resultDeadline = (Get-Date).AddSeconds(90)
+  $seenYieldMs = [double]$script:userYieldTotalMs   # 양보 마감 연장 기준값 (허브와 같은 계약)
   $retryPoint = $null
-  while ((Get-Date) -lt $resultDeadline) {
+  # 만료 판정 직전 누적 양보 반영 - Close-*Popup 등 판독 헬퍼 안의 커서 대피 양보까지 (반박 검토)
+  while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$resultDeadline) -SeenYieldMs ([ref]$seenYieldMs))) {
     $skipScene = Find-GameTextPoint -Game $Game -ReferenceX $rgCutsceneTop[0] -ReferenceY $rgCutsceneTop[1] `
       -RegionWidth $rgCutsceneTop[2] -RegionHeight $rgCutsceneTop[3] -SearchText '넘기'
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       $resultDeadline = (Get-Date).AddSeconds(90)
+      $seenYieldMs = [double]$script:userYieldTotalMs
       Start-Sleep -Seconds 2
       continue
+    }
+    # 사용자 조작 중이면 아래 어떤 클릭도 하지 않고 끝날 때까지 기다린 뒤, 양보한 시간만큼 마감을
+    # 늘리고 서두(컷신/클리어/결과 판독)부터 다시 합니다 (2026-09-08 18:16 실기: 조작 35초 동안
+    # 회전마다 클릭이 버려지며 90초 예산만 소모 + '다시 터치'가 누르지도 않은 클릭을 기록).
+    if (Test-UserRecentlyActive) {
+      Invoke-UserYieldWithDeadline -Game $Game -Context '결과 화면 대기' -Deadline ([ref]$resultDeadline) -SeenYieldMs ([ref]$seenYieldMs)
+      $yieldedHere = $true
+      continue
+    }
+    if ($yieldedHere -and $null -ne $PastResultCondition -and -not $script:screenCaptureFailing -and (& $PastResultCondition)) {
+      Write-RunLog "$($script:contentTag) 사용자 조작 중 결과 화면을 지나 다음 화면에 도달했습니다 - 반복 버튼 클릭 없이 진행합니다"
+      $script:resultScreenSkippedByUser = $true
+      return $null
     }
     if ($skipScene) {
       # 컷신이 그 사이 끝났을 수 있으므로 클릭 직전에 한 번 더 확인 (스테일 클릭 방지)
@@ -5843,11 +5958,16 @@ function Wait-ForResultScreen {
     if ($skipScene) {
       Focus-Game -Game $Game
       Click-ScreenPoint -X $skipScene.X -Y $skipScene.Y
-      # 클리어 대기 쪽과 같은 계약 - 실제 클릭일 때만 '클릭'이라고 기록합니다 (2026-08-10)
+      # 클리어 대기 쪽과 같은 계약 - 실제 클릭일 때만 '클릭'이라고 기록합니다 (2026-08-10).
+      # 생략 원인이 사용자 조작이면(게이트~클릭 사이 경합) 같은 양보 경로.
       if ($script:lastClickPerformed) {
         Write-RunLog "$($script:contentTag) 컷신 - 장면 넘기기 클릭"
+      } elseif ($script:lastClickSkipReason -eq 'user-active') {
+        Invoke-UserYieldWithDeadline -Game $Game -Context '결과 화면 대기' -Deadline ([ref]$resultDeadline) -SeenYieldMs ([ref]$seenYieldMs)
+        $yieldedHere = $true
+        continue
       } else {
-        Write-RunLog "$($script:contentTag) 컷신 - 커서 확인 실패로 장면 넘기기 클릭을 건너뜀 (다음 감지에서 재시도)"
+        Write-RunLog "$($script:contentTag) 컷신 - 커서 미확인으로 장면 넘기기 클릭을 건너뜀 (다음 감지에서 재시도)"
       }
       Start-Sleep -Seconds 2
       continue
@@ -5855,7 +5975,15 @@ function Wait-ForResultScreen {
     if (Test-DungeonClearPrompt -Game $Game) {
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptClearCenter[0] -ReferenceY $ptClearCenter[1]
-      Write-RunLog "$($script:contentTag) 클리어 화면이 남아 있어 다시 터치"
+      if ($script:lastClickPerformed) {
+        Write-RunLog "$($script:contentTag) 클리어 화면이 남아 있어 다시 터치"
+      } elseif ($script:lastClickSkipReason -eq 'user-active') {
+        Invoke-UserYieldWithDeadline -Game $Game -Context '결과 화면 대기' -Deadline ([ref]$resultDeadline) -SeenYieldMs ([ref]$seenYieldMs)
+        $yieldedHere = $true
+        continue
+      } else {
+        Write-RunLog "$($script:contentTag) 클리어 화면 재터치를 건너뜀 (커서 미확인) - 다음 감지에서 재시도"
+      }
       Start-Sleep -Seconds 2
       continue
     }
@@ -5876,7 +6004,15 @@ function Wait-ForResultScreen {
       # 빈 배경(400,300)을 클릭해 커서가 감지를 가리지 않게 합니다.
       # 탐색어도 '발견' 조각으로 완화 (다른 요인으로 라벨 일부가 가려져도 감지 유지).
       Click-GamePoint -Game $Game -ReferenceX 400 -ReferenceY 300
-      Write-RunLog "$($script:contentTag) 전리품 공개 화면 - 화면 클릭으로 진행"
+      if ($script:lastClickPerformed) {
+        Write-RunLog "$($script:contentTag) 전리품 공개 화면 - 화면 클릭으로 진행"
+      } elseif ($script:lastClickSkipReason -eq 'user-active') {
+        Invoke-UserYieldWithDeadline -Game $Game -Context '결과 화면 대기' -Deadline ([ref]$resultDeadline) -SeenYieldMs ([ref]$seenYieldMs)
+        $yieldedHere = $true
+        continue
+      } else {
+        Write-RunLog "$($script:contentTag) 전리품 공개 화면 진행 클릭을 건너뜀 (커서 미확인) - 다음 감지에서 재시도"
+      }
       Start-Sleep -Seconds 2
       continue
     }
@@ -8037,7 +8173,13 @@ function Invoke-NormalDungeonCycle {
         if (Test-UserRecentlyActive) {
           Wait-UserYieldEnd -Game $Game -Context "'우연한 만남' 토글 켜기"
           $chanceRefound = Find-DgChanceTogglePoint -Game $Game
-          if ($chanceRefound) { $chancePoint = $chanceRefound }
+          if (-not $chanceRefound) {
+            # 재탐색 실패 = 앵커 폐기 (옛 좌표의 픽셀 판정은 일반 배경도 'off'로 읽어 unknown 정지를
+            # 통과한 뒤 옛 위치를 클릭할 수 있음 - Codex P1). 판정 불가와 같은 조건부 정지.
+            Write-RunLog "[완료] 양보 후 '우연한 만남' 토글 위치를 다시 찾지 못했습니다 - 매칭 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+            exit 4
+          }
+          $chancePoint = $chanceRefound
           $toggleState = Get-ChanceToggleState -Game $Game -Point @([int]$chancePoint.X, [int]$chancePoint.Y)
           if ($toggleState -eq 'unknown') {
             Write-RunLog "[완료] '우연한 만남' 토글 상태를 양보 후 다시 확인하지 못했습니다 - 매칭 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
@@ -8109,8 +8251,14 @@ function Invoke-NormalDungeonCycle {
       if (Test-UserRecentlyActive) {
         Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
         $enterTry--
-        $titleNow = Read-DgTitleText -Game $Game
-        if (-not $titleNow.Contains('구역') -and -not $script:screenCaptureFailing) { $entered = $true; break }
+        # 양보 후 판정은 긍정 증거로만 (Resolve-DgEntryAfterYield 주석) - 옵션 화면이면 다음 회전이
+        # 클릭, 둘 다 아니면 입장하기를 다시 누르지 않고 조건부 정지 (옛 좌표 강행 금지)
+        $yieldEntry = Resolve-DgEntryAfterYield -Game $Game
+        if ($yieldEntry -eq 'entered') { $entered = $true; break }
+        if ($yieldEntry -eq 'unknown') {
+          Write-RunLog "[완료] 사용자 조작 후 옵션 화면도 던전 내부도 확인되지 않습니다 - 입장하기를 다시 누르지 않고 정지합니다. 화면을 확인하고 다시 시작해 주세요"
+          exit 4
+        }
         continue
       }
       Focus-Game -Game $Game
@@ -8119,8 +8267,14 @@ function Invoke-NormalDungeonCycle {
         # 경합 창 백업 - 팝업 처리·재화 폴백으로 넘어가기 전에 판정 (Codex)
         Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
         $enterTry--
-        $titleNow = Read-DgTitleText -Game $Game
-        if (-not $titleNow.Contains('구역') -and -not $script:screenCaptureFailing) { $entered = $true; break }
+        # 양보 후 판정은 긍정 증거로만 (Resolve-DgEntryAfterYield 주석) - 옵션 화면이면 다음 회전이
+        # 클릭, 둘 다 아니면 입장하기를 다시 누르지 않고 조건부 정지 (옛 좌표 강행 금지)
+        $yieldEntry = Resolve-DgEntryAfterYield -Game $Game
+        if ($yieldEntry -eq 'entered') { $entered = $true; break }
+        if ($yieldEntry -eq 'unknown') {
+          Write-RunLog "[완료] 사용자 조작 후 옵션 화면도 던전 내부도 확인되지 않습니다 - 입장하기를 다시 누르지 않고 정지합니다. 화면을 확인하고 다시 시작해 주세요"
+          exit 4
+        }
         continue
       }
       Start-Sleep -Milliseconds 1200
@@ -8267,7 +8421,12 @@ function Invoke-NormalDungeonCycle {
         if (Test-UserRecentlyActive) {
           Wait-UserYieldEnd -Game $Game -Context "'우연한 만남' 토글 끄기"
           $chanceOffRefound = Find-DgChanceTogglePoint -Game $Game
-          if ($chanceOffRefound) { $chanceOffPoint = $chanceOffRefound }
+          if (-not $chanceOffRefound) {
+            # 재탐색 실패 = 앵커 폐기 (배경의 'off' 판정을 해제 성공으로 오인할 수 있음 - Codex P1)
+            Write-RunLog "[완료] 양보 후 '우연한 만남' 토글 위치를 다시 찾지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+            exit 4
+          }
+          $chanceOffPoint = $chanceOffRefound
           $toggleState = Get-ChanceToggleState -Game $Game -Point @([int]$chanceOffPoint.X, [int]$chanceOffPoint.Y)
           if ($toggleState -eq 'unknown') {
             Write-RunLog "[완료] '우연한 만남' 토글 상태를 양보 후 다시 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
@@ -8359,8 +8518,17 @@ function Invoke-NormalDungeonCycle {
     Write-RunLog "$($script:contentTag) 결과 화면 대기 (엔딩 컷신은 자동으로 넘김)"
   }
   $dgRetryPoint = Wait-ForResultScreen -Game $Game -MissingMessage '던전 결과 화면(다시 하기 버튼)을 찾지 못했습니다.' `
-    -FindRetryButton { Find-DgRetryButtonPoint -Game $Game }
-  Write-RunLog "$($script:contentTag) 결과 화면 확인 (나가기 / 다시 하기)"
+    -FindRetryButton { Find-DgRetryButtonPoint -Game $Game } `
+    -PastResultCondition {
+      # 옵션 화면 = '입장하기' 버튼 또는 제목 '구역' ('다시 하기' 복귀 대기와 같은 신호)
+      ((([string](Get-DgStageEnterButtonText -Game $Game)) -replace '\s', '').Contains('입장하기')) -or
+      ((Read-DgTitleText -Game $Game).Contains('구역'))
+    }
+  if ($script:resultScreenSkippedByUser) {
+    Write-RunLog "$($script:contentTag) 결과 화면은 사용자가 직접 넘겼습니다 (클리어는 확인됨) - 옵션 화면 복귀로 회차를 마칩니다"
+  } else {
+    Write-RunLog "$($script:contentTag) 결과 화면 확인 (나가기 / 다시 하기)"
+  }
 
   # 13-커스텀. 결과 화면 도달 = 이 판의 클리어 확정 지점 (정상 판/복구 판/전리품 공개 경유가
   # 전부 여기로 합류). 이후 마무리(다시 하기 → 옵션 복귀)에서 끊겨도 GUI가 완료로 계상하도록
@@ -8506,28 +8674,51 @@ function Invoke-NormalDungeonCycle {
   #       안전 중지 예약은 위 14의 기존 나가기 경로가 우선합니다 (여기 도달 = 예약 없음).
   #       수동 진행분 정리 모드(customCleanupOnly)는 같은 항목을 새로 시작하므로 기존
   #       다시 하기 → 코드 10 경로를 그대로 탑니다.
+  # '다음 층으로' 앞에서 양보했다는 사실을 아래 '다시 하기' 경로에 알립니다 - 양보 직후는 유휴라
+  # 그쪽 게이트(Test-UserRecentlyActive)가 열리지 않아 결과 화면 시점의 옛 '다시 하기' 좌표를 그대로
+  # 클릭할 수 있었음 (2026-09-08 반박 검토 major: 재탐색 실패 후 낙하 경로)
+  $yieldedBeforeRetry = $false
   if ($script:customMode -and -not $script:customCleanupOnly) {
     $customFinishAction = Get-CustomFinishAction -Item $script:customItem -Next $script:customNext
     if ($customFinishAction -eq 'next-floor') {
       Write-RunLog "[커스텀] 다음 항목이 2층 - '다음 층으로'로 이동하며 회차를 마칩니다"
       $nextFloorPoint = Find-DgNextFloorButtonPoint -Game $Game
+      # 사용자 조작 중이면 대기 후 버튼을 **다시 찾습니다** (대기 중 결과 화면이 바뀌었을 수 있음 -
+      # 옛 좌표 강행 금지. 못 찾으면 아래 '다시 하기' 경로의 기존 경고로 - 2026-09-08 양보 확장)
+      if ($nextFloorPoint -and (Test-UserRecentlyActive)) {
+        Wait-UserYieldEnd -Game $Game -Context "'다음 층으로' 클릭"
+        $yieldedBeforeRetry = $true
+        $nextFloorPoint = Find-DgNextFloorButtonPoint -Game $Game
+      }
       if (-not $nextFloorPoint) {
         Write-RunLog "[경고] '다음 층으로' 버튼을 찾지 못했습니다 - 일단 '다시 하기'로 마칩니다 (다음 회차의 시작 검증이 이어서 판정)"
       } else {
         Focus-Game -Game $Game
         Click-ScreenPoint -X $nextFloorPoint.X -Y $nextFloorPoint.Y
-        Write-RunLog "$($script:contentTag) '다음 층으로' 클릭 - 다음 층 구역 선택 화면 대기"
+        if ($script:lastClickPerformed) {
+          Write-RunLog "$($script:contentTag) '다음 층으로' 클릭 - 다음 층 구역 선택 화면 대기"
+        } else {
+          # 생략된 클릭을 눌렀다고 적지 않습니다 - 아래 대기가 결과 화면이 남아 있으면 상태 기반으로 재클릭
+          Write-RunLog "$($script:contentTag) '다음 층으로' 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 결과 화면이 남아 있으면 대기 중 재클릭"
+        }
         # 전환 확인은 아래 다시 하기 대기와 같은 규칙: 제목이 던전 UI(구역/선택 화면)로
         # 바뀌면 성공, '던전 탐험을 계속하시겠습니까?' 팝업은 계속하기로 넘기고,
         # 재클릭은 결과 화면('다음 층으로' 버튼)이 그대로 보일 때만 합니다 (상태 기반).
         $floorDeadline = (Get-Date).AddSeconds(40)
+        $floorSeenYieldMs = [double]$script:userYieldTotalMs   # 양보 마감 연장 기준값
         $movedToNextFloor = $false
-        while ((Get-Date) -lt $floorDeadline) {
+        while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$floorDeadline) -SeenYieldMs ([ref]$floorSeenYieldMs))) {
           Start-Sleep -Seconds 2
           if ($script:screenCaptureFailing) {
             Test-SafeStopDuringCaptureFail
             [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림 - 2026-08-09 7차 점검)
             $floorDeadline = (Get-Date).AddSeconds(40)
+            $floorSeenYieldMs = [double]$script:userYieldTotalMs
+            continue
+          }
+          # 사용자 조작 중이면 클릭하지 않고 기다린 뒤 마감 연장 + 서두(제목 판독)부터 다시
+          if (Test-UserRecentlyActive) {
+            Invoke-UserYieldWithDeadline -Game $Game -Context "'다음 층으로' 전환 대기" -Deadline ([ref]$floorDeadline) -SeenYieldMs ([ref]$floorSeenYieldMs)
             continue
           }
           $floorTitleNow = & $readDgTitle
@@ -8542,10 +8733,20 @@ function Invoke-NormalDungeonCycle {
             Focus-Game -Game $Game
             if ($floorContPoint) {
               Click-ScreenPoint -X $floorContPoint.X -Y $floorContPoint.Y
+              # 실제 클릭일 때만 '선택' 기록 - 생략이면 다음 회전(서두 게이트 → 재판독)이 다시 처리
+              if ($script:lastClickPerformed) {
+                Write-RunLog "$($script:contentTag) '던전 탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
+              } else {
+                Write-RunLog "$($script:contentTag) '계속하기' 클릭을 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도"
+                # 조작 생략은 즉시 양보 대기·마감 연장 - 다음 게이트 전에 마감이 끝날 수 있음 (Codex P2)
+                if ($script:lastClickSkipReason -eq 'user-active') {
+                  Invoke-UserYieldWithDeadline -Game $Game -Context "'다음 층으로' 전환 대기" -Deadline ([ref]$floorDeadline) -SeenYieldMs ([ref]$floorSeenYieldMs)
+                }
+              }
             } else {
               Press-KeyOnce -VirtualKey ([byte]27)   # ESC = 계속하기 (버튼 지점을 못 찾은 경우 예비)
+              Write-RunLog "$($script:contentTag) '던전 탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
             }
-            Write-RunLog "$($script:contentTag) '던전 탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
             Start-Sleep -Seconds 1
             continue
           }
@@ -8556,9 +8757,16 @@ function Invoke-NormalDungeonCycle {
           if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
           $floorAgainPoint = Find-DgNextFloorButtonPoint -Game $Game
           if ($floorAgainPoint) {
-            Write-RunLog "$($script:contentTag) 결과 화면이 남아 있어 '다음 층으로'를 다시 클릭합니다"
             Focus-Game -Game $Game
             Click-ScreenPoint -X $floorAgainPoint.X -Y $floorAgainPoint.Y
+            if ($script:lastClickPerformed) {
+              Write-RunLog "$($script:contentTag) 결과 화면이 남아 있어 '다음 층으로'를 다시 클릭합니다"
+            } elseif ($script:lastClickSkipReason -eq 'user-active') {
+              Invoke-UserYieldWithDeadline -Game $Game -Context "'다음 층으로' 전환 대기" -Deadline ([ref]$floorDeadline) -SeenYieldMs ([ref]$floorSeenYieldMs)
+              continue
+            } else {
+              Write-RunLog "$($script:contentTag) '다음 층으로' 재클릭을 건너뜀 (커서 미확인) - 다음 감지에서 재시도"
+            }
           }
         }
         if (-not $movedToNextFloor) {
@@ -8582,22 +8790,51 @@ function Invoke-NormalDungeonCycle {
   # 그대로 보일 때만 합니다 (사냥터 '새 임무 선택'과 동일한 규칙).
   # 3버튼 배치에서 옛 고정 좌표(757,654)는 '다음 구역으로' 자리라, 탐색으로 찾은
   # '다시 하기' 글자 지점을 클릭합니다 (다른 스테이지로 넘어가는 오클릭 방지 - 실측).
-  Focus-Game -Game $Game
-  if ($dgRetryPoint) {
-    Click-ScreenPoint -X $dgRetryPoint.X -Y $dgRetryPoint.Y
-  } else {
-    Click-GamePoint -Game $Game -ReferenceX $ptDgRetry[0] -ReferenceY $ptDgRetry[1]
+  # 사용자 조작 중이면 대기 후 '다시 하기' 지점을 **다시 찾습니다**. 못 찾으면(사용자가 이미 눌렀거나
+  # 화면이 바뀜) 고정 좌표로 강행하지 않고 아래 복귀 대기가 상태 기반으로 처리합니다 - 옵션 화면이면
+  # 성공, 결과 화면이 남아 있으면 재클릭 (2026-09-08 양보 확장. 14:44/18:17 실기: 이 클릭이 조작에
+  # 버려졌는데 '클릭'으로 기록됐고 대기 루프의 재클릭이 실제 복귀를 담당했음)
+  $dgRetryClickSkipped = $false
+  if ($script:resultScreenSkippedByUser) {
+    # 결과 화면을 사용자가 이미 넘김 - '다시 하기' 버튼이 없으므로 클릭 없이 복귀 대기부터 (옵션 화면이면 즉시 성공)
+    $dgRetryClickSkipped = $true
+  } elseif ($yieldedBeforeRetry -or (Test-UserRecentlyActive)) {
+    Wait-UserYieldEnd -Game $Game -Context "'다시 하기' 클릭"
+    $dgRetryPoint = Find-DgRetryButtonPoint -Game $Game
+    if (-not $dgRetryPoint) {
+      $dgRetryClickSkipped = $true
+      Write-RunLog "$($script:contentTag) 양보 후 '다시 하기' 버튼이 보이지 않아 클릭 없이 복귀 대기부터 진행합니다"
+    }
   }
-  Write-RunLog "$($script:contentTag) '다시 하기' 클릭 - 옵션 화면 복귀 대기"
+  if (-not $dgRetryClickSkipped) {
+    Focus-Game -Game $Game
+    if ($dgRetryPoint) {
+      Click-ScreenPoint -X $dgRetryPoint.X -Y $dgRetryPoint.Y
+    } else {
+      Click-GamePoint -Game $Game -ReferenceX $ptDgRetry[0] -ReferenceY $ptDgRetry[1]
+    }
+    if ($script:lastClickPerformed) {
+      Write-RunLog "$($script:contentTag) '다시 하기' 클릭 - 옵션 화면 복귀 대기"
+    } else {
+      Write-RunLog "$($script:contentTag) '다시 하기' 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 복귀 대기 중 결과 화면이 남아 있으면 재클릭"
+    }
+  }
   $optionsDeadline = (Get-Date).AddSeconds(40)
+  $optionsSeenYieldMs = [double]$script:userYieldTotalMs   # 양보 마감 연장 기준값
   $backToOptions = $false
   $insideStreak = 0   # 던전 내부(파티 재입장) 연속 확인 수 (2연속 확정 - v2.1.2)
-  while ((Get-Date) -lt $optionsDeadline) {
+  while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$optionsDeadline) -SeenYieldMs ([ref]$optionsSeenYieldMs))) {
     Start-Sleep -Seconds 2
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림 - 2026-08-09 7차 점검)
       $optionsDeadline = (Get-Date).AddSeconds(40)
+      $optionsSeenYieldMs = [double]$script:userYieldTotalMs
+      continue
+    }
+    # 사용자 조작 중이면 클릭하지 않고 기다린 뒤 마감 연장 + 서두(옵션 화면 판독)부터 다시
+    if (Test-UserRecentlyActive) {
+      Invoke-UserYieldWithDeadline -Game $Game -Context "'다시 하기' 복귀 대기" -Deadline ([ref]$optionsDeadline) -SeenYieldMs ([ref]$optionsSeenYieldMs)
       continue
     }
     # 진입 버튼 '입장하기'를 1차 신호로 씁니다 (2026-08-12 23:55 + 08-13 00:51 실사고 ×2 -
@@ -8618,10 +8855,18 @@ function Invoke-NormalDungeonCycle {
       Focus-Game -Game $Game
       if ($contPoint) {
         Click-ScreenPoint -X $contPoint.X -Y $contPoint.Y
+        if ($script:lastClickPerformed) {
+          Write-RunLog "$($script:contentTag) '던전 탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
+        } else {
+          Write-RunLog "$($script:contentTag) '계속하기' 클릭을 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도"
+          if ($script:lastClickSkipReason -eq 'user-active') {
+            Invoke-UserYieldWithDeadline -Game $Game -Context "'다시 하기' 복귀 대기" -Deadline ([ref]$optionsDeadline) -SeenYieldMs ([ref]$optionsSeenYieldMs)
+          }
+        }
       } else {
         Press-KeyOnce -VirtualKey ([byte]27)   # ESC = 계속하기 (버튼 지점을 못 찾은 경우 예비)
+        Write-RunLog "$($script:contentTag) '던전 탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
       }
-      Write-RunLog "$($script:contentTag) '던전 탐험을 계속하시겠습니까?' 팝업 - 계속하기 선택"
       Start-Sleep -Seconds 1
       continue
     }
@@ -8633,15 +8878,28 @@ function Invoke-NormalDungeonCycle {
     if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
-      Write-RunLog "$($script:contentTag) 공지 게시판 팝업 감지 - X로 닫기 (복귀 대기 중)"
+      if ($script:lastClickPerformed) {
+        Write-RunLog "$($script:contentTag) 공지 게시판 팝업 감지 - X로 닫기 (복귀 대기 중)"
+      } else {
+        Write-RunLog "$($script:contentTag) 공지 게시판 X 닫기 클릭을 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도"
+        if ($script:lastClickSkipReason -eq 'user-active') {
+          Invoke-UserYieldWithDeadline -Game $Game -Context "'다시 하기' 복귀 대기" -Deadline ([ref]$optionsDeadline) -SeenYieldMs ([ref]$optionsSeenYieldMs)
+        }
+      }
       Start-Sleep -Seconds 2
       continue
     }
     $retryAgainPoint = Find-DgRetryButtonPoint -Game $Game
     if ($retryAgainPoint) {
-      Write-RunLog "$($script:contentTag) 결과 화면이 남아 있어 '다시 하기'를 다시 클릭합니다"
       Focus-Game -Game $Game
       Click-ScreenPoint -X $retryAgainPoint.X -Y $retryAgainPoint.Y
+      if ($script:lastClickPerformed) {
+        Write-RunLog "$($script:contentTag) 결과 화면이 남아 있어 '다시 하기'를 다시 클릭합니다"
+      } elseif ($script:lastClickSkipReason -eq 'user-active') {
+        Invoke-UserYieldWithDeadline -Game $Game -Context "'다시 하기' 복귀 대기" -Deadline ([ref]$optionsDeadline) -SeenYieldMs ([ref]$optionsSeenYieldMs)
+      } else {
+        Write-RunLog "$($script:contentTag) '다시 하기' 재클릭을 건너뜀 (커서 미확인) - 다음 감지에서 재시도"
+      }
       continue
     }
     # 던전 내부 감지 (2026-08-17 06:00 실사고 - 오류 캡처 실측: 우연한 만남 파티의 재입장이
@@ -8806,7 +9064,13 @@ function Invoke-HuntingGroundCycle {
           Wait-UserYieldEnd -Game $Game -Context "난이도 '$htDifficulty' 정정"
           $htDiffRefound = Find-GameTextPoint -Game $Game -ReferenceX $rgHtDifficulty[0] -ReferenceY $rgHtDifficulty[1] `
             -RegionWidth $rgHtDifficulty[2] -RegionHeight $rgHtDifficulty[3] -Scale 4 -SearchText $difficultySearch -ExactText $difficultyKey
-          if ($htDiffRefound) { $difficultyPoint = $htDiffRefound }
+          if (-not $htDiffRefound) {
+            # 재탐색 실패 = 옛 절대 좌표 폐기 (창 이동 등으로 화면 좌표가 바뀌었을 수 있음 - Codex P1).
+            # 정정 없이 아래 '확인 실패 정지'로 (fail-closed)
+            Write-RunLog "[사냥터] 양보 후 난이도 '$htDifficulty' 글자를 다시 찾지 못해 정정 클릭을 하지 않습니다"
+            break
+          }
+          $difficultyPoint = $htDiffRefound
           if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $difficultyPoint) { $htDiffConfirmed = $true; break }
           continue
         }
@@ -9010,7 +9274,13 @@ function Invoke-HuntingGroundCycle {
       if (Test-UserRecentlyActive) {
         Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
         $enterTry--
-        if (-not (Find-HtEntryButtonPoint -Game $Game) -and -not $script:screenCaptureFailing -and -not (Test-DgImePopupVisible -Game $Game)) { $entered = $true; break }
+        # 양보 후 판정은 긍정 증거로만 (Resolve-HtEntryAfterYield 주석 - 던전과 같은 계약)
+        $yieldEntry = Resolve-HtEntryAfterYield -Game $Game
+        if ($yieldEntry -eq 'entered') { $entered = $true; break }
+        if ($yieldEntry -eq 'unknown') {
+          Write-RunLog "[완료] 사용자 조작 후 첫 화면도 사냥터 내부도 확인되지 않습니다 - 입장하기를 다시 누르지 않고 정지합니다. 화면을 확인하고 다시 시작해 주세요"
+          exit 4
+        }
         continue
       }
       Focus-Game -Game $Game
@@ -9018,7 +9288,13 @@ function Invoke-HuntingGroundCycle {
       if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
         Wait-UserYieldEnd -Game $Game -Context '입장하기 클릭'
         $enterTry--
-        if (-not (Find-HtEntryButtonPoint -Game $Game) -and -not $script:screenCaptureFailing -and -not (Test-DgImePopupVisible -Game $Game)) { $entered = $true; break }
+        # 양보 후 판정은 긍정 증거로만 (Resolve-HtEntryAfterYield 주석 - 던전과 같은 계약)
+        $yieldEntry = Resolve-HtEntryAfterYield -Game $Game
+        if ($yieldEntry -eq 'entered') { $entered = $true; break }
+        if ($yieldEntry -eq 'unknown') {
+          Write-RunLog "[완료] 사용자 조작 후 첫 화면도 사냥터 내부도 확인되지 않습니다 - 입장하기를 다시 누르지 않고 정지합니다. 화면을 확인하고 다시 시작해 주세요"
+          exit 4
+        }
         continue
       }
       Start-Sleep -Milliseconds 1200
@@ -9124,8 +9400,13 @@ function Invoke-HuntingGroundCycle {
     Write-RunLog '[사냥터] 결과 화면 대기 (컷신은 자동으로 넘김)'
   }
   $null = Wait-ForResultScreen -Game $Game -MissingMessage '사냥터 결과 화면(새 임무 선택 버튼)을 찾지 못했습니다.' `
-    -FindRetryButton { Find-HtNewMissionPoint -Game $Game }
-  Write-RunLog '[사냥터] 결과 화면 확인 (나가기 / 머무르기 / 새 임무 선택)'
+    -FindRetryButton { Find-HtNewMissionPoint -Game $Game } `
+    -PastResultCondition { [bool](Find-HtEntryButtonPoint -Game $Game) }   # 첫 화면(입장하기 버튼) 도달
+  if ($script:resultScreenSkippedByUser) {
+    Write-RunLog "[사냥터] 결과 화면은 사용자가 직접 넘겼습니다 (클리어는 확인됨) - '새 임무 선택' 클릭 없이 첫 화면 복귀로 진행합니다"
+  } else {
+    Write-RunLog '[사냥터] 결과 화면 확인 (나가기 / 머무르기 / 새 임무 선택)'
+  }
 
   # 8-1. 다음 임무 몫의 은동전이 없으면 '새 임무 선택'을 게임이 거부합니다
   #      ('다음 임무에 사용할 은동전이 부족해요' 안내 - 2026-07-18 01:05 실측).
@@ -9149,9 +9430,12 @@ function Invoke-HuntingGroundCycle {
   # 않은 재입장이 시작됩니다 (2026-07-17 23:51 실측 사고 - 검은 로딩 화면에서 시간 초과).
   # 그래서 결과 화면(새 임무 선택 버튼)이 그대로 보일 때만 다시 클릭하고, 전환 중에는
   # 기다리기만 합니다 (파티장 '입장 취소' 오클릭 방지와 같은 규칙).
-  Focus-Game -Game $Game
-  Click-GamePoint -Game $Game -ReferenceX $ptHtNewMission[0] -ReferenceY $ptHtNewMission[1]
-  Write-RunLog "[사냥터] '새 임무 선택' 클릭 - 첫 화면 복귀 대기"
+  if (-not $script:resultScreenSkippedByUser) {
+    # 사용자가 결과 화면을 이미 넘겼으면 이 고정 좌표는 첫 화면의 '파티 찾기' 자리 - 클릭 생략 (Codex P2)
+    Focus-Game -Game $Game
+    Click-GamePoint -Game $Game -ReferenceX $ptHtNewMission[0] -ReferenceY $ptHtNewMission[1]
+    Write-RunLog "[사냥터] '새 임무 선택' 클릭 - 첫 화면 복귀 대기"
+  }
   $returnDeadline = (Get-Date).AddSeconds(40)
   $returnedToEntry = $false
   while ((Get-Date) -lt $returnDeadline) {

@@ -13,7 +13,9 @@ $workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @(
     'Invoke-ClickUntil', 'Invoke-VerifiedContentExit', 'Confirm-DifficultySelected',
-    'Set-DgOptionDifficulty', 'Resume-DgOptionDifficultyAfterYield', 'Get-KoreanObjectParticle')) {
+    'Set-DgOptionDifficulty', 'Resume-DgOptionDifficultyAfterYield', 'Get-KoreanObjectParticle',
+    'Invoke-UserYieldWithDeadline', 'Wait-ForResultScreen', 'Get-YieldAdjustedDeadline',
+    'Resolve-DgEntryAfterYield', 'Resolve-HtEntryAfterYield')) {
   Invoke-Expression $definition
 }
 
@@ -22,6 +24,9 @@ function Assert-Case {
   if ("$Actual" -eq "$Expect") { "OK   {0}: {1}" -f $Name, $Actual }
   else { "FAIL {0}: 실제 [{1}] 기대 [{2}]" -f $Name, $Actual, $Expect; $script:fails++ }
 }
+# 배선 검사용 주석 제거 사본 (여러 섹션이 쓰므로 맨 앞에서 한 번 정의)
+$workerSource = [IO.File]::ReadAllText($workerPath)
+$workerCode = (($workerSource -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 
 # ---- 공용 모의: 가상 시계 + 입력 경계 ----
 $script:vclock = [datetime]'2026-01-01 00:00:00'
@@ -197,6 +202,154 @@ function Find-DgDifficultyPoint { param($Game, $Region, $Label, $HardX); $script
 Reset-Mock -ActiveSeq @($true) -SelectedSeq @($false, $false, $false, $false, $false)
 $ok = Set-DgOptionDifficulty -Game $game -Label '어려움'
 Assert-Case '옵션 난이도: 양보 후 재탐색 실패 → 클릭 없이 실패 반환' "$ok/$($script:clickCount)" 'False/0'
+
+# ---- 4b. 결과 화면 대기(Wait-ForResultScreen, 90초) + 마감 연장 헬퍼 (2026-09-08 18:16 실기 후 추가) ----
+$rgCutsceneTop = @(0, 0, 10, 10); $rgDgLootReveal = @(0, 0, 10, 10); $ptClearCenter = @(636, 400)
+function Find-GameTextPoint { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $SearchText, $Scale, $ExactText) return $null }
+function Test-DungeonClearPrompt {
+  param($Game)
+  if ($script:mockPromptQueue.Count -gt 0) { return [bool]$script:mockPromptQueue.Dequeue() }
+  return $false
+}
+function Close-NetworkUnstablePopup { param($Game, $LogPrefix) return $false }
+function Close-CurrencyOverviewScreen { param($Game) return $false }
+function Close-WeeklyCoopResetPopup { param($Game, $LogPrefix) return $false }
+function Close-CoopMissionBoardScreen { param($Game, $LogPrefix) return $false }
+$script:mockPromptQueue = New-Object System.Collections.Queue
+# 헬퍼: 양보 차분만큼 마감 연장, 두 번째 호출(새 양보 0)은 연장 0
+Reset-Mock -ActiveSeq @($true) -YieldMs 30000
+$dl = [datetime]'2026-01-01 00:00:40'; $seen = [double]0
+Invoke-UserYieldWithDeadline -Game $game -Context '테스트' -Deadline ([ref]$dl) -SeenYieldMs ([ref]$seen)
+$firstDl = $dl
+$script:mockYieldMs = 0   # 두 번째 호출은 새 양보 없음(실제 Wait 는 유휴면 즉시 반환) - 차분 0 이어야 함
+Invoke-UserYieldWithDeadline -Game $game -Context '테스트' -Deadline ([ref]$dl) -SeenYieldMs ([ref]$seen)
+Assert-Case '헬퍼: 양보 30초 → 마감 +30초, 재호출(새 양보 없음)은 +0' "$(($firstDl - [datetime]'2026-01-01 00:00:40').TotalSeconds)/$(($dl - $firstDl).TotalSeconds)" '30/0'
+# R1. 90초 상한, 첫 회전 양보 100초 → 연장으로 이어서 반복 버튼 발견 (연장 없으면 throw)
+Reset-Mock -ActiveSeq @($true) -YieldMs 100000
+$script:mockPromptQueue = New-Object System.Collections.Queue
+$script:retryCalls = 0
+$threw = $false
+try { $rp = Wait-ForResultScreen -Game $game -MissingMessage '결과 없음' -FindRetryButton { $script:retryCalls++; if ($script:retryCalls -ge 2) { @{ X = 1; Y = 1 } } else { $null } } }
+catch { $threw = $true }
+Assert-Case '결과 대기: 상한(90초)을 넘는 양보(100초) 후에도 반복 버튼 도달(마감 연장)' "$threw/$($script:yieldCalls)/$($null -ne $rp)" 'False/1/True'
+# R2. 클리어 재터치가 경합으로 생략(user-active) → 대기 후 서두부터 → '다시 터치' 로그 없음
+Reset-Mock -ClickSeq @('user-active') -YieldMs 5000
+$script:mockPromptQueue = New-Object System.Collections.Queue; $script:mockPromptQueue.Enqueue($true)
+$script:retryCalls = 0
+$rp = Wait-ForResultScreen -Game $game -MissingMessage '결과 없음' -FindRetryButton { $script:retryCalls++; if ($script:retryCalls -ge 1) { @{ X = 1; Y = 1 } } else { $null } }
+Assert-Case '결과 대기: 재터치 경합 생략 → 양보 1·실제 클릭 0·거짓 터치 로그 0' "$($script:yieldCalls)/$($script:performedCount)/$(Get-LogCount '클리어 화면이 남아 있어 다시 터치')" '1/0/0'
+# R3. 커서 미확인 재터치는 기존대로 건너뜀 로그 + 다음 감지 (양보 없음)
+Reset-Mock -ClickSeq @('cursor-not-ready')
+$script:mockPromptQueue = New-Object System.Collections.Queue; $script:mockPromptQueue.Enqueue($true)
+$script:retryCalls = 0
+$rp = Wait-ForResultScreen -Game $game -MissingMessage '결과 없음' -FindRetryButton { $script:retryCalls++; if ($script:retryCalls -ge 1) { @{ X = 1; Y = 1 } } else { $null } }
+Assert-Case '결과 대기: 커서 미확인 재터치 → 건너뜀 로그 1·양보 0' "$(Get-LogCount '클리어 화면 재터치를 건너뜀 (커서 미확인)')/$($script:yieldCalls)" '1/0'
+# R5. 판독 헬퍼 안의 커서 대피 양보(이 루프 코드가 부르지 않는 곳)도 만료 판정에 반영 (반박 검토 major):
+#     Close-NetworkUnstablePopup 모의가 첫 호출에서 '커서 대피 양보 100초'처럼 누적 변수만 올리고 시계를
+#     전진 → while 조건의 Get-YieldAdjustedDeadline 이 반영해야 90초 상한을 넘겨도 반복 버튼에 도달
+function Close-NetworkUnstablePopup {
+  param($Game, $LogPrefix)
+  if (-not $script:helperYieldDone) {
+    $script:helperYieldDone = $true
+    $script:vclock = $script:vclock.AddMilliseconds(100000)
+    $script:userYieldTotalMs = [double]$script:userYieldTotalMs + 100000
+  }
+  return $false
+}
+Reset-Mock
+$script:helperYieldDone = $false
+$script:mockPromptQueue = New-Object System.Collections.Queue
+$script:retryCalls = 0
+$threw = $false
+try { $rp = Wait-ForResultScreen -Game $game -MissingMessage '결과 없음' -FindRetryButton { $script:retryCalls++; if ($script:retryCalls -ge 2) { @{ X = 1; Y = 1 } } else { $null } } }
+catch { $threw = $true }
+Assert-Case '결과 대기: 판독 헬퍼 안 커서 대피 양보(100초)도 만료 판정에 반영돼 도달' "$threw/$($null -ne $rp)/$($script:yieldCalls)" 'False/True/0'
+function Close-NetworkUnstablePopup { param($Game, $LogPrefix) return $false }
+# 헬퍼 단위: 차분 반영 1회 + 재호출 0 + 반환값이 갱신된 마감
+$script:userYieldTotalMs = [double]25000
+$dl2 = [datetime]'2026-01-01 00:01:00'; $seen2 = [double]5000
+$ret = Get-YieldAdjustedDeadline -Deadline ([ref]$dl2) -SeenYieldMs ([ref]$seen2)
+$ret2 = Get-YieldAdjustedDeadline -Deadline ([ref]$dl2) -SeenYieldMs ([ref]$seen2)
+Assert-Case '만료 판정 헬퍼: 차분 20초 반영 → +20, 재호출 +0, 반환 = 갱신 마감' "$(($ret - [datetime]'2026-01-01 00:01:00').TotalSeconds)/$(($ret2 - $ret).TotalSeconds)/$($seen2)" '20/0/25000'
+# R4. 양보 없이 끝내 못 찾으면 기존대로 throw (연장이 무한 대기를 만들지 않음)
+Reset-Mock
+$script:mockPromptQueue = New-Object System.Collections.Queue
+$threw = $false
+try { [void](Wait-ForResultScreen -Game $game -MissingMessage '결과 없음' -FindRetryButton { $null }) } catch { $threw = $true }
+Assert-Case '결과 대기: 양보 없는 미발견은 기존대로 throw' $threw $true
+# 배선: 다음 층·다시 하기 루프
+Assert-Case "배선: '다음 층으로' 대기 루프 양보 2곳(서두 게이트+재클릭 경합) + 초기 클릭 양보 후 재탐색" `
+  (([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context `"'다음 층으로' 전환 대기`"").Count -eq 3) -and
+   ($workerCode -match "Wait-UserYieldEnd -Game \`$Game -Context `"'다음 층으로' 클릭`"\s+\`$yieldedBeforeRetry = \`$true\s+\`$nextFloorPoint = Find-DgNextFloorButtonPoint")) 'True'
+Assert-Case "배선: '다시 하기' 복귀 루프 양보 2곳 + 초기 클릭 양보 후 재탐색(못 찾으면 고정 좌표 강행 금지)" `
+  (([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context `"'다시 하기' 복귀 대기`"").Count -eq 4) -and
+   ($workerCode -match "Wait-UserYieldEnd -Game \`$Game -Context `"'다시 하기' 클릭`"\s+\`$dgRetryPoint = Find-DgRetryButtonPoint") -and
+   ($workerCode.Contains('$dgRetryClickSkipped = $true'))) 'True'
+Assert-Case '배선: 결과 화면 대기 루프 양보 4곳(서두 게이트 + 컷신/재터치/전리품 경합)' `
+  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '결과 화면 대기'").Count) 4
+# 반박 검토 반영: 5개 시간 상한 루프의 만료 판정이 전부 누적 양보를 반영 (ClickUntil 외·내부 while 2 +
+# VerifiedExit + 결과 화면 + 다음 층 + 다시 하기 = 6 조건식)
+Assert-Case '배선: 시간 상한 루프 만료 판정 6곳이 Get-YieldAdjustedDeadline 경유' `
+  ([regex]::Matches($workerCode, '-lt \(Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$\w+\) -SeenYieldMs \(\[ref\]\$\w+\)\)\)').Count) 6
+Assert-Case "배선: '다음 층으로' 양보 사실을 '다시 하기' 게이트에 전달(옛 좌표 낙하 경로 차단)" `
+  (($workerCode.Contains('$yieldedBeforeRetry = $true')) -and
+   ($workerCode.Contains('if ($yieldedBeforeRetry -or (Test-UserRecentlyActive)) {'))) 'True'
+Assert-Case "배선: 40초 루프의 '계속하기'·공지 닫기 로그는 실제 클릭일 때만" `
+  (([regex]::Matches($workerCode, "'계속하기' 클릭을 건너뜀").Count -eq 2) -and
+   ($workerCode.Contains('공지 게시판 X 닫기 클릭을 건너뜀'))) 'True'
+
+# ---- 4c. Codex 리뷰 반영 (2026-09-08): 양보 후 입장 판정은 긍정 증거 / 결과 화면 인계 / 재탐색 실패 폐기 ----
+$rgQuestTracker = @(0, 0, 10, 10); $ocrKoreanEngine = $null
+function Get-GameRegionOcrText { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $Scale, $Engine) return $script:mockQuestText }
+function Test-HomeEndEscHud { param($Game) return $script:mockHud }
+function Test-DgImePopupVisible { param($Game) return $false }
+function Find-HtEntryButtonPoint { param($Game) return $script:mockHtEntry }
+# 던전: 옵션 화면 그대로 → 'options' (클릭 없이 다음 회전)
+function Read-DgTitleText { param($Game) return $script:mockTitle }
+Reset-Mock; $script:mockTitle = '페카고분 심층 2층 2구역'; $script:mockQuestText = ''; $script:mockHud = $true
+Assert-Case '입장 양보 후(던전): 제목에 구역 = 옵션 화면 그대로' (Resolve-DgEntryAfterYield -Game $game) 'options'
+# 던전: 필드로 나감(HUD 만 있고 추적기에 구역 없음) → 15초 뒤 'unknown' (예전 판정은 여기서 입장으로 오인)
+Reset-Mock; $script:mockTitle = ''; $script:mockQuestText = '일일 임무 진행'; $script:mockHud = $true
+$r = Resolve-DgEntryAfterYield -Game $game
+Assert-Case '입장 양보 후(던전): HUD 만 있고 추적기에 구역 없음(필드) = unknown, 15초 폴링' "$r/$(($script:vclock - [datetime]'2026-01-01 00:00:00').TotalSeconds -ge 15)" 'unknown/True'
+# 던전: 로딩 뒤 던전 내부(HUD + 추적기 '2구역 클리어') → 'entered'
+Reset-Mock; $script:mockTitle = ''; $script:mockQuestText = '심층2층2구역클리어'; $script:mockHud = $true
+Assert-Case '입장 양보 후(던전): HUD + 추적기 구역 = entered' (Resolve-DgEntryAfterYield -Game $game) 'entered'
+# 사냥터: 첫 화면 / 내부 / unknown
+Reset-Mock; $script:mockHtEntry = @{ X = 1; Y = 1 }; $script:mockQuestText = ''
+Assert-Case '입장 양보 후(사냥터): 입장 버튼 보임 = options' (Resolve-HtEntryAfterYield -Game $game) 'options'
+Reset-Mock; $script:mockHtEntry = $null; $script:mockQuestText = '소탕임무진행'
+Assert-Case '입장 양보 후(사냥터): 추적기 소탕 = entered' (Resolve-HtEntryAfterYield -Game $game) 'entered'
+Reset-Mock; $script:mockHtEntry = $null; $script:mockQuestText = ''
+Assert-Case '입장 양보 후(사냥터): 둘 다 아님 = unknown' (Resolve-HtEntryAfterYield -Game $game) 'unknown'
+function Read-DgTitleText { param($Game) return '페카고분 1층 1구역' }
+# 결과 화면 인계: 양보가 있었던 호출에서만 PastResultCondition 을 보고, 참이면 $null + 플래그
+Reset-Mock -ActiveSeq @($true) -YieldMs 5000
+$script:mockPromptQueue = New-Object System.Collections.Queue
+$script:pastCalls = 0
+$rp = Wait-ForResultScreen -Game $game -MissingMessage '결과 없음' -FindRetryButton { $null } -PastResultCondition { $script:pastCalls++; $true }
+Assert-Case '결과 대기: 양보 후 다음 화면 도달 → $null 반환 + 플래그' "$($null -eq $rp)/$($script:resultScreenSkippedByUser)/$($script:pastCalls)" 'True/True/1'
+Reset-Mock
+$script:mockPromptQueue = New-Object System.Collections.Queue
+$script:pastCalls = 0
+$script:retryCalls = 0
+$rp = Wait-ForResultScreen -Game $game -MissingMessage '결과 없음' -FindRetryButton { $script:retryCalls++; if ($script:retryCalls -ge 2) { @{ X = 1; Y = 1 } } else { $null } } -PastResultCondition { $script:pastCalls++; $true }
+Assert-Case '결과 대기: 양보 없으면 다음 화면 조건을 보지 않음(기존 흐름 불변)' "$($null -ne $rp)/$($script:resultScreenSkippedByUser)/$($script:pastCalls)" 'True/False/0'
+# 배선
+Assert-Case '배선: 던전·사냥터 입장 루프 양보 후 판정이 긍정 증거 헬퍼 경유(각 2곳) + unknown 은 정지' `
+  (([regex]::Matches($workerCode, '\$yieldEntry = Resolve-DgEntryAfterYield -Game \$Game').Count -eq 2) -and
+   ([regex]::Matches($workerCode, '\$yieldEntry = Resolve-HtEntryAfterYield -Game \$Game').Count -eq 2) -and
+   ([regex]::Matches($workerCode, "if \(\`$yieldEntry -eq 'unknown'\) \{\s+Write-RunLog[^\r\n]+\s+exit 4").Count -eq 4)) 'True'
+Assert-Case '배선: 우연한 만남 켜기/끄기 재탐색 실패 = 앵커 폐기(정지)' `
+  ([regex]::Matches($workerCode, "if \(-not \`$chance(?:Off)?Refound\) \{\s+Write-RunLog[^\r\n]+\s+exit 4").Count) 2
+Assert-Case '배선: 사냥터 정정 재탐색 실패 = 정정 없이 종료(옛 절대 좌표 폐기)' `
+  ([bool]($workerCode -match 'if \(-not \$htDiffRefound\) \{\s+Write-RunLog[^\r\n]+\s+break')) 'True'
+Assert-Case '배선: 40초 루프 팝업 클릭의 조작 생략은 즉시 마감 연장(3곳)' `
+  ([regex]::Matches($workerCode, "(?m)^\s*if \(\`$script:lastClickSkipReason -eq 'user-active'\) \{\s+Invoke-UserYieldWithDeadline").Count) 3   # ^if 만 - elseif 경합 백업과 구분
+Assert-Case '배선: 결과 화면 인계 - 호출부 2곳이 PastResultCondition 전달 + 다시 하기/새 임무 선택 클릭 생략' `
+  (([regex]::Matches($workerCode, '-PastResultCondition \{').Count -eq 2) -and
+   ($workerCode.Contains('if ($script:resultScreenSkippedByUser) {') -and
+   ($workerCode.Contains('if (-not $script:resultScreenSkippedByUser) {')))) 'True'
 
 # ---- 5. 조사 헬퍼 ----
 Assert-Case '조사: 받침 있음 → 을' ((Get-KoreanObjectParticle -Word '구역 2-2 전환') + '|' + (Get-KoreanObjectParticle -Word '소탕 해제 폴백') + '|' + (Get-KoreanObjectParticle -Word '입장하기 클릭')) '을|을|을'

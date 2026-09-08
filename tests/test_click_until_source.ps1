@@ -3,7 +3,10 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 $workerPath = Join-Path $root 'mabinogi_run_once.ps1'
-Invoke-Expression (Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-ClickUntil'))
+# v2.1.7: 만료 판정 헬퍼(Get-YieldAdjustedDeadline)도 함께 추출 (while 조건식이 호출)
+foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-ClickUntil', 'Get-YieldAdjustedDeadline')) {
+  Invoke-Expression $definition
+}
 
 $script:screenCaptureFailing = $false
 $script:clickCount = 0

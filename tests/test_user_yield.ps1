@@ -45,9 +45,15 @@ Assert-Case '배선: 대피 진입부 양보 루프 (게임 위 + 최근 입력)
   ([bool]($workerText -match 'while \(\(Test-CursorOverGame -Game \$Game\) -and \(Test-UserRecentlyActive\)\)')) 'True'
 Assert-Case '배선: 양보 루프에 시간 상한 없음' `
   ([bool]($workerText -match '\$userYieldClock\.Elapsed\.TotalSeconds -g[et]')) 'False'
-Assert-Case '배선: 양보 시작/재개 안내 로그' `
-  (($workerText.Contains('사용자 마우스 조작 감지 - 조작이 끝날 때까지 자동화를 잠시 양보합니다')) -and
+# v2.1.7: 안내에 입력 종류($script:lastUserInputKind - '마우스 이동'/'키/버튼 입력')를 표기 (2026-09-08 사용자
+# 지적 "꿀비 자기 클릭에 양보하는 것 같다" - 채팅 타이핑 등 키보드 입력도 조작으로 잡히는 것을 로그로 구분)
+Assert-Case '배선: 양보 시작/재개 안내 로그 (입력 종류 표기)' `
+  (($workerText.Contains('사용자 입력 감지($($script:lastUserInputKind)) - 조작이 끝날 때까지 자동화를 잠시 양보합니다')) -and
    ($workerText.Contains('사용자 조작이 끝나 자동화를 재개합니다 (양보 {0}초)'))) 'True'
+Assert-Case '배선: 입력 종류 추정 - 관측 커서 기준점 갱신 3곳(관측/자기 주입/대피 이동)' `
+  ([regex]::Matches($workerText, '(?m)^\s+Update-ObservedCursor\b').Count) 3
+Assert-Case '배선: 입력 종류는 커서 이동 여부로 분기' `
+  (($workerText.Contains("`$script:lastUserInputKind = '마우스 이동'")) -and ($workerText.Contains("`$script:lastUserInputKind = '키/버튼 입력'"))) 'True'
 # 클릭 취소 게이트: 조작 중에는 기다리지 않고 이번 클릭을 버림 (Codex 조건 - 판독과 클릭
 # 사이에 화면이 바뀌었을 수 있어 옛 좌표 클릭 금지. lastClickPerformed=false 계약 재사용)
 # v2.1.6: false 초기화와 게이트 사이에 생략 원인 메타 초기화($lastClickSkipReason = '')가
