@@ -14,7 +14,9 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectR
       # 지정 시간(시간 지정 모드) 검사는 스텁이 아니라 **본체**를 씁니다 (2026-08-11 실측 ① 대응
       # 수정) - 시나리오가 env 를 안 주면 파싱이 $null 이라 무동작 = 기존 시나리오 영향 없음.
       # 시간 도달 시나리오는 HONEYNOGI_UNTIL_TIME 을 지난 시각으로 넣어 exit 4 를 확인합니다.
-      'Get-LifeUntilDeadline', 'Test-LifeUntilReached')) {
+      'Get-LifeUntilDeadline', 'Test-LifeUntilReached',
+      # 사이클 한도 x 사용자 양보 상호작용도 본체로 검증합니다 (2026-09-09 Codex 사후 리뷰 P1)
+      'Get-YieldAdjustedDeadline', 'Get-LifeCycleDeadline')) {
   Invoke-Expression $definition
 }
 # 소유 판정이 쓰는 실제 데이터 (이형 표 / 공통 치환 쌍) - 스텁이 아니라 본체 값을 그대로 씁니다
@@ -56,6 +58,11 @@ function Test-NoticeBoardPopup { param($Game) return $false }
 function Close-LifeBlockingDialog { param($Game) return 'none' }
 function Write-LifeDiagnostics { param($Game, [string]$Context) [Console]::WriteLine("DIAG $Context") }
 function Test-SafeStopDuringCaptureFail { }
+# 양보 대기 스텁 - 호출 사실만 궤적에 남깁니다 (2026-09-09 Codex 구현 리뷰 P2 가드:
+# 조작으로 접은 회전은 **재진입 전에** 기다려야 합니다. 다음 회전의 게이트가 알아서
+# 기다릴 것이라는 판단이 틀렸음 - 시퀀스 서두의 잔존 창 X 닫기가 게이트보다 먼저 오고,
+# 커서가 게임 밖이면 대피는 안 기다리는데 X 클릭은 취소돼 재시도가 소모됐습니다)
+function Wait-UserYieldEnd { param($Game, [string]$Context) [Console]::WriteLine("YIELDWAIT $Context") }
 # 캡처 복구 탐침: N 번 탐침한 뒤 복구되도록 흉내 냅니다 (0 = 영영 복구 안 됨).
 # 운영 코드에서 이 탐침이 빠지면 캡처 실패 플래그가 영영 안 풀려 한도까지 갇힙니다
 # (2026-08-07 실사고) - 'capture-recover' 시나리오가 그 회귀를 잡습니다
@@ -110,10 +117,27 @@ $lifeGatherHardCapSeconds = 3600      # 절대 상한 (진행이 있어도 이 �
 $script:menuResults = @()
 $script:menuCalls = 0
 $script:menuDetailText = ''
+# 회전별 '사용자 조작 양보' 주입 초 (0/미지정 = 양보 없음). 실제 양보와 같은 방식으로
+# $script:userYieldTotalMs 를 늘리고 가상 시계를 앞당깁니다. **$script:lifeMenuYielded 는
+# 세우지 않습니다** - '화면이 그대로라 그 자리에서 이어서 진행'한 회전을 흉내 내는 것이
+# 목적이고, 그 경로의 양보가 사이클 한도에서 빠지지 않던 것이 2026-09-09 P1 이었습니다.
+$script:menuYieldSeconds = @()
+$script:userYieldTotalMs = [double]0
+# 회전별 '사용자 조작으로 접음'($script:lifeMenuYielded) 주입 - 재시도 미계상 + 재진입 전 대기 검증용
+$script:menuFoldSeq = @()
 function Invoke-LifeMenuSequence {
-  param($Game, $SkillEntry, [string]$TargetName, [datetime]$Deadline)
+  param($Game, $SkillEntry, [string]$TargetName)
   $script:menuCalls++
   [Console]::WriteLine("MENU#$($script:menuCalls)")
+  $yieldIndex = $script:menuCalls - 1
+  if ($yieldIndex -lt $script:menuYieldSeconds.Count) {
+    $yieldSeconds = [int]$script:menuYieldSeconds[$yieldIndex]
+    if ($yieldSeconds -gt 0) {
+      Start-Sleep -Seconds $yieldSeconds
+      $script:userYieldTotalMs = [double]$script:userYieldTotalMs + ($yieldSeconds * 1000)
+      [Console]::WriteLine("YIELD#$($script:menuCalls)=${yieldSeconds}s")
+    }
+  }
   # 실제 메뉴 시퀀스는 '상세를 이 대상의 팝업으로 확정한 뒤에만' 요구 레벨을 남깁니다.
   # 여기서도 같은 계약으로 채워 실제 추출 함수(Get-LifeRequiredLevel)까지 태웁니다
   if ($script:menuDetailText) {
@@ -123,6 +147,9 @@ function Invoke-LifeMenuSequence {
     }
   }
   $menuIndex = $script:menuCalls - 1
+  # 본체와 같이 매 회전 초기화한 뒤, 시나리오가 지정한 회전에서만 '접음'으로 표시합니다
+  $script:lifeMenuYielded = $false
+  if ($menuIndex -lt $script:menuFoldSeq.Count -and $script:menuFoldSeq[$menuIndex]) { $script:lifeMenuYielded = $true }
   if ($menuIndex -lt $script:menuResults.Count) { return [bool]$script:menuResults[$menuIndex] }
   return $false
 }
@@ -158,6 +185,28 @@ switch ($Scenario) {
   }
   'menu-fail' {
     # 메뉴 사이클 3회 전부 실패 → 시작 확정 실패 (exit 4)
+    $script:menuResults = @($false, $false, $false)
+    $script:stateSeq = @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
+  }
+  'menu-yield-folded' {
+    # 2026-09-09 Codex 구현 리뷰 P2 가드: 조작으로 접은 회전은 재시도를 쓰지 않고(MENU 4회 =
+    # 미계상 1 + 정상 3), **재진입 전에 반드시 기다립니다**(YIELDWAIT 1회).
+    # 대기가 빠지면 다음 시퀀스 서두의 잔존 창 X 닫기가 조작 중에 취소돼 재시도만 소모됩니다.
+    $script:menuFoldSeq = @($true)
+    $script:menuResults = @($false, $false, $false, $false)
+    $script:stateSeq = @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
+  }
+  'menu-yield-continues' {
+    # 2026-09-09 Codex 사후 리뷰 P1 재현: 메뉴 시퀀스 **안에서** 사용자 조작 양보가 일어나고
+    # 화면이 그대로라 '이어서 진행'한 회전($script:lifeMenuYielded 미설정)입니다.
+    # 사이클 한도 60초에 양보 120초 - 한도가 양보만큼 밀리지 않으면 1회전 만에 while 조건이
+    # 끊겨 MENU 는 1회에서 멈춥니다(수정 전 동작). 밀리면 예정대로 3회전을 돌고 소진 정지.
+    # 즉 m3 = 양보가 한도에서 빠짐 / m1 = 양보가 한도를 먹음(P1 재발).
+    $script:useVirtualClock = $true
+    $lifeGatherWait = 60
+    $script:menuYieldSeconds = @(120)
     $script:menuResults = @($false, $false, $false)
     $script:stateSeq = @('absent', 'absent', 'absent')
     $script:stateTail = 'absent'
@@ -266,6 +315,20 @@ switch ($Scenario) {
     $env:HONEYNOGI_UNTIL_TIME = '2020-01-01 00:00'
     $script:stateSeq = @('present')
     $script:stateTail = 'present'
+  }
+  'until-mid-menu' {
+    # 2026-09-09 Codex 구현 리뷰가 잡은 신규 회귀 가드: **메뉴 루프 도중** 지정 시각이 지나면
+    # 사유가 '지정 시간 도달'이어야 합니다. 마감을 Get-LifeCycleDeadline 으로 통일하면서
+    # while 조건이 지정 시각까지 보게 됐고, 그러자 루프를 나온 회차가 다음 회전 서두의
+    # Test-LifeUntilReached 에 도달하지 못한 채 '메뉴 사이클 3회 소진'으로 끝났습니다.
+    # 가상 시계 시작이 00:00:00 이므로 목표를 00:01 로 두고, 1회전에서 120초 양보로 넘깁니다.
+    $script:useVirtualClock = $true
+    $env:HONEYNOGI_UNTIL_TIME = '2026-08-07 00:01'
+    $lifeGatherWait = 600
+    $script:menuYieldSeconds = @(120)
+    $script:menuResults = @($false, $false, $false)
+    $script:stateSeq = @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
   }
   'until-mid-wait' {
     # 채집 대기 **중에** 지정 시간 도달 - 진행 한도(600초)는 아직 멀었어도 지정 시간이

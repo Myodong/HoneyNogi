@@ -85,7 +85,7 @@ foreach ($node in $stallAst.FindAll({
     Line = $node.Extent.StartLineNumber
     Body = $clause.Item2.Extent.Text; PreCheck = $preCheck }
 }
-Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 24   # 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1
+Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 29   # 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1
 Assert-Case '동결 지점: while 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'while' }).Count) 7
 # 한도 되돌림 형 3곳 (클리어 대기 본문 / 어비스 선택 화면 복귀 / 그 밖). 11차에서 감시망에
 # 새로 들어온 형태입니다 - 이 자리들이 캡처 실패 중 유일한 게임 사망 감지 지점입니다.
@@ -94,7 +94,11 @@ Assert-Case '동결 지점: if-renew 형(한도 되돌림)' (@($freezeSpots | Wh
 # 있었습니다(공통 진입점 호출 여부는 우연히 전부 지키고 있었지만, 복구 탐침은 4곳이
 # 빠져 무한 회전이었습니다 - 7차 점검에서 발견·수정).
 # 2026-08-15 +1: 냥코인 REROLL_WAIT 동결 블록 (Stopwatch 정지+복구 탐침+continue) → 13곳
-Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 14   # 2026-09-08 어비스 이동하기 +1
+# 2026-09-09 +3: Resolve-DgEntryAfterYield / Resolve-HtEntryAfterYield 의 캡처 실패 동결(신설,
+#   Codex P1 - 판독만 건너뛰어 캡처 시도 0회 → 무조건 unknown → exit 4 였음) +
+#   어비스 **혼자하기** 이동하기 루프(함께하기 쪽과 비대칭이라 마감 되돌림·안전 중지가 빠져 있었음)
+# 2026-09-10 +2: 던전·사냥터 '파티 찾기'의 양보 후 재판독 앞 캡처 실패 동결
+Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 19   # 2026-09-08 어비스 이동하기 +1
 $loopMissing = @()
 foreach ($spot in $freezeSpots) {
   $bodyCode = (($spot.Body -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
@@ -110,7 +114,10 @@ Assert-Case '동결 지점 전부가 공통 진입점을 호출' $loopMissing.Co
 #   **무한 회전**이 되던 자리입니다 (채집에서 2026-08-07 에 고친 자기 잠금과 같은 형태).
 #   판독 함수 이름은 자리마다 달라 '캡처를 여는 호출' 전체를 후보로 둡니다.
 $probePattern = 'Test-CaptureRecovered|Get-GameRegionCapture|Get-GameRegionOcrText|Get-GameOcrText|' +
-  'Find-GameTextPoint|Get-GamePixel|Test-ExitButton|Get-DgTributeCost|Find-HtEntryButtonPoint|Get-EnterButtonText|& \$Condition'
+  'Find-GameTextPoint|Get-GamePixel|Test-ExitButton|Get-DgTributeCost|Find-HtEntryButtonPoint|Get-EnterButtonText|' +
+  # 2026-09-10: Read-DgTitleText 는 내부에서 Get-GameRegionOcrText 를 부르는 판독 래퍼라
+  # 캡처를 엽니다 (던전 '파티 찾기' 동결 분기의 복구 탐침)
+  'Read-DgTitleText|& \$Condition'
 $probeMissing = @()
 foreach ($spot in $freezeSpots) {
   $scan = [string]$spot.Body + "`n" + [string]$spot.PreCheck

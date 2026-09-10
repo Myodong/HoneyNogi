@@ -2730,13 +2730,28 @@ function Resolve-DgEntryAfterYield {
   param([System.Diagnostics.Process]$Game, [int]$TimeoutSeconds = 15)
   $probeDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ($true) {
-    if (-not $script:screenCaptureFailing) {
-      if ((Read-DgTitleText -Game $Game).Contains('구역')) { return 'options' }
-      $questNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
-          -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-      if ((Test-HomeEndEscHud -Game $Game) -and $questNow.Contains('구역')) { return 'entered' }
+    if ($script:screenCaptureFailing) {
+      # 캡처 실패 구간은 '판정'이 아니라 '동결'입니다 (2026-09-09 Codex 판정 - P1 실사용 고장).
+      # 예전에는 판독 블록을 건너뛰기만 해서 **캡처를 한 번도 시도하지 않았고**, 플래그는
+      # Register-CaptureSuccess(= 캡처 성공)로만 풀리므로 15초 내내 참으로 남아 무조건
+      # 'unknown' → 호출부 exit 4 였습니다. 사용자가 조작 중 창을 잠깐 내리기만 해도 회차가
+      # 정지했고, 화면이 곧 돌아와도 소용이 없었습니다 (Codex 모의: 추가 캡처 0회, 16초 뒤 unknown).
+      # Invoke-AutoRefocus(최소화 창 자동 복원)도 Get-GameRegionCapture 안에서만 도는데,
+      # 여기서 캡처를 안 하면 복원 시도조차 발생하지 않습니다.
+      # 같은 루프 서두(입장하기 for 문)는 이미 이 계약을 지킵니다 - 양보 경로만 우회하고 있었습니다.
+      Test-SafeStopDuringCaptureFail
+      [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 화면이 돌아와도 감지 못 함)
+      $probeDeadline = (Get-Date).AddSeconds($TimeoutSeconds)   # 캡처가 살아 있는 시간만 예산으로 셈
+      Start-Sleep -Seconds 2
+      continue
     }
-    if ((Get-Date) -ge $probeDeadline) { return 'unknown' }
+    if ((Read-DgTitleText -Game $Game).Contains('구역')) { return 'options' }
+    $questNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+        -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    if ((Test-HomeEndEscHud -Game $Game) -and $questNow.Contains('구역')) { return 'entered' }
+    # 판독 **도중** 캡처가 끊겼으면 그 빈 판독으로 'unknown'(= exit 4)을 확정하지 않습니다 -
+    # 다음 회전의 동결 분기가 복구를 기다립니다 (Codex 조건)
+    if ((Get-Date) -ge $probeDeadline -and -not $script:screenCaptureFailing) { return 'unknown' }
     Start-Sleep -Seconds 2
   }
 }
@@ -2747,13 +2762,27 @@ function Resolve-HtEntryAfterYield {
   param([System.Diagnostics.Process]$Game, [int]$TimeoutSeconds = 15)
   $probeDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ($true) {
-    if (-not $script:screenCaptureFailing) {
-      if ((Find-HtEntryButtonPoint -Game $Game) -or (Test-DgImePopupVisible -Game $Game)) { return 'options' }
-      $questNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
-          -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-      if ($questNow.Contains('소탕') -or $questNow.Contains('정찰')) { return 'entered' }
+    if ($script:screenCaptureFailing) {
+      # 캡처 실패 구간은 '판정'이 아니라 '동결'입니다 (2026-09-09 Codex 판정 - P1 실사용 고장).
+      # 예전에는 판독 블록을 건너뛰기만 해서 **캡처를 한 번도 시도하지 않았고**, 플래그는
+      # Register-CaptureSuccess(= 캡처 성공)로만 풀리므로 15초 내내 참으로 남아 무조건
+      # 'unknown' → 호출부 exit 4 였습니다. 사용자가 조작 중 창을 잠깐 내리기만 해도 회차가
+      # 정지했고, 화면이 곧 돌아와도 소용이 없었습니다 (Codex 모의: 추가 캡처 0회, 16초 뒤 unknown).
+      # Invoke-AutoRefocus(최소화 창 자동 복원)도 Get-GameRegionCapture 안에서만 도는데,
+      # 여기서 캡처를 안 하면 복원 시도조차 발생하지 않습니다.
+      # 같은 루프 서두(입장하기 for 문)는 이미 이 계약을 지킵니다 - 양보 경로만 우회하고 있었습니다.
+      Test-SafeStopDuringCaptureFail
+      [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 화면이 돌아와도 감지 못 함)
+      $probeDeadline = (Get-Date).AddSeconds($TimeoutSeconds)   # 캡처가 살아 있는 시간만 예산으로 셈
+      Start-Sleep -Seconds 2
+      continue
     }
-    if ((Get-Date) -ge $probeDeadline) { return 'unknown' }
+    if ((Find-HtEntryButtonPoint -Game $Game) -or (Test-DgImePopupVisible -Game $Game)) { return 'options' }
+    $questNow = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
+        -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    if ($questNow.Contains('소탕') -or $questNow.Contains('정찰')) { return 'entered' }
+    # 던전 쪽과 같은 계약 - 판독 도중 새로 끊긴 캡처로 'unknown' 을 확정하지 않습니다 (Codex 조건)
+    if ((Get-Date) -ge $probeDeadline -and -not $script:screenCaptureFailing) { return 'unknown' }
     Start-Sleep -Seconds 2
   }
 }
@@ -2996,8 +3025,11 @@ function Move-CursorOutsideGame {
   # 여기서 기다립니다. 모든 판독 경로가 이 함수를 거치므로 판독도 자연히 미뤄집니다
   # (깨진 판독으로 오판하느니 대기가 안전). 손을 떼면 2.5초 뒤 자동 재개.
   # 상한 없음 (Codex: 조작 중 상한 도달로 커서를 뺏으면 요청을 정면으로 깸).
-  # 양보 시간은 각 흐름의 타임아웃에서 제외하지 않습니다 - 조작이 해당 단계 타임아웃보다
-  # 길면 조건부 정지가 날 수 있음을 감수 (실기에서 문제 되면 캡처 실패 동결 배선을 검토).
+  # 양보 시간은 $script:userYieldTotalMs 에 **누적만** 하고, 그것을 자기 마감에 반영할지는
+  # **호출부의 시간 계약**이 정합니다 (2026-09-09 정정 - 예전 서술 '타임아웃에서 제외하지
+  # 않는다·감수'는 09-08 배치에서 누적을 도입하면서 낡았습니다). 시간 상한 루프 11곳은
+  # 만료 판정 직전 Get-YieldAdjustedDeadline 으로 반영하고, 클리어 감시(Wait-ForDungeonClearScreen)는
+  # 전투 연장·부활 한도를 따로 관리해 아직 반영하지 않습니다 (Codex 판정 - 실측 후 결정).
   # 조건을 매 회전 재검사하므로 커서가 게임 밖으로 나가면(=조작 끝) 즉시 풀립니다.
   $userYieldClock = $null
   while ((Test-CursorOverGame -Game $Game) -and (Test-UserRecentlyActive)) {
@@ -4103,6 +4135,14 @@ function Wait-ForScreen {
   # 다시 앞으로 가져와 감지를 복구합니다. config.json focus.refocusEverySeconds 로 조절(0=끄기).
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $lastFocus = Get-Date
+  # 사용자 조작 양보는 이 대기의 예산에서 뺍니다 (2026-09-09 Codex 판정 - P2).
+  # Condition 안의 판독 헬퍼들(팝업 스윕 등)이 판독 직전 Move-CursorOutsideGame 을 부르고,
+  # 그 대피는 조작 중이면 **상한 없이** 기다립니다. 그 시간이 마감에서 빠지지 않아,
+  # 양보 뒤 스윕이 팝업을 닫아 Condition 이 거짓이 된 회전에서 다음 판독 전에 시간이 초과되고
+  # throw → 코드 1(오류) + 자동 재시도 1회 소모로 끝났습니다 (Codex 모의 진리표 4케이스로 확정).
+  # Move-CursorOutsideGame 주석의 '타임아웃에서 제외하지 않는다 - 감수'는 09-08 배치에서 누적을
+  # 도입하면서 낡은 서술이 됐습니다(Codex 판정). 다른 시간 상한 루프 10곳은 이미 이 계약입니다.
+  $seenYieldMs = [double]$script:userYieldTotalMs
   do {
     # Condition 은 실행하되 캡처 실패 중에는 성공으로 인정하지 않습니다 (2026-08-01 전수
     # 점검: `-not (Test-...)` 형태 Condition 이 캡처 실패의 빈 판독을 성공으로 뒤집어 즉시
@@ -4116,13 +4156,17 @@ function Wait-ForScreen {
       # 복구가 영영 안 되는 상황에서도 안전하게 끝낼 수 있게 안전 중지 예약을 확인합니다.
       Test-SafeStopDuringCaptureFail
       $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      # 마감을 새로 잡았으니 양보 기준값도 같이 갱신합니다 - 안 하면 그 전에 쌓인 양보가
+      # 새 마감에 또 더해집니다 (Invoke-ClickUntil 의 캡처 실패 분기와 같은 형태)
+      $seenYieldMs = [double]$script:userYieldTotalMs
     }
     if ($Game -and $refocusEverySeconds -gt 0 -and
         ((Get-Date) - $lastFocus).TotalSeconds -ge $refocusEverySeconds) {
       if (Invoke-AutoRefocus -Game $Game) { $lastFocus = Get-Date }
     }
     Start-Sleep -Milliseconds $PollMilliseconds
-  } while ((Get-Date) -lt $deadline)
+    # 만료 판정 **직전**에 양보 차분을 마감에 반영합니다 (Get-YieldAdjustedDeadline 계약)
+  } while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs)))
 
   throw "$Description 대기 시간이 초과됐습니다."
 }
@@ -6512,6 +6556,10 @@ function Set-DgOptionDifficulty {
   while (-not $finalClickSent) {
     if (Test-UserRecentlyActive) {
       Wait-UserYieldEnd -Game $Game -Context "난이도 '$Label' 재클릭"
+      # 양보 중 창이 움직였거나 화면이 바뀌었으면 $point 는 이미 다른 자리입니다 - 앞선 두 양보
+      # 분기와 같이 좌표를 다시 찾고, 못 찾으면 클릭하지 않고 실패 처리합니다 (2026-09-09 Codex P2:
+      # 이 최종 재클릭 분기만 재탐색이 빠져 있어 옛 절대 좌표를 그대로 눌렀음)
+      if (-not (Resume-DgOptionDifficultyAfterYield -Game $Game -Label $Label -PointRef ([ref]$point))) { return $false }
       if (Test-DifficultySelectedAt -Game $Game -ScreenPoint $point) {
         Write-RunLog "$($script:contentTag) 난이도 '$Label' 선택 확인 (양보 후 재확인 - 재클릭 생략, 옵션 화면)"
         return $true
@@ -8074,9 +8122,20 @@ function Invoke-NormalDungeonCycle {
       # 사용자가 카드를 눌렀을 수 있어 옛 판독으로 누르면 반대로 만듭니다 (2026-09-08 양보 배치)
       if ($lootWordPoint -and (Test-UserRecentlyActive)) {
         Wait-UserYieldEnd -Game $Game -Context '더블 루팅 정정'
+        # 양보 후 재판독은 **대피 뒤에** 합니다 - 사용자의 커서가 소모량 숫자를 덮으면 판독이
+        # 비고, 그 미판독이 아래에서 '정정 필요 유지'로 흘러 현재 화면 확인 없이 클릭이 나갑니다.
+        Move-CursorOutsideGame -Game $Game   # 양보 후 재판독 직전 대피
         $lootYieldCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
         if ($null -ne $lootYieldCost -and $lootYieldCost -eq $expectedCost) {
           Write-RunLog "$($script:contentTag) 양보 중 공물 소모량이 예상(${expectedCost})으로 맞춰졌습니다 - 정정 클릭 생략"
+          $lootWordPoint = $null
+        }
+        # 미판독(null)이면 **이번 회차 정정은 보류**합니다 (2026-09-09 Codex P2).
+        # 예전에는 `$null -ne x -and x -eq 기대` 형태라 null 이 '정정 필요 유지'로 흘러,
+        # 양보 중 사용자가 화면을 옮겼거나 캡처가 끊긴 상태에서 카드를 눌러 **반대로** 만들 수
+        # 있었습니다(은동전 오소모). 즉시 정지로 바꾸지 않고 아래 재확인·복구 흐름에 맡깁니다.
+        elseif ($null -eq $lootYieldCost) {
+          Write-RunLog "$($script:contentTag) 양보 후 공물 소모량을 읽지 못했습니다 - 이번 정정 클릭은 보류하고 재확인만 진행합니다"
           $lootWordPoint = $null
         }
       }
@@ -8659,9 +8718,73 @@ function Invoke-NormalDungeonCycle {
     }
     # 클릭하면 자동으로 파티 매칭이 진행되고, 파티가 구성되면 게임이 알아서
     # 던전에 입장합니다. 여기서는 클릭 후 아래의 입장 감지에서 매칭 완료를 기다립니다.
-    Write-RunLog "$($script:contentTag) '파티 찾기' 클릭 - 파티 매칭을 기다립니다"
-    Focus-Game -Game $Game
-    Click-GamePoint -Game $Game -ReferenceX $ptDgPartyFind[0] -ReferenceY $ptDgPartyFind[1]
+    # 예전에는 전송 확인 없이 한 번만 누르고 로그를 클릭 **전에** 남겼습니다. 사용자 조작으로
+    # 클릭이 생략되면 매칭이 시작되지 않은 채 아래 매칭 대기(기본 300초)를 다 태우고 throw →
+    # 오류 종료였습니다 (2026-09-09 전수 감사).
+    # ★ **미전송만** 재시도합니다. 전송이 확인된 뒤에는 '입장이 늦다'는 이유로 다시 누르지
+    #   않습니다 - 매칭이 이미 시작됐으면 같은 자리를 다시 누르는 것이 **매칭 취소**가 될 수
+    #   있습니다 (2026-09-10 Codex 설계 합의).
+    # ★ 재클릭 허가 조건이 **'구역' 단독으로는 부족**합니다: 위 8643 주석의 실측 계약대로
+    #   '우연한 만남' 토글이 켜지면 **같은 자리가 넓은 '입장하기' 버튼**이라 잘못 누르면
+    #   혼자 입장해 버립니다. 그래서 제목의 '구역' + **토글 off 확정**을 함께 요구합니다
+    #   (기존 Find-DgChanceTogglePoint / Get-ChanceToggleState 재사용 - 새 OCR 기준 없음).
+    # ★ 옵션 화면이 확인되지 않으면 **추가 클릭을 금지하고 관측으로 넘깁니다**. 옵션 소멸을
+    #   입장 성공으로 선언하지 않습니다 (Codex).
+    $dgPartyFindSent = $false
+    $dgPartyFindRecheck = $false
+    while (-not $dgPartyFindSent) {
+      if ($dgPartyFindRecheck -or (Test-UserRecentlyActive)) {
+        # ★ 표시는 **검증을 전부 통과한 뒤에만** 지웁니다 (2026-09-10 Codex 구현 리뷰 P2):
+        #   진입 즉시 지우면, 캡처 실패 동결이 continue 한 다음 회전에 사용자가 이미 유휴라
+        #   **재판독 블록을 통째로 건너뛰고 클릭**했습니다(캡처 실패 플래그가 참인 채로).
+        $dgPartyFindRecheck = $true
+        Wait-UserYieldEnd -Game $Game -Context "'파티 찾기' 클릭"
+        Move-CursorOutsideGame -Game $Game   # 판독 직전 대피
+        if ($script:screenCaptureFailing) {
+          # 판독 근거가 없는 동안은 누르지 않고 복구를 기다립니다 (동결 계약 - 제목 판독이 복구 탐침)
+          Test-SafeStopDuringCaptureFail
+          [void](Read-DgTitleText -Game $Game)
+          Start-Sleep -Seconds 2
+          continue
+        }
+        # ★ 판독 **도중** 캡처가 끊기면 빈 값이 나옵니다. 그걸 '화면이 바뀌었다'로 확정하면
+        #   화면이 곧 돌아와 옵션 화면이 그대로여도 재클릭 루프를 이미 빠져나온 뒤라
+        #   클릭 0회로 300초를 태우고 오류로 끝납니다 (Codex 구현 리뷰 P1). 판독마다 재확인.
+        $dgTitleNow = Read-DgTitleText -Game $Game
+        if ($script:screenCaptureFailing) { continue }
+        if (-not $dgTitleNow.Contains('구역')) {
+          Write-RunLog "$($script:contentTag) 양보 후 옵션 화면이 확인되지 않습니다 - '파티 찾기'를 다시 누르지 않고 입장 여부를 관측합니다"
+          break
+        }
+        # 토글이 다시 켜졌으면 그 자리는 '입장하기'입니다 - 누르면 혼자 입장 (위 실측 계약)
+        $chanceNowPoint = Find-DgChanceTogglePoint -Game $Game
+        if ($script:screenCaptureFailing) { continue }
+        $chanceNowState = $(if ($chanceNowPoint) {
+            Get-ChanceToggleState -Game $Game -Point @([int]$chanceNowPoint.X, [int]$chanceNowPoint.Y)
+          } else { 'unknown' })
+        # 여기에는 캡처 플래그 재검사를 두지 않습니다: Get-ChanceToggleState 는 Get-GamePixel
+        # 직접 픽셀 판독이라 Register-CaptureSuccess 를 부르지 않아 플래그를 갱신하지 않습니다
+        # (이슈_개선점_목록.md 의 'Get-GamePixel 캡처 실패 플래그 대칭' 항목 - 알려진 미구현).
+        # 픽셀 판독 실패는 'unknown' 으로 나오고 아래 off 확정 요구에 그대로 걸립니다.
+        # 플래그를 세울 수 있는 것은 바로 위 앵커 OCR 뿐이고 그건 이미 검사했습니다 (2026-09-10 Codex).
+        if ($chanceNowState -ne 'off') {
+          Write-RunLog "$($script:contentTag) 양보 후 '우연한 만남' 토글이 꺼짐으로 확인되지 않습니다 (${chanceNowState}) - 그 자리가 '입장하기'일 수 있어 다시 누르지 않고 입장 여부를 관측합니다"
+          break
+        }
+        $dgPartyFindRecheck = $false   # 캡처 정상 + 소스 화면 검증 통과 - 이제 눌러도 됩니다
+      }
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptDgPartyFind[0] -ReferenceY $ptDgPartyFind[1]
+      if ($script:lastClickPerformed) {
+        $dgPartyFindSent = $true
+        Write-RunLog "$($script:contentTag) '파티 찾기' 클릭 - 파티 매칭을 기다립니다"
+      } elseif ($script:lastClickSkipReason -eq 'user-active') {
+        $dgPartyFindRecheck = $true
+      } else {
+        Write-RunLog "$($script:contentTag) '파티 찾기' 클릭을 건너뜀 (커서 미확인) - 입장 여부를 관측합니다"
+        break
+      }
+    }
     Start-Sleep -Milliseconds 1200
     # 입장 확인 팝업이 뜨는 경우 동일하게 처리합니다
     Resolve-DgEnterConfirmPopup -Game $Game | Out-Null
@@ -9372,9 +9495,20 @@ function Invoke-HuntingGroundCycle {
       $htLootNeedsFix = $true
       if (Test-UserRecentlyActive) {
         Wait-UserYieldEnd -Game $Game -Context '더블 루팅 정정'
+        # 양보 후 재판독은 **대피 뒤에** 합니다 - 사용자의 커서가 소모량 숫자를 덮으면 판독이
+        # 비고, 그 미판독이 아래에서 '정정 필요 유지'로 흘러 현재 화면 확인 없이 클릭이 나갑니다.
+        Move-CursorOutsideGame -Game $Game   # 양보 후 재판독 직전 대피
         $htLootYieldCost = Get-DgTributeCost -Game $Game -ValidCosts $dgValidCosts
         if ($null -ne $htLootYieldCost -and $htLootYieldCost -eq $expectedCost) {
           Write-RunLog "[사냥터] 양보 중 공물 소모량이 예상(${expectedCost})으로 맞춰졌습니다 - 정정 클릭 생략"
+          $htLootNeedsFix = $false
+        }
+        # 미판독(null)이면 **이번 회차 정정은 보류**합니다 (2026-09-09 Codex P2).
+        # 예전에는 `$null -ne x -and x -eq 기대` 형태라 null 이 '정정 필요 유지'로 흘러,
+        # 양보 중 사용자가 화면을 옮겼거나 캡처가 끊긴 상태에서 카드를 눌러 **반대로** 만들 수
+        # 있었습니다(은동전 오소모). 즉시 정지로 바꾸지 않고 아래 재확인·복구 흐름에 맡깁니다.
+        elseif ($null -eq $htLootYieldCost) {
+          Write-RunLog "[사냥터] 양보 후 공물 소모량을 읽지 못했습니다 - 이번 정정 클릭은 보류하고 재확인만 진행합니다"
           $htLootNeedsFix = $false
         }
       }
@@ -9457,9 +9591,54 @@ function Invoke-HuntingGroundCycle {
 
   # 3. 입장 (매칭 방식별)
   if ($htMatching -eq '파티찾기') {
-    Write-RunLog "[사냥터] '파티 찾기' 클릭 - 파티 매칭을 기다립니다"
-    Focus-Game -Game $Game
-    Click-GamePoint -Game $Game -ReferenceX $ptDgPartyFind[0] -ReferenceY $ptDgPartyFind[1]
+    # 예전에는 전송 확인 없이 한 번만 누르고 로그를 클릭 **전에** 남겼습니다. 사용자 조작으로
+    # 클릭이 생략되면 매칭이 시작되지 않은 채 아래 입장 대기(기본 300초)를 다 태우고 throw →
+    # 오류 종료였습니다 (2026-09-09 전수 감사. huntingGround.matching 기본값이 '파티찾기'라
+    # 이게 사냥터의 **기본 입장 경로**입니다).
+    # ★ **미전송만** 재시도합니다. 한 번 전송된 뒤에는 첫 화면이 남아 있어도 다시 누르지
+    #   않습니다 - 매칭이 이미 시작됐으면 같은 자리를 다시 누르는 것이 매칭 취소가 될 수
+    #   있습니다 (2026-09-10 Codex 설계 합의).
+    # ★ 입장 성공 판정은 기존대로 퀘스트 추적기의 '소탕/정찰'이 담당합니다. '첫 화면이
+    #   사라지면 매칭이 시작된 것'이라는 가정은 **사냥터에서 실측된 바 없어** 쓰지 않습니다
+    #   (규칙 8 - 그 서술은 던전·어비스 주석에만 있습니다).
+    $htPartyFindSent = $false
+    $htPartyFindRecheck = $false
+    while (-not $htPartyFindSent) {
+      if ($htPartyFindRecheck -or (Test-UserRecentlyActive)) {
+        # 표시는 검증을 전부 통과한 뒤에만 지웁니다 (던전 쪽과 같은 계약 - Codex 구현 리뷰 P2)
+        $htPartyFindRecheck = $true
+        Wait-UserYieldEnd -Game $Game -Context "'파티 찾기' 클릭"
+        Move-CursorOutsideGame -Game $Game   # 판독 직전 대피
+        if ($script:screenCaptureFailing) {
+          # 판독 근거가 없는 동안은 누르지 않고 복구를 기다립니다 (동결 계약 - 버튼 탐색이 복구 탐침)
+          Test-SafeStopDuringCaptureFail
+          [void](Find-HtEntryButtonPoint -Game $Game)
+          Start-Sleep -Seconds 2
+          continue
+        }
+        # 첫 화면(파티 찾기/입장하기 버튼)이 그대로 보일 때만 누릅니다 (규칙 4 - 상태 기반).
+        # IME 팝업 감지는 **클릭 허가가 아닙니다** - 그건 기존 팝업 처리 경로의 몫입니다 (Codex).
+        $htEntryPointNow = Find-HtEntryButtonPoint -Game $Game
+        # 판독 도중 끊긴 캡처의 $null 을 '화면이 바뀌었다'로 확정하지 않습니다 (Codex 구현 리뷰 P1)
+        if ($script:screenCaptureFailing) { continue }
+        if (-not $htEntryPointNow) {
+          Write-RunLog "[사냥터] 양보 후 첫 화면이 확인되지 않습니다 - '파티 찾기'를 다시 누르지 않고 입장 여부를 관측합니다"
+          break
+        }
+        $htPartyFindRecheck = $false   # 캡처 정상 + 소스 화면 검증 통과 - 이제 눌러도 됩니다
+      }
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptDgPartyFind[0] -ReferenceY $ptDgPartyFind[1]
+      if ($script:lastClickPerformed) {
+        $htPartyFindSent = $true
+        Write-RunLog "[사냥터] '파티 찾기' 클릭 - 파티 매칭을 기다립니다"
+      } elseif ($script:lastClickSkipReason -eq 'user-active') {
+        $htPartyFindRecheck = $true
+      } else {
+        Write-RunLog "[사냥터] '파티 찾기' 클릭을 건너뜀 (커서 미확인) - 입장 여부를 관측합니다"
+        break
+      }
+    }
     Start-Sleep -Milliseconds 1200
     Resolve-DgEnterConfirmPopup -Game $Game | Out-Null
   } else {
@@ -11151,11 +11330,23 @@ function Invoke-LifeListScroll {
   # 같은 화면에서 드래그는 전 방향 확실히 동작(실험 05/06 캡처) → 드래그로 전환.
   # 게임 전면 + 커서 확인 후에만 입력하고, 실제 드래그 수행 여부를 반환합니다.
   param([System.Diagnostics.Process]$Game, [int]$Steps)
+  # 이 호출이 '사용자 조작으로 취소됐는가' 표시 - 호출부가 예산 면제 판단에 씁니다.
+  # **조기 반환보다 앞에서** 초기화해야 이전 호출의 표시가 남지 않습니다 (Codex 조건)
+  $script:lifeScrollYielded = $false
   if ($Steps -eq 0) { return $false }
-  # 사용자 조작 중 드래그 취소 (2026-08-16 v2.1.1 - 클릭 취소와 같은 계약: 호출부가 $false
-  # 를 받아 다음 탐색 회차에서 재시도)
+  # 사용자 조작 중에는 **기다립니다**. 예전에는 기다리지 않고 건너뛰기만 했는데(v2.1.1),
+  # 호출부는 그 회전의 예산을 그대로 소모해서 목록이 한 칸도 안 움직인 채 탐색이 끝났습니다.
+  # ★ 2026-09-09 실기 실측(20:46:21~26): 취소 11회로 탐색 12스텝이 6초 만에 소진 →
+  #   '[오류] 채집 대상 을 목록에서 찾지 못했습니다' → 조건부 정지. 진단 궤적도 스텝4~11
+  #   판독이 완전히 동일했습니다(목록 미이동). 기다리지 않으면 양보가 누적되지 않아
+  #   마감 연장도 안 걸립니다 - '조작했더니 자동화가 정지'하는 반복 실사고 유형입니다.
+  # 대기 뒤 **이 호출에서는 드래그하지 않고** 돌아갑니다 - 대기 중 목록이 움직였을 수 있어
+  # 호출부가 현재 목록을 다시 읽고 다음 드래그를 정하게 합니다 (규칙 4 상태 기반, Codex 합의).
   if (Test-UserRecentlyActive) {
-    Write-RunLog '[생활] 목록 스크롤: 사용자 마우스 조작 감지로 건너뜀 (다음 회차에서 재시도)'
+    Wait-UserYieldEnd -Game $Game -Context '채집 목록 스크롤'
+    Test-LifeUntilReached   # 양보 복귀 후 다음 입력 전에 지정 종료 시각 확인 (Codex 조건)
+    $script:lifeScrollYielded = $true
+    Write-RunLog '[생활] 목록 스크롤: 사용자 조작이 끝나기를 기다렸습니다 - 이 회전은 예산을 쓰지 않고 목록을 다시 읽습니다'
     return $false
   }
   # 이 함수도 아래에서 Get-ScaledScreenPoint 를 직접 부르므로 최소화 복원 계약에 포함합니다
@@ -11783,6 +11974,26 @@ function Close-LifeOpenWindows {
   return $closed
 }
 
+function Get-LifeCycleDeadline {
+  # 생활(채집) 사이클의 **실효 마감** = min(사용자 양보를 반영한 사이클 한도, 사용자 지정 종료 시각).
+  # 생활의 모든 만료 판정(호출부 루프·메뉴 시퀀스 내부 16곳·퀘스트 생성 확인)이 이 한 곳을 봅니다.
+  #
+  # ★ 2026-09-09 Codex 사후 리뷰 P1: 09-09 00:24 에 넣은 '화면 그대로면 이어서 진행' 경로
+  #   (Test-LifeYieldBeforeInput 이 $false 반환)는 $script:lifeMenuYielded 를 세우지 않는데,
+  #   마감 연장이 '접은 회전'(-not $menuSeqOk -and $lifeMenuYielded) 분기에만 있었습니다.
+  #   그래서 그 경로의 양보는 마감에 전혀 반영되지 않고 사이클 한도를 그대로 먹었습니다 -
+  #   사용자가 화면을 바꾸지 않고 PC 를 쓰기만 해도 채집이 조건부 정지(exit 4). 던전·어비스·
+  #   사냥터·냥 상인은 전부 while 만료 조건에서 Get-YieldAdjustedDeadline 을 부르는데(10곳)
+  #   생활만 raw 마감을 쓰고 있었습니다 - 그 계약으로 통일합니다.
+  # 차분만 반영하므로 어디서 몇 번 불러도 같은 양보가 두 번 더해지지 않습니다
+  # (Get-YieldAdjustedDeadline 계약). 판독 직전 커서 대피(Move-CursorOutsideGame)가 만든 양보도
+  # 같은 누적 변수($script:userYieldTotalMs)에 들어오므로 함께 반영됩니다.
+  # **지정 종료 시각은 연장하지 않습니다** - 사용자 약속이라 양보가 길어도 그 시각에 끊습니다.
+  $adjusted = Get-YieldAdjustedDeadline -Deadline ([ref]$script:lifeCycleDeadline) -SeenYieldMs ([ref]$script:lifeSeenYieldMs)
+  if ($script:lifeUntilDeadline -and $script:lifeUntilDeadline -lt $adjusted) { return $script:lifeUntilDeadline }
+  return $adjusted
+}
+
 function Test-LifeYieldBeforeInput {
   # 생활 메뉴 사이클의 입력 직전 양보 게이트 (2026-09-08 신설 → 09-09 수정).
   # 조작 중이면 끝날 때까지 기다린 뒤 **화면이 그대로면 그 자리에서 이어서 진행**($false),
@@ -11802,7 +12013,17 @@ function Test-LifeYieldBeforeInput {
       Write-RunLog "[생활] 양보 후 화면 판독이 불가능해 이번 메뉴 사이클을 접습니다 ($Step) - 재시도 횟수는 쓰지 않습니다"
       return $true
     }
-    if (& $ScreenStillValid) { return $false }   # 화면 그대로 - 이어서 진행
+    # 콜백 **결과를 받아 두고 캡처 플래그를 다시 봅니다**: 판독 도중 캡처가 끊기면 빈 OCR 로
+    # $false 가 나오고, 호출부의 `-not (Test-...)` 형태 조건이 그것을 '화면 그대로'로 뒤집습니다
+    # (2026-09-09 Codex P2). 같은 파일의 다른 판독은 전부 '판독 후 플래그 재확인' 계약을
+    # 지키는데 여기만 콜백 **전에만** 검사하고 있었습니다.
+    $screenStillOk = & $ScreenStillValid
+    if ($script:screenCaptureFailing) {
+      $script:lifeMenuYielded = $true
+      Write-RunLog "[생활] 양보 후 화면 판독 도중 캡처가 끊겨 이번 메뉴 사이클을 접습니다 ($Step) - 재시도 횟수는 쓰지 않습니다"
+      return $true
+    }
+    if ($screenStillOk) { return $false }   # 화면 그대로 - 이어서 진행
     $script:lifeMenuYielded = $true
     Write-RunLog "[생활] 양보 중 화면이 바뀌어 이번 메뉴 사이클을 접고 처음부터 다시 시작합니다 ($Step) - 재시도 횟수는 쓰지 않습니다"
     return $true
@@ -11813,16 +12034,16 @@ function Test-LifeYieldBeforeInput {
 function Invoke-LifeMenuSequence {
   # 메뉴 사이클 1회: C → 내 정보 확인 → 생활 스킬 → 스킬 셀 → 대상 행 → 상세 확인 →
   # 가까운 위치 찾기. 성공 $true / 실패 $false (호출부가 재시도).
-  # Deadline = 사이클 하드 상한: 이 함수 한 번에 탐색 12회·OCR 수십 회가 들어 있어 내부
-  # 검사 없이는 한도를 넘긴 뒤에도 클릭이 이어짐 (리뷰 지적 - 특히 초과 후 '가까운 위치
-  # 찾기' 입력 금지). 주요 입력 전마다 검사하고 초과 시 $false (호출부 말미 검사가 exit 4)
-  param([System.Diagnostics.Process]$Game, $SkillEntry, [string]$TargetName, [datetime]$Deadline)
+  # 한도(Get-LifeCycleDeadline) = 사이클 하드 상한: 이 함수 한 번에 탐색 12회·OCR 수십 회가
+  # 들어 있어 내부 검사 없이는 한도를 넘긴 뒤에도 클릭이 이어짐 (리뷰 지적 - 특히 초과 후
+  # '가까운 위치 찾기' 입력 금지). 주요 입력 전마다 검사하고 초과 시 $false (호출부 말미 검사가 exit 4)
+  param([System.Diagnostics.Process]$Game, $SkillEntry, [string]$TargetName)
   # 사용자 조작 양보 (2026-09-08 어비스 사고와 같은 기전 - 조작 중에는 클릭이 생략돼 전환 확인이
   # 실패하고 메뉴 사이클 3회가 소진돼 코드 4 정지). 이 함수는 C → 스킬 → 셀 → 행 → 링크의 순차
   # 진행이라 중간 재개가 안전하지 않아, **조작을 만나면 대기 후 이번 사이클을 접고**(return $false)
   # 호출부가 그 회전을 **계상하지 않고** 처음(내 정보 확인)부터 다시 돌립니다.
   $script:lifeMenuYielded = $false
-  if ((Get-Date) -gt $Deadline) { return $false }
+  if ((Get-Date) -gt (Get-LifeCycleDeadline)) { return $false }
   # 다른 창이 게임을 덮고 있으면 판독·클릭이 전부 엉뚱한 곳으로 갑니다 (2026-08-07 실사고)
   if (-not (Confirm-LifeGameFront -Game $Game)) { Start-Sleep -Seconds 3; return $false }
   # 1) 내 정보 열기 (이미 열려 있으면 C 생략 - 토글 사고 방지).
@@ -11840,10 +12061,24 @@ function Invoke-LifeMenuSequence {
     if (Test-LifeWindowOpen -Game $Game) {
       Focus-Game -Game $Game
       Invoke-LifeWindowCloseClick -Game $Game
+      # 사용자 조작으로 취소된 클릭은 **회전을 쓰지 않습니다** (2026-09-10 Codex 설계 합의).
+      # 이 X 닫기는 시퀀스 **서두**라 아래 Test-LifeYieldBeforeInput 게이트보다 먼저 옵니다.
+      # 그래서 조작 중이면 클릭만 조용히 버려지고, 1.2초 뒤 창이 그대로라 '닫힘 확인 실패'로
+      # 회전이 계상됐습니다 - 조작 몇 초에 회전 3개가 ~4초 만에 소진돼 exit 4, 회전마다
+      # 진단 캡처 1장이 보관 10개를 밀어냈습니다. 같은 함수의 다른 4곳(생활 스킬·스킬 셀·
+      # 대상 행·가까운 위치 찾기)이 이미 지키는 계약을 여기에도 맞춥니다.
+      # 근거는 '우리 클릭이 전송되지 않았다' 하나입니다 - 사용자가 직접 닫았을 가능성은
+      # 부정하지 않고, 재진입 때 Test-LifeWindowOpen 이 현재 화면을 다시 읽습니다 (Codex).
+      if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+        $script:lifeMenuYielded = $true
+        Write-RunLog '[생활] 잔존 창 닫기: 사용자 조작으로 클릭을 취소했습니다 - 조작 종료 후 재시도(재시도 횟수는 쓰지 않습니다)'
+        return $false
+      }
       # 실제 클릭일 때만 '닫고'라고 씁니다 (위 시작 정리와 같은 계약 - 8차 점검)
       if ($script:lastClickPerformed) {
         Write-RunLog '[생활] 잔존 창 감지 - X로 닫고 내 정보를 새로 엽니다'
       } else {
+        # 여기 남는 것은 커서 미확인 전용입니다 (조작 취소는 위에서 갈렸습니다)
         Write-RunLog '[생활] 잔존 창 감지 - 커서 확인이 안 돼 X 클릭을 건너뜀 (닫힘 확인에서 판단)'
       }
       Start-Sleep -Milliseconds 1200
@@ -11858,7 +12093,7 @@ function Invoke-LifeMenuSequence {
     }
     # C 입력 직전 재검사 - 진입 검사(함수 첫 줄) 뒤 전면 확인·판독으로 수 초가 지났을 수
     # 있습니다 (2026-08-11 교차 리뷰: 입력 직전 검사가 빠진 두 곳 중 하나)
-    if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
+    if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
     # C 는 토글이라, 대기 중 사용자가 이미 내 정보를 열었으면 누르면 안 됩니다 - 아직 안 열린 상태만 진행
     if (Test-LifeYieldBeforeInput -Game $Game -Step '내 정보 열기' -ScreenStillValid { -not (Test-LifeInfoScreen -Game $Game) }) { return $false }
     if (-not (Press-LifeMenuKey -Game $Game)) { return $false }
@@ -11879,13 +12114,21 @@ function Invoke-LifeMenuSequence {
   Write-RunLog '[생활] 내 정보 화면 확인'
   # 2) 좌측 '생활 스킬' 메뉴 클릭 → 화면 전환 확인 (스킬 창은 좌측 메뉴가 없는 레이아웃이라
   #    '생활력' 신호 소멸 = 전환 증거. 전환 확인 전에는 다음 클릭 금지 - 클릭 정책/리뷰 조건)
-  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
+  if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
   # 무조건 전면화 → 전면 확인 게이트 (2026-08-22 - 이미 전면이면 즉시 통과해 ~0.5초 절약,
   # 전면 확인 실패 시엔 클릭을 차단하므로 안전은 강화 - Codex 제안. 아래 두 클릭도 동일)
   # 좌측 '생활 스킬' 메뉴는 내 정보 화면에서만 유효한 고정 좌표입니다
   if (Test-LifeYieldBeforeInput -Game $Game -Step '생활 스킬 열기' -ScreenStillValid { Test-LifeInfoScreen -Game $Game }) { return $false }
   if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX $ptLifeSkillMenu[0] -ReferenceY $ptLifeSkillMenu[1]
+  # 게이트를 통과한 **뒤** 조작이 시작되면 저수준 클릭이 'user-active' 로 취소됩니다.
+  # 그걸 확인하지 않으면 전환 확인만 실패하고 회전이 소모됩니다 (2026-09-09 Codex P2 -
+  # 링크 클릭만 이 계약을 지키고 있었음). 조작 취소는 회전 미계상으로 돌립니다.
+  if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+    $script:lifeMenuYielded = $true
+    Write-RunLog "[생활] '생활 스킬' 클릭이 사용자 조작으로 전송되지 않았습니다 - 이번 회전 중단(재시도 횟수는 쓰지 않습니다)"
+    return $false
+  }
   $menuMoved = $false
   foreach ($moveTry in 1..4) {
     Start-Sleep -Milliseconds 900
@@ -11907,11 +12150,19 @@ function Invoke-LifeMenuSequence {
   Start-Sleep -Milliseconds 800
   # 셀 클릭 직전 재검사 - 직전 검사(생활 스킬 클릭 전) 뒤 전환 확인 루프로 최대 4초쯤 지났을
   # 수 있습니다 (2026-08-11 교차 리뷰: 입력 직전 검사가 빠진 두 곳 중 하나)
-  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
+  if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
   # 스킬 셀은 생활 스킬 창(= 내 정보 화면이 아닌 상태)에서만 유효합니다
   if (Test-LifeYieldBeforeInput -Game $Game -Step '스킬 셀 선택' -ScreenStillValid { -not (Test-LifeInfoScreen -Game $Game) }) { return $false }
   if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX ([int]$SkillEntry.Cell[0]) -ReferenceY ([int]$SkillEntry.Cell[1])
+  # 게이트를 통과한 **뒤** 조작이 시작되면 저수준 클릭이 'user-active' 로 취소됩니다.
+  # 그걸 확인하지 않으면 전환 확인만 실패하고 회전이 소모됩니다 (2026-09-09 Codex P2 -
+  # 링크 클릭만 이 계약을 지키고 있었음). 조작 취소는 회전 미계상으로 돌립니다.
+  if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+    $script:lifeMenuYielded = $true
+    Write-RunLog "[생활] '스킬 셀' 클릭이 사용자 조작으로 전송되지 않았습니다 - 이번 회전 중단(재시도 횟수는 쓰지 않습니다)"
+    return $false
+  }
   Start-Sleep -Milliseconds 1200
   $skillVerified = $false
   foreach ($verifyTry in 1..3) {
@@ -11945,7 +12196,7 @@ function Invoke-LifeMenuSequence {
   # 스킬 셀을 방금 눌러 목록이 최상단인 시점이라 순서 기반 위치 계산을 허용합니다.
   # 판독 전에 화면이 살아 있는지 확인합니다 - 캡처가 끊긴 채 이 판독을 하면 순서 폴백이
   # '보이지도 않는 행'을 돌려주고 그대로 클릭까지 갑니다 (2026-08-07 감사 high)
-  if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline $Deadline -Context '대상 빠른 확인')) { return $false }
+  if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline (Get-LifeCycleDeadline) -Context '대상 빠른 확인')) { return $false }
   $quickScan = Find-LifeTargetScan -Game $Game -TargetName $TargetName -Order @($SkillEntry.Order) -FreshList
   if ($null -ne $quickScan.Y) {
     $targetRowY = [int]$quickScan.Y
@@ -11974,9 +12225,20 @@ function Invoke-LifeMenuSequence {
       $topScrollFails = 0
       while ($topTries -lt 12) {
         # 최상단 정렬도 사이클 한도 안에서만 (드래그 1회 약 2초 - 12회면 한도를 넘길 수 있음)
-        if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 목록 정렬 중단'; return $false }
-        if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline $Deadline -Context '목록 정렬')) { return $false }
+        if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 목록 정렬 중단'; return $false }
+        if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline (Get-LifeCycleDeadline) -Context '목록 정렬')) { return $false }
         if (-not (Invoke-LifeListScroll -Game $Game -Steps 1)) {
+          if ($script:lifeScrollYielded) {
+            # 사용자 조작으로 취소된 회전 - **전송 실패 3회 제한에서 면제**합니다(증가도 초기화도
+            # 하지 않음). 다만 대기 중 목록이 움직였을 수 있어 **다음 드래그 전에 현재 목록을
+            # 다시 읽습니다** - 그냥 continue 하면 루프 서두가 판독 없이 또 끕니다 (Codex 합의).
+            $topRows = @(Get-LifeTargetRows -Game $Game -Scale 4)
+            if ($topRows.Count -gt 0) {
+              $topRowsKey = (($topRows | ForEach-Object { [string]$_.Text }) -join '|')
+              if (Test-LifeListAtTop -Rows $topRows -Order @($SkillEntry.Order)) { break }
+            }
+            continue
+          }
           # ★ 드래그 '전송 실패'는 목록이 끝났다는 뜻이 아니라 **일시 실패**입니다(전면화 실패
           #   또는 커서 확인 실패). 그런데 예전에는 곧바로 break 해서 정렬을 포기한 채 아래로만
           #   훑는 탐색으로 넘어갔고, 그 탐색은 '최상단에서 시작'이 전제라 현재 화면보다 위에
@@ -12019,10 +12281,10 @@ function Invoke-LifeMenuSequence {
     # 여기도 판독에 성공한 회차만 예산을 소모합니다 (캡처 플래핑이 탐색 범위를 갉아먹지 않게)
     $scrollStep = -1
     while ($scrollStep -lt 11) {
-      if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 대상 탐색 중단'; return $false }
+      if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 대상 탐색 중단'; return $false }
       # 화면이 안 그려지는 동안에는 판독도 드래그도 하지 않습니다 - 0행 판독을 '목록 소멸'로,
       # 프리즈된 화면을 '끝까지 훑었다'로 오인하고 미발견 정지(exit 4)로 직행했습니다 (2026-08-07 감사)
-      if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline $Deadline -Context '대상 탐색')) { return $false }
+      if (-not (Wait-LifeCaptureAlive -Game $Game -Deadline (Get-LifeCycleDeadline) -Context '대상 탐색')) { return $false }
       # 스텝당 판독 1벌(s4→s5): 대상 찾기 + 행 증거 + 끝 판정이 같은 결과를 공유합니다
       $scanResult = Find-LifeTargetScan -Game $Game -TargetName $TargetName -Order @($SkillEntry.Order)
       if ($null -ne $scanResult.Y) {
@@ -12057,8 +12319,17 @@ function Invoke-LifeMenuSequence {
       $previousRowsKey = $rowsKey
       if ($scrollStep -eq 11) { break }   # 마지막 회차는 재탐색이 없으므로 스크롤도 보내지 않음
       # 판독(OCR)에 시간이 든 뒤이므로 실제 입력 직전에 한도를 다시 확인합니다 (리뷰 조건)
-      if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 대상 탐색 중단'; return $false }
+      if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 대상 탐색 중단'; return $false }
       $lastScrollSent = [bool](Invoke-LifeListScroll -Game $Game -Steps -1)
+      if ($script:lifeScrollYielded) {
+        # 사용자 조작으로 취소된 회전은 목록이 한 칸도 안 움직였으므로 **탐색 예산을 쓰지
+        # 않습니다** (2026-09-09 실기: 취소 11회로 12스텝 소진 → 미발견 조건부 정지).
+        # 궤적에서도 빼서 '정상 탐색 스텝'처럼 보이지 않게 합니다 (Codex 합의).
+        # $lastScrollSent 는 $false 그대로 - 취소 뒤 동일 판독을 '목록 끝'으로 확정하면 안 됩니다.
+        $scrollStep--
+        if ($scanTrail.Count -le 1) { $scanTrail = @() }
+        else { $scanTrail = @($scanTrail[0..($scanTrail.Count - 2)]) }
+      }
     }
   }
   if ($null -eq $targetRowY) {
@@ -12078,7 +12349,7 @@ function Invoke-LifeMenuSequence {
     Write-RunLog '[완료] 채집 대상 미발견 - 조건부 정지'
     exit 4
   }
-  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
+  if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 메뉴 진행 중단'; return $false }
   # 클릭 직전에는 **새로 한 번 떠 봐야** 합니다. $script:screenCaptureFailing 은 '마지막 캡처
   # 결과'라, 행을 읽은 직후 화면이 멈추면 플래그는 여전히 정상으로 남아 있어 그대로 클릭이
   # 나갑니다 (리뷰 지적 - 대기 함수는 플래그가 false 면 즉시 통과).
@@ -12092,6 +12363,14 @@ function Invoke-LifeMenuSequence {
   if (Test-LifeYieldBeforeInput -Game $Game -Step '대상 선택' -ScreenStillValid { @(Get-LifeTargetRows -Game $Game -Scale 4).Count -gt 0 }) { return $false }
   if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX $ptLifeListCenter[0] -ReferenceY $targetRowY
+  # 게이트를 통과한 **뒤** 조작이 시작되면 저수준 클릭이 'user-active' 로 취소됩니다.
+  # 그걸 확인하지 않으면 전환 확인만 실패하고 회전이 소모됩니다 (2026-09-09 Codex P2 -
+  # 링크 클릭만 이 계약을 지키고 있었음). 조작 취소는 회전 미계상으로 돌립니다.
+  if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+    $script:lifeMenuYielded = $true
+    Write-RunLog "[생활] '대상 행' 클릭이 사용자 조작으로 전송되지 않았습니다 - 이번 회전 중단(재시도 횟수는 쓰지 않습니다)"
+    return $false
+  }
   Start-Sleep -Milliseconds 1200
   # 5) 상세 팝업 검증: 라벨('집물' 조각 - 실기 깨짐 대응) + 제목이 설정 대상과 일치해야 함
   #    ('채집물'은 모든 대상 공통 문구라 단독으로는 오클릭을 못 잡음 - 리뷰 지적.
@@ -12192,7 +12471,7 @@ function Invoke-LifeMenuSequence {
   #    고정 좌표 폴백은 원 사고 재도입이라 금지 - 못 찾으면 진단 후 재시도 (리뷰 블로커).
   #    순서: Focus → 판독 → 단일 후보 검증 → deadline 재검사 → 기준 좌표 클릭
   #    (Click-GamePoint 가 클릭 시점 창 rect 로 환산 - 캡처 후 창 이동에도 안전)
-  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
+  if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
   # 링크 클릭은 사이클을 실제로 시작시키는 입력이라 전면 확인을 한 번 더 (리뷰 클릭 정책)
   if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
   $linkWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgLifeFindLink[0] -ReferenceY $rgLifeFindLink[1] `
@@ -12238,7 +12517,7 @@ function Invoke-LifeMenuSequence {
     $recheckVerdicts = @()
     $recheckTitles = @()
     foreach ($recheckScale in @(3, 4)) {
-      if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 클릭 직전 재확인 중단'; return $false }
+      if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 클릭 직전 재확인 중단'; return $false }
       $recheckText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
           -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale $recheckScale -Engine $ocrKoreanEngine) -replace '\s', ''
       $recheckVerdicts += , (Get-LifeTitleVerdictFromDetail -DetailText $recheckText -TargetName $TargetName -Order @($SkillEntry.Order))
@@ -12254,7 +12533,7 @@ function Invoke-LifeMenuSequence {
       if ($stripRegion) {
         $stripVerdicts = @()
         foreach ($stripScale in @(4, 5, 6)) {
-          if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 제목 띠 재확인 중단'; return $false }
+          if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 제목 띠 재확인 중단'; return $false }
           $stripWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $stripRegion[0] -ReferenceY $stripRegion[1] `
               -RegionWidth $stripRegion[2] -RegionHeight $stripRegion[3] -Scale $stripScale -Engine $ocrKoreanEngine)
           $stripTitle = ((@($stripWords | Sort-Object { [int]$_.X } | ForEach-Object { [string]$_.Text }) -join '') -replace '\s', '')
@@ -12272,7 +12551,7 @@ function Invoke-LifeMenuSequence {
     # 깊은 재확인은 새 캡처를 여러 장 썼습니다. 여기서 링크 좌표만 갱신하면 '판정은 A 팝업,
     # 클릭은 B 팝업' 이 될 수 있습니다 (리뷰 지적). 그래서 **마지막 프레임에서 링크와 제목을
     # 함께 다시 얻고, 첫 프레임과 같은 팝업인지 확인**한 뒤에만 앞의 판정을 적용합니다.
-    if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
+    if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
     if (-not (Confirm-LifeGameFront -Game $Game)) { return $false }
     $linkWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgLifeFindLink[0] -ReferenceY $rgLifeFindLink[1] `
         -RegionWidth $rgLifeFindLink[2] -RegionHeight $rgLifeFindLink[3] -Scale 3 -Engine $ocrKoreanEngine)
@@ -12295,12 +12574,32 @@ function Invoke-LifeMenuSequence {
     return $false
   }
   # 판독/전면화에 시간이 들 수 있어 실제 클릭 직전에 한도를 다시 확인합니다 (리뷰 조건)
-  if ((Get-Date) -gt $Deadline) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
-  # 링크 좌표는 그 상세 팝업이 그대로여야 유효 - 팝업 라벨('집물' 조각)로 확인
+  if ((Get-Date) -gt (Get-LifeCycleDeadline)) { Write-RunLog '[생활] 사이클 한도 초과 - 채집 시작 입력을 중단합니다'; return $false }
+  # 링크 좌표는 그 상세 팝업이 그대로여야 유효합니다.
+  # ★ 2026-09-09 Codex P2: 예전 게이트는 팝업 라벨('채집물' 조각) 하나만 봤는데, 그 라벨은
+  #   **모든 대상 공통 문구**라 사용자가 양보 중 다른 대상 상세로 바꿔도 통과했습니다 - 그러면
+  #   옛 $linkWord 좌표로 눌러 **엉뚱한 대상의 채집이 시작**됩니다. 같은 함수 위쪽(대상 행 클릭
+  #   뒤 상세 검증)에서 이미 "'채집물'은 모든 대상 공통 문구라 단독으로는 오클릭을 못 잡음"
+  #   이라고 기각한 근거를, 게이트에 그대로 다시 쓰고 있었습니다.
+  #   → 클릭 직전 재확인과 **같은 절차**(제목 + 링크 Y 를 한 프레임에서 함께 읽기)로 돌리고,
+  #     통과하면 **그 프레임의 링크 좌표로 갱신**합니다 (옛 좌표 클릭 금지 - 계약 ④).
+  $script:lifeYieldLinkPoint = $null
   if (Test-LifeYieldBeforeInput -Game $Game -Step '가까운 위치 찾기' -ScreenStillValid {
-        $yieldDetailText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-        Test-LifeDetailHasLabel -Text $yieldDetailText
+        $yieldLinkWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgLifeFindLink[0] -ReferenceY $rgLifeFindLink[1] `
+            -RegionWidth $rgLifeFindLink[2] -RegionHeight $rgLifeFindLink[3] -Scale 3 -Engine $ocrKoreanEngine)
+        $yieldLinkWord = Select-LifeFindNearestWord -Words $yieldLinkWords
+        if ($null -eq $yieldLinkWord) { return $false }
+        # 제목이 안 읽히는 대상은 양쪽 다 빈 문자열이라 링크 Y 가 근거가 됩니다 (대상마다 다름)
+        if ((Get-LifeDetailTitleFromWords -Words $yieldLinkWords) -ne $firstFrameTitle) { return $false }
+        if ([Math]::Abs([int]$yieldLinkWord.Y - $firstFrameLinkY) -gt 6) { return $false }
+        $script:lifeYieldLinkPoint = $yieldLinkWord
+        return $true
       }) { return $false }
+  # 양보가 있었고 재확인을 통과했으면 **그때 읽은 좌표**로 클릭합니다
+  if ($null -ne $script:lifeYieldLinkPoint) { $linkWord = $script:lifeYieldLinkPoint }
+  # 양보가 길었으면 그 사이에 지정 종료 시각이 지났을 수 있습니다 - 입력 **직전**에 다시 확인합니다
+  # (2026-09-09 Codex 지적: 마감 검사가 양보 게이트 앞에만 있어, 종료 50초 뒤에도 클릭 1회가 나갔음)
+  Test-LifeUntilReached
   Write-RunLog "[생활] 대상 '$TargetName' 상세 확인 (제목 '$linkTitle') - '가까운 위치 찾기' 클릭 (링크 탐색 $([int]$linkWord.X),$([int]$linkWord.Y))"
   Click-GamePoint -Game $Game -ReferenceX ([int]$linkWord.X) -ReferenceY ([int]$linkWord.Y)
   # 클릭이 실제로 나갔는지 확인 - 생략됐으면 퀘스트 생성 확인으로 넘어가지 않고 사이클 실패 (Codex)
@@ -12358,7 +12657,7 @@ function Invoke-LifeGatherCycle {
   # 생활(채집) 1사이클: 메뉴 사이클 → 퀘스트 생성 확인 → 존재 대기 → 소멸 = 완료 (exit 0).
   # 한도는 **단계마다 다릅니다** (2026-08-08 에 gatherWaitSeconds 의 의미가 '총 시간'에서
   # '진행이 멈춘 시간'으로 바뀐 뒤로 그렇습니다 - 이 주석은 그 이전 서술이었습니다):
-  #  - 메뉴/퀘스트 생성 단계: $cycleDeadline = life.gatherWaitSeconds (기본 600초)
+  #  - 메뉴/퀘스트 생성 단계: $script:lifeCycleDeadline = life.gatherWaitSeconds (기본 600초)
   #  - 채집 대기 단계: 수량이 늘 때마다 되감기는 $progressDeadline
   #                   + 절대 상한 $lifeGatherHardCapSeconds (3600초)
   # 즉 1사이클 최악 소요는 600초가 아니라 약 600+3600초입니다. '한 사이클 = 600초'로 가정하고
@@ -12395,8 +12694,9 @@ function Invoke-LifeGatherCycle {
   [void](Clear-EventOverlay -Game $Game)
   # 사이클 한도(deadline)는 '준비 정리 완료 시점'부터 잽니다 (설계 합의 계약 - 위 정리
   # 함수들의 내부 캡처 실패 대기는 이 한도 밖. 이후의 모든 내부 대기는 이 한도가 상한).
-  $cycleDeadline = (Get-Date).AddSeconds($lifeGatherWait)
-  $lifeSeenYieldMs = [double]$script:userYieldTotalMs   # 사용자 양보 마감 연장 기준값 (재시도 예산에만 적용)
+  $script:lifeCycleDeadline = (Get-Date).AddSeconds($lifeGatherWait)
+  # 사용자 양보 마감 연장 기준값 - 사이클 한도와 **같은 회계**를 씁니다 (Get-LifeCycleDeadline 이 차분만 반영)
+  $script:lifeSeenYieldMs = [double]$script:userYieldTotalMs
   # 시간 지정 모드: 목표 시각을 워커도 알고 사이클 **중에** 스스로 끊습니다 (실측 ① 대응 -
   # Test-LifeUntilReached 주석 참고). 파싱 실패/빈 값 = 제한 없음.
   $script:lifeUntilDeadline = Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME)
@@ -12404,14 +12704,12 @@ function Invoke-LifeGatherCycle {
     Write-RunLog ("[생활] 지정 시간 {0} 까지 - 도달하면 사이클 중에도 자동화를 마칩니다" -f $script:lifeUntilDeadline.ToString('HH:mm'))
     Test-LifeUntilReached   # 시작 시점에 이미 지났으면(경계 상황) 클릭 없이 즉시 종료
   }
-  # 메뉴 시퀀스에 넘길 한도 = 사이클 한도와 지정 시간 중 이른 쪽. 시퀀스 내부의 입력 직전
-  # 검사들이 이 값을 보므로, 지정 시간이 지나면 '가까운 위치 찾기' 등 새 입력이 나가지
-  # 않습니다 (시퀀스가 $false 로 나오면 호출부 루프 상단의 Test-LifeUntilReached 가
-  # 올바른 사유("지정 시간 도달")로 정지 - 사유 우선 순서 계약).
-  $lifeMenuDeadline = $cycleDeadline
-  if ($script:lifeUntilDeadline -and $script:lifeUntilDeadline -lt $lifeMenuDeadline) {
-    $lifeMenuDeadline = $script:lifeUntilDeadline
-  }
+  # 메뉴 시퀀스가 보는 한도도 Get-LifeCycleDeadline 하나로 통일했습니다 (= 사이클 한도와
+  # 지정 시간 중 이른 쪽). 시퀀스 내부의 입력 직전 검사들이 그 값을 보므로, 지정 시간이
+  # 지나면 '가까운 위치 찾기' 등 새 입력이 나가지 않습니다 (시퀀스가 $false 로 나오면
+  # 호출부 루프 상단의 Test-LifeUntilReached 가 올바른 사유("지정 시간 도달")로 정지 -
+  # 사유 우선 순서 계약). 스냅숏 변수($lifeMenuDeadline)를 넘기던 방식은 시퀀스 **안에서**
+  # 일어난 양보를 반영하지 못해 정지를 만들었습니다 (2026-09-09 Codex 사후 리뷰 P1).
   # 시작 시점에 서버 연결이 끊겨 있으면 무엇도 진행되지 않습니다 - 퀘스트 판정보다 먼저
   # 확인합니다 (리뷰 조건: 초기 present 면 메뉴 루프를 건너뛰어 감지를 놓침)
   if ((Close-LifeBlockingDialog -Game $Game) -eq 'disconnected') {
@@ -12438,7 +12736,7 @@ function Invoke-LifeGatherCycle {
   $initialPopupRounds = 0
   while ($initialProbes -lt 20) {
     Test-LifeUntilReached   # 지정 시간은 사이클 한도보다 우선 (사유 정확성)
-    if ((Get-Date) -gt $cycleDeadline) { break }
+    if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
     if ($script:screenCaptureFailing) {
       # ★ 동결 구간의 **공통 진입점**을 반드시 거칩니다 (7차 점검에서 누락 적발).
       #   3차 점검이 세운 계약은 "캡처 실패로 도는 모든 자리는 여기를 지난다" 인데,
@@ -12560,7 +12858,7 @@ function Invoke-LifeGatherCycle {
       $otherWaitProbes = 0
       while ($otherWaitProbes -lt 60) {        # 3초 간격 - 상한은 약 3분 (사이클 한도 안에서)
         Test-LifeUntilReached   # 지정 시간은 사이클 한도보다 우선 (사유 정확성)
-        if ((Get-Date) -gt $cycleDeadline) { break }
+        if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
         Start-Sleep -Seconds 3
         if ($script:screenCaptureFailing) {
           # 위 초기 확인 루프와 같은 이유로 공통 진입점을 거칩니다 (7차 점검)
@@ -12612,9 +12910,11 @@ function Invoke-LifeGatherCycle {
     $menuOk = $false
     # foreach → while: 사용자 조작으로 접은 회전은 **재시도 횟수를 쓰지 않습니다**(양보 미계상).
     # foreach 는 인덱스를 되돌릴 수 없어 구조를 바꿨습니다 (2026-09-08 Codex 지적).
-    # 무한 방지: 사이클 한도($cycleDeadline)는 벽시계라 아래 while 조건이 결국 끊습니다.
+    # 무한 방지: while 조건이 사이클 한도를 봅니다. 단 그 한도는 **양보한 만큼 밀리므로**
+    # 사용자가 계속 조작하면 그만큼 길어집니다 (의도된 계약 - 조작 중에는 기다린다).
+    # 진짜 상한은 시도 3회와 사용자 지정 종료 시각입니다 (Codex 확인, 2026-09-09).
     $menuTry = 0
-    while ($menuTry -lt 3 -and -not $menuOk -and (Get-Date) -le $cycleDeadline) {
+    while ($menuTry -lt 3 -and -not $menuOk -and (Get-Date) -le (Get-LifeCycleDeadline)) {
       $menuTry++
       Test-LifeUntilReached   # 지정 시간 도달이면 이번 회전의 어떤 클릭도 시작하지 않음
       # 팝업 방어 (구매/보상/협동/네트워크 + 주간 리셋 + 공지 게시판)
@@ -12639,7 +12939,7 @@ function Invoke-LifeGatherCycle {
       while ($script:screenCaptureFailing) {
         Test-LifeUntilReached   # 캡처 실패 중에도 지정 시간은 흐릅니다 (벽시계 약속 - 동결 제외)
         # 영구 캡처 실패도 사이클 한도를 넘기면 정지합니다 (deadline 계약 - 리뷰 지적)
-        if ((Get-Date) -gt $cycleDeadline) {
+        if ((Get-Date) -gt (Get-LifeCycleDeadline)) {
           Write-RunLog "[완료] 화면 캡처 실패가 지속돼 사이클 한도(${lifeGatherWait}초)를 넘겼습니다 - 조건부 정지"
           exit 4
         }
@@ -12647,17 +12947,22 @@ function Invoke-LifeGatherCycle {
         Start-Sleep -Seconds 2
         [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 한도까지 여기 갇힘)
       }
-      $menuSeqOk = Invoke-LifeMenuSequence -Game $Game -SkillEntry $skillEntry -TargetName $lifeTargetName -Deadline $lifeMenuDeadline
+      $menuSeqOk = Invoke-LifeMenuSequence -Game $Game -SkillEntry $skillEntry -TargetName $lifeTargetName
       if (-not $menuSeqOk -and $script:lifeMenuYielded) {
-        # 사용자 조작으로 접은 회전 - 재시도 횟수 미계상 + 사이클 한도도 양보한 만큼 연장
-        # (지정 종료 시각(Test-LifeUntilReached)은 사용자 약속이라 연장하지 않습니다 - Codex)
+        # 재진입 **전에** 조작이 끝나기를 기다립니다 (2026-09-09 Codex 구현 리뷰 P2).
+        # 다음 회전의 양보 게이트에서 알아서 기다릴 것이라는 판단은 틀렸습니다 - 시퀀스 서두의
+        # 잔존 창 X 닫기가 게이트보다 **먼저** 오고, 사용자가 커서를 게임 밖에 두고 조작 중이면
+        # Move-CursorOutsideGame 은 기다리지 않는데 X 클릭은 user-active 로 취소돼,
+        # 창 닫힘 확인 실패가 **양보 표시 없이** 반환되며 재시도를 소모했습니다
+        # (Codex 모의: 메뉴 4회 / 명시적 양보 0회 / 재시도 3회 소진).
+        # 여기서 기다린 시간은 다음 Get-LifeCycleDeadline 호출이 마감에 반영합니다.
+        Wait-UserYieldEnd -Game $Game -Context '채집 메뉴 재시도'
+        # 사용자 조작으로 접은 회전 - **재시도 횟수만** 미계상합니다.
+        # 사이클 한도 연장은 여기서 하지 않습니다: Get-LifeCycleDeadline 이 모든 만료 판정
+        # 직전에 양보 차분을 반영하므로 접든 이어가든 동일하게 연장됩니다 (지정 종료 시각은
+        # 사용자 약속이라 불변 - 헬퍼가 min 으로 지킵니다). 예전에는 연장이 이 분기에만
+        # 있어서, '화면 그대로면 이어서 진행'(09-09 신설) 경로의 양보가 통째로 누락됐습니다.
         $menuTry--
-        $cycleDeadline = Get-YieldAdjustedDeadline -Deadline ([ref]$cycleDeadline) -SeenYieldMs ([ref]$lifeSeenYieldMs)
-        # 메뉴 한도는 사이클 한도와 지정 종료 시각 중 이른 쪽 (선언부와 같은 규칙 - 지정 시각은 불변)
-        $lifeMenuDeadline = $cycleDeadline
-        if ($script:lifeUntilDeadline -and $script:lifeUntilDeadline -lt $lifeMenuDeadline) {
-          $lifeMenuDeadline = $script:lifeUntilDeadline
-        }
         continue
       }
       if ($menuSeqOk) {
@@ -12668,7 +12973,7 @@ function Invoke-LifeGatherCycle {
         $presentCount = 0
         foreach ($confirmTry in 1..8) {
           Test-LifeUntilReached
-          if ((Get-Date) -gt $cycleDeadline) { break }
+          if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
           Start-Sleep -Milliseconds 1500
           if ((Get-LifeQuestState -Game $Game) -eq 'present') {
             $presentCount++
@@ -12714,8 +13019,15 @@ function Invoke-LifeGatherCycle {
       }
       [void](Close-LifeOpenWindows -Game $Game)
       Start-Sleep -Seconds 2
-      if ((Get-Date) -gt $cycleDeadline) { break }
+      if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
     }
+    # 루프를 빠져나온 사유가 '지정 시각 도달'이면 그 사유로 끝냅니다 (사유 우선 순서 계약).
+    # ★ 2026-09-09 Codex 구현 리뷰가 잡은 신규 회귀: 마감을 헬퍼로 통일하면서 while 조건이
+    #   지정 시각까지 보게 됐고, 그러자 지정 시각 도달로 루프를 나온 회차가 다음 회전 서두의
+    #   Test-LifeUntilReached 에 **도달하지 못한 채** '메뉴 사이클 3회 소진' + '채집 시작을
+    #   확정하지 못했습니다' 로 끝났습니다 (수정 전에는 while 이 raw 사이클 한도만 봐서 한 번
+    #   더 돌며 서두 검사에 걸렸음). 사유가 뒤바뀌면 사용자가 원인을 오진합니다.
+    Test-LifeUntilReached
     if (-not $menuOk) {
       Write-LifeDiagnostics -Game $Game -Context '메뉴 사이클 3회 소진'
       # 링크를 눌러도 퀘스트가 안 생기는 가장 흔한 원인은 '스킬 레벨 미달'입니다
@@ -14138,8 +14450,17 @@ try {
           }
           Start-Sleep -Milliseconds 1500
         } else {
-          # 캡처 실패 중의 빈 판독을 '버튼 소멸'로 세지 않습니다 (Codex)
-          if ($script:screenCaptureFailing) { Start-Sleep -Milliseconds 500; continue }
+          # 캡처 실패 중의 빈 판독을 '버튼 소멸'로 세지 않습니다 (Codex).
+          # 마감도 되돌리고 공용 실패 처리를 거칩니다 - 함께하기 쪽(위)과 대칭 (2026-09-09 Codex P2:
+          # 여기만 goneCount 미소모만 반영돼, 복구 가능한 캡처 장애가 30초를 소진하고 '클릭을 한 번도
+          # 보내지 못했습니다'로 끝났습니다 - 실제 원인과 다른 사유)
+          if ($script:screenCaptureFailing) {
+            Test-SafeStopDuringCaptureFail
+            $moveDeadline = (Get-Date).AddSeconds(30)
+            $moveSeenYieldMs = [double]$script:userYieldTotalMs
+            Start-Sleep -Milliseconds 500
+            continue
+          }
           $goneCount++
           if ($goneCount -ge 2 -and $moveClicked) { break }
           Start-Sleep -Milliseconds 500

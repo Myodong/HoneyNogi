@@ -292,12 +292,15 @@ Assert-Case '배선: 결과 화면 대기 루프 양보 4곳(서두 게이트 + 
 # 반박 검토 반영: 5개 시간 상한 루프의 만료 판정이 전부 누적 양보를 반영 (ClickUntil 외·내부 while 2 +
 # VerifiedExit + 결과 화면 + 다음 층 + 다시 하기 = 6 조건식)
 # 09-08 어비스 배치 +3: Return-ToAbyssSelection(60초) + 이동하기 2곳(30초) / +1: 사냥터 첫 화면 복귀(40초)
-Assert-Case '배선: 시간 상한 루프 만료 판정 10곳이 Get-YieldAdjustedDeadline 경유' `
-  ([regex]::Matches($workerCode, '-lt \(Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$\w+\) -SeenYieldMs \(\[ref\]\$\w+\)\)\)').Count) 10
+# 2026-09-09 +1: Wait-ForScreen (Codex P2 - Condition 안의 팝업 스윕이 판독 직전 커서 대피를
+#   부르고 그 양보가 상한 없는데 마감에서 빠지지 않아, 양보 뒤 스윕이 팝업을 닫아 Condition 이
+#   거짓이 된 회전에서 시간 초과 throw → 코드 1 + 자동 재시도 소모였음)
+Assert-Case '배선: 시간 상한 루프 만료 판정 11곳이 Get-YieldAdjustedDeadline 경유' `
+  ([regex]::Matches($workerCode, '-lt \(Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$\w+\) -SeenYieldMs \(\[ref\]\$\w+\)\)\)').Count) 11
 # 2차 배치 잔여분 (생활·냥 상인·더블 루팅 정정) - 2026-09-08 사용자 지시로 전량 처리
 Assert-Case '생활: 메뉴 사이클 입력 5곳 양보 게이트 + 회전 미계상(while 전환)' `
   (([regex]::Matches($workerCode, 'Test-LifeYieldBeforeInput -Game \$Game -Step').Count -eq 5) -and
-   ($workerCode.Contains('while ($menuTry -lt 3 -and -not $menuOk -and (Get-Date) -le $cycleDeadline)')) -and
+   ($workerCode.Contains('while ($menuTry -lt 3 -and -not $menuOk -and (Get-Date) -le (Get-LifeCycleDeadline))')) -and
    ($workerCode -match '\$script:lifeMenuYielded\) \{[\s\S]{0,200}?\$menuTry--')) 'True'
 Assert-Case '생활: 링크 클릭 전송 확인(생략이면 퀘스트 확인으로 안 넘어감)' `
   ($workerCode.Contains("[생활] '가까운 위치 찾기' 클릭이 전송되지 않았습니다")) 'True'
@@ -343,9 +346,11 @@ Assert-Case '난이도 확인: 양보 후 RefindPoint 재탐색(호출부 5곳 �
   (([regex]::Matches($workerCode, '-RefindPoint \{').Count -eq 5) -and
    ($workerCode.Contains('Write-RunLog "[경고] 양보 후 난이도 ''$Label'' 글자를 다시 찾지 못했습니다 - 재클릭하지 않고 확인 실패로 처리합니다"')) -and
    ($workerCode.Contains('$script:difficultyConfirmYieldPending = $true'))) 'True'
-Assert-Case '토글 3곳: user-active 생략 뒤에는 유휴 여부와 무관하게 재판독(옛 상태 재사용 금지)' `
+# 2026-09-10: 같은 '재판독 계약'을 던전·사냥터 '파티 찾기' 2곳이 추가로 채택했습니다
+#   (단일 줄 elseif 형은 토글 3곳 전용 그대로 - 파티찾기는 여러 줄 형태)
+Assert-Case '토글 3곳 + 파티찾기 2곳: user-active 생략 뒤에는 유휴 여부와 무관하게 재판독(옛 상태 재사용 금지)' `
   (([regex]::Matches($workerCode, "elseif \(\`$script:lastClickSkipReason -eq 'user-active'\) \{ \`$\w+Recheck = \`$true \}").Count -eq 3) -and
-   ([regex]::Matches($workerCode, '\$\w+Recheck -or \(Test-UserRecentlyActive\)').Count -eq 3)) 'True'
+   ([regex]::Matches($workerCode, '\$\w+Recheck -or \(Test-UserRecentlyActive\)').Count -eq 5)) 'True'
 Assert-Case '어비스: 복귀 루프 클릭 로그 정직화 5곳(메뉴/ESC/공지 X/나가기 + 생략 시 마감 연장)' `
   (([regex]::Matches($workerCode, "클릭 건너뜀 \(\`$\(if \(\`$script:lastClickSkipReason -eq 'user-active'\)").Count -ge 4) -and
    ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count -ge 6)) 'True'

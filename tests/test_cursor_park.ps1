@@ -193,8 +193,13 @@ Assert-Case '배선: Click-GamePoint 직후에도 대피하지 않는다' `
 #   세는 두 번째 단언으로 총량을 관리합니다.
 Assert-Case '배선: 대피(줄 끝 주석 없는 형태)는 판독 직전에만 정확히 12곳' `
   ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$Game\s*$').Count) 12   # 양보 재판독분은 줄 끝 주석을 달아 이 계수와 분리
-Assert-Case '배선: 대피 호출 총량 (양보 재판독 12곳 포함 - 늘리면 이 숫자도 함께)' `
-  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$[Gg]ame').Count) 24
+# 2026-09-09 +2: 더블 루팅 정정(던전·사냥터)의 양보 후 소모량 재판독 직전 대피 - 사용자 커서가
+#   소모량 숫자를 덮으면 판독이 null 이 되고, 그 미판독이 '정정 필요 유지'로 흘러 화면 확인
+#   없이 카드를 눌렀습니다(은동전 오소모 - Codex P2). 양보 재판독분이라 줄 끝 주석을 답니다.
+# 2026-09-10 +2: 던전·사냥터 '파티 찾기'의 양보 후 재판독 직전 대피 (전송 확인 없이 한 번만
+#   누르던 것을 '미전송만 재시도'로 바꾸면서, 재클릭 허가 판정 전에 커서를 물립니다)
+Assert-Case '배선: 대피 호출 총량 (양보 재판독 16곳 포함 - 늘리면 이 숫자도 함께)' `
+  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$[Gg]ame').Count) 28
 # 생활의 네 자리를 이름으로도 고정합니다 (개수만 맞추고 엉뚱한 데 넣는 것을 막음)
 Assert-Case '배선: 생활 창 열림 판정이 판독 전에 대피' `
   ([bool]([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-LifeWindowOpen')) -match

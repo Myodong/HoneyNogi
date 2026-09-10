@@ -533,27 +533,35 @@ Assert-Case '배선(지정시간): 도달 시 exit 4 (사이클 미계상)' `
 Assert-Case '배선(지정시간): 사유 문구에 지정 시간 표기' `
   ([bool]($untilCode -match '지정 시간\(\{0\}\) 도달')) 'True'
 # 호출 지점: 시작 직후 1 + 초기 확인 + 이전 채집 대기 + 메뉴 재시도 + 캡처 대기 + 생성 확인
-# + 메인 대기 = 7곳 (정확 개수 - 줄이면 그 대기에서 목표를 넘김)
-Assert-Case '배선(지정시간): 검사 호출 7곳' `
-  (@([regex]::Matches($workerRaw, '(?m)^\s*Test-LifeUntilReached')).Count) 7
+# + 메인 대기 = 7곳, **+ 메뉴 루프 탈출 직후 1곳 = 8곳** (2026-09-09 Codex 구현 리뷰 회귀 가드:
+# 마감을 Get-LifeCycleDeadline 으로 통일하면서 while 이 지정 시각까지 보게 됐고, 그러자 루프를
+# 나온 회차가 다음 회전 서두의 검사에 못 닿아 사유가 '채집 시작 실패'로 뒤바뀌었음).
+# 정확 개수 - 줄이면 그 대기에서 목표를 넘기거나 사유가 어긋납니다.
+# 2026-09-09 +1: '가까운 위치 찾기' **클릭 직전** (양보가 길면 그 사이 지정 시각이 지날 수 있는데
+#   마감 검사가 양보 게이트 앞에만 있어 종료 50초 뒤에도 클릭이 나갔음 - Codex 지적) → 9곳
+# 2026-09-09 +1: Invoke-LifeListScroll 의 양보 복귀 직후 (대기 중 지정 시각이 지날 수 있는데
+#   그대로 드래그로 이어지면 약속을 넘겨 입력하게 됨 - Codex 조건) → 10곳
+Assert-Case '배선(지정시간): 검사 호출 10곳' `
+  (@([regex]::Matches($workerRaw, '(?m)^\s*Test-LifeUntilReached')).Count) 10
 # 메인 대기 루프에서 until 검사가 절대 상한 검사보다 앞 (사유 우선 계약)
 Assert-Case '배선(지정시간): 메인 루프에서 지정 시간이 절대 상한보다 먼저' `
   ([bool]($workerRaw -match '(?s)while \(\$true\) \{[^}]{0,400}Test-LifeUntilReached[^}]{0,400}-gt \$hardDeadline')) 'True'
-# 메뉴 시퀀스에는 사이클 한도와 지정 시간 중 이른 쪽을 넘긴다 (내부 입력 직전 검사가 이 값을 봄)
-Assert-Case '배선(지정시간): 메뉴 한도 = min(사이클, 지정시간) 계산' `
-  ([bool]($workerRaw -match '\$lifeMenuDeadline = \$script:lifeUntilDeadline')) 'True'
-Assert-Case '배선(지정시간): 메뉴 호출이 clamp 된 한도를 사용' `
-  ([bool]($workerRaw -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline \$lifeMenuDeadline')) 'True'
-Assert-Case '배선(지정시간): 옛 사이클 한도 직접 전달이 남아 있지 않다' `
-  ([bool]($workerRaw -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline \$cycleDeadline')) 'False'
+# 메뉴 시퀀스도 사이클 한도와 지정 시간 중 이른 쪽을 봅니다 - 스냅숏을 넘기는 대신
+# Get-LifeCycleDeadline 을 직접 부릅니다 (2026-09-09: 스냅숏은 시퀀스 안의 양보를 못 받음)
+Assert-Case '배선(지정시간): 헬퍼가 min(사이클, 지정시간) 을 계산' `
+  ([bool]($workerRaw -match '\$script:lifeUntilDeadline -lt \$adjusted\) \{ return \$script:lifeUntilDeadline \}')) 'True'
+Assert-Case '배선(지정시간): 메뉴 시퀀스 내부 검사가 헬퍼를 직접 호출' `
+  ([bool]($workerRaw -match 'function Invoke-LifeMenuSequence \{[\s\S]{0,1500}?\(Get-Date\) -gt \(Get-LifeCycleDeadline\)')) 'True'
+Assert-Case '배선(지정시간): 한도 스냅숏 전달이 남아 있지 않다 (시퀀스 안의 양보 누락 원인)' `
+  ([bool]($workerRaw -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline')) 'False'
 # 메뉴 시퀀스 입력 직전 가드 (교차 리뷰 - C 입력/스킬 셀 클릭 앞)
 # v2.1.7: 한도 재검사와 입력 사이에 사용자 양보 게이트(Test-LifeYieldBeforeInput)가 들어감 - 둘 다 필수
 Assert-Case '배선(지정시간): C 입력 직전 한도 재검사' `
-  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Press-LifeMenuKey')) 'True'
+  ([bool]($workerRaw -match '(?s)-gt \(Get-LifeCycleDeadline\)\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Press-LifeMenuKey')) 'True'
 # 2026-08-22 개정: 무조건 전면화가 Confirm-LifeGameFront 게이트로 교체됨 (전면이면 즉시
 # 통과 - 오버헤드 절감. 실패 시 클릭 차단이라 안전 강화)
 Assert-Case '배선(지정시간): 스킬 셀 클릭 직전 한도 재검사 + 양보 게이트 + 전면 게이트' `
-  ([bool]($workerRaw -match '(?s)-gt \$Deadline\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Confirm-LifeGameFront -Game \$Game\)\) \{ return \$false \}\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
+  ([bool]($workerRaw -match '(?s)-gt \(Get-LifeCycleDeadline\)\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Confirm-LifeGameFront -Game \$Game\)\) \{ return \$false \}\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
 
 # (c) GUI 배선 - env 전달 조건과 초 정규화
 $guiRaw = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
@@ -992,6 +1000,28 @@ $sim = Invoke-CycleSim 'process-content'
 Assert-Case '사이클: 가공 콘텐츠 → exit 4' $sim.Exit '4'
 $sim = Invoke-CycleSim 'menu-fail'
 Assert-Case '사이클: 메뉴 3회 실패 → exit 4 (재시도 3회 소진)' ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m3'
+# 2026-09-09 Codex 사후 리뷰 P1: 메뉴 시퀀스 안에서 양보하고 '화면 그대로라 이어서 진행'한
+# 회전($script:lifeMenuYielded 미설정)의 양보가 사이클 한도에서 빠지지 않아, 사용자가 PC 를
+# 쓰기만 해도 조건부 정지했습니다. 한도 60초 + 양보 120초 - 연장되면 3회전(m3), 안 되면 m1.
+# 2026-09-09 Codex 구현 리뷰 회귀 가드: 메뉴 루프 도중 지정 시각이 지나면 사유는
+# '지정 시간 도달' 이어야 합니다 (마감 통일로 while 이 지정 시각까지 보게 되면서, 루프를
+# 나온 회차가 서두 검사에 못 닿아 '채집 시작 실패'로 오진되던 것을 잡습니다)
+$sim = Invoke-CycleSim 'until-mid-menu'
+Assert-Case '사이클: 메뉴 루프 도중 지정 시각 도달 → 사유는 "지정 시간 도달"' `
+  ([bool](@($sim.Out | Where-Object { "$_" -match '지정 시간\(00:01\) 도달' }).Count -ge 1)) 'True'
+Assert-Case '사이클: 그때 "채집 시작 확정 실패"로 오진하지 않음 (사유 우선 순서)' `
+  ([bool](@($sim.Out | Where-Object { "$_" -match '채집 시작\(가까운 위치 찾기\)을 확정하지 못했습니다' }).Count -ge 1)) 'False'
+# 2026-09-09 Codex 구현 리뷰 P2 가드: 조작으로 접은 회전은 재시도 미계상(MENU 4회) +
+# **재진입 전 대기**(YIELDWAIT 1회). 대기가 빠지면 다음 회전 서두의 잔존 창 X 닫기가
+# 조작 중에 취소돼 양보 표시 없이 재시도만 소모됩니다 (Codex 모의: 명시적 양보 0회, 3회 소진)
+$sim = Invoke-CycleSim 'menu-yield-folded'
+Assert-Case '사이클: 조작으로 접은 회전은 재시도 미계상 (MENU 4회 = 미계상 1 + 정상 3)' `
+  ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m4'
+Assert-Case '사이클: 접은 회전은 재진입 전에 조작이 끝나기를 기다림' `
+  (@($sim.Out | Where-Object { "$_" -match '^YIELDWAIT 채집 메뉴 재시도' }).Count) 1
+$sim = Invoke-CycleSim 'menu-yield-continues'
+Assert-Case '사이클: 이어서 진행한 회전의 양보도 사이클 한도에서 빠짐 (한도 60초 + 양보 120초 → 3회전)' `
+  ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m3'
 # STATE 수 = 초기 확인분 + 생성 확인분 + 대기 판독분 (완료 판정 전 전면화 재확인은 제거됨)
 $sim = Invoke-CycleSim 'happy'
 Assert-Case '사이클: 정상 (초기 3회 + 생성 확인 2회 + absent 3연속) → exit 0' ('{0}/m{1}/s{2}' -f $sim.Exit, $sim.Menu, $sim.State) '0/m1/s8'
@@ -1252,12 +1282,15 @@ Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($worke
 #   플래그가 영영 안 풀리고 바로 다음 줄이 한도를 40초로 되돌려 무한 회전이었습니다
 #   (채집에서 2026-08-07 에 고친 것과 같은 형태가 던전/사냥터에 남아 있었음).
 # 2026-08-15 +1: 냥코인 REROLL_WAIT 캡처 실패 동결 블록(시계 정지+복구 탐침) 신설로 13곳
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 13곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1 + 검증 종료 루프 1 + 냥코인 뽑기 2)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '13'
+# 2026-09-09 +2: Resolve-DgEntryAfterYield / Resolve-HtEntryAfterYield 의 캡처 실패 동결 분기.
+#   두 함수는 판독을 건너뛰기만 해서 캡처 시도가 0이었고, 플래그가 안 풀려 무조건 'unknown'
+#   → 호출부 exit 4 였습니다 (Codex P1: 모의에서 추가 캡처 0회, 16초 뒤 unknown) → 15곳
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 15곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1 + 검증 종료 루프 1 + 냥코인 뽑기 2 + 양보 후 판정 2)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '15'
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `
-  ([regex]::Matches($workerText, 'Wait-LifeCaptureAlive -Game \$Game -Deadline \$Deadline').Count) '3'
+  ([regex]::Matches($workerText, 'Wait-LifeCaptureAlive -Game \$Game -Deadline \(Get-LifeCycleDeadline\)').Count) '3'
 # 클릭 직전에는 플래그를 믿지 말고 새로 캡처해야 합니다 - 판독 후 화면이 멈추면 플래그는
 # 정상으로 남아 있어 안 보이는 곳을 누르게 됩니다 (2026-08-07 리뷰 지적)
 # 깊은 재확인이 돌았으면 '마지막 프레임'에서 링크·제목을 다시 얻고 첫 프레임과 같은 팝업인지
@@ -1325,10 +1358,12 @@ Assert-Case '제목 띠: 라벨 후보 중 최소 Y 채택' `
   ((Get-LifeTitleStripRegion -Words $stripWords) -join ',') '440,174,300,36'
 Assert-Case "배선: '생활 스킬' 클릭 후 화면 전환 확인 게이트" ($workerText.Contains("'생활 스킬' 화면 전환을 확인하지 못했습니다")) 'True'
 # 2026-08-16 범위 확장: v2.1.1 사용자 조작 취소 게이트가 함수 도입부에 끼어 700자 초과
-Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,1300}Test-GameForeground -Game \$Game') 'True'
+# 2026-09-09 재확장: 그 게이트가 '건너뛰기'에서 '대기 + 양보 표시'로 바뀌며 근거 주석이 늘어남
+#   (실기 실측 - 건너뛰기만 하면 호출부가 예산을 소모해 '대상 미발견' 정지)
+Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,2600}Test-GameForeground -Game \$Game') 'True'
 # 2차 리뷰 반영 계약 (리뷰): deadline 하드 상한 + 캡처 실패 판독 무효 + 휠 증거
-Assert-Case '배선: deadline 은 준비 정리(이벤트 스킵) 뒤에 생성' ($workerText -match '\[void\]\(Clear-EventOverlay -Game \$Game\)[\s\S]{0,500}\$cycleDeadline = \(Get-Date\)\.AddSeconds') 'True'
-Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*Test-LifeUntilReached\s*\r?\n\s*if \(\(Get-Date\) -gt \$cycleDeadline\) \{ break \}') 'True'
+Assert-Case '배선: deadline 은 준비 정리(이벤트 스킵) 뒤에 생성' ($workerText -match '\[void\]\(Clear-EventOverlay -Game \$Game\)[\s\S]{0,500}\$script:lifeCycleDeadline = \(Get-Date\)\.AddSeconds') 'True'
+Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*Test-LifeUntilReached\s*\r?\n\s*if \(\(Get-Date\) -gt \(Get-LifeCycleDeadline\)\) \{ break \}') 'True'
 Assert-Case '배선: C 입력 전 판독 후 캡처 플래그 재확인' ($workerText -match '\$infoAlreadyOpen = Test-LifeInfoScreen -Game \$Game\s*\r?\n\s*if \(\$script:screenCaptureFailing\) \{ return \$false \}') 'True'
 Assert-Case '배선: 전환 확인 판독 후 캡처 플래그 재확인' ($workerText -match '\$infoStillVisible = Test-LifeInfoScreen -Game \$Game[\s\S]{0,400}if \(\$script:screenCaptureFailing\) \{ continue \}') 'True'
 Assert-Case '배선: 훑기 판독 1벌 공유(찾기+행 증거) + 목록 순서 전달' `
@@ -1377,7 +1412,7 @@ Assert-Case '배선: 모달 닫기 버튼은 하단 밴드 우선 + 예비 좌�
   (($workerText -match '\$buttonBand = @\(400, 560, 480, 120\)') -and
    ($workerText -match 'if \(\$closePoint\) \{\s*\r?\n\s*Click-ScreenPoint')) 'True'
 Assert-Case '배선: 최상단 정렬/탐색 스크롤 직전 deadline 재검사' `
-  ([regex]::Matches($workerText, '\(Get-Date\) -gt \$Deadline').Count -ge 6) 'True'
+  ([regex]::Matches($workerText, '\(Get-Date\) -gt \(Get-LifeCycleDeadline\)').Count -ge 6) 'True'
 # 화면에 이미 보이면 스크롤 0회로 즉시 클릭 (2026-08-06 사용자 관찰 - 상단 대상도 매번 정렬)
 Assert-Case '배선: 현재 화면 우선 탐색 → 못 찾을 때만 최상단 정렬' `
   (($workerText -match '\$quickScan = Find-LifeTargetScan -Game \$Game -TargetName \$TargetName -Order @\(\$SkillEntry\.Order\)') -and
@@ -1395,20 +1430,27 @@ Assert-Case '배선: 탐색은 목록 끝 도달 판정 + 안전 상한 12회 (�
    ($workerText -match 'if \(\$lastScrollSent -and \(\$rowsKey -eq \$previousRowsKey\)\)')) 'True'
 # 2차 교차 리뷰 반영 계약
 Assert-Case '배선: 스크롤 수행 여부 반환 + 끝 판정에 반영' `
-  (($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,4500}return \$true') -and
+  (($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,6000}return \$true') -and
    ($workerText -match '\$lastScrollSent = \[bool\]\(Invoke-LifeListScroll -Game \$Game -Steps -1\)')) 'True'
 Assert-Case '배선: 탐색 마지막 회차 휠 생략' ($workerText -match 'if \(\$scrollStep -eq 11\) \{ break \}') 'True'
 Assert-Case '배선: 상세 wrong 확정은 두 스케일 합의 (wrongCount 2)' ($workerText -match 'if \(\$detailWrongCount -ge 2\)') 'True'
-# 메뉴 시퀀스 내부 deadline (3차 교차 리뷰: 한도 초과 후 클릭 진행 금지 - 특히 찾기 입력)
-Assert-Case '배선: 메뉴 시퀀스가 Deadline 을 받아 내부 검사 4곳+' `
-  (($workerText -match 'Invoke-LifeMenuSequence -Game \$Game -SkillEntry \$skillEntry -TargetName \$lifeTargetName -Deadline \$lifeMenuDeadline') -and
-   (([regex]::Matches($workerText, '\(Get-Date\) -gt \$Deadline')).Count -ge 4)) 'True'
+# 메뉴 시퀀스 내부 한도 (3차 교차 리뷰: 한도 초과 후 클릭 진행 금지 - 특히 찾기 입력).
+# 2026-09-09: 스냅숏 파라미터를 없애고 헬퍼 직접 호출로 바꿨습니다 (시퀀스 안의 양보 반영)
+Assert-Case '배선: 메뉴 시퀀스 내부 한도 검사 4곳+ (헬퍼 경유)' `
+  ((-not ($workerText -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline')) -and
+   (([regex]::Matches($workerText, '\(Get-Date\) -gt \(Get-LifeCycleDeadline\)')).Count -ge 4)) 'True'
 Assert-Case "배선: '가까운 위치 찾기' 링크는 글자 탐색으로만 클릭 (고정 좌표 폴백 금지)" `
   (($workerText -match 'Select-LifeFindNearestWord -Words \$linkWords') -and
    ($workerText -match "링크를 찾지 못했습니다 - 이번 회전 중단") -and
    (-not $workerText.Contains('ptLifeFindNearest'))) 'True'
 Assert-Case '배선: 링크 클릭 직전 deadline 재검사 (OCR/전면화 시간 반영)' `
-  ($workerText -match 'Select-LifeFindNearestWord[\s\S]{0,6000}\(Get-Date\) -gt \$Deadline[\s\S]{0,900}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') 'True'
+  ($workerText -match 'Select-LifeFindNearestWord[\s\S]{0,6000}\(Get-Date\) -gt \(Get-LifeCycleDeadline\)[\s\S]{0,2600}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') 'True'
+# 2026-09-09: 그 사이에 양보 게이트가 들어가므로, **양보 뒤 갱신된 좌표**로 클릭하는지와
+# 입력 직전 지정 시각 재확인이 있는지를 따로 못 박습니다 (Codex P2 - 공통 라벨 게이트가
+# 다른 대상 팝업도 통과시켜 옛 좌표로 눌렀음)
+Assert-Case '배선: 양보 후 링크 좌표 갱신 + 입력 직전 지정 시각 재확인' `
+  (($workerText -match 'if \(\$null -ne \$script:lifeYieldLinkPoint\) \{ \$linkWord = \$script:lifeYieldLinkPoint \}[\s\S]{0,400}Test-LifeUntilReached[\s\S]{0,400}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') -and
+   ($workerText -match '\$script:lifeYieldLinkPoint = \$yieldLinkWord')) 'True'
 # 링크 클릭 후 고정 1500ms 는 제거 (2026-08-12): 생성 확인 루프가 첫 판독 전에 또 1500ms 를
 # 자는 이중 대기였음 - present 2회 계약과 판독 간격은 루프 쪽이 그대로 담당
 # v2.1.7: 링크 클릭 뒤에 전송 확인 분기(생략이면 사이클 실패)가 들어감 - 고정 대기(Start-Sleep)는 여전히 없음

@@ -101,7 +101,12 @@ Assert-Case '배선: 판정 진단 로그(분기명 + now/후보/확정/재확�
 # 끼어듦 - 주석과 그 초기화 줄만 허용 (계약 = 게이트가 초기화 직후라는 순서 불변)
 Assert-Case '배선: Click-ScreenPoint 사용자 조작 취소 게이트 (lastClickPerformed=false 직후)' `
   ([bool]($workerText -match "\`$script:lastClickPerformed = \`$false\r?\n(?:\s*(?:#[^\r\n]*|\`$script:lastClickSkipReason = '')\r?\n)*\s+if \(Test-UserRecentlyActive\) \{")) 'True'
-Assert-Case '배선: 생활 드래그도 사용자 조작 취소 게이트' `
-  ($workerText.Contains('목록 스크롤: 사용자 마우스 조작 감지로 건너뜀')) 'True'
+# 2026-09-09 계약 변경(실기 실측): 생활 드래그는 '건너뛰기'가 아니라 **대기**입니다.
+# 건너뛰기만 하면 호출부가 그 회전의 예산을 그대로 소모해, 목록이 한 칸도 안 움직인 채
+# 탐색 12스텝이 6초 만에 소진되고 '대상 미발견' 조건부 정지가 났습니다 (20:46 실기).
+# 상세 진리표는 tests/test_life_scroll_yield.ps1 (본체 실행 + 변이 검증).
+Assert-Case '배선: 생활 드래그는 조작 중 **대기**(건너뛰기 아님) + 양보 표시' `
+  (($workerText -match 'if \(Test-UserRecentlyActive\) \{[\s\S]{0,300}?Wait-UserYieldEnd -Game \$Game -Context ''채집 목록 스크롤''[\s\S]{0,300}?\$script:lifeScrollYielded = \$true') -and
+   (-not $workerText.Contains('목록 스크롤: 사용자 마우스 조작 감지로 건너뜀'))) 'True'
 
 exit $fails
