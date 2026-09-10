@@ -4098,6 +4098,53 @@ function Test-DetailTitleMatches {
   return (Test-DetailScreen -Game $Game)
 }
 
+function Invoke-AbyssBackRefocus {
+  param([System.Diagnostics.Process]$Game)
+
+  # 어비스 뒤로가기(<) 대기 중의 **주기 전면화**입니다. 아무것도 반환하지 않습니다
+  # (호출부의 Condition 스크립트블록 안에서 도는데, 값을 흘리면 화면 판정에 섞입니다).
+  #
+  # 왜 필요한가: `Wait-ForScreen` 은 감지 실패 시 주기적으로 전면화를 시도하지만
+  #   `Invoke-ClickUntil` 은 **클릭할 때만** 전면화합니다. 다른 창이 게임을 덮으면 소스·목표
+  #   판독이 둘 다 실패해 클릭까지 도달하지 못하고, 전면화 기회도 없이 초과됩니다
+  #   (2026-09-10 설계 리뷰 지적 - 교체로 생길 뻔한 회귀).
+  # 안전: `Invoke-AutoRefocus` 자체가 '실제로 가려졌을 때만' 동작하고, 유휴 검사가 켜져 있으면
+  #   조작 중에는 포커스를 뺏지 않습니다. 주기·유휴 설정은 config.json focus.* 를 그대로 따릅니다
+  #   (**`onlyWhenUserIdleSeconds = 0` 은 유휴 검사를 끄는 설정**이라 그때는 조작 중에도 전면화합니다
+  #   - 사용자가 명시적으로 끈 것이므로 여기서 따로 막지 않습니다).
+  # 성공했을 때만 시각을 갱신하는 것은 Wait-ForScreen 과 같은 계약입니다(가려지지 않았으면
+  #   Test-GameCovered 가 값싸게 거짓을 돌려주므로 매 폴링 재시도해도 부담이 없습니다).
+  if ($refocusEverySeconds -le 0) { return }
+  if (((Get-Date) - $script:abyssBackRefocusAt).TotalSeconds -lt $refocusEverySeconds) { return }
+  if (Invoke-AutoRefocus -Game $Game) { $script:abyssBackRefocusAt = Get-Date }
+}
+
+function Test-AbyssKnownDetailScreen {
+  param([System.Diagnostics.Process]$Game)
+
+  # 지금 열린 화면이 "등록된 어비스 던전 중 하나의 상세 화면"인지 **매번 새로** 판독합니다.
+  # 뒤로가기(<) 재클릭 허가 전용입니다 (규칙 4 - 무조건 재클릭 금지, 상태가 확인될 때만).
+  #
+  # 왜 제목인가: 하단 '입장하기' 버튼은 탭(혼자하기/함께하기)에 따라 위치가 바뀌고, 캐릭터가
+  #   멀면 같은 자리가 '이동하기'로 바뀝니다. `Test-DetailScreen`/`Test-PartyDetailScreen` 은
+  #   둘 다 '입장|장하'만 보므로 **이동하기 상태에서 거짓**이 되어, 원래 가능하던 뒤로가기를
+  #   첫 클릭부터 막습니다 (2026-09-10 설계 리뷰 지적). 제목은 어느 탭에서든 표시됩니다
+  #   (Get-DetailTitleText 주석의 실측 근거).
+  # 왜 목표 던전 일치를 요구하지 않는가: 호출부 하나가 **다른 던전 상세에서 빠져나오는**
+  #   경로라, 일치를 요구하면 바로 그 경로의 재클릭이 막힙니다. `Test-AbyssDetailTargetConfirmed`
+  #   (양보 후 재개 전용, 목표 일치 필수)와는 쓰임이 다릅니다.
+  $titleNow = Get-DetailTitleText -Game $Game
+  # 판독 **뒤에** 캡처 실패를 검사합니다. 판독이 성공하면 그 안에서 캡처 성공이 등록되어 실패
+  # 표시가 풀리는데, 먼저 검사하면 **직전까지 실패였다는 낡은 표시** 때문에 화면이 돌아온
+  # 뒤에도 재클릭이 막힙니다. 반대로 판독 도중 실패했으면 여기서 잡혀 거짓이 됩니다
+  # (2026-09-09 구현 리뷰에서 같은 순서 문제로 실결함이 나왔습니다).
+  if ($script:screenCaptureFailing) { return $false }
+  foreach ($knownKeyword in $allDungeonKeywords) {
+    if ($titleNow.Contains($knownKeyword)) { return $true }
+  }
+  return $false
+}
+
 function Test-AbyssDetailTargetConfirmed {
   # 사용자 양보 후 재개 전용: 지금 열린 상세 화면이 **목표 던전**의 것인지 확정합니다.
   # Test-DetailTitleMatches 는 제목이 안 읽히면 입장 버튼만으로 통과시켜(혼자하기 탭 회색 제목 대응),
@@ -14015,11 +14062,23 @@ try {
       if ($recoveryTitle.Contains($recoveryKeyword)) { $recoveryKnownDetail = $true; break }
     }
     if ($recoveryKnownDetail) {
-      Focus-Game -Game $game
-      Click-GamePoint -Game $game -ReferenceX $ptDetailBack[0] -ReferenceY $ptDetailBack[1]
-      Wait-ForScreen -Game $game -TimeoutSeconds $timeoutAbyssSelect -Description '어비스 선택 화면(완료 항목 복구)' -Condition {
-        Test-AbyssSelectionScreen -Game $game
-      }
+      # 전송 확인도 재클릭 경로도 없던 자리입니다 - 사용자 조작으로 클릭이 생략되면 한 번도
+      # 누르지 못한 채 대기만 태우고 초과 throw 였습니다 (2026-09-10). Invoke-ClickUntil 이
+      # 양보 대기·마감 연장·상태 기반 재클릭을 모두 갖고 있어 그대로 위임합니다.
+      # 무조건 Focus-Game 대신 설정을 따르는 전면화를 씁니다 - 옛 코드는 헬퍼의 양보 게이트보다
+      # 먼저 돌아, 클릭은 양보하면서 ALT 입력과 전면화는 이미 해 버렸습니다 (2026-09-10 리뷰).
+      Invoke-AutoRefocus -Game $game | Out-Null
+      # 재클릭 간격을 1초로 줍니다. 기본 5초면 **내부 대기 루프가 목표 화면만 확인하고 소스는
+      # 다시 안 보기 때문에**, 창 가림이 풀려 상세 화면이 보이게 돼도 다음 소스 판독까지 5초를
+      # 흘리다 마감에 걸려 클릭 0회로 끝날 수 있습니다 (2026-09-10 리뷰의 가상 시계 재현).
+      $script:abyssBackRefocusAt = Get-Date
+      Invoke-ClickUntil -Game $game -Point $ptDetailBack -Description '어비스 선택 화면(완료 항목 복구)' `
+        -TimeoutSeconds $timeoutAbyssSelect -ReclickEverySeconds 1 `
+        -Condition {
+          Invoke-AbyssBackRefocus -Game $game
+          Test-AbyssSelectionScreen -Game $game
+        } `
+        -SourceCondition { Test-AbyssKnownDetailScreen -Game $game }
       Write-RunLog '[커스텀] 어비스 상세 화면에서 선택 화면으로 복귀 - 완료 항목 재입장 없이 복구 완료'
       exit 0
     }
@@ -14043,11 +14102,18 @@ try {
         $needCardClick = $false
       } else {
         Write-RunLog "[어비스] 시작: 다른 던전 상세 화면 감지 - 뒤로 나가서 다시 선택"
-        Focus-Game -Game $game
-        Click-GamePoint -Game $game -ReferenceX $ptDetailBack[0] -ReferenceY $ptDetailBack[1]
-        Wait-ForScreen -Game $game -TimeoutSeconds $timeoutAbyssSelect -Description '어비스 던전 선택 화면' -Condition {
-          Test-AbyssSelectionScreen -Game $game
-        }
+        # 위 복구 경로와 같은 결함이었습니다 (2026-09-10). 재클릭 허가는 '등록된 어비스 상세
+        # 화면'이면 충분합니다 - 여기는 **다른 던전** 상세에서 빠져나오는 경로라 목표 던전
+        # 일치를 요구하면 안 됩니다. 전면화·재클릭 간격의 근거는 위 복구 경로 주석 참고.
+        Invoke-AutoRefocus -Game $game | Out-Null
+        $script:abyssBackRefocusAt = Get-Date
+        Invoke-ClickUntil -Game $game -Point $ptDetailBack -Description '어비스 던전 선택 화면' `
+          -TimeoutSeconds $timeoutAbyssSelect -ReclickEverySeconds 1 `
+          -Condition {
+            Invoke-AbyssBackRefocus -Game $game
+            Test-AbyssSelectionScreen -Game $game
+          } `
+          -SourceCondition { Test-AbyssKnownDetailScreen -Game $game }
       }
     }
     if ($needCardClick) {

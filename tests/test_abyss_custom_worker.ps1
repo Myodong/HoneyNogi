@@ -85,7 +85,10 @@ Check-Pattern '안전 중지 종료 코드가 호출 문맥을 따름' `
   'Return-ToAbyssSelection -Game \$game -SafeStopExitCode 10[\s\S]{0,400}exit 10'
 Check-Pattern '완료 복구에서 선택 화면이면 재입장 없이 완료' `
   'customRecoveryOnly -and \(Test-AbyssSelectionScreen[\s\S]{0,250}exit 0'
+# 2026-09-10: 이 분기의 뒤로가기가 상태 기반 재클릭 헬퍼로 바뀌면서 근거 주석이 붙어 구간이
+# 1200 → 1386자가 됐습니다(재클릭 허가·전면화 보존·재클릭 간격의 이유). 계약 자체는 그대로라
+# 상한만 넓힙니다 - 뒤로가기 동작의 세부 계약은 tests\test_abyss_detail_back.ps1 이 봅니다.
 Check-Pattern '완료 복구에서 상세 화면도 선택 화면으로 복귀' `
-  'customRecoveryOnly -and -not \$startInsideDetected[\s\S]{0,1200}완료 항목 재입장 없이 복구 완료[\s\S]{0,80}exit 0'
+  'customRecoveryOnly -and -not \$startInsideDetected[\s\S]{0,1600}완료 항목 재입장 없이 복구 완료[\s\S]{0,80}exit 0'
 
 exit $fails
