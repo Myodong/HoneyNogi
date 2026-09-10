@@ -1014,6 +1014,42 @@ Assert-Case '사이클: 그때 "채집 시작 확정 실패"로 오진하지 않
 # 2026-09-09 Codex 구현 리뷰 P2 가드: 조작으로 접은 회전은 재시도 미계상(MENU 4회) +
 # **재진입 전 대기**(YIELDWAIT 1회). 대기가 빠지면 다음 회전 서두의 잔존 창 X 닫기가
 # 조작 중에 취소돼 양보 표시 없이 재시도만 소모됩니다 (Codex 모의: 명시적 양보 0회, 3회 소진)
+# ── 2026-09-10 B1: 시작 팝업 가드가 '미전송 클릭'에 소진되던 문제 ──
+# 공지 게시판 X 클릭이 사용자 조작으로 취소돼도 $initialPopupRounds 가 올라, 조작 20~30초면
+# 10라운드가 소진되고 팝업 처리가 **꺼진 채** 판독으로 넘어갔습니다. 공지는 가장자리 HUD 가
+# 그대로 보여 'absent' 로 확정되고 → 메뉴를 열어 **진행 중이던 남의 채집을 끊습니다**
+# (이 가드 자체가 2026-08-07 감사가 그 사고 때문에 넣은 것).
+$sim = Invoke-CycleSim 'notice-yield-budget'
+$noticeCovered = @($sim.Out | Where-Object { "$_" -match '공지가림' }).Count
+$noticeYields  = @($sim.Out | Where-Object { "$_" -match '^YIELDWAIT' }).Count
+$noticeClicks  = @($sim.Out | Where-Object { "$_" -match '^CLICK#' }).Count
+Assert-Case '시작 팝업: 조작 취소는 가드 예산을 쓰지 않는다 (취소 11회 + 전송 1회 = 시도 12회, 양보 11회)' `
+  ('{0}/c{1}/y{2}' -f $sim.Exit, $noticeClicks, $noticeYields) '0/c12/y11'
+Assert-Case '시작 팝업: 공지가 덮인 채로는 퀘스트를 판독하지 않는다 (남의 채집을 끊지 않음)' `
+  $noticeCovered 0
+# 커서 미확인은 **자동화의 실패 시도**라 기존대로 라운드를 소모합니다 (사용자 양보와 구별).
+# 10회 연속 실패하면 가드 소진 경계가 그대로 남는데, 이번 범위 밖으로 확인된 사항입니다.
+$sim = Invoke-CycleSim 'notice-cursor-budget'
+# ★ YIELDWAIT=0 만으로는 부족합니다 (2026-09-10 Codex 구현 리뷰 P2): '커서 실패를 대기 없이
+#   면제'하는 변이를 넣으면 첫 판독 전 클릭이 10→16회로 늘어나는데도 그 단언은 통과합니다.
+#   **첫 STATE# 이전의 CLICK# 이 정확히 10회**인지를 세야 라운드 상한이 지켜졌음이 증명됩니다.
+#   (전체 클릭 수로 세면 안 됩니다 - 이후 메뉴 회전에서도 공지 클릭이 나가 총 13회입니다)
+$cursorTrace = @($sim.Out | Where-Object { "$_" -match '^(CLICK#|STATE#)' })
+$firstStateAt = [array]::IndexOf(@($cursorTrace | ForEach-Object { [bool]("$_" -match '^STATE#') }), $true)
+$clicksBeforeFirstState = $(if ($firstStateAt -lt 0) { @($cursorTrace).Count } else { $firstStateAt })
+Assert-Case '시작 팝업: 커서 미확인은 양보하지 않고 라운드 상한(10)만 소모한다 (계약)' `
+  ('{0}/y{1}/c{2}' -f $sim.Exit, (@($sim.Out | Where-Object { "$_" -match '^YIELDWAIT' }).Count), $clicksBeforeFirstState) '4/y0/c10'
+# 공통 처리부가 **공지 분기 전용이 아님**을 잡습니다 - 구매 스윕·주간 리셋도 같은 계약
+foreach ($popupCase in @('purchase-yield-budget', 'weekly-yield-budget')) {
+  $sim = Invoke-CycleSim $popupCase
+  Assert-Case "시작 팝업($popupCase): 조작 취소는 가드 예산을 쓰지 않는다 (시도 12·양보 11·메뉴 0)" `
+    ('{0}/c{1}/y{2}/m{3}' -f $sim.Exit, (@($sim.Out | Where-Object { "$_" -match '^CLICK#' }).Count), (@($sim.Out | Where-Object { "$_" -match '^YIELDWAIT' }).Count), $sim.Menu) '0/c12/y11/m0'
+}
+# 양보한 시간이 사이클 마감에 반영되는가 - 반영 안 되면 한도 60초가 양보 100초에 끊깁니다
+$sim = Invoke-CycleSim 'notice-yield-deadline'
+Assert-Case '시작 팝업: 양보 100초가 사이클 한도(60초)에 반영돼 끊기지 않는다' `
+  ('{0}/{1}' -f $sim.Exit, (@($sim.Out | Where-Object { "$_" -match '사이클 한도 초과' }).Count)) '0/0'
+
 $sim = Invoke-CycleSim 'menu-yield-folded'
 Assert-Case '사이클: 조작으로 접은 회전은 재시도 미계상 (MENU 4회 = 미계상 1 + 정상 3)' `
   ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m4'

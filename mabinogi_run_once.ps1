@@ -12762,10 +12762,27 @@ function Invoke-LifeGatherCycle {
       elseif (Test-NoticeBoardPopup -Game $Game) {
         Focus-Game -Game $Game
         Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
-        Write-RunLog '[생활] 공지 게시판 팝업 감지 - X로 닫기 (시작 확인 중)'
+        # 전송된 클릭에만 '닫기'라고 씁니다 (던전·어비스 복귀 분기와 같은 계약)
+        Write-RunLog $(if ($script:lastClickPerformed) { '[생활] 공지 게시판 팝업 감지 - X로 닫기 (시작 확인 중)' } else { "[생활] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })
         $popupHandled = $true
       }
       if ($popupHandled) {
+        # ★ 사용자 조작으로 취소된 클릭은 **팝업 가드 예산을 쓰지 않습니다** (2026-09-10 설계 합의).
+        #   예전에는 클릭 0회여도 $initialPopupRounds 가 올라, 조작 20~30초면 10라운드가 ~20초에
+        #   소진되고 팝업 처리가 **꺼진 채** 판독으로 넘어갔습니다. 공지 게시판은 가장자리 HUD 가
+        #   그대로 보여 Test-HomeEndEscHud 가 참이라 '게임 화면인데 퀘스트 없음(absent)'으로
+        #   확정되고, 그대로 메뉴를 열어 **진행 중이던 남의 채집을 끊습니다** - 이 팝업 가드
+        #   자체가 2026-08-07 감사가 그 사고 때문에 넣은 것입니다.
+        #   세 분기(구매 스윕·주간 리셋·공지) 모두 $true 를 돌려주기 전 **마지막 동작이 클릭**이라
+        #   여기서 공통으로 판단합니다. $popupHandled 가 거짓일 때는 옛 클릭 메타를 읽지 않습니다.
+        #   커서 미확인은 **자동화의 실패 시도**라 기존대로 라운드를 소모합니다 - 사용자에게
+        #   양보한 회전과 구별하는 기존 클릭 계약입니다.
+        #   여기서 기다린 시간은 $script:userYieldTotalMs 에 누적돼, 다음 회전 서두의
+        #   Get-LifeCycleDeadline 이 사이클 마감에 반영합니다 (별도 [ref] 마감 연장 불필요).
+        if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+          Wait-UserYieldEnd -Game $Game -Context '생활 시작 팝업 닫기'
+          continue
+        }
         $initialPopupRounds++
         Start-Sleep -Seconds 2
         continue      # 닫은 회차는 반드시 재캡처 - 같은 프레임으로 판정하면 오판 (리뷰 계약)

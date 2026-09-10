@@ -52,9 +52,30 @@ function Start-Sleep {
 }
 function Close-LifeOpenWindows { param($Game) return $false }
 function Clear-EventOverlay { param($Game) return $false }
-function Invoke-PurchasePopupSweep { param($Game) return $false }
-function Close-WeeklyCoopResetPopup { param($Game, [string]$LogPrefix) return $false }
-function Test-NoticeBoardPopup { param($Game) return $false }
+# ── 시작 팝업 3종 (2026-09-10 신설) ──
+# ★ Codex 지침: '팝업 존재 상태를 클릭 결과와 연결'하고 **감지 호출 횟수로 사라지는 스텁은 금지**.
+#   팝업은 **실제 전송된 클릭**으로만 사라집니다. 그래야 '미전송이 예산만 태우는' 사고를 잡습니다.
+$script:noticeOpen = $false        # 공지 게시판이 떠 있는가
+$script:purchaseOpen = $false      # 구매 팝업
+$script:weeklyOpen = $false        # 주간 리셋 팝업
+# 구매·주간 스윕은 자기 안에서 클릭하고 $true 를 돌려줍니다 - 미전송이어도 $true 입니다
+# (Codex 확인: 미전송을 이유로 반환값을 $false 로 바꾸면 팝업이 남은 채 판독으로 내려갑니다)
+function Invoke-PurchasePopupSweep {
+  param($Game)
+  if (-not $script:purchaseOpen) { return $false }
+  Click-GamePoint -Game $Game -ReferenceX 1 -ReferenceY 1
+  if ($script:lastClickPerformed) { $script:purchaseOpen = $false }
+  return $true
+}
+function Close-WeeklyCoopResetPopup {
+  param($Game, [string]$LogPrefix)
+  if (-not $script:weeklyOpen) { return $false }
+  Click-GamePoint -Game $Game -ReferenceX 2 -ReferenceY 2
+  if ($script:lastClickPerformed) { $script:weeklyOpen = $false }
+  return $true
+}
+# 공지는 호출부가 직접 클릭합니다 - 여기서는 존재 여부만
+function Test-NoticeBoardPopup { param($Game) return $script:noticeOpen }
 function Close-LifeBlockingDialog { param($Game) return 'none' }
 function Write-LifeDiagnostics { param($Game, [string]$Context) [Console]::WriteLine("DIAG $Context") }
 function Test-SafeStopDuringCaptureFail { }
@@ -62,7 +83,17 @@ function Test-SafeStopDuringCaptureFail { }
 # 조작으로 접은 회전은 **재진입 전에** 기다려야 합니다. 다음 회전의 게이트가 알아서
 # 기다릴 것이라는 판단이 틀렸음 - 시퀀스 서두의 잔존 창 X 닫기가 게이트보다 먼저 오고,
 # 커서가 게임 밖이면 대피는 안 기다리는데 X 클릭은 취소돼 재시도가 소모됐습니다)
-function Wait-UserYieldEnd { param($Game, [string]$Context) [Console]::WriteLine("YIELDWAIT $Context") }
+# 2026-09-10 보강 (Codex 지침): 호출만 세면 '마감 연장'을 검증할 수 없습니다 -
+# 가상 시계와 $script:userYieldTotalMs 를 **같은 시간만큼** 올려 실제 계약을 흉내 냅니다.
+$script:yieldSeconds = 0        # 한 번 대기할 때 흐르는 가상 시간(초). 0 이면 시간 안 흐름
+function Wait-UserYieldEnd {
+  param($Game, [string]$Context)
+  [Console]::WriteLine("YIELDWAIT $Context")
+  if ($script:yieldSeconds -gt 0) {
+    Start-Sleep -Seconds $script:yieldSeconds
+    $script:userYieldTotalMs = [double]$script:userYieldTotalMs + ($script:yieldSeconds * 1000)
+  }
+}
 # 캡처 복구 탐침: N 번 탐침한 뒤 복구되도록 흉내 냅니다 (0 = 영영 복구 안 됨).
 # 운영 코드에서 이 탐침이 빠지면 캡처 실패 플래그가 영영 안 풀려 한도까지 갇힙니다
 # (2026-08-07 실사고) - 'capture-recover' 시나리오가 그 회귀를 잡습니다
@@ -79,7 +110,22 @@ function Test-CaptureRecovered {
 }
 function Focus-Game { param($Game) }
 function Test-GameForeground { param($Game) return $true }   # 시뮬레이션은 항상 전면 가정
-function Click-GamePoint { param($Game, [int]$ReferenceX, [int]$ReferenceY) }
+# 클릭 스텁: **매번 두 메타를 초기화**하고 시나리오 시퀀스로 전송/생략을 정합니다 (Codex 지침).
+# 시퀀스가 소진되면 전송 성공으로 봅니다. 공지 좌표(ptNoticeClose)의 전송 성공만 공지를 닫습니다.
+$script:clickSeq = @()          # 'ok' / 'user-active' / 'cursor-not-ready'
+$script:clickCalls = 0
+$script:noticeClickSent = 0
+function Click-GamePoint {
+  param($Game, [int]$ReferenceX, [int]$ReferenceY)
+  $i = $script:clickCalls; $script:clickCalls++
+  $r = if ($i -lt $script:clickSeq.Count) { [string]$script:clickSeq[$i] } else { 'ok' }
+  $script:lastClickPerformed = ($r -eq 'ok')
+  $script:lastClickSkipReason = $(if ($r -eq 'ok') { '' } else { $r })
+  [Console]::WriteLine("CLICK#$($script:clickCalls)=$r")
+  if ($ReferenceX -eq $script:ptNoticeClose[0] -and $ReferenceY -eq $script:ptNoticeClose[1]) {
+    if ($script:lastClickPerformed) { $script:noticeOpen = $false; $script:noticeClickSent++ }
+  }
+}
 # 수량 판독 스텁: 시나리오가 시퀀스를 주면 순서대로, 소진 후에는 마지막 값을 계속 돌려줍니다
 $script:countSeq = @()
 $script:countCalls = 0
@@ -168,6 +214,16 @@ function Get-LifeQuestState {
   if ($script:captureFailAfterStateCalls -gt 0 -and $script:stateCalls -eq $script:captureFailAfterStateCalls) {
     $script:screenCaptureFailing = $true
   }
+  # ★ 공지 게시판이 덮인 채 판독하면 가장자리 HUD 는 그대로 보여 '게임 화면인데 퀘스트 없음
+  #   (absent)'으로 확정됩니다 - 그게 남의 채집을 끊은 실사고 기전입니다 (2026-08-07 감사).
+  #   독립 시퀀스로 present 를 돌려주면 그 가림을 무시하게 되므로 여기서 모형화합니다 (Codex 지침).
+  #   ※ 이 스텁은 'HUD 가 보이고 부재 판정 조건을 충족한 경우'를 모형화한 것입니다 - 실제
+  #     Get-LifeQuestState 에는 넓은 판독이 10자 미만이면 최초 두 번 unknown 으로 유예하는
+  #     절차가 있어, '공지면 항상 첫 판독부터 absent' 로 확대 해석하면 안 됩니다 (Codex 정정).
+  if ($script:noticeOpen) {
+    [Console]::WriteLine("STATE#$($script:stateCalls)=absent(공지가림)")
+    return 'absent'
+  }
   $stateIndex = $script:stateCalls - 1
   $state = if ($stateIndex -lt $script:stateSeq.Count) { [string]$script:stateSeq[$stateIndex] } else { [string]$script:stateTail }
   [Console]::WriteLine("STATE#$($script:stateCalls)=$state")
@@ -187,6 +243,55 @@ switch ($Scenario) {
     # 메뉴 사이클 3회 전부 실패 → 시작 확정 실패 (exit 4)
     $script:menuResults = @($false, $false, $false)
     $script:stateSeq = @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
+  }
+  'notice-yield-budget' {
+    # 2026-09-10 B1: 공지 게시판 X 클릭이 **사용자 조작으로 취소**되면 팝업 가드 예산을
+    # 쓰지 않아야 합니다. 예전에는 클릭 0회여도 $initialPopupRounds 가 올라 10라운드가
+    # 소진되고, 공지가 덮인 채 판독 → 가장자리 HUD 로 'absent' 확정 → 메뉴를 열어
+    # **진행 중이던 남의 채집을 끊었습니다** (2026-08-07 감사가 이 가드를 넣은 이유).
+    # 취소 11회 뒤 전송 성공 → 시도 12회 / 양보 11회 / **공지가 덮인 채 판독 0회**.
+    $script:noticeOpen = $true
+    $script:clickSeq = @('user-active') * 11 + @('ok')
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'purchase-yield-budget' {
+    # 공통 처리부가 **공지 분기 전용이 아님**을 잡습니다 (2026-09-10 Codex 구현 리뷰 P2):
+    # 양보 처리를 실수로 공지 분기 안으로 옮겨도 공지 시나리오만으로는 통과해 버립니다.
+    # 구매 스윕은 자기 안에서 클릭하고 **미전송이어도 $true** 를 돌려줍니다(실제 계약).
+    $script:purchaseOpen = $true
+    $script:clickSeq = @('user-active') * 11 + @('ok')
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'weekly-yield-budget' {
+    # 주간 리셋 분기도 동일 (구매 스윕 내부에서도 호출되는 함수라 계약이 같아야 합니다)
+    $script:weeklyOpen = $true
+    $script:clickSeq = @('user-active') * 11 + @('ok')
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'notice-cursor-budget' {
+    # 같은 자리의 **커서 미확인**은 자동화의 실패 시도라 기존대로 라운드를 소모합니다
+    # (사용자에게 양보한 회전과 구별하는 클릭 계약 - 2026-09-10 Codex 확인).
+    # 양보 0회 + 10라운드 소진이 계약입니다. 10회 연속 실패하면 팝업 가드 소진 경계가
+    # 그대로 남는데, 그건 이번 범위 밖으로 확인된 사항입니다.
+    $script:noticeOpen = $true
+    $script:clickSeq = @('cursor-not-ready') * 15
+    $script:stateSeq = @('absent', 'absent')
+    $script:stateTail = 'absent'
+    $script:menuResults = @($false, $false, $false)
+  }
+  'notice-yield-deadline' {
+    # 양보한 시간이 사이클 마감에 반영되는가 (한도 60초에 양보 100초).
+    # 반영되지 않으면 '[생활] 사이클 한도 초과' 로 끊기고 공지도 못 닫습니다.
+    $script:useVirtualClock = $true
+    $lifeGatherWait = 60
+    $script:yieldSeconds = 20
+    $script:noticeOpen = $true
+    $script:clickSeq = @('user-active') * 5 + @('ok')
+    $script:stateSeq = @('present')
     $script:stateTail = 'absent'
   }
   'menu-yield-folded' {
