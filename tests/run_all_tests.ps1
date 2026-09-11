@@ -17,7 +17,7 @@ $testDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $tests = @(Get-ChildItem -Path $testDir -Filter 'test_*.ps1' | Sort-Object Name)
 
 # 기대 테스트 개수 (추가/삭제 시 함께 갱신). 숫자가 어긋나면 실패로 끝냅니다.
-$expectedTestCount = 72   # 08-20 +1: test_dg_pill_highlight (v2.1.2) / 09-01 +1: test_embedded_host (v2.1.4) / 09-07 +1: test_dg_card_console (v2.1.6) / 09-08 +1: test_yield_batch (v2.1.7) / 09-09 +1: test_life_cycle_deadline (v2.1.8) / 09-09 +1: test_life_scroll_yield (v2.1.8 실기 실측) / 09-10 +1: test_party_find_yield (v2.1.8) / 09-10 +1: test_abyss_detail_back (v2.1.8)
+$expectedTestCount = 74   # 08-20 +1: test_dg_pill_highlight (v2.1.2) / 09-01 +1: test_embedded_host (v2.1.4) / 09-07 +1: test_dg_card_console (v2.1.6) / 09-08 +1: test_yield_batch (v2.1.7) / 09-09 +1: test_life_cycle_deadline (v2.1.8) / 09-09 +1: test_life_scroll_yield (v2.1.8 실기 실측) / 09-10 +1: test_party_find_yield (v2.1.8) / 09-10 +1: test_abyss_detail_back (v2.1.8) / 09-11 +1: test_event_overlay_yield (v2.1.8) / 09-11 +1: test_dg_retry_button_offline (v2.1.8 실사고 - 이진화 폴백)
 
 $failedTests = @()
 $erroredTests = @()

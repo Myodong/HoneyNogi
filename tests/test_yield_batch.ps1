@@ -331,8 +331,10 @@ Assert-Case '어비스: 탭 확인 실패는 정지(반환을 버리지 않음) 
 Assert-Case '탭 확인: 양보 시 재클릭 기회 미소모 + 경합 pending' `
   (($workerCode.Contains('$script:tabConfirmYieldPending = $true')) -and
    ($workerCode -match '\(\(Test-UserRecentlyActive\)\) -or \$script:tabConfirmYieldPending|\(Test-UserRecentlyActive\) -or \$script:tabConfirmYieldPending')) 'True'
+# 2026-09-11: 대기와 반환 사이에 호출부용 결과 전달($Outcome = 'user-active')이 한 줄 들어감 -
+# 계약(대기 후 $false)은 그대로라 그 한 줄만 허용. 결과 전달 자체는 test_event_overlay_yield.ps1 이 봄
 Assert-Case '이벤트 화면: Space 주입 전 양보 게이트(대기 후 재판독)' `
-  ([bool]($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \`$Game -Context '이벤트 화면 처리'\s+return \`$false")) 'True'
+  ([bool]($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \`$Game -Context '이벤트 화면 처리'\s+(?:if \(\`$Outcome[^\r\n]*\s+)?return \`$false")) 'True'
 # unknownSince 보정은 누적 변수 차분으로 (서두 게이트뿐 아니라 판독 헬퍼 안 커서 대피 양보까지 - Codex P2)
 Assert-Case '어비스: 선택 화면 복귀 루프 서두 게이트 + 알 수 없는 화면 20초 판정에서 양보 제외' `
   (($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀' -Deadline \(\[ref\]\`$deadline\) -SeenYieldMs \(\[ref\]\`$seenYieldMs\)\s+continue") -and

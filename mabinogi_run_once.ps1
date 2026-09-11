@@ -3690,7 +3690,8 @@ function Find-GameTextPoint {
     [string]$SearchText,
     [string]$ExactText = '',
     [int]$Scale = 3,
-    $Engine = $ocrKoreanEngine
+    $Engine = $ocrKoreanEngine,
+    [switch]$BinaryWhiteText
   )
 
   # 영역을 OCR로 읽되 단어별 위치(BoundingRect)까지 받아, 찾는 글자가 포함된 단어의
@@ -3699,8 +3700,10 @@ function Find-GameTextPoint {
   # ExactText 를 주면 '단어 전체가 정확히 일치'하는 것을 먼저 찾고, 없을 때만 SearchText
   # 부분 일치로 넘어갑니다. (예: '지옥1'과 '지옥10'처럼 이름이 겹치는 버튼 구분용)
   # 글자를 못 찾거나 캡처에 실패하면 $null 을 돌려줍니다.
+  # BinaryWhiteText: 흰 글자만 남기는 이진화 (Get-GameRegionCapture 참고). 광택 그라데이션 버튼
+  # 위의 흰 글자처럼 배경 색이 판독을 흔드는 자리에서 호출부가 폴백으로 켠다 (2026-09-11 실사고).
   $capture = Get-GameRegionCapture -Game $Game -ReferenceX $ReferenceX -ReferenceY $ReferenceY `
-    -RegionWidth $RegionWidth -RegionHeight $RegionHeight -Scale $Scale
+    -RegionWidth $RegionWidth -RegionHeight $RegionHeight -Scale $Scale -BinaryWhiteText:$BinaryWhiteText
   if (-not $capture) { return $null }
   try {
     # 임시 PNG 파일 없이 메모리에서 곧바로 OCR (Invoke-OcrOnBitmap 주석 참고)
@@ -4004,6 +4007,10 @@ function Close-GhostRegisterPrompt {
   Click-GamePoint -Game $Game -ReferenceX ([int]$laterWord.X) -ReferenceY ([int]$laterWord.Y)
   if ($script:lastClickPerformed) {
     Write-RunLog "${LogPrefix}고스트 등록 안내 - '나중에' 클릭"
+  } elseif ($script:lastClickSkipReason -eq 'user-active') {
+    # 사용자 조작 생략은 커서 실패가 아닙니다 - 호출부(Clear-EventOverlay)가 메타를 읽어 기다린 뒤
+    # 시도 횟수를 돌려줍니다. 여기서는 사유만 바르게 남깁니다 (2026-09-11 설계 리뷰 지적).
+    Write-RunLog "${LogPrefix}고스트 등록 안내 감지 - 사용자 조작으로 클릭을 건너뜀 (조작 종료 후 재시도)"
   } else {
     Write-RunLog "${LogPrefix}고스트 등록 안내 감지 - 커서 확인이 안 돼 클릭을 건너뜀 (다음 확인에서 재시도)"
   }
@@ -5186,11 +5193,21 @@ function Test-KnownScreen {
 function Invoke-EventSkipOrConfirm {
   param(
     [System.Diagnostics.Process]$Game,
-    [string]$LogPrefix = ''
+    [string]$LogPrefix = '',
+    $Outcome = $null   # [ref] 또는 생략. 타입을 [ref] 로 박으면 PS 5.1 이 기본값 $null 변환에 실패해
+                       # 기존 호출부(어비스 복귀 루프)가 통째로 죽습니다 - 회귀 테스트가 잡음 (2026-09-11)
   )
 
   # 출석/이벤트 화면의 '출석부 건너뛰기' 또는 보상 요약의 '확인' 버튼을 찾아 클릭합니다.
   # 클릭했으면 $true, 두 버튼 모두 없으면 $false 를 반환합니다.
+  # -Outcome (선택, 2026-09-11): 반환값과 별개로 **이번 회전에서 무슨 일이 있었는지**를 돌려줍니다.
+  #   'user-active' = 사용자 조작을 만나 기다린 뒤 아무것도 누르지 않고 $false 로 돌아감
+  #   'sent'        = Space 를 눌렀음 (Press-KeyOnce 는 클릭 메타를 안 건드려 호출부가 알 수 없음)
+  #   그 밖의 경로는 빈 문자열 - 호출부가 $script:lastClickPerformed 메타로 판단합니다.
+  # 왜 필요한가: 양보 후의 $false 를 '처리할 이벤트 없음'으로 읽는 호출부(Clear-EventOverlay)가
+  # 중앙/X 폴백으로 내려가 양보 직후 엉뚱한 화면을 눌렀습니다. 반환값을 바꾸면 안 됩니다 -
+  # 다른 호출부(어비스 복귀 루프)는 $false 를 '다음 판정으로'로 쓰고 있어 그대로 두어야 합니다.
+  if ($Outcome -is [ref]) { $Outcome.Value = '' }
   # (스텔라 픽/알 수 없는 화면 폴백은 시도 횟수 상태와 묶여 있어 여기에 포함하지 않습니다)
   # 협동 미션 전체 창은 범용 '지원'/'확인' 탐색보다 먼저 전용 제목으로 판정합니다 (이 창에
   # 그 단어들이 없다는 실측이 없으므로 특정 화면 확인 → 전용 X 순서 - 리뷰 조건, 06:02 실사고)
@@ -5203,7 +5220,7 @@ function Invoke-EventSkipOrConfirm {
   if ($skipPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $skipPoint.X -Y $skipPoint.Y
-    Write-RunLog "[안내] ${LogPrefix}출석부 건너뛰기 클릭"
+    if ($script:lastClickPerformed) { Write-RunLog "[안내] ${LogPrefix}출석부 건너뛰기 클릭" }
     Start-Sleep -Seconds 2
     return $true
   }
@@ -5216,10 +5233,16 @@ function Invoke-EventSkipOrConfirm {
     # 이 함수는 호출부 루프가 매 회전 재판독하는 구조라 $false 반환 = '이번엔 처리 안 함'으로 안전
     if (Test-UserRecentlyActive) {
       Wait-UserYieldEnd -Game $Game -Context '이벤트 화면 처리'
+      if ($Outcome -is [ref]) { $Outcome.Value = 'user-active' }
       return $false
     }
+    # Space 경로는 Focus-Game 을 유지합니다 - 키 입력은 전역이라 게임이 전면이어야 하고, 바로 위
+    # 게이트가 조작을 잡은 회전에서는 여기까지 오지 않습니다(게이트 통과 후 시작된 조작은 경합 창 -
+    # Space 에는 클릭 같은 마지막 취소 게이트가 없어 기존 한계). 가려졌을 때만 전면화하는 Invoke-AutoRefocus 로 바꾸면
+    # '가려졌고 유휴가 3~15초' 인 틈에 Space 가 다른 창으로 갑니다 (2026-09-11 설계 리뷰 주의).
     Focus-Game -Game $Game
     Press-KeyOnce -VirtualKey ([byte]32)   # Space = 확인
+    if ($Outcome -is [ref]) { $Outcome.Value = 'sent' }
     Write-RunLog "[안내] ${LogPrefix}출석 완료(지원품 지급) 화면 - Space로 확인"
     Start-Sleep -Seconds 2
     return $true
@@ -5229,7 +5252,7 @@ function Invoke-EventSkipOrConfirm {
   if ($confirmPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $confirmPoint.X -Y $confirmPoint.Y
-    Write-RunLog "[안내] ${LogPrefix}보상 확인 클릭"
+    if ($script:lastClickPerformed) { Write-RunLog "[안내] ${LogPrefix}보상 확인 클릭" }
     Start-Sleep -Seconds 2
     return $true
   }
@@ -5263,7 +5286,7 @@ function Close-WeeklyCoopResetPopup {
     } else {
       Click-GamePoint -Game $Game -ReferenceX 495 -ReferenceY 654   # '닫기' 실측 예비 좌표 (두 창 크기 동일)
     }
-    Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 닫기 클릭"
+    if ($script:lastClickPerformed) { Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 닫기 클릭" }
     Start-Sleep -Seconds 2
     return $true
   }
@@ -5287,10 +5310,34 @@ function Clear-EventOverlay {
   $attempt = 0
   $maxAttempts = 20
   $stellaPicks = 0   # '오늘의 스텔라 픽' 카드 선택 시도 횟수 (2회 후에는 닫기 X로 전환)
+  # 사용자 조작 양보 (2026-09-11, 실측 09-10 23:51): 조작으로 생략된 클릭이 ①20회 예산
+  # ②'6회부터 X 후보 순환' 격상 문턱 ③스텔라 카드 2회를 태웠습니다. X 후보 첫 좌표는 던전
+  # 우상단 X 와 겹쳐 던전을 닫고 필드로 나간 실사고(07-28)가 있는 자리입니다.
+  # 계약(설계 합의): 클릭 전송 → 시도 소모 / user-active 생략 → 미소모 + 로그 없음 /
+  # cursor-not-ready → 기존대로 소모(자동화의 실패 시도) / Space 전송 → 소모.
+  # 되돌림 횟수 상한은 두지 않습니다 - user-active 만 되돌리므로 '오래 조작했다'는 이유로
+  # 예산을 깎는 셈이 됩니다. 시간 상한은 **없습니다** - Wait-UserYieldEnd 는 조작이 이어지는 한
+  # 계속 기다리며 프로세스 종료·창 소실만 감시합니다(정상 캡처 중 F9 즉시 종료도 보장 안 함).
+  # 이건 저장소의 양보 계약 그대로이고, 이번 수정이 시간 상한을 새로 둘 사유는 아닙니다 (구현 리뷰).
   while ($attempt -lt $maxAttempts) {
+    # 이번 회전의 클릭 결과만 읽기 위해 사유 메타를 비웁니다 (Invoke-ClickUntil 과 같은 이유 -
+    # 지난 회전의 'user-active' 가 남아 아래 백업 분기를 오발동하면 재판독 없이 도는 바쁜 루프).
+    # Space 경로(Press-KeyOnce)는 메타를 건드리지 않아 자연히 '전송'으로 처리됩니다.
+    $script:lastClickSkipReason = ''
+    $eventOutcome = ''
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 2
+    } elseif (Test-UserRecentlyActive) {
+      # 사전 게이트 - 캡처 실패와 같은 자리, 같은 이유로 시도 횟수를 쓰지 않습니다. 분기 안의
+      # Focus-Game 은 이 게이트 뒤라, **게이트가 조작을 잡은 회전에서는** 전면화·ALT 주입이
+      # 나가지 않습니다(게이트 통과 후 판독 중 시작된 조작은 경합 창 - 아래 백업이 되돌림).
+      # Focus-Game 을 Invoke-AutoRefocus(가려졌고 유휴 ≥15초일 때만)로 바꾸면 안 됩니다 -
+      # '가려졌고 유휴 3~15초' 인 틈에 전면화 없이 클릭이 다른 창으로 갑니다. Invoke-ClickUntil 도
+      # 게이트 뒤에 Focus-Game(전면화 **시도** - 실패 시 경고만)을 둡니다 (구현 리뷰 합의).
+      # 양보 뒤에는 아래 공통 꼬리의 Test-KnownScreen 으로 떨어집니다 - 사용자가 양보 중에
+      # 팝업을 닫았으면 거기서 끝나고, 중앙/X 를 한 번 더 누르지 않습니다.
+      Wait-UserYieldEnd -Game $Game -Context '이벤트 화면 넘기기'
     } else {
       $attempt++
       # 0) '오늘의 스텔라 픽' 데일리 팝업(카드 3장 선택 - 실측 2026-07-16):
@@ -5301,12 +5348,17 @@ function Clear-EventOverlay {
       if ($stellaTitle.Contains('스텔라')) {
         Focus-Game -Game $Game
         if ($stellaPicks -lt 2) {
-          $stellaPicks++
           Click-GamePoint -Game $Game -ReferenceX $ptStellaCard[0] -ReferenceY $ptStellaCard[1]
-          Write-RunLog '[안내] 오늘의 스텔라 픽 감지 - 가운데 카드 선택'
+          # 카운터는 **실제 클릭 뒤에만** 증가 - 생략된 클릭으로 2회를 소진하면 카드를 한 번도
+          # 못 고른 채 닫기 X(= 던전 우상단 X 와 같은 좌표)로 새어 오늘 픽을 못 고릅니다.
+          # 어비스 복귀 루프의 같은 처리(2026-09-08)와 같은 형태입니다.
+          if ($script:lastClickPerformed) {
+            $stellaPicks++
+            Write-RunLog '[안내] 오늘의 스텔라 픽 감지 - 가운데 카드 선택'
+          }
         } else {
           Click-GamePoint -Game $Game -ReferenceX $ptStellaClose[0] -ReferenceY $ptStellaClose[1]
-          Write-RunLog '[안내] 스텔라 픽 화면이 남아 있어 닫기(X) 클릭'
+          if ($script:lastClickPerformed) { Write-RunLog '[안내] 스텔라 픽 화면이 남아 있어 닫기(X) 클릭' }
         }
         Start-Sleep -Seconds 2
       } elseif ($stellaPickBtn = Find-GameTextPoint -Game $Game -ReferenceX $rgStellaPickBtn[0] -ReferenceY $rgStellaPickBtn[1] `
@@ -5315,7 +5367,7 @@ function Clear-EventOverlay {
         # 하단 초록 '스텔라 픽' 확정 버튼이 나옵니다. 버튼을 눌러 오늘의 픽을 확정합니다.
         Focus-Game -Game $Game
         Click-ScreenPoint -X $stellaPickBtn.X -Y $stellaPickBtn.Y
-        Write-RunLog '[안내] 스텔라 픽 2단계 - 확정 버튼(스텔라 픽) 클릭'
+        if ($script:lastClickPerformed) { Write-RunLog '[안내] 스텔라 픽 2단계 - 확정 버튼(스텔라 픽) 클릭' }
         Start-Sleep -Seconds 2
       } elseif ($todayOffBtn = Find-GameTextPoint -Game $Game -ReferenceX $rgEventTodayOff[0] -ReferenceY $rgEventTodayOff[1] `
           -RegionWidth $rgEventTodayOff[2] -RegionHeight $rgEventTodayOff[3] -SearchText '그만') {
@@ -5324,14 +5376,14 @@ function Clear-EventOverlay {
         # 헛클릭을 반복하지 않도록 이 검사가 '확인' 탐색보다 먼저 옵니다.
         Focus-Game -Game $Game
         Click-ScreenPoint -X $todayOffBtn.X -Y $todayOffBtn.Y
-        Write-RunLog "[안내] 공지 팝업 - '오늘 그만 보기' 클릭"
+        if ($script:lastClickPerformed) { Write-RunLog "[안내] 공지 팝업 - '오늘 그만 보기' 클릭" }
         Start-Sleep -Seconds 2
       } elseif ($eventCloseBtn = Find-GameTextPoint -Game $Game -ReferenceX $rgEventCloseBtn[0] -ReferenceY $rgEventCloseBtn[1] `
           -RegionWidth $rgEventCloseBtn[2] -RegionHeight $rgEventCloseBtn[3] -SearchText '닫기') {
         # 새 이벤트 안내 팝업('닫기'/'이벤트 바로가기' 배치): 닫기를 눌러 넘어갑니다
         Focus-Game -Game $Game
         Click-ScreenPoint -X $eventCloseBtn.X -Y $eventCloseBtn.Y
-        Write-RunLog "[안내] 이벤트 안내 팝업 - '닫기' 클릭"
+        if ($script:lastClickPerformed) { Write-RunLog "[안내] 이벤트 안내 팝업 - '닫기' 클릭" }
         Start-Sleep -Seconds 2
       } elseif (Find-GameTextPoint -Game $Game -ReferenceX $rgNoticeBoardTabs[0] -ReferenceY $rgNoticeBoardTabs[1] `
           -RegionWidth $rgNoticeBoardTabs[2] -RegionHeight $rgNoticeBoardTabs[3] -SearchText '쿠폰') {
@@ -5340,12 +5392,18 @@ function Clear-EventOverlay {
         # 프로모션 썸네일을 눌러 다른 화면을 열지 않도록 폴백보다 먼저 처리합니다.
         Focus-Game -Game $Game
         Click-GamePoint -Game $Game -ReferenceX $ptNoticeBoardClose[0] -ReferenceY $ptNoticeBoardClose[1]
-        Write-RunLog '[안내] 공지 보드 팝업 - 우상단 닫기(X) 클릭'
+        # 09-10 23:51 실측: 생략된 클릭이 이 로그를 그대로 남겼습니다 - 전송됐을 때만 기록
+        if ($script:lastClickPerformed) { Write-RunLog '[안내] 공지 보드 팝업 - 우상단 닫기(X) 클릭' }
         Start-Sleep -Seconds 2
       } elseif (Close-GhostRegisterPrompt -Game $Game) {
         # '고스트 등록' 안내 (신규 화면 - 2026-08-13 실측): 함수가 '나중에' 클릭·로그·대기까지
         # 처리. 아래 일반 폴백(중앙 클릭/X 순환)은 이 화면을 닫지 못함이 실측됨.
-      } elseif (-not (Invoke-EventSkipOrConfirm -Game $Game)) {
+      } elseif (-not (Invoke-EventSkipOrConfirm -Game $Game -Outcome ([ref]$eventOutcome)) -and
+                $eventOutcome -ne 'user-active') {
+        # $eventOutcome: 헬퍼가 사용자 양보 후 $false 를 돌려주는 경로가 있는데, 그 $false 를
+        # '처리할 이벤트 없음'으로 읽으면 아래 중앙/X 폴백으로 내려가 **양보 직후 엉뚱한 화면을
+        # 한 번 더 누릅니다** (2026-09-11 설계 리뷰가 격리 실행으로 확인). 양보였으면 폴백을
+        # 타지 않고 아래 공통 후처리에서 시도 횟수만 돌려줍니다.
         # 건너뛰기/확인 버튼이 둘 다 없는 화면. 처리 우선순위:
         # 1) 말풍선에 글자가 보이면 NPC 대화(알리사 도입 장면 등)로 보고 중앙 클릭으로 진행
         #    (대화가 길 수 있어 15회차까지 허용 - 실측 2026-07-17)
@@ -5358,17 +5416,30 @@ function Clear-EventOverlay {
         Focus-Game -Game $Game
         if ($bubbleText.Length -ge 2 -and $attempt -lt 15) {
           Click-GamePoint -Game $Game -ReferenceX $ptClearCenter[0] -ReferenceY $ptClearCenter[1]
-          Write-RunLog "[안내] NPC 대화 진행 - 중앙 클릭 ($attempt/$maxAttempts)"
+          if ($script:lastClickPerformed) { Write-RunLog "[안내] NPC 대화 진행 - 중앙 클릭 ($attempt/$maxAttempts)" }
         } elseif ($attempt -ge 6) {
           $xCandidates = @(@(1229, 67), @(1090, 137), @(959, 180))
           $xPick = $xCandidates[($attempt - 6) % $xCandidates.Count]
           Click-GamePoint -Game $Game -ReferenceX $xPick[0] -ReferenceY $xPick[1]
-          Write-RunLog "[안내] 알 수 없는 화면 - 닫기(X) 후보($($xPick[0]),$($xPick[1])) 클릭 시도 ($attempt/$maxAttempts)"
+          # 생략된 후보는 '써 본 후보'가 아닙니다 - 아래 공통 후처리가 시도 횟수를 돌려주면
+          # 다음 유효 시도가 같은 번호·같은 후보로 다시 옵니다 (설계 합의: 순환도 함께 되돌림)
+          if ($script:lastClickPerformed) { Write-RunLog "[안내] 알 수 없는 화면 - 닫기(X) 후보($($xPick[0]),$($xPick[1])) 클릭 시도 ($attempt/$maxAttempts)" }
         } else {
           Click-GamePoint -Game $Game -ReferenceX $ptClearCenter[0] -ReferenceY $ptClearCenter[1]
-          Write-RunLog "[안내] 알 수 없는 화면 - 중앙 클릭으로 진행 시도 ($attempt/$maxAttempts)"
+          if ($script:lastClickPerformed) { Write-RunLog "[안내] 알 수 없는 화면 - 중앙 클릭으로 진행 시도 ($attempt/$maxAttempts)" }
         }
         Start-Sleep -Seconds 2
+      }
+      # 공통 후처리 - 이번 회전의 클릭이 사용자 조작으로 생략됐으면 시도 횟수를 돌려줍니다.
+      # ① 헬퍼가 양보 후 돌아온 경우: 헬퍼 안에서 이미 기다렸으므로 횟수만 돌려줍니다.
+      # ② 직접 클릭이 게이트 통과 뒤 클릭 직전 경합으로 생략된 경우: 기다린 뒤 돌려줍니다.
+      # 두 조건을 **함께** 봅니다 - 'cursor-not-ready' 까지 돌려주면 커서가 계속 안 잡힐 때
+      # 예산이 영영 안 줄어 무한 루프가 됩니다 (Click-ScreenPoint 가 두 사유를 나눈 이유).
+      if ($eventOutcome -eq 'user-active') {
+        $attempt--
+      } elseif (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+        Wait-UserYieldEnd -Game $Game -Context '이벤트 화면 넘기기'
+        $attempt--
       }
     }
     if (Test-KnownScreen -Game $Game) {
@@ -5561,6 +5632,26 @@ function Find-DgRetryButtonPoint {
     $point = Find-GameTextPoint -Game $Game -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
       -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5
     if ($point) { return $point }
+  }
+  # 2026-09-11 실사고 (하루 4회 정지): 게임이 DPI 미인식이라 150% 디스플레이에서는 1272 렌더를
+  # Windows 가 1.5배 늘린 1908 창이 캡처된다. 광택 그라데이션 위 흰 글자 '다시 하기'가 일반
+  # 판독에서 '담k`6\기' 같은 한 덩어리로 깨져 90초 내내 빗나갔다 (오류 캡처 10장 오프라인 재현:
+  # 일반 s5 2/10, 배율 사다리 s4/s3 도 7/10 - 버튼 광택 애니메이션으로 프레임마다 흔들림).
+  # 흰 글자 이진화는 10/10 ('하기' 조각이 전부 생존) → 일반 판독이 전부 실패했을 때만 같은
+  # 어휘로 한 번 더 읽는다. 통과 경로는 그대로라 1272 창의 기존 동작은 불변.
+  # 좌측 '나가기' 위치 게이트는 두지 않았다 - 10장 어느 모드에서도 '나가기' 조각이 관측되지 않음
+  # (진리표 tests\test_dg_retry_button_offline.ps1, 캡처 던전이미지\실측기록\20260911_심층결과화면_*).
+  foreach ($searchWord in @('다시', '다셔', '하기')) {
+    $point = Find-GameTextPoint -Game $Game -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
+      -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5 -BinaryWhiteText
+    if ($point) {
+      # 실기 증거용 - 폴백이 구한 회차를 로그로 구분한다. 폴링 루프 여러 곳에서 불리므로 회차당 첫 1회만.
+      if (-not $script:dgRetryBinaryFallbackLogged) {
+        $script:dgRetryBinaryFallbackLogged = $true
+        Write-RunLog "$($script:contentTag) '다시 하기' 버튼 - 일반 판독이 놓쳐 흰 글자 이진화로 찾음 ('$searchWord' 조각, 이번 회차 첫 1회만 기록)"
+      }
+      return $point
+    }
   }
   return $null
 }
@@ -5794,7 +5885,7 @@ function Close-CoopMissionBoardScreen {
   # 주 1회 리셋에만 도달하는 분기라 추가 OCR 비용은 사실상 없음)
   if (-not (Test-CoopMissionBoardVisible -Game $Game)) { return $false }
   Click-GamePoint -Game $Game -ReferenceX 1228 -ReferenceY 67
-  Write-RunLog "[안내] ${LogPrefix}협동 미션 전체 창 감지(주간 리셋 추정) - 닫기(X) 클릭"
+  if ($script:lastClickPerformed) { Write-RunLog "[안내] ${LogPrefix}협동 미션 전체 창 감지(주간 리셋 추정) - 닫기(X) 클릭" }
   Start-Sleep -Seconds 2
   return $true
 }
@@ -5859,7 +5950,7 @@ function Close-NetworkUnstablePopup {
   } else {
     Click-GamePoint -Game $Game -ReferenceX 743 -ReferenceY 620   # '다시 시도하기' 중심 실측 예비 (제목 재확정 전제)
   }
-  Write-RunLog "[안내] ${LogPrefix}네트워크 불안정 팝업 감지 - '다시 시도하기' 클릭 (재접속 시도)"
+  if ($script:lastClickPerformed) { Write-RunLog "[안내] ${LogPrefix}네트워크 불안정 팝업 감지 - '다시 시도하기' 클릭 (재접속 시도)" }
   Start-Sleep -Seconds 3
   return $true
 }
