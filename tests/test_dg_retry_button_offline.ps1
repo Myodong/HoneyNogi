@@ -216,4 +216,61 @@ if (-not (Test-Path -LiteralPath $threeButtonDir)) {
   }
 }
 
+# ── 4. 1272 네이티브 창(배율 100%) - 2026-09-11 20:47/20:49 실기 수집 프레임 (릴리스 게이트 ③) ────
+# 지인 PC 는 대개 1272 창이라, 1908(150% 확대 캡처)에서만 검증된 이진화 폴백이 1272 에서 엉뚱한 자리
+# (특히 왼쪽 '나가기' = 필드 이탈)를 돌려주지 않는지 확인해야 릴리스할 수 있다. 100% 배율 세션에서
+# 창 1272x717 로 심층 2회차(2-1 → 2-2)를 돌리며 자동 수집(입력 없음)한 결과 화면 프레임 9장 + 음성 2장.
+# 3버튼 배치(나가기 / 다시 하기 / 다음 구역으로) 실측(캡처 픽셀 = 기준 좌표): 나가기 403~550 /
+# 다시 하기 562~710 / 다음 구역으로 722~872, y 627~683. 두 회차 모두 일반 판독이 먼저 읽었고(구제 로그 0건),
+# 강제 이진화도 같은 버튼을 돌려줬다. 음성 프레임(엔딩 컷신·옵션 화면 '입장하기')은 세 경로 모두 null 이어야
+# 한다 - 탐색 영역 $rgDgRetryBtn 이 '입장하기'(x 683~1155) 를 오른쪽에서 잘라 '하기' 오탐이 없다는 증거.
+$nativeDir = Join-Path $projectRoot '던전이미지\실측기록\20260911_심층결과화면_3버튼_다시하기_1272'
+if (-not (Test-Path -LiteralPath $nativeDir)) {
+  "SKIP 1272 네이티브 프레임 폴더가 없어 건너뜁니다: $nativeDir"
+} else {
+  $nativeBox = @{ Left = 580; Top = 633; Right = 693; Bottom = 677 }   # 가운데 버튼 안쪽 (1908 상자 ÷ 1.5)
+  $positives = @(Get-ChildItem -LiteralPath $nativeDir -Filter 'r*.png' | Sort-Object Name)
+  $negatives = @(Get-ChildItem -LiteralPath $nativeDir -Filter 'neg*.png' | Sort-Object Name)
+  Assert-Case '1272: 결과 화면 프레임 9장' $positives.Count 9
+  Assert-Case '1272: 음성 프레임 2장' $negatives.Count 2
+  $nativeNormalHits = 0
+  foreach ($frame in $positives) {
+    $script:sourceBitmap = [System.Drawing.Bitmap]::FromFile($frame.FullName)
+    try {
+      $forced = $null
+      foreach ($searchWord in @('다시', '다셔', '하기')) {
+        $forced = Find-GameTextPoint -Game $null -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
+          -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5 -BinaryWhiteText
+        if ($forced) { break }
+      }
+      $forcedText = if ($forced) { "({0},{1})" -f $forced.X, $forced.Y } else { 'null' }
+      $forcedInside = ($null -ne $forced) -and ($forced.X -ge $nativeBox.Left) -and ($forced.X -le $nativeBox.Right) -and
+        ($forced.Y -ge $nativeBox.Top) -and ($forced.Y -le $nativeBox.Bottom)
+      Assert-Case ("1272 강제 이진화 {0}: 반환 좌표 {1} 가 가운데 '다시 하기' 안" -f $frame.BaseName, $forcedText) $forcedInside $true
+      $script:captureModes.Clear()
+      $point = Find-DgRetryButtonPoint -Game $null
+      $pointText = if ($point) { "({0},{1})" -f $point.X, $point.Y } else { 'null' }
+      $inside = ($null -ne $point) -and ($point.X -ge $nativeBox.Left) -and ($point.X -le $nativeBox.Right) -and
+        ($point.Y -ge $nativeBox.Top) -and ($point.Y -le $nativeBox.Bottom)
+      Assert-Case ("1272 탐색 {0}: 반환 좌표 {1} 가 가운데 '다시 하기' 안" -f $frame.BaseName, $pointText) $inside $true
+      # 1272 의 기존 성공 경로 불변: 일반 판독이 읽어 이진화가 호출되지 않아야 한다
+      if (-not ($script:captureModes -contains 'bin')) { $nativeNormalHits++ }
+    } finally { $script:sourceBitmap.Dispose() }
+  }
+  Assert-Case '1272 집계: 9장 전부 일반 판독이 먼저 읽음 (이진화 미호출 - 기존 경로 불변)' $nativeNormalHits 9
+  foreach ($frame in $negatives) {
+    $script:sourceBitmap = [System.Drawing.Bitmap]::FromFile($frame.FullName)
+    try {
+      $forced = $null
+      foreach ($searchWord in @('다시', '다셔', '하기')) {
+        $forced = Find-GameTextPoint -Game $null -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
+          -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5 -BinaryWhiteText
+        if ($forced) { break }
+      }
+      Assert-Case ("1272 음성 {0}: 강제 이진화도 null (오탐 없음)" -f $frame.BaseName) ($null -eq $forced) $true
+      Assert-Case ("1272 음성 {0}: 탐색 null" -f $frame.BaseName) ($null -eq (Find-DgRetryButtonPoint -Game $null)) $true
+    } finally { $script:sourceBitmap.Dispose() }
+  }
+}
+
 exit $fails
