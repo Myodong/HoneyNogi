@@ -4371,13 +4371,22 @@ function Wait-ForDungeonClearScreen {
           # 이 분기도 '닫았다'를 실제 클릭 여부로 구분합니다 (형제 두 분기와 같은 계약 -
           # 5차 점검에서 여기만 빠져 있었음). 여신상 전환 판정 자체는 팝업이 뜬 사실만으로
           # 성립하므로 클릭 성패와 무관하게 그대로 둡니다.
+          # 사유 3갈래 (2026-09-13). 여신상 전환 판정은 위에서 이미 확정 - 사유와 무관 (설계 합의).
           if ($script:lastClickPerformed) {
             Write-RunLog "$($script:contentTag) 부활 직후 구매 팝업(재료 부족 추정) - 닫고 이후 부활은 여신상으로 전환"
+          } elseif ($script:lastClickSkipReason -eq 'user-active') {
+            Write-RunLog "$($script:contentTag) 부활 직후 구매 팝업(재료 부족 추정) - 사용자 조작으로 닫기 클릭을 취소 (다음 감지에서 재시도, 이후 부활은 여신상으로 전환)"
           } else {
             Write-RunLog "$($script:contentTag) 부활 직후 구매 팝업(재료 부족 추정) - 커서 확인 실패로 닫기 클릭을 건너뜀 (이후 부활은 여신상으로 전환)"
           }
         } elseif ($script:lastClickPerformed) {
           Write-RunLog "$($script:contentTag) 구매 팝업 감지 - 닫기 클릭"
+        } elseif ($script:lastClickSkipReason -eq 'user-active') {
+          # 사용자 조작으로 취소 - **기다리지 않고** 다음 감지에서 재시도합니다 (2026-09-13 설계 합의: 이 루프는
+          # 600초 감시형이라 컷신 처리와 같은 '대기 없는 재감지' 방식. 양보 마감 연장을 반영하지 않는 루프라
+          # Wait-UserYieldEnd 를 넣으면 양보 시간이 클리어 마감을 먹습니다 - 연장 정책은 별도 이슈).
+          # 실기 14:30: 취소 2회가 '커서 확인 실패'로 기록됐던 자리 - 사유만 바로잡습니다.
+          Write-RunLog "$($script:contentTag) 구매 팝업 감지 - 사용자 조작으로 닫기 클릭을 취소 (다음 감지에서 재시도)"
         } else {
           # 커서 확인 실패로 클릭을 건너뛴 경우. 예전에는 이것도 '닫기 클릭'으로 기록해
           # 진단이 헛돌았습니다 (2026-08-09) - 실제로 무엇을 했는지 그대로 씁니다.
@@ -6151,6 +6160,8 @@ function Invoke-AfterEntryKeys {
     $entryPopupSeen = $false
     $entryPopupRemains = $false
     for ($popupTry = 1; $popupTry -le 4; $popupTry++) {
+      # 이번 회전의 클릭 결과만 읽기 위해 사유 메타를 비웁니다 (직전 회전의 user-active 잔존 오발동 방지)
+      $script:lastClickSkipReason = ''
       # **판독 전에 커서를 창 밖으로 물립니다.** 이 루프가 2026-08-09 제보의 현장입니다:
       # 직전 회전에서 '닫기'를 누르면 커서가 그 자리에 남고, 그때부터 '닫기'를 못 찾아
       # 팝업이 아직 있는데 break 하거나 남은 팝업을 영영 못 닫습니다.
@@ -6199,6 +6210,17 @@ function Invoke-AfterEntryKeys {
       # 건너뛰는데, 그것까지 세면 '닫았다'로 계상돼 로그가 거짓이 되고 재확인 분기도 잘못
       # 열립니다 (2026-08-09 5차 점검 - lastClickPerformed 를 정작 이 핵심 루프가 안 썼음).
       if ($script:lastClickPerformed) { $entryPopupClicks++ }
+      elseif ($script:lastClickSkipReason -eq 'user-active') {
+        # 사용자 조작으로 취소된 클릭은 시도를 쓰지 않습니다 (2026-09-13 실기 14:20 - 32초 조작 중 취소 1회가
+        # 시도를 먹고 '닫기 클릭 1회 뒤에도 남아 있습니다' 경고로 넘어갔음. 위 커서 대피는 창 위 조작만
+        # 기다리므로 창 밖 조작은 여기서 취소됨). 기다린 뒤 **같은 번호**로 재탐색 - 4회째 잔존 판정은
+        # 클릭보다 앞이라 되돌림은 1~3회에서만 일어납니다. 양보 중 팝업이 사라졌으면 $entryPopupSeen 이
+        # 참이라 연쇄 재확인(1.2초) 을 한 번 거친 뒤 종료 - 기존 계약 그대로 (설계 합의).
+        Write-RunLog "$LogPrefix 구매 팝업 감지 - 사용자 조작으로 닫기 클릭을 취소했습니다 (조작 종료 후 재확인, 시도 횟수는 쓰지 않습니다)"
+        Wait-UserYieldEnd -Game $Game -Context '입장 직후 구매 팝업 닫기'
+        $popupTry--
+        continue
+      }
       Start-Sleep -Seconds 1
     }
     # 잔존은 **클릭을 한 번도 못 보낸 경우에도** 알려야 합니다. 예전 조건($entryPopupClicks -gt 0)
