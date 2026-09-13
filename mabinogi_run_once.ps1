@@ -12066,52 +12066,103 @@ function Write-LifeDiagnostics {
 
 function Close-LifeOpenWindows {
   # 시작 상태 복구 (멱등 - 리뷰 조건): 상세 팝업이 열려 있으면 확인으로, 내 정보/생활
-  # 스킬 창이 열려 있으면(X 픽셀 판별 + 내정보 OCR 보조) X 로 닫습니다. 뭘 닫았으면 $true.
+  # 스킬 창이 열려 있으면(X 픽셀 판별 + 내정보 OCR 보조) X 로 닫습니다.
+  # 반환값 = "이번 호출에서 닫기 입력을 하나 이상 **전송**했음" (2026-09-13 명시 - 그 전에는
+  # 미전송에도 참이 되어 주석과 어긋났음). 실제로 닫혔는지·정리가 끝났는지를 뜻하지 않습니다.
+  # 두 운영 호출부 모두 [void] 로 버리므로 후속 분기에는 쓰이지 않습니다.
   # X 클릭 후 실제로 닫혔는지 재확인하고 안 닫혔으면 1회 재클릭합니다 (1차 실기 22:45:25
   # 재현: X 닫기 미확인 상태로 넘어가 다음 C 토글이 남은 창을 닫으며 재시도 1회 소실)
+  #
+  # 사용자 조작 양보 (2026-09-13 설계 합의 - 규칙 4 를 지키지 않던 마지막 생활 자리):
+  #   전송 → 시도 소모 / user-active 생략 → 미소모 + 기다린 뒤 **재판독부터** / cursor-not-ready →
+  #   기존대로 소모. 양보 뒤 옛 판독으로 재클릭하지 않습니다. 시도 예산(2회)·X 좌표·글리프 우선·
+  #   마지막 후조건 판독은 그대로입니다. 여기서 기다린 시간은 $script:userYieldTotalMs 에 누적돼
+  #   사이클 한도가 차분으로 반영합니다(회전 끝 호출부) - 별도 마감 연장·기준값 초기화 금지,
+  #   실패한 메뉴 회전($menuTry)도 되돌리지 않습니다.
   param([System.Diagnostics.Process]$Game)
   $closed = $false
-  $detailText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
-      -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
-  if (Test-LifeDetailHasLabel -Text $detailText) {
+
+  # 1) 대상 상세 팝업 - 모달이라 반드시 '확인'으로 먼저 닫아야 합니다. 팝업이 남으면 아래 X 클릭이
+  #    막히는데, X 루프는 X 의 존재만 판정하고 팝업을 처리하지 않아 '창이 남았다'로만 보고 2회를
+  #    낭비합니다 - 그래서 취소된 확인은 **여기서** 기다린 뒤 상세 OCR 부터 다시 합니다.
+  #    사용자 양보에 따른 되돌림에는 횟수 상한을 두지 않습니다(조작을 이유로 확인 기회를 소진시키지
+  #    않음). cursor-not-ready 는 기존대로 1회로 끝냅니다. 사용자가 양보 중 직접 닫았으면 재판독에서
+  #    라벨이 사라져 추가 클릭 없이 X 판정으로 내려갑니다.
+  while ($true) {
+    $script:lastClickSkipReason = ''
+    if (Test-UserRecentlyActive) {
+      # 사전 게이트 - 아래 Focus-Game(전면화 시도 + ALT 주입)이 조작 중에 나가지 않게 합니다.
+      # Invoke-AutoRefocus 로 바꾸면 안 됩니다: 가려졌고 유휴 3~15초인 틈에 전면화 없이 다른 창을
+      # 누릅니다 (출석·공지 넘기기 09-11 합의와 같은 근거). 게이트 통과 후 시작된 조작은 아래 백업이 잡습니다.
+      Wait-UserYieldEnd -Game $Game -Context '생활 시작 정리(상세 팝업 확인)'
+      continue
+    }
+    $detailText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgLifeDetail[0] -ReferenceY $rgLifeDetail[1] `
+        -RegionWidth $rgLifeDetail[2] -RegionHeight $rgLifeDetail[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+    if (-not (Test-LifeDetailHasLabel -Text $detailText)) { break }
     # '집물' = '채집물'의 안정 조각 (2차 실기: '채'가 '자|'로 깨져 팝업을 못 알아보고
     # X 를 눌러 모달에 막히던 사고 - 팝업은 반드시 '확인'으로 먼저 닫아야 함)
     Focus-Game -Game $Game
     Click-GamePoint -Game $Game -ReferenceX $ptLifeDetailConfirm[0] -ReferenceY $ptLifeDetailConfirm[1]
-    Write-RunLog '[생활] 시작 정리: 대상 상세 팝업 확인 클릭'
-    Start-Sleep -Seconds 1
-    $closed = $true
+    if ($script:lastClickPerformed) {
+      Write-RunLog '[생활] 시작 정리: 대상 상세 팝업 확인 클릭'
+      Start-Sleep -Seconds 1
+      $closed = $true
+      break
+    }
+    if ($script:lastClickSkipReason -eq 'user-active') {
+      # 클릭 직전 경합 - 게이트는 지났는데 조작이 시작됨. 기다린 뒤 상세 OCR 부터 다시.
+      Write-RunLog '[생활] 시작 정리: 사용자 조작으로 상세 팝업 확인 클릭을 취소했습니다 - 조작 종료 후 다시 확인'
+      Wait-UserYieldEnd -Game $Game -Context '생활 시작 정리(상세 팝업 확인)'
+      continue
+    }
+    Write-RunLog '[생활] 시작 정리: 커서 확인이 안 돼 상세 팝업 확인 클릭을 건너뜀'
+    break
   }
+
+  # 2) 내 정보 / 생활 스킬 창 - X 로 닫기. 전송·커서 미확인 시도만 2회 예산을 씁니다(user-active 는 미소모).
   $lifeWindowStillOpen = $false
-  foreach ($closeTry in 1..2) {
+  $sentTries = 0
+  while ($sentTries -lt 2) {
+    $script:lastClickSkipReason = ''
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context '생활 시작 정리(창 닫기)'
+      continue
+    }
     $lifeWindowStillOpen = ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game))
     if (-not $lifeWindowStillOpen) { break }
     Focus-Game -Game $Game
     Invoke-LifeWindowCloseClick -Game $Game
-    # 클릭이 **실제로 나갔을 때만** '눌렀다'로 씁니다. Click-ScreenPoint 는 커서 확인 실패 시
-    # 클릭을 건너뛰는데, 그것까지 '닫기(X)'로 기록하면 뒤이은 '아직 안 닫힘' 로그와 겹쳐
-    # "클릭은 나갔는데 게임이 안 먹었다"는 오진을 남깁니다. 5~7차가 전투 쪽에서 없앤 계약이
-    # 생활에만 빠져 있었습니다 (2026-08-10 8차 점검).
+    # 클릭이 **실제로 나갔을 때만** '눌렀다'로 씁니다. 사유 3갈래 - 전송 / 사용자 조작(시도 미소모,
+    # 기다린 뒤 재판독) / 커서 미확인(자동화 자신의 실패 - 시도 소모). 8차 점검(2026-08-10)의
+    # '거짓 닫기 로그' 계약에 09-13 양보 계약을 더한 것입니다.
     if ($script:lastClickPerformed) {
-      Write-RunLog "[생활] 시작 정리: 정보/스킬 창 닫기(X) - $closeTry 회차"
+      $sentTries++
+      $closed = $true
+      Write-RunLog "[생활] 시작 정리: 정보/스킬 창 닫기(X) - $sentTries 회차"
+    } elseif ($script:lastClickSkipReason -eq 'user-active') {
+      Write-RunLog '[생활] 시작 정리: 사용자 조작으로 창 닫기(X) 클릭을 취소했습니다 - 조작 종료 후 재확인(시도 횟수는 쓰지 않습니다)'
+      Wait-UserYieldEnd -Game $Game -Context '생활 시작 정리(창 닫기)'
+      continue
     } else {
-      Write-RunLog "[생활] 시작 정리: 커서 확인이 안 돼 창 닫기(X) 클릭을 건너뜀 - $closeTry 회차"
+      $sentTries++
+      Write-RunLog "[생활] 시작 정리: 커서 확인이 안 돼 창 닫기(X) 클릭을 건너뜀 - $sentTries 회차"
     }
     Start-Sleep -Milliseconds 1200
-    $closed = $true
   }
   # 후조건 확인은 **마지막 클릭 뒤 상태가 미지일 때만** 재판독합니다 (2026-08-22 - 창이
   # 없던 정상 경로는 루프의 마지막 판정이 곧 후조건이라 같은 판독 한 벌을 반복하고 있었음.
-  # 판정 의미 불변 - Codex 제안).
+  # 판정 의미 불변 - 리뷰 제안).
   if ($lifeWindowStillOpen) {
     $lifeWindowStillOpen = ((Test-LifeWindowOpen -Game $Game) -or (Test-LifeInfoScreen -Game $Game))
   }
   if ($lifeWindowStillOpen) {
-    Write-RunLog '[생활] 경고: 창 닫기 2회 후에도 창이 남아 있습니다 (다음 단계에서 재처리)'
+    # 확인한 사실까지만 씁니다 - 이 정리는 세 번째 메뉴 회전 끝에도 불리므로 '다음 단계 재처리'가
+    # 항상 성립하지는 않습니다 (설계 합의).
+    Write-RunLog '[생활] 경고: 창 닫기 2회 후에도 창이 남아 있습니다'
   }
   return $closed
 }
-
 function Get-LifeCycleDeadline {
   # 생활(채집) 사이클의 **실효 마감** = min(사용자 양보를 반영한 사이클 한도, 사용자 지정 종료 시각).
   # 생활의 모든 만료 판정(호출부 루프·메뉴 시퀀스 내부 16곳·퀘스트 생성 확인)이 이 한 곳을 봅니다.

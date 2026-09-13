@@ -1355,8 +1355,10 @@ Assert-Case '배선: 상세 판독 s3→s4 사다리 (한 스케일 깨짐으로
 # 라벨 앵커는 2026-08-09 제보('채집물'->'채집묻')로 단일 진입점으로 모았습니다.
 # 이 앵커 하나가 제목부 절단·요구 레벨·팝업 인식을 전부 좌우하므로, 리터럴이 다시
 # 흩어지지 않게 '직접 참조 0건 + 진입점 경유'를 함께 못 박습니다.
+# 2026-09-13: 시작 정리가 양보 재판독 루프가 되면서 라벨 검사가 부정형(`if (-not (…)) { break }`)이 됐다.
+# 계약(팝업 검출은 라벨 진입점 Test-LifeDetailHasLabel 경유)은 그대로라 두 모양을 모두 허용한다.
 Assert-Case '배선: 시작 정리 팝업 검출이 라벨 진입점 경유' `
-  ($workerText -match "if \(Test-LifeDetailHasLabel -Text \`$detailText\)") 'True'
+  ($workerText -match "if \((-not \()?Test-LifeDetailHasLabel -Text \`$detailText\)") 'True'
 # 주석에는 설명용으로 '집물' 이 여러 번 나오므로 주석 줄을 걷어내고 **실제 코드만** 셉니다
 $workerCodeOnly = (@($workerText -split "`n") | Where-Object { $_.TrimStart() -notlike '#*' }) -join "`n"
 Assert-Case "배선: 라벨 리터럴 직접 참조 없음 (조각 배열 선언 1곳만)" `
