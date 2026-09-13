@@ -4,7 +4,7 @@ $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
-    -Names @('Get-NyanNumberValue', 'Test-NyanMerchantTitle', 'Get-NyanPriceTags', 'Test-NyanSameTag', 'Test-NyanCoinSuspect', 'Get-NyanCoinCorrection')) {
+    -Names @('Get-NyanNumberValue', 'Test-NyanMerchantTitle', 'Get-NyanPriceTags', 'Test-NyanSameTag', 'Test-NyanCoinSuspect', 'Get-NyanCoinCorrection', 'Get-NyanCommonTags', 'Get-NyanStableTag')) {
   Invoke-Expression $definition
 }
 $workerText = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
@@ -103,12 +103,13 @@ Assert-Case "배선: 기타 분기(etc → Invoke-NyanMerchantRun)" `
 Assert-Case '배선: 구매 확인은 클릭한 좌표의 소멸 (Test-NyanSameTag)' `
   ([bool]($workerText -match 'Test-NyanSameTag -Tags \$tagsNow -X \(\[int\]\$firstTag\.X\) -Y \(\[int\]\$firstTag\.Y\)')) 'True'
 # 2026-08-15 개정: 구매 속도 개선으로 PURCHASE_WAIT가 횟수 루프(1..8×1000ms)에서 Stopwatch
-# 경과 시간 판정(폴링 500ms, 재클릭 4초, 타임아웃 8초)으로 바뀜 (Codex 조건 - OCR 소요 때문에
+# 경과 시간 판정(폴링 500ms, 재클릭 4초, 타임아웃 8초)으로 바뀜 (리뷰 조건 - OCR 소요 때문에
 # 횟수×간격은 벽시계가 아님). 벽시계 계약(4초/8초)은 그대로.
+# 2026-09-13 재개정: 폴링 500→150ms (수동 52판 프레임 실측 - 구매 클릭 뒤 가격표 소멸은 다음 프레임).
 Assert-Case '배선: 재클릭은 최대 1회 ($reclicked 래치, 경과 4초 판정)' `
   ([bool]($workerText -match 'if \(\$purchaseWaitClock\.Elapsed\.TotalSeconds -ge 4 -and -not \$reclicked\)')) 'True'
-Assert-Case '배선: 구매 확인은 경과 8초 타임아웃 + 500ms 폴링' `
-  ([bool]($workerText -match 'while \(\$purchaseWaitClock\.Elapsed\.TotalSeconds -lt 8\) \{\r?\n\s+Start-Sleep -Milliseconds 500')) 'True'
+Assert-Case '배선: 구매 확인은 경과 8초 타임아웃 + 150ms 폴링' `
+  ([bool]($workerText -match 'while \(\$purchaseWaitClock\.Elapsed\.TotalSeconds -lt 8\) \{\r?\n\s+Start-Sleep -Milliseconds 150')) 'True'
 # 2026-08-15 재개정: 사용자 추가 단축 요청으로 '무조건 1200ms'가 '경계 근접/미확정 1200ms,
 # 원거리 300ms' 조건부로 완화됨 (Codex 승인 명시적 계약 완화 - stale-low는 경계 부근에서만
 # 유해, 여유폭 냥코인 30만/골드 10만은 현상금·가격표 실측 상한의 3~12배)
@@ -117,8 +118,8 @@ Assert-Case '배선: 확인 후 대기가 경계 조건부 (근접·미확정 12
 Assert-Case '배선: 골드 상한 경계도 여유폭 10만으로 검사 ($lastGoldValue 추적 포함)' `
   (($workerText -match '\$nearGoldLimit = \(\$lastGoldValue -lt 0 -or \(\$nyanGoldLimit - \(\$startGold - \$lastGoldValue\)\) -le 100000\)') -and
    ($workerText -match '\$goldFailStreak = 0\r?\n\s+\$lastGoldValue = \$goldNow')) 'True'
-Assert-Case '배선: 소멸 확정 판독으로 안정 1연속 시딩 (빈 판은 $null - 새 판 2연속 유지)' `
-  ([bool]($workerText -match '\$stableTag = \$\(if \(@\(\$tagsNow\)\.Count -gt 0\) \{ \$tagsNow\[0\] \} else \{ \$null \}\)')) 'True'
+Assert-Case '배선: 소멸 확정 판독 전체로 안정 1연속 시딩 (빈 판은 빈 배열 - 새 판 2연속 유지)' `
+  ([bool]($workerText -match '\$stableTags = @\(\$tagsNow\)\r?\n\s+continue')) 'True'
 # ── 체인 구매 (2026-08-15 사용자 '1~2초' 요청 - Codex 3조건 반영 승인) ──
 Assert-Case '배선: 체인 구매는 최대 2장 추가 (잔량 판독 간 최대 3구매)' `
   ([bool]($workerText -match '\$chainBudget = 2\r?\n\s+while \(\$true\) \{')) 'True'
@@ -143,8 +144,8 @@ Assert-Case '배선: 한도 리롤은 0개 판독 1회 선행 요구 (구판 잔
 Assert-Case '배선: pendingBoardTags 는 일회성 + 나이 3초 상한 + 캡처 실패 시 폐기' `
   (($workerText -match '-not \$script:screenCaptureFailing -and\r?\n\s+\$pendingBoardTagsClock\.Elapsed\.TotalSeconds -le 3') -and
    ($workerText -match '\$tags = @\(Read-NyanPriceTags -Game \$Game\)\r?\n\s+\}\r?\n\s+\$pendingBoardTags = \$null')) 'True'
-Assert-Case '배선: 시딩 성공 시 확정 판독을 pendingBoardTags 로 재사용' `
-  ([bool]($workerText -match '\$stableTag = \$tagsNow\[0\]\r?\n\s+\$pendingBoardTags = \$tagsNow\r?\n\s+\$pendingBoardTagsClock = \[System\.Diagnostics\.Stopwatch\]::StartNew\(\)')) 'True'
+Assert-Case '배선: 재등장 시딩은 직전·최신 공통 카드만 pendingBoardTags 로 (최신 전체 금지)' `
+  ([bool]($workerText -match '\$rerollCommon = @\(Get-NyanCommonTags -Current \$tagsNow -Previous \$rerollPrevTags\)\r?\n\s+if \(@\(\$rerollCommon\)\.Count -gt 0\) \{\r?\n\s+\$pendingBoardTags = \$rerollCommon\r?\n\s+\$pendingBoardTagsClock = \[System\.Diagnostics\.Stopwatch\]::StartNew\(\)')) 'True'
 Assert-Case '배선: 체인 클릭마다 지정 시간 검사 (Codex 조건 - 최악 8초×2 누적 유예 방지)' `
   ([bool]($workerText -match '\$firstTag = \$tagsNow\[0\]\r?\n\s+Test-NyanUntilReached')) 'True'
 # 유령 태그 클릭 무해 논증의 전제: 누적 구매 수는 로그 표기 전용 - 종료/상한 판단에 쓰이면
@@ -167,8 +168,8 @@ Assert-Case '배선: REROLL_WAIT = Stopwatch 12초 + 400ms 폴링 (2차 확인 2
   ([bool]($workerText -match 'while \(\$rerollWaitClock\.Elapsed\.TotalSeconds -lt 12\) \{[\s\S]{0,400}Start-Sleep -Milliseconds \$\(if \(\$rerollSeen -ge 1\) \{ 250 \} else \{ 400 \}\)')) 'True'
 Assert-Case '배선: REROLL_WAIT 캡처 실패 중 시계 동결 (Stop→복구 탐침→Start)' `
   ([bool]($workerText -match '\$rerollWaitClock\.Stop\(\)[\s\S]{0,120}Test-CaptureRecovered -Game \$Game[\s\S]{0,60}\$rerollWaitClock\.Start\(\)')) 'True'
-Assert-Case '배선: 재등장 2연속 좌표 일치 시 $stableTag 시딩' `
-  ([bool]($workerText -match '\$rerollPrevTag\.Y\) -le 12\) \{\r?\n\s+\$stableTag = \$tagsNow\[0\]')) 'True'
+Assert-Case '배선: 재등장 2연속 시 $stableTags 는 최신 판독 전체 (그 다음 공통 카드 계산)' `
+  ([bool]($workerText -match 'if \(\$rerollSeen -ge 2\) \{[\s\S]{0,900}?\$stableTags = @\(\$tagsNow\)\r?\n\s+\$rerollCommon = @\(Get-NyanCommonTags')) 'True'
 # 2026-08-15 개정: 소진 확정이 루프 상단 전체 주기 반복(잔량 OCR+800ms ×3 ≈ 5~7초)에서
 # 가격표 전용 빠른 재판독 루프로 경량화됨 (사용자 속도 요청). '3연속 빈 판독' 계약은 유지
 # (상단 1회 + 재확인 2회) + Codex 조건: 최소 벽시계 2초(연출 압축 오판 방지), 매 판독 직후
@@ -181,8 +182,8 @@ Assert-Case '배선: 미확정 소진은 루프 상단 복귀 (다시 뽑기 금
   ([bool]($workerText -match 'if \(-not \$emptyConfirmed\) \{ continue \}')) 'True'
 # 안전 중지: 판 종료(다시 뽑기 클릭 직전)가 유일한 안전 경계 - flag 소비 후 exit 4, 확인과
 # 클릭 사이에 다른 동작 금지 (2026-08-15 실기 결함: 배선 부재로 안전 중지가 영영 안 먹었음)
-Assert-Case '배선: 안전 중지 flag 확인이 다시 뽑기 클릭 직전 (소비 → exit 4 → Focus/클릭 순서)' `
-  ([bool]($workerText -match 'if \(Test-Path -LiteralPath \$safeStopFlagPath\) \{\r?\n\s+Remove-Item -LiteralPath \$safeStopFlagPath[^\r\n]*\r?\n\s+Write-RunLog \("\[완료\] 안전 중지[\s\S]{0,100}exit 4\r?\n\s+\}\r?\n\s+Focus-Game -Game \$Game')) 'True'
+Assert-Case '배선: 안전 중지 flag 확인이 다시 뽑기 입력 직전 (소비 → exit 4 → 앵커 분기 → A/폴백 순서)' `
+  ([bool]($workerText -match 'if \(Test-Path -LiteralPath \$safeStopFlagPath\) \{\r?\n\s+Remove-Item -LiteralPath \$safeStopFlagPath[^\r\n]*\r?\n\s+Write-RunLog \("\[완료\] 안전 중지[\s\S]{0,100}exit 4\r?\n\s+\}\r?\n\s+if \(\$null -ne \$rerollAnchor\) \{')) 'True'
 Assert-Case '배선: 목표 도달은 2연속 동일 값으로 확정' `
   ([bool]($workerText -match '\$coinNow -eq \$lastCoinValue -and \$coinNow -ge \$nyanTargetCoins')) 'True'
 Assert-Case '배선: 골드 상한은 잔량 차감 (시작-현재)' `
@@ -196,6 +197,111 @@ Assert-Case '배선: 판독 영역 5종 실측값' `
    ($workerText.Contains('$rgNyanGold   = @(935, 40, 150, 45)')) -and
    ($workerText.Contains('$rgNyanCards  = @(390, 330, 480, 340)')) -and
    ($workerText.Contains('$rgNyanReroll = @(1090, 630, 170, 50)'))) 'True'
+
+# ── 2026-09-13 속도 개선 (수동 52판 실측 - 이력 '냥코인 뽑기 속도 실측' 참고): 전면이면 포커스 생략,
+#    구매 확인 폴링 150ms, 다시 뽑기는 앵커 확인 후 단축키 A. 함수 본문의 **주석을 뺀 사본**으로 단언합니다. ──
+$nyanCode = Remove-SourceComments -Text (@(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('Invoke-NyanMerchantRun'))[0])
+Assert-Case '속도: 구매 클릭 2곳(체인·재클릭)의 포커스는 전면 확인 조건부' `
+  (([regex]::Matches($nyanCode, 'if \(-not \(Test-GameForeground -Game \$Game\)\) \{ Focus-Game -Game \$Game \}\s+Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$firstTag\.X \+ 20\)')).Count) 2
+Assert-Case '속도: 냥 루프 안에 무조건 Focus-Game 호출 0건 (전부 전면 조건부)' `
+  (([regex]::Matches($nyanCode, '(?m)^\s*Focus-Game -Game \$Game\s*$')).Count) 0
+Assert-Case '속도: 구매 확인 폴링 150ms 직후 가격표 판독 (4초 재클릭·8초 타임아웃 벽시계 불변)' `
+  ([bool]($nyanCode -match 'while \(\$purchaseWaitClock\.Elapsed\.TotalSeconds -lt 8\) \{\s+Start-Sleep -Milliseconds 150\s+\$tagsNow = @\(Read-NyanPriceTags')) 'True'
+Assert-Case '다시 뽑기: 앵커 있으면 단축키 A 1회 (Press-KeyOnce 0x41) - 앵커 클릭 0건·Press-KeyVerified 미사용' `
+  ((([regex]::Matches($nyanCode, 'Press-KeyOnce -VirtualKey 0x41')).Count -eq 1) -and
+   (([regex]::Matches($nyanCode, 'Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$rerollAnchor')).Count -eq 0) -and
+   (-not $nyanCode.Contains('Press-KeyVerified'))) 'True'
+Assert-Case '다시 뽑기: 순서 = 전면 복구(조건부) → 앵커 판독 → 사용자 재확인 → 안전 중지 → 앵커 분기 → 전면 최종 확인(실패 continue) → A' `
+  ([bool]($nyanCode -match 'if \(-not \(Test-GameForeground -Game \$Game\)\) \{ Focus-Game -Game \$Game \}\s+\$rerollWords = @\(Get-GameRegionOcrWords[\s\S]{0,700}?if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \$Game -Context ''냥 상인 다시 뽑기''\s+continue\s+\}\s+if \(Test-Path -LiteralPath \$safeStopFlagPath\) \{[\s\S]{0,400}?exit 4\s+\}\s+if \(\$null -ne \$rerollAnchor\) \{\s+if \(-not \(Test-GameForeground -Game \$Game\)\) \{\s+Write-RunLog ''\[기타\] 다시 뽑기 키\(A\)를 보내지 않았습니다[^\r\n]*\s+continue\s+\}\s+Press-KeyOnce -VirtualKey 0x41')) 'True'
+$nyanSafeStopToKey = [regex]::Match($nyanCode, 'Test-Path -LiteralPath \$safeStopFlagPath[\s\S]*?Press-KeyOnce -VirtualKey 0x41').Value
+Assert-Case '다시 뽑기: 안전 중지 확인과 A 사이에 sleep·판독·포커스·사용자 검사 없음 (입력 직전 마지막 동작 계약)' `
+  (($nyanSafeStopToKey.Length -gt 0) -and -not ($nyanSafeStopToKey -match 'Start-Sleep|Get-GameRegion|Read-Nyan|Focus-Game|Test-UserRecentlyActive')) 'True'
+$nyanKeyBranch = [regex]::Match($nyanCode, 'if \(\$null -ne \$rerollAnchor\) \{[\s\S]*?\} else \{').Value
+Assert-Case '다시 뽑기: 키 경로는 직전 클릭 메타(lastClickPerformed/SkipReason)를 읽지 않음' `
+  (($nyanKeyBranch.Length -gt 0) -and -not ($nyanKeyBranch -match 'lastClickPerformed|lastClickSkipReason')) 'True'
+Assert-Case '다시 뽑기: 앵커 없으면 폴백 고정점 클릭(전면 조건부) + 미전송 시 continue' `
+  ([bool]($nyanCode -match '\} else \{\s+if \(-not \(Test-GameForeground -Game \$Game\)\) \{ Focus-Game -Game \$Game \}\s+Click-GamePoint -Game \$Game -ReferenceX \$ptNyanReroll\[0\] -ReferenceY \$ptNyanReroll\[1\]\s+if \(-not \$script:lastClickPerformed\) \{[\s\S]{0,600}?continue\s+\}\s+\}\s+Write-RunLog \("\[기타\] 가격표 소진')) 'True'
+
+# ── 다시 뽑기 입력 분기 모의 실행 (2026-09-13 구현 리뷰 지적: 배선 정규식은 '뽑기' 앵커 판정 자체를 보호하지
+#    못함 - `-eq '뽑기'` 를 '닫기' 로 바꿔도 통과). 주석 뺀 함수 본문에서 **전면 복구 ~ A/폴백 분기**를 잘라
+#    실제 코드를 실행합니다. `continue` 가 살아 있도록 1회 foreach 로 감싸고, 점소싱(. )으로 돌려 대입이
+#    호출자에 보이게 합니다 (규칙 3). 안전 중지 flag 는 없는 경로로 두어 exit 4 가 실행되지 않습니다. ──
+$nyanRerollSpan = [regex]::Match($nyanCode, 'if \(-not \(Test-GameForeground -Game \$Game\)\) \{ Focus-Game -Game \$Game \}\s+\$rerollWords = @\(Get-GameRegionOcrWords[\s\S]*?(?=\s+Write-RunLog \("\[기타\] 가격표 소진)').Value
+Assert-Case '모의: 다시 뽑기 분기 추출 (전면 복구 ~ A/폴백)' ($nyanRerollSpan.Length -gt 200) 'True'
+$nyanRerollBlock = [scriptblock]::Create("foreach (`$nyanOnce in 1) {`n" + $nyanRerollSpan + "`n`$script:nyanReachedEnd = `$true`n}")
+$rgNyanReroll = @(1090, 630, 170, 50); $ptNyanReroll = @(1163, 655); $ocrKoreanEngine = $null
+$safeStopFlagPath = Join-Path $env:TEMP ('honeynogi_no_such_flag_' + [guid]::NewGuid().ToString('N'))
+$Game = New-Object PSObject
+function Reset-NyanMock {
+  param($Words, [bool]$Foreground = $true, [bool]$UserActive = $false)
+  $script:mockWords = $Words; $script:mockForeground = $Foreground; $script:mockUserActive = $UserActive
+  $script:nyanKeyCount = 0; $script:nyanClickCount = 0; $script:nyanFocusCount = 0; $script:nyanYieldCount = 0
+  $script:nyanLogs = @(); $script:nyanReachedEnd = $false; $script:lastClickPerformed = $false; $script:lastClickSkipReason = ''
+}
+function Get-GameRegionOcrWords { return $script:mockWords }
+function Test-GameForeground { param($Game) return $script:mockForeground }
+function Focus-Game { param($Game) $script:nyanFocusCount++ }
+function Test-UserRecentlyActive { return $script:mockUserActive }
+function Wait-UserYieldEnd { param($Game, $Context) $script:nyanYieldCount++ }
+function Press-KeyOnce { param([byte]$VirtualKey) if ($VirtualKey -eq 0x41) { $script:nyanKeyCount++ } }
+function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY) $script:nyanClickCount++; $script:lastClickPerformed = $true }
+function Write-RunLog { param([string]$Message) $script:nyanLogs += $Message }
+# ① 앵커 '뽑기' + 전면: A 1회, 클릭 0회, 끝까지 진행
+Reset-NyanMock -Words @(@{ Text = '뽑기'; X = 1163; Y = 649 })
+. $nyanRerollBlock
+Assert-Case "모의: 앵커 '뽑기' → A 1회·클릭 0회·포커스 0회·끝까지 진행" ('{0},{1},{2},{3}' -f $script:nyanKeyCount, $script:nyanClickCount, $script:nyanFocusCount, $script:nyanReachedEnd) '1,0,0,True'
+# ② 앵커가 '닫기'(다른 글자): A 0회, 폴백 클릭 1회
+Reset-NyanMock -Words @(@{ Text = '닫기'; X = 1163; Y = 649 })
+. $nyanRerollBlock
+Assert-Case "모의: 앵커가 '닫기' → A 0회·폴백 클릭 1회·끝까지 진행" ('{0},{1},{2}' -f $script:nyanKeyCount, $script:nyanClickCount, $script:nyanReachedEnd) '0,1,True'
+# ③ 빈 판독: A 0회, 폴백 클릭 1회
+Reset-NyanMock -Words @()
+. $nyanRerollBlock
+Assert-Case '모의: 빈 판독 → A 0회·폴백 클릭 1회' ('{0},{1}' -f $script:nyanKeyCount, $script:nyanClickCount) '0,1'
+# ④ 앵커 있음 + 전면 아님: 포커스 복구 1회(판독 전) 후 최종 확인 실패 → A 0회·클릭 0회·continue(끝 미도달)·전면 미확인 로그
+Reset-NyanMock -Words @(@{ Text = '뽑기'; X = 1163; Y = 649 }) -Foreground $false
+. $nyanRerollBlock
+Assert-Case '모의: 전면 아님 → 판독 전 복구 1회, A 0회, 클릭 0회, continue, 전면 미확인 로그' ('{0},{1},{2},{3},{4}' -f $script:nyanFocusCount, $script:nyanKeyCount, $script:nyanClickCount, $script:nyanReachedEnd, [bool]($script:nyanLogs -match '전면 미확인')) '1,0,0,False,True'
+# ⑤ 사용자 조작 중(판독 뒤 재확인): 대기 1회 후 continue - A·클릭 0회
+Reset-NyanMock -Words @(@{ Text = '뽑기'; X = 1163; Y = 649 }) -UserActive $true
+. $nyanRerollBlock
+Assert-Case '모의: 사용자 조작 중 → Wait-UserYieldEnd 1회, A 0회, 클릭 0회, continue' ('{0},{1},{2},{3}' -f $script:nyanYieldCount, $script:nyanKeyCount, $script:nyanClickCount, $script:nyanReachedEnd) '1,0,0,False'
+
+# ── 공통 카드 규칙 (2026-09-13 실기 정체: 카드 존 OCR 간헐 검출·줄 순서 변동으로 '첫 가격표 2연속 일치' 26% 통과) ──
+$tagA = @{ X = 480; Y = 414 }; $tagB = @{ X = 636; Y = 632 }; $tagC = @{ X = 793; Y = 414 }
+$pick = Get-NyanStableTag -Current @($tagB, $tagA) -Previous @($tagA, $tagB)
+Assert-Case '공통: 직전 [A,B]·현재 [B,A] → 현재 순서의 B' ('{0},{1}' -f $pick.X, $pick.Y) '636,632'
+$pick = Get-NyanStableTag -Current @($tagA, $tagB) -Previous @($tagB)
+Assert-Case '공통: 직전 [B]·현재 [A,B] → B (한 번만 본 A 금지)' ('{0},{1}' -f $pick.X, $pick.Y) '636,632'
+Assert-Case '공통: 직전 [A]·현재 [B] → 없음' ($null -eq (Get-NyanStableTag -Current @($tagB) -Previous @($tagA))) 'True'
+$moved = @{ X = 492; Y = 414 }
+$pick = Get-NyanStableTag -Current @($moved) -Previous @($tagA)
+Assert-Case '공통: ±12 이동 허용 + 선택 좌표는 현재 값' ('{0},{1}' -f $pick.X, $pick.Y) '492,414'
+Assert-Case '공통: 한 축 13 이동은 거부' ($null -eq (Get-NyanStableTag -Current @(@{ X = 493; Y = 414 }) -Previous @($tagA))) 'True'
+Assert-Case '공통: 직전 빈 배열 → 없음' ($null -eq (Get-NyanStableTag -Current @($tagA) -Previous @())) 'True'
+Assert-Case '공통: 직전 $null → 없음' ($null -eq (Get-NyanStableTag -Current @($tagA) -Previous $null)) 'True'
+Assert-Case '공통: 현재 빈 배열 → 없음' ($null -eq (Get-NyanStableTag -Current @() -Previous @($tagA))) 'True'
+Assert-Case '공통: 현재의 null 항목은 무시' ('{0},{1}' -f (Get-NyanStableTag -Current @($null, $tagA) -Previous @($tagA)).X, (Get-NyanStableTag -Current @($null, $tagA) -Previous @($tagA)).Y) '480,414'
+$common = @(Get-NyanCommonTags -Current @($tagA, $tagB, $tagC) -Previous @($tagC, $tagA))
+Assert-Case '공통 목록: 직전 [C,A]·현재 [A,B,C] → [A,C] (현재 순서, B 제외)' (($common | ForEach-Object { $_.X }) -join ',') '480,793'
+Assert-Case '공통 목록: 1개면 @() 수집으로 1칸 배열' (@(Get-NyanCommonTags -Current @($tagA) -Previous @($tagA))).Count 1
+Assert-Case '공통 목록: 0개면 @() 수집으로 빈 배열' (@(Get-NyanCommonTags -Current @($tagA) -Previous @($tagB))).Count 0
+# [A] → [B] → [A]: 호출부가 직전 판독을 '교체'해야 마지막 A 가 2연속으로 오인되지 않음 - 호출 시퀀스로 모의
+$prevTags = @(); $seq = @(@($tagA), @($tagB), @($tagA)); $picks = @()
+foreach ($cur in $seq) {
+  $pk = Get-NyanStableTag -Current $cur -Previous $prevTags
+  if ($null -eq $pk) { $prevTags = @($cur) }   # 워커 READY 의 교체 규칙
+  $picks += , $(if ($null -eq $pk) { '-' } else { 'hit' })
+}
+Assert-Case '공통 시퀀스: [A]→[B]→[A] 는 전부 미확정 (교체 규칙 - 누적 금지)' ($picks -join ',') '-,-,-'
+Assert-Case '배선: READY 는 Get-NyanStableTag + 공통 없으면 직전 판독 교체(누적 금지) + 700ms' `
+  ([bool]($nyanCode -match '\$firstTag = Get-NyanStableTag -Current \$tags -Previous \$stableTags\s+if \(\$null -eq \$firstTag\) \{\s+\$stableTags = @\(\$tags\)\s+Start-Sleep -Milliseconds 700\s+continue')) 'True'
+Assert-Case '배선: $stableTags 초기·판 전환 2곳 빈 배열 + 옛 단수 변수 0건' `
+  ((([regex]::Matches($nyanCode, '\$stableTags = @\(\)')).Count -eq 2) -and (([regex]::Matches($nyanCode, '\$stableTag(?!s)')).Count -eq 0)) 'True'
+Assert-Case '배선: $rerollPrevTags 는 재확인마다 최신 판독 전체로 갱신 + 초기·소진 시 빈 배열' `
+  ((([regex]::Matches($nyanCode, '\$rerollPrevTags = @\(\$tagsNow\)')).Count -eq 1) -and (([regex]::Matches($nyanCode, '\$rerollPrevTags = @\(\)')).Count -eq 2) -and (([regex]::Matches($nyanCode, '\$rerollPrevTag(?!s)')).Count -eq 0)) 'True'
+Assert-Case '배선: 체인 구매는 최신 단일 판독 유지 ($firstTag = $tagsNow[0])' `
+  (([regex]::Matches($nyanCode, '\$firstTag = \$tagsNow\[0\]')).Count) 1
 
 # ── 배선 가드 (GUI) ──
 Assert-Case 'GUI: 기타 시작 시 커스텀 경로 배제' `

@@ -21,3 +21,20 @@ function Get-SourceFunctionDefinitions {
     [string]$functionAst.Extent.Text
   }
 }
+
+function Remove-SourceComments {
+  # 소스 문자열 단언용 '주석 뺀 사본' (2026-09-13 신설). 주석에만 걸리는 단언을 막기 위해 주석 토큰을
+  # 같은 길이의 공백으로 치환합니다 - 나머지 텍스트의 위치·줄 구조는 그대로라 기존 정규식이 그대로 먹습니다.
+  param([string]$Text)
+  $tokens = $null; $errors = $null
+  [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$tokens, [ref]$errors) | Out-Null
+  $builder = New-Object System.Text.StringBuilder $Text
+  foreach ($token in $tokens) {
+    if ($token.Kind -eq [System.Management.Automation.Language.TokenKind]::Comment) {
+      $start = $token.Extent.StartOffset
+      $length = $token.Extent.EndOffset - $start
+      [void]$builder.Remove($start, $length).Insert($start, ($token.Text -replace '[^\r\n]', ' '))   # CR/LF 보존 - 다중행 주석의 줄 수 유지 (구현 리뷰 지적)
+    }
+  }
+  return $builder.ToString()
+}

@@ -13586,6 +13586,28 @@ function Test-NyanSameTag {
   return $false
 }
 
+function Get-NyanCommonTags {
+  # 직전 판독에도(±12) 있는 현재 판독의 가격표들 - **현재 판독의 좌표 객체**를 현재 순서대로 (순수 - 진리표 대상).
+  # READY 안정 판정과 다시 뽑기 시딩이 씁니다 (2026-09-13 실기: 카드 존 OCR 이 프레임마다 가격표를 2~4개만
+  # 검출하고 줄 순서도 바뀌어 종전의 '첫 가격표($tags[0]) 2연속 일치' 가 약 1초 간격 판독 쌍의 26% 만 통과 →
+  # 700ms 대기가 최대 8초 반복. 공통 카드 존재는 80%). 반환은 파이프라인에서 풀리므로 호출부는 @() 로 수집.
+  param($Current, $Previous)
+  $common = @()
+  foreach ($tag in @($Current)) {
+    if ($null -eq $tag) { continue }
+    if (Test-NyanSameTag -Tags $Previous -X ([int]$tag.X) -Y ([int]$tag.Y)) { $common += , $tag }
+  }
+  return $common
+}
+
+function Get-NyanStableTag {
+  # 2연속 관측된 카드 중 현재 판독 순서의 첫 번째, 없으면 $null (순수 - 진리표 대상)
+  param($Current, $Previous)
+  $common = @(Get-NyanCommonTags -Current $Current -Previous $Previous)
+  if ($common.Count -eq 0) { return $null }
+  return $common[0]
+}
+
 function Test-NyanCoinSuspect {
   # 냥코인 잔량 판독 급변 의심 판정 (순수 - 진리표 대상. 2026-08-15 조기 정지 실사고:
   # 아이콘이 '9'로 오독돼 8,603,217 → 98,603,217 접두, 같은 화면이라 2연속 반복돼 목표
@@ -13690,7 +13712,7 @@ function Invoke-NyanMerchantRun {
   }
   if ($startGold -ge 0) { Write-RunLog ("[기타] 시작 골드 {0:N0}" -f $startGold) }
   # 3) 메인 루프
-  $stableTag = $null          # READY 안정 확인용 직전 가격표 앵커
+  $stableTags = @()           # READY 안정 확인용 직전 판독 전체 (공통 카드 규칙 - Get-NyanStableTag)
   $lastCoinValue = [int64](-1)
   $lastGoldValue = [int64](-1)   # 골드 상한 경계 판정용 (확인 후 대기 조건부 단축)
   $coinReadGapPurchases = 0      # 마지막 잔량 확정 이후 구매 수 (접두 보정 상한 배치 인식용)
@@ -13777,14 +13799,15 @@ function Invoke-NyanMerchantRun {
     }
     $pendingBoardTags = $null
     if (@($tags).Count -gt 0 -and $boardPurchases -lt 5) {
-      $firstTag = $tags[0]
-      $tagStable = ($null -ne $stableTag -and
-        [Math]::Abs([int]$firstTag.X - [int]$stableTag.X) -le 12 -and
-        [Math]::Abs([int]$firstTag.Y - [int]$stableTag.Y) -le 12)
-      if (-not $tagStable) {
+      # 안정 2연속 = '직전 판독에도(±12) 있던 카드' 중 현재 판독 순서의 첫 번째 (2026-09-13 실기 정체 - 판 주기
+      # 9초에 12~19초 판이 섞임. Get-NyanCommonTags 주석). 계약은 그대로 '같은 좌표에서 2연속 관측된 카드만
+      # 클릭' - 특정 카드 순서 의존만 뺐습니다. 공통이 없으면 직전 판독을 현재 판독으로 **교체**만 합니다
+      # (설계 합의: 여러 판독을 누적하면 [A]→[B]→[A] 의 마지막 A 가 2연속으로 오인됨).
+      $firstTag = Get-NyanStableTag -Current $tags -Previous $stableTags
+      if ($null -eq $firstTag) {
         # 안정 2연속 요건: 새 판 연출 중의 흔들리는 프레임을 누르지 않습니다 (사용자 제약:
         # 가격표가 뜬 뒤에만 클릭 가능)
-        $stableTag = $firstTag
+        $stableTags = @($tags)
         Start-Sleep -Milliseconds 700
         continue
       }
@@ -13805,7 +13828,9 @@ function Invoke-NyanMerchantRun {
           Wait-UserYieldEnd -Game $Game -Context '냥 상인 카드 구매'
           break
         }
-        Focus-Game -Game $Game
+        # 전면이면 포커스 생략 (2026-09-13 실측: Focus-Game 은 이미 전면이어도 ALT 트릭 + 510ms 를 매번 치러
+        # 구매 1회 1.7초의 최대 항목이었음. 비전면일 때만 기존 복구. 설계 합의 - 경고 상태 초기화 지연은 허용)
+        if (-not (Test-GameForeground -Game $Game)) { Focus-Game -Game $Game }
         Click-GamePoint -Game $Game -ReferenceX ([int]$firstTag.X + 20) -ReferenceY ([int]$firstTag.Y - 50)
         if (-not $script:lastClickPerformed) {
           Write-RunLog "[기타] 카드 구매 클릭이 전송되지 않았습니다 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 이번 판 판독부터 다시 시도합니다"
@@ -13819,14 +13844,17 @@ function Invoke-NyanMerchantRun {
         # 아래 다시 뽑기 줄의 누적 구매 요약만)
         Write-RunLog ("[진단] 카드 구매 클릭 {0}회째 (카드 위치 x{1} y{2})" -f $purchaseCount, [int]$firstTag.X, [int]$firstTag.Y)
         # PURCHASE_WAIT: 클릭한 그 좌표의 가격표 소멸 = 구매 확인. 재클릭은 좌표 잔존을
-        # 재확인한 뒤 최대 1회 (Codex 조건 - 무조건 재클릭 금지 정책).
+        # 재확인한 뒤 최대 1회 (리뷰 조건 - 무조건 재클릭 금지 정책).
         # 2026-08-15 속도 개선: 폴링 1000ms→500ms. 재클릭 4초/타임아웃 8초는 횟수가 아니라
-        # Stopwatch 경과 시간으로 판정 (Codex 조건 - OCR 소요 때문에 횟수×간격은 벽시계가 아님)
+        # Stopwatch 경과 시간으로 판정 (리뷰 조건 - OCR 소요 때문에 횟수×간격은 벽시계가 아님)
+        # 2026-09-13 폴링 500→150ms: 수동 52판 프레임 실측(워커와 같은 중심 좌표 변환)에서 구매 클릭 →
+        # 가격표 소멸은 다음 프레임(중앙값 34ms)이고, 클릭 200~450ms 뒤에도 남아 있던 11% 는 게임의
+        # 수락 지연(22건) 또는 거부(13건 - 연타 중)라 다음 폴링이 다시 읽으면 되는 경우. 4초/8초 벽시계 불변.
         $purchaseGone = $false
         $reclicked = $false
         $purchaseWaitClock = [System.Diagnostics.Stopwatch]::StartNew()
         while ($purchaseWaitClock.Elapsed.TotalSeconds -lt 8) {
-          Start-Sleep -Milliseconds 500
+          Start-Sleep -Milliseconds 150
           $tagsNow = @(Read-NyanPriceTags -Game $Game)
           if (-not (Test-NyanSameTag -Tags $tagsNow -X ([int]$firstTag.X) -Y ([int]$firstTag.Y))) { $purchaseGone = $true; break }
           if ($purchaseWaitClock.Elapsed.TotalSeconds -ge 4 -and -not $reclicked) {
@@ -13837,7 +13865,7 @@ function Invoke-NyanMerchantRun {
               $purchaseWaitClock.Start()
               continue
             }
-            Focus-Game -Game $Game
+            if (-not (Test-GameForeground -Game $Game)) { Focus-Game -Game $Game }   # 전면이면 생략 (위와 같음)
             Click-GamePoint -Game $Game -ReferenceX ([int]$firstTag.X + 20) -ReferenceY ([int]$firstTag.Y - 50)
             if ($script:lastClickPerformed) {
               $reclicked = $true
@@ -13883,11 +13911,10 @@ function Invoke-NyanMerchantRun {
         $nearGoldLimit = ($lastGoldValue -lt 0 -or ($nyanGoldLimit - ($startGold - $lastGoldValue)) -le 100000)
       }
       if ($nearTarget -or $nearGoldLimit) { Start-Sleep -Milliseconds 1200 } else { Start-Sleep -Milliseconds 300 }
-      # 같은 판의 남은 카드는 정지 상태 (실기 75구매+ 관측 - READY 자체가 tags[0]의 판독 간
-      # 일관성에 의존해 무결점). 소멸을 확정한 유효 판독으로 안정 1연속을 시딩해, 다음 주기
-      # 판독과 일치하면 그게 2연속째 = 즉시 클릭 (2연속 계약 유지 + 주기 하나 절약 - Codex
-      # 합의). 마지막 카드를 사서 $tagsNow가 비면 $null - 새 판은 기존대로 2연속을 새로 셉니다.
-      $stableTag = $(if (@($tagsNow).Count -gt 0) { $tagsNow[0] } else { $null })
+      # 같은 판의 남은 카드는 정지 상태 (실기 75구매+ 관측). 소멸을 확정한 유효 판독 **전체**로 안정 1연속을
+      # 시딩해, 다음 주기 판독과 공통인 카드가 있으면 그게 2연속째 = 즉시 클릭 (2연속 계약 유지 + 주기 하나
+      # 절약 - 설계 합의). 마지막 카드를 사서 $tagsNow가 비면 빈 배열 - 새 판은 기존대로 2연속을 새로 셉니다.
+      $stableTags = @($tagsNow)
       continue
     }
     # 가격표 0개 또는 판 한도 도달 → 다시 뽑기.
@@ -13897,7 +13924,7 @@ function Invoke-NyanMerchantRun {
     # 클릭이었음). 한도 도달이면 소진 재확인 없이 바로 다시 뽑기로 갑니다.
     # 판 중간에서 시작하면 첫 판은 카운트가 실제와 어긋나 무효 클릭이 나올 수 있음
     # (게임이 거부해 무해 - 첫 리롤부터 정확. Codex 문서화 조건).
-    $stableTag = $null
+    $stableTags = @()
     $boardLimitReached = ($boardPurchases -ge 5)
     if (-not $boardLimitReached) {
       # 소진 확정. '3연속 빈 판독' 계약은 유지하되(구매 공개 연출이 카드 존을 가리는 순간의
@@ -13926,12 +13953,26 @@ function Invoke-NyanMerchantRun {
       Wait-UserYieldEnd -Game $Game -Context '냥 상인 다시 뽑기'
       continue
     }
-    # REROLL: 다시 뽑기 1회 ('뽑기' 앵커 → 폴백 고정점)
+    # REROLL: 다시 뽑기 1회 - '뽑기' 앵커가 보이면 **단축키 A**, 없으면 폴백 고정점 클릭.
+    # 2026-09-13 실측(사용자 수동 52판): 버튼에 'A' 배지가 있고 사용자는 전부 A 로 눌렀음. 종전의
+    # 앵커 클릭은 Focus-Game 510ms + 클릭 430ms 를 치렀고, 키는 120ms. 앵커 판독은 '상인 화면인가'의
+    # 상태 확인으로 유지합니다 (전면 확인은 상인 화면 확인이 아님 - 설계 합의).
+    # 순서(설계 합의): 필요한 전면 복구 → 앵커 판독 → 사용자 재확인 → 안전 중지 → 전면 최종 확인 → A 1회.
+    # Press-KeyVerified 를 쓰지 않는 이유: 포커스 재시도 중 사용자 조작을 재검사하지 않아 조작 중에도
+    # 키가 나갑니다 (클릭 경로의 user-active 취소 계약과 등가가 아님 - 설계 리뷰 모의 실행으로 확인).
+    if (-not (Test-GameForeground -Game $Game)) { Focus-Game -Game $Game }
     $rerollWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNyanReroll[0] -ReferenceY $rgNyanReroll[1] `
         -RegionWidth $rgNyanReroll[2] -RegionHeight $rgNyanReroll[3] -Scale 4 -Engine $ocrKoreanEngine)
     $rerollAnchor = $null
     foreach ($rerollWord in $rerollWords) {
       if (([string]$rerollWord.Text) -replace '\s', '' -eq '뽑기') { $rerollAnchor = $rerollWord; break }
+    }
+    # 사용자 재확인 - 전면 복구·앵커 판독 사이에 조작이 시작됐을 수 있습니다. 안전 중지 검사보다 **앞**에
+    # 둡니다 (Test-UserRecentlyActive 는 후보 재확인으로 350ms 씩 기다릴 수 있어 flag 검사 뒤에 두면
+    # '입력 직전 마지막 동작' 계약이 깨짐).
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context '냥 상인 다시 뽑기'
+      continue
     }
     # 안전 중지: 판을 마친 이 지점(다시 뽑기 클릭 직전)이 냥코인 흐름의 유일한 안전 경계입니다.
     # 2026-08-15 실기 결함 - 냥코인 루프에 flag 확인이 없어 안전 중지를 눌러도 영영 안 멈췄음
@@ -13942,30 +13983,37 @@ function Invoke-NyanMerchantRun {
       Write-RunLog ("[완료] 안전 중지 - 이번 판을 마쳐 정지합니다 (누적 구매 {0}회)" -f $purchaseCount)
       exit 4
     }
-    Focus-Game -Game $Game
     if ($null -ne $rerollAnchor) {
-      Click-GamePoint -Game $Game -ReferenceX ([int]$rerollAnchor.X) -ReferenceY ([int]$rerollAnchor.Y + 6)
+      # 전면 최종 확인 뒤 재포커스 재시도 없이 A 1회. 전면이 아니면 키가 다른 창에 들어가므로 보내지 않고
+      # 판 판독부터 다시 (키 경로는 직전 클릭의 lastClickPerformed 메타를 읽지 않습니다).
+      if (-not (Test-GameForeground -Game $Game)) {
+        Write-RunLog '[기타] 다시 뽑기 키(A)를 보내지 않았습니다 (게임 창 전면 미확인) - 판 판독부터 다시 시도합니다'
+        continue
+      }
+      Press-KeyOnce -VirtualKey 0x41
     } else {
+      # 앵커 미탐지: 기존 폴백 고정점 클릭 (전면이면 포커스 생략)
+      if (-not (Test-GameForeground -Game $Game)) { Focus-Game -Game $Game }
       Click-GamePoint -Game $Game -ReferenceX $ptNyanReroll[0] -ReferenceY $ptNyanReroll[1]
-    }
-    if (-not $script:lastClickPerformed) {
-      Write-RunLog "[기타] 다시 뽑기 클릭이 전송되지 않았습니다 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 판 판독부터 다시 시도합니다"
-      if ($script:lastClickSkipReason -eq 'user-active') { Wait-UserYieldEnd -Game $Game -Context '냥 상인 다시 뽑기' }
-      continue
+      if (-not $script:lastClickPerformed) {
+        Write-RunLog "[기타] 다시 뽑기 클릭이 전송되지 않았습니다 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 판 판독부터 다시 시도합니다"
+        if ($script:lastClickSkipReason -eq 'user-active') { Wait-UserYieldEnd -Game $Game -Context '냥 상인 다시 뽑기' }
+        continue
+      }
     }
     Write-RunLog ("[기타] 가격표 소진 - 다시 뽑기 (누적 구매 {0}회)" -f $purchaseCount)
     # REROLL_WAIT: 가격표 재등장 2연속까지 대기. 대기 중 다시 뽑기 재클릭 금지 (Codex 조건).
     # 2026-08-15 속도 개선: 폴링 400ms(재등장 1회 확인 후엔 250ms) + 벽시계 12초는 Stopwatch
     # 판정. 캡처 실패 중엔 시계를 멈춰 전역 '캡처 실패 시 시간 동결' 계약을 지킵니다 (Codex
-    # 조건 - 안 멈추면 일시 캡처 장애가 조건부 정지로 오판됨). 2연속의 두 판독이 같은 첫
-    # 좌표(±12)면 그 자체가 '안정 2연속'이므로 $stableTag 로 시딩하고 그 판독을
-    # pendingBoardTags 로 넘겨 다음 주기 가격표 OCR도 생략합니다 (배분 연출로 좌표가
-    # 흔들리면 시딩 없이 기존 2연속을 새로 셉니다).
+    # 조건 - 안 멈추면 일시 캡처 장애가 조건부 정지로 오판됨). 재등장 2연속의 두 판독에 **공통인 카드**가
+    # 있으면 그 카드들은 이미 '안정 2연속'이므로 pendingBoardTags 로 넘겨 다음 주기 가격표 OCR 을 생략하고,
+    # $stableTags 에는 최신 판독 전체를 둡니다 (2026-09-13 공통 카드 규칙. 공통이 없으면 시딩 없이 다음
+    # 주기의 새 판독을 최신 전체와 비교합니다).
     # 한도 경로는 구판 가격표가 1~2초 잔존하므로 **0개 판독 1회를 먼저 요구**해 구판을 새
     # 판으로 오인하지 않습니다 (Codex 반례 - 소진 경로는 이미 0개 3연속을 확인해 면제).
     # 다시 뽑기 클릭이 커서 방어로 스킵된 경우는 재등장이 안 와 타임아웃 정지 (fail-closed).
     $rerollSeen = 0
-    $rerollPrevTag = $null
+    $rerollPrevTags = @()
     $rerollCleared = (-not $boardLimitReached)
     $rerollWaitClock = [System.Diagnostics.Stopwatch]::StartNew()
     while ($rerollWaitClock.Elapsed.TotalSeconds -lt 12) {
@@ -13983,20 +14031,23 @@ function Invoke-NyanMerchantRun {
         if (-not $rerollCleared) { continue }   # 구판 잔존 가격표 - 아직 새 판 아님
         $rerollSeen++
         if ($rerollSeen -ge 2) {
-          if ($null -ne $rerollPrevTag -and
-            [Math]::Abs([int]$tagsNow[0].X - [int]$rerollPrevTag.X) -le 12 -and
-            [Math]::Abs([int]$tagsNow[0].Y - [int]$rerollPrevTag.Y) -le 12) {
-            $stableTag = $tagsNow[0]
-            $pendingBoardTags = $tagsNow
+          # 시딩(2026-09-13 설계 합의): $stableTags 는 최신 판독 전체, pending 은 **직전·최신 판독의 공통 카드만**
+          # (최신 좌표). 최신 전체를 pending 에 넣으면 다음 READY 가 자기 자신과 비교해 한 번만 관측된 카드를
+          # 고릅니다 (리뷰 반례: 직전 [B]·최신 [A,B] 면 확인된 건 B 뿐). 공통이 없으면 pending 없이 다음 주기의
+          # 새 판독을 최신 전체와 비교합니다. REROLL_WAIT 종료 조건(재등장 2연속)은 시딩과 무관하게 그대로.
+          $stableTags = @($tagsNow)
+          $rerollCommon = @(Get-NyanCommonTags -Current $tagsNow -Previous $rerollPrevTags)
+          if (@($rerollCommon).Count -gt 0) {
+            $pendingBoardTags = $rerollCommon
             $pendingBoardTagsClock = [System.Diagnostics.Stopwatch]::StartNew()
           }
           break
         }
-        $rerollPrevTag = $tagsNow[0]
+        $rerollPrevTags = @($tagsNow)
       } else {
         $rerollCleared = $true
         $rerollSeen = 0
-        $rerollPrevTag = $null
+        $rerollPrevTags = @()
       }
     }
     if ($rerollSeen -lt 2) {
