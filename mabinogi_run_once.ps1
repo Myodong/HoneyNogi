@@ -5286,7 +5286,16 @@ function Close-WeeklyCoopResetPopup {
     } else {
       Click-GamePoint -Game $Game -ReferenceX 495 -ReferenceY 654   # '닫기' 실측 예비 좌표 (두 창 크기 동일)
     }
-    if ($script:lastClickPerformed) { Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 닫기 클릭" }
+    # 사유 3갈래 - 위 구매 스윕과 같은 계약 (2026-09-13). 사용자 조작 취소는 기다린 뒤 즉시 $true.
+    if ($script:lastClickPerformed) {
+      Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 닫기 클릭"
+    } elseif ($script:lastClickSkipReason -eq 'user-active') {
+      Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 사용자 조작으로 닫기 클릭을 취소했습니다 (조작 종료 후 다음 감지에서 재시도)"
+      Wait-UserYieldEnd -Game $Game -Context '주간 협동 미션 팝업 닫기'
+      return $true
+    } else {
+      Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (다음 감지에서 재시도)"
+    }
     Start-Sleep -Seconds 2
     return $true
   }
@@ -6078,8 +6087,19 @@ function Invoke-PurchasePopupSweep {
   if ($sweepPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $sweepPoint.X -Y $sweepPoint.Y
-    if ($script:lastClickPerformed) { Write-RunLog '[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)' }
-    else { Write-RunLog '[안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (입장 대기 중, 다음 감지에서 재시도)' }
+    # 사유 3갈래 (2026-09-13 설계 합의): 전송 / 사용자 조작(기다린 뒤 즉시 $true - 호출부가 continue·
+    # return $false 로 재판독. 위 커서 대피는 커서가 창 위일 때만 양보하므로 창 밖 조작은 여기서 취소됨) /
+    # 커서 미확인(기존대로 대기·소모). 반환값은 "팝업을 감지해 이번 판독 흐름을 처리했다"로 그대로 -
+    # 팝업이 남았을 수 있어 $false 로 다음 판독에 내려보내면 안 됩니다(Test-DungeonEntered 는 HUD 만 봄).
+    if ($script:lastClickPerformed) {
+      Write-RunLog '[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)'
+    } elseif ($script:lastClickSkipReason -eq 'user-active') {
+      Write-RunLog '[안내] 구매 팝업 감지 - 사용자 조작으로 닫기 클릭을 취소했습니다 (조작 종료 후 다음 감지에서 재시도)'
+      Wait-UserYieldEnd -Game $Game -Context '구매 팝업 닫기'
+      return $true
+    } else {
+      Write-RunLog '[안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (입장 대기 중, 다음 감지에서 재시도)'
+    }
     # ★ 클릭 직후 대피 금지 (2026-08-09 실기 실사고 - 클리어 대기 루프와 같은 이유).
     #   mouse UP 뒤 지연 없이 커서를 빼면 게임이 프레임 루프에서 클릭을 처리할 때 포인터가
     #   이미 버튼 밖이라 클릭이 무효화됩니다. 가림 방지는 위 '탐색 전 대피'가 담당합니다.
@@ -7340,7 +7360,17 @@ function Invoke-NormalDungeonCycle {
   # 화면이 겹친 채 재시도 워커가 시작되자 제목/HUD 판독이 전부 가려져 "던전 화면이 아닙니다"
   # 3연속 즉사 → 정지. 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
+    $script:lastClickSkipReason = ''
     if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
+    # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
+    # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
+    # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
+    # 되돌리기만 하면 조작 중 헛돕니다 (구현 리뷰 모의: 10초 조작에 취소 10회·양보 0회).
+    if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+      Wait-UserYieldEnd -Game $Game -Context '시작 팝업 정리'
+      $startSweep--
+      continue
+    }
     Start-Sleep -Milliseconds 1200
   }
   $titleText = & $readDgTitle
@@ -9008,21 +9038,37 @@ function Invoke-NormalDungeonCycle {
     Focus-Game -Game $Game
     $lastExitPoint = Find-GameTextPoint -Game $Game -ReferenceX 440 -ReferenceY 625 -RegionWidth 260 -RegionHeight 60 `
       -SearchText '나가' -ExactText '나가기'
+    $script:lastClickSkipReason = ''
     if ($lastExitPoint) {
       Click-ScreenPoint -X $lastExitPoint.X -Y $lastExitPoint.Y
     } else {
       Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
     }
-    Write-RunLog "$($script:contentTag) 마지막 판 완료 - '나가기'로 필드에 나가며 자동화를 마칩니다"
+    # 전송된 클릭에만 '나가기 클릭'을 씁니다 (2026-09-13 설계 합의 - 취소된 클릭이 '나가며 마칩니다'를
+    # 그대로 남기던 마지막 던전 자리). 사용자 조작으로 취소됐으면 기다린 뒤 아래 확인 루프로 들어갑니다 -
+    # 루프의 'reclick' 판정(결과 화면이 그대로 보일 때만)이 재클릭 허가라 옛 좌표로 이어 누르지 않습니다.
+    if ($script:lastClickPerformed) {
+      Write-RunLog "$($script:contentTag) 마지막 판 완료 - '나가기' 클릭 - 필드 복귀를 확인합니다"
+    } elseif ($script:lastClickSkipReason -eq 'user-active') {
+      Write-RunLog "$($script:contentTag) 마지막 판 완료 - 사용자 조작으로 '나가기' 클릭을 취소했습니다 - 조작 종료 후 재확인"
+      Wait-UserYieldEnd -Game $Game -Context "마지막 판 '나가기'"
+    } else {
+      Write-RunLog "$($script:contentTag) 마지막 판 완료 - 커서 확인이 안 돼 '나가기' 클릭을 건너뜀 - 아래 확인에서 재시도"
+    }
+    # 40초 마감과 양보 기준값을 **함께** 잡습니다 - 위에서 이미 기다린 양보는 이 마감에 들어가지 않고
+    # (기준값이 그 뒤 값), 루프 안 양보만 차분으로 더합니다 (Invoke-ClickUntil 과 같은 형태).
     $fieldDeadline = (Get-Date).AddSeconds(40)
+    $fieldSeenYieldMs = [double]$script:userYieldTotalMs
     $fieldStreak = 0
     $fieldReached = $false
-    while ((Get-Date) -lt $fieldDeadline) {
+    while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$fieldDeadline) -SeenYieldMs ([ref]$fieldSeenYieldMs))) {
       Start-Sleep -Seconds 2
+      $script:lastClickSkipReason = ''
       if ($script:screenCaptureFailing) {
         Test-SafeStopDuringCaptureFail
         [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림 - 2026-08-09 7차 점검)
         $fieldDeadline = (Get-Date).AddSeconds(40)
+        $fieldSeenYieldMs = [double]$script:userYieldTotalMs
         continue
       }
       # 판독 도중 캡처 실패는 누적 래치로 잡습니다 - 뒤 판독이 성공하면 전역 플래그가
@@ -9039,6 +9085,15 @@ function Invoke-NormalDungeonCycle {
       if ($script:screenCaptureFailing) { $probeFailed = $true }
       # 판독 도중 캡처 실패가 있었으면 이번 판독분은 신뢰하지 않습니다
       if ($probeFailed) { continue }
+      # 판독 뒤·분기 전 양보 게이트 (설계 합의): 'popup-exit' 의 Space 는 취소 게이트가 없고 'wait' 는
+      # 클릭이 없어 클릭 메타로는 잡히지 않습니다 - 커서가 게임 밖인 조작이 계속되면 양보 누적도 없이
+      # 40초가 그대로 소모됐습니다. 조작 중엔 판독은 허용하되 분기로 넘어가지 않고, 기다린 뒤 전체 재판독
+      # (옛 $exitStep 으로 이어가지 않음). 필드 증거 연속도 리셋합니다.
+      if (Test-UserRecentlyActive) {
+        Wait-UserYieldEnd -Game $Game -Context '마지막 판 필드 복귀 확인'
+        $fieldStreak = 0
+        continue
+      }
       $exitStep = Get-DgLastRunExitStep -HudVisible $probeHud -QuestText $probeQuest `
         -CenterText $probeCenter -RetryVisible $probeRetry
       if ($exitStep -eq 'field-evidence') {
@@ -9062,7 +9117,6 @@ function Invoke-NormalDungeonCycle {
       }
       if ($exitStep -eq 'reclick') {
         # 결과 화면(다시 하기 버튼)이 그대로 보일 때만 상태 기반 재클릭
-        Write-RunLog "$($script:contentTag) 결과 화면이 남아 있어 '나가기'를 다시 클릭합니다"
         Focus-Game -Game $Game
         $lastExitRetry = Find-GameTextPoint -Game $Game -ReferenceX 440 -ReferenceY 625 -RegionWidth 260 -RegionHeight 60 `
           -SearchText '나가' -ExactText '나가기'
@@ -9070,6 +9124,14 @@ function Invoke-NormalDungeonCycle {
           Click-ScreenPoint -X $lastExitRetry.X -Y $lastExitRetry.Y
         } else {
           Click-GamePoint -Game $Game -ReferenceX $ptDgResultExit[0] -ReferenceY $ptDgResultExit[1]
+        }
+        # 전송된 재클릭만 기록하고, 클릭 직전 경합으로 취소됐으면 기다린 뒤 재판독 (위 게이트를 지난 뒤
+        # 시작된 조작). 다음 회전의 'reclick' 판정이 다시 허가합니다.
+        if ($script:lastClickPerformed) {
+          Write-RunLog "$($script:contentTag) 결과 화면이 남아 있어 '나가기'를 다시 클릭했습니다"
+        } elseif ($script:lastClickSkipReason -eq 'user-active') {
+          Wait-UserYieldEnd -Game $Game -Context "마지막 판 '나가기' 재클릭"
+          $fieldStreak = 0
         }
       }
     }
@@ -9427,7 +9489,17 @@ function Invoke-HuntingGroundCycle {
 
   # 시작 화면 판정 전 전체 화면 팝업 정리 (던전/심층 시작부와 같은 계약 - 2026-08-01 실사고)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
+    $script:lastClickSkipReason = ''
     if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
+    # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
+    # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
+    # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
+    # 되돌리기만 하면 조작 중 헛돕니다 (구현 리뷰 모의: 10초 조작에 취소 10회·양보 0회).
+    if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+      Wait-UserYieldEnd -Game $Game -Context '시작 팝업 정리'
+      $startSweep--
+      continue
+    }
     Start-Sleep -Milliseconds 1200
   }
 
@@ -13124,8 +13196,28 @@ function Invoke-LifeGatherCycle {
       $menuTry++
       Test-LifeUntilReached   # 지정 시간 도달이면 이번 회전의 어떤 클릭도 시작하지 않음
       # 팝업 방어 (구매/보상/협동/네트워크 + 주간 리셋 + 공지 게시판)
-      if (Invoke-PurchasePopupSweep -Game $Game) { Start-Sleep -Milliseconds 1200 }
-      if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { Start-Sleep -Milliseconds 1200 }
+      # 사용자 조작으로 취소된 팝업 닫기는 회전을 쓰지 않습니다 - 함수가 이미 기다렸으므로 회전을
+      # 되돌리고 서두부터 재판독 (2026-09-13 설계 합의). 메타는 그 호출 **직후**에 읽습니다(다음 헬퍼가 덮어씀).
+      $script:lastClickSkipReason = ''
+      if (Invoke-PurchasePopupSweep -Game $Game) {
+        # 위임 함수(보상·협동·네트워크)는 기다리지 않고 돌아오므로 여기서 기다린 뒤 되돌립니다 (구현 리뷰:
+        # 5초 예산에 취소 6회·전송 0회 헛돌기). 직접 닫기가 이미 기다렸으면 유휴라 즉시 반환 - 중복 누적 없음.
+        if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+          Wait-UserYieldEnd -Game $Game -Context '채집 메뉴(팝업 정리)'
+          $menuTry--
+          continue
+        }
+        Start-Sleep -Milliseconds 1200
+      }
+      $script:lastClickSkipReason = ''
+      if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') {
+        if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+          Wait-UserYieldEnd -Game $Game -Context '채집 메뉴(팝업 정리)'
+          $menuTry--
+          continue
+        }
+        Start-Sleep -Milliseconds 1200
+      }
       if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
         Focus-Game -Game $Game
         Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
@@ -14029,7 +14121,17 @@ try {
   # 출석/이벤트 처리(Clear-EventOverlay)는 구매 팝업을 모르므로 스윕을 먼저 돌립니다.
   # 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건. 콘텐츠 공통)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
+    $script:lastClickSkipReason = ''
     if (-not (Invoke-PurchasePopupSweep -Game $game)) { break }
+    # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
+    # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
+    # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
+    # 되돌리기만 하면 조작 중 헛돕니다 (구현 리뷰 모의: 10초 조작에 취소 10회·양보 0회).
+    if (-not $script:lastClickPerformed -and $script:lastClickSkipReason -eq 'user-active') {
+      Wait-UserYieldEnd -Game $game -Context '시작 팝업 정리'
+      $startSweep--
+      continue
+    }
     Start-Sleep -Milliseconds 1200
   }
 

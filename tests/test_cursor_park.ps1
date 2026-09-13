@@ -292,10 +292,10 @@ Assert-Case '로그: 실제 클릭 여부를 플래그로 남긴다' `
           ($clickBody -match '\$script:lastClickPerformed = \$true'))) 'True'
 Assert-Case '로그: 참 설정은 mouse_event 뒤에만' `
   ([bool]($clickBody -match 'mouse_event\(0x0004[\s\S]{0,120}\$script:lastClickPerformed = \$true')) 'True'
-# 3곳 = 클리어 대기 루프의 일반 분기 + **부활 분기** + 입장 대기 스윕.
-# 부활 분기는 5차 점검에서 빠져 있던 것 (형제 분기들과 계약이 달랐음).
-Assert-Case '로그: 팝업 닫기 3곳이 건너뜀을 구분해 기록' `
-  ([regex]::Matches($workerRaw, '커서 확인 실패로 닫기 클릭을 건너뜀').Count) 3
+# 4곳 = 클리어 대기 루프의 일반 분기 + **부활 분기** + 입장 대기 스윕 + 주간 리셋 팝업(2026-09-13 - 사유 3갈래로
+# 나누면서 커서 미확인 문구 추가). 부활 분기는 5차 점검에서 빠져 있던 것 (형제 분기들과 계약이 달랐음).
+Assert-Case '로그: 팝업 닫기 4곳이 건너뜀을 구분해 기록' `
+  ([regex]::Matches($workerRaw, '커서 확인 실패로 닫기 클릭을 건너뜀').Count) 4
 # ★ 카드 토글도 마찬가지입니다. 클릭을 건너뛰었는데 '눌렀다'로 기록하면 ①로그가 거짓이고
 #   ②그 상태($script:dgToggleClicked)를 쓰는 소모량 잔상 판정이 '방금 전환했으니 잔상'이라며
 #   교차 검증을 건너뜁니다 - 누르지도 않았는데 말입니다 (2026-08-09 5차 점검).
@@ -306,10 +306,11 @@ $toggleBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @(
 $lifeCloseBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Close-LifeOpenWindows'))
 Assert-Case '로그: 생활 시작 정리도 실제 클릭일 때만 눌렀다고 기록' `
   ([bool]($lifeCloseBody -match '(?s)Invoke-LifeWindowCloseClick -Game \$Game.{0,600}?if \(\$script:lastClickPerformed\) \{')) 'True'
-# 4곳 = 생활 3(시작 정리의 상세 팝업 확인·창 닫기 X, 메뉴 시퀀스 잔존 창 X) + 고스트 등록 안내('나중에'
-# 클릭 생략 - 2026-08-13 신규 화면 처리). 2026-09-13: 시작 정리의 팝업 '확인'도 전송을 확인하며 사유를 남김 (+1)
+# 5곳 = 생활 3(시작 정리의 상세 팝업 확인·창 닫기 X, 메뉴 시퀀스 잔존 창 X) + 고스트 등록 안내('나중에'
+# 클릭 생략 - 2026-08-13 신규 화면 처리) + 마지막 판 '나가기'(2026-09-13 - 첫 클릭 사유 3갈래).
+# 2026-09-13: 시작 정리의 팝업 '확인'도 전송을 확인하며 사유를 남김 (+1)
 Assert-Case '로그: 생활 건너뜀도 사유를 남긴다' `
-  ([regex]::Matches($workerRaw, '커서 확인이 안 돼 .{0,20}클릭을 건너뜀').Count) 4
+  ([regex]::Matches($workerRaw, '커서 확인이 안 돼 .{0,20}클릭을 건너뜀').Count) 5
 Assert-Case '로그: 카드 토글도 실제 클릭일 때만 눌렀다고 기록' `
   ([bool]($toggleBody -match 'if \(\$script:lastClickPerformed\) \{[\s\S]{0,400}\$script:dgToggleClicked = \$true')) 'True'
 Assert-Case '로그: 토글 건너뜀도 사유를 남긴다' `

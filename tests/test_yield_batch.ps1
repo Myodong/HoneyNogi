@@ -295,8 +295,9 @@ Assert-Case '배선: 결과 화면 대기 루프 양보 4곳(서두 게이트 + 
 # 2026-09-09 +1: Wait-ForScreen (Codex P2 - Condition 안의 팝업 스윕이 판독 직전 커서 대피를
 #   부르고 그 양보가 상한 없는데 마감에서 빠지지 않아, 양보 뒤 스윕이 팝업을 닫아 Condition 이
 #   거짓이 된 회전에서 시간 초과 throw → 코드 1 + 자동 재시도 소모였음)
-Assert-Case '배선: 시간 상한 루프 만료 판정 11곳이 Get-YieldAdjustedDeadline 경유' `
-  ([regex]::Matches($workerCode, '-lt \(Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$\w+\) -SeenYieldMs \(\[ref\]\$\w+\)\)\)').Count) 11
+# 2026-09-13 +1: 마지막 판 '나가기' 필드 복귀 확인(40초) - 취소된 클릭·Space·wait 경로의 양보가 마감에서 빠지던 자리
+Assert-Case '배선: 시간 상한 루프 만료 판정 12곳이 Get-YieldAdjustedDeadline 경유' `
+  ([regex]::Matches($workerCode, '-lt \(Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$\w+\) -SeenYieldMs \(\[ref\]\$\w+\)\)\)').Count) 12
 # 2차 배치 잔여분 (생활·냥 상인·더블 루팅 정정) - 2026-09-08 사용자 지시로 전량 처리
 Assert-Case '생활: 메뉴 사이클 입력 5곳 양보 게이트 + 회전 미계상(while 전환)' `
   (([regex]::Matches($workerCode, 'Test-LifeYieldBeforeInput -Game \$Game -Step').Count -eq 5) -and
