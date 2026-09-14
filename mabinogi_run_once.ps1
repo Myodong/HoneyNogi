@@ -13533,6 +13533,11 @@ $rgNyanTitle  = @(25, 38, 300, 55)     # 제목 '고양이 상인 뽑기' (1272 
 $rgNyanCoin   = @(1085, 40, 125, 45)   # 우상단 냥코인 잔량 (실측 '0401,217'/'@8.181.217')
 $rgNyanGold   = @(935, 40, 150, 45)    # 우상단 골드 잔량 (지출 = 시작-현재 차감)
 $rgNyanCards  = @(390, 330, 480, 340)  # 카드 존 (가격표 탐색 한정 ROI - HUD 재화 오인 방지)
+# 카드 존 판독 배율 (2026-09-14 실측: 워커 실기 프레임 311장 라벨 실험 - 배율 3 은 하단 좌우 50~53%·중우 81%,
+# 배율 5 는 상단 두 장(고양이 얼굴 위, 14/32%) 빼고 5슬롯 95~100%. 판당 구매 5회라 그 5슬롯이면 판 끝 정체 소멸.
+# 비용 +70ms/판독. 이진화는 중우 61% 로 퇴보해 채택 안 함. 회귀 tests\test_nyan_cards_scale_offline.ps1 이 라벨
+# 24장으로 '배율 3 재현 → 배율 5 통과' 를 고정. 값을 바꾸면 그 테스트로 오프라인 재검 필수)
+$nyanCardsScale = 5
 $rgNyanReroll = @(1090, 630, 170, 50)  # '다시 뽑기' 버튼 ('뽑기' 앵커. '다시'는 '다셔' 깨짐 실측)
 $ptNyanReroll = @(1163, 655)           # 다시 뽑기 폴백 클릭점 (앵커 실패 시)
 
@@ -13608,6 +13613,13 @@ function Get-NyanStableTag {
   return $common[0]
 }
 
+function Get-NyanWaitSeconds {
+  # 대기 예산 경과(초) = 시계 경과 − 캡처 실패로 버린 폴링 시간 (순수 - 진리표 대상). 규칙 15: 캡처 실패 구간은
+  # 예산을 소모하지 않습니다. 시계는 ElapsedMilliseconds 만 읽으므로 모의 시계 객체로 시험할 수 있습니다.
+  param($Clock, [double]$LostMs = 0)
+  return ([double]$Clock.ElapsedMilliseconds - $LostMs) / 1000.0
+}
+
 function Test-NyanCoinSuspect {
   # 냥코인 잔량 판독 급변 의심 판정 (순수 - 진리표 대상. 2026-08-15 조기 정지 실사고:
   # 아이콘이 '9'로 오독돼 8,603,217 → 98,603,217 접두, 같은 화면이라 2연속 반복돼 목표
@@ -13660,8 +13672,17 @@ function Test-NyanUntilReached {
 function Read-NyanAmount {
   # 우상단 재화(냥코인/골드) 판독 - 실패 시 -1
   param([System.Diagnostics.Process]$Game, [int[]]$Region)
-  $amountText = Get-GameRegionOcrText -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
-    -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 4 -Engine $ocrKoreanEngine
+  try {
+    $amountText = Get-GameRegionOcrText -Game $Game -ReferenceX $Region[0] -ReferenceY $Region[1] `
+      -RegionWidth $Region[2] -RegionHeight $Region[3] -Scale 4 -Engine $ocrKoreanEngine
+  } catch {
+    # 창 좌표 실패는 Get-GameRegionCapture 가 캡처 실패 플래그를 세운 뒤 던지는 예외(-ThrowOnWindowRectFailure)라
+    # 최상위 catch 의 exit 1 로 빠졌습니다 (2026-09-14 구현 리뷰 P2 - 호출부의 캡처 실패 가드를 우회). 규칙 15:
+    # 판정이 아니라 동결 - 플래그가 선 경우만 -1 로 돌려 호출부 가드 → 상단 동결 경로(핸들 소실 60초는 거기서 코드 4).
+    # 그 밖의 예외는 그대로 올립니다.
+    if ($script:screenCaptureFailing) { return [int64](-1) }
+    throw
+  }
   return (Get-NyanNumberValue -Text $amountText)
 }
 
@@ -13673,7 +13694,7 @@ function Read-NyanPriceTags {
   # 좌표 (0,0) → 커서 방어 스킵 반복 끝에 구매 확인 실패 조건부 정지 (오프라인 재현 확정).
   param([System.Diagnostics.Process]$Game)
   $cardWords = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgNyanCards[0] -ReferenceY $rgNyanCards[1] `
-      -RegionWidth $rgNyanCards[2] -RegionHeight $rgNyanCards[3] -Scale 3 -Engine $ocrKoreanEngine)
+      -RegionWidth $rgNyanCards[2] -RegionHeight $rgNyanCards[3] -Scale $nyanCardsScale -Engine $ocrKoreanEngine)
   return @(Get-NyanPriceTags -Words $cardWords)
 }
 
@@ -13734,6 +13755,12 @@ function Invoke-NyanMerchantRun {
     # 조기 종료하지 않기 위한 안정 요건 (Codex 조건. 뻥튀기 오독의 조기 정지는 골드를
     # 아끼는 방향이라 치명적이지 않지만, 확정은 2연속으로)
     $coinNow = Read-NyanAmount -Game $Game -Region $rgNyanCoin
+    if ($script:screenCaptureFailing) {
+      # 규칙 15: 캡처 실패의 -1 은 판독 실패가 아니라 동결 - 실패 카운터(8회 정지)를 쓰지 않고 루프 상단 동결
+      # 경로(안전 검사·2초 대기·복구 탐침)로 갑니다 (2026-09-13 설계 합의)
+      Test-SafeStopDuringCaptureFail
+      continue
+    }
     $coinSuspect = (Test-NyanCoinSuspect -Previous $lastCoinValue -Current $coinNow)
     if ($coinSuspect) {
       # 지속형 '9' 접두 오독은 스킵만으로는 회복되지 않아 8연속 정지에 걸립니다
@@ -13772,6 +13799,11 @@ function Invoke-NyanMerchantRun {
     # 골드 상한 (잔량 차감 - Codex 합의: 가격 합산은 1→7 오독으로 부정확)
     if ($nyanGoldLimitEnabled) {
       $goldNow = Read-NyanAmount -Game $Game -Region $rgNyanGold
+      if ($script:screenCaptureFailing) {
+        # 규칙 15: 위 냥코인 가드와 같음 - 골드 실패 카운터를 쓰지 않고 상단 동결 경로로
+        Test-SafeStopDuringCaptureFail
+        continue
+      }
       if ($goldNow -ge 0) {
         $goldFailStreak = 0
         $lastGoldValue = $goldNow
@@ -13853,11 +13885,29 @@ function Invoke-NyanMerchantRun {
         $purchaseGone = $false
         $reclicked = $false
         $purchaseWaitClock = [System.Diagnostics.Stopwatch]::StartNew()
-        while ($purchaseWaitClock.Elapsed.TotalSeconds -lt 8) {
+        $purchaseWaitLostMs = 0   # 캡처 실패로 버린 폴링 시간 - 4초/8초 예산에서 뺍니다 (규칙 15)
+        while ((Get-NyanWaitSeconds -Clock $purchaseWaitClock -LostMs $purchaseWaitLostMs) -lt 8) {
+          $pollStartMs = $purchaseWaitClock.ElapsedMilliseconds
           Start-Sleep -Milliseconds 150
           $tagsNow = @(Read-NyanPriceTags -Game $Game)
+          if ($script:screenCaptureFailing) {
+            # 규칙 15: 캡처 실패로 돌아온 빈 배열을 '소멸'로 채택하지 않습니다 (2026-09-13 구현 리뷰 지적 - 종전에는
+            # 캡처가 잠깐 죽으면 사지도 않은 카드를 산 것으로 세고 판당 5회 한도가 어긋났음). 실패한 폴링의 경과를
+            # 예산에서 빼고, 복구될 때까지 시계를 멈춘 채 안전 검사·2초 대기·탐침을 반복합니다 (설계 합의 - 7.9초
+            # 진입 반례: 무조건 Start 면 실패 판독 시간이 누적돼 캡처 실패 상태 그대로 '구매 미확인' 종료). 복구 뒤에는
+            # 새로 읽습니다.
+            $purchaseWaitLostMs += ($purchaseWaitClock.ElapsedMilliseconds - $pollStartMs)
+            $purchaseWaitClock.Stop()
+            while ($script:screenCaptureFailing) {
+              Test-SafeStopDuringCaptureFail
+              Start-Sleep -Seconds 2
+              [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림)
+            }
+            $purchaseWaitClock.Start()
+            continue
+          }
           if (-not (Test-NyanSameTag -Tags $tagsNow -X ([int]$firstTag.X) -Y ([int]$firstTag.Y))) { $purchaseGone = $true; break }
-          if ($purchaseWaitClock.Elapsed.TotalSeconds -ge 4 -and -not $reclicked) {
+          if ((Get-NyanWaitSeconds -Clock $purchaseWaitClock -LostMs $purchaseWaitLostMs) -ge 4 -and -not $reclicked) {
             # 조작 중이면 재클릭 기회를 쓰지 않고 대기 - 8초 시계도 멈춥니다 (양보 시간이 예산을 먹지 않게)
             if (Test-UserRecentlyActive) {
               $purchaseWaitClock.Stop()
@@ -14016,17 +14066,31 @@ function Invoke-NyanMerchantRun {
     $rerollPrevTags = @()
     $rerollCleared = (-not $boardLimitReached)
     $rerollWaitClock = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($rerollWaitClock.Elapsed.TotalSeconds -lt 12) {
+    $rerollWaitLostMs = 0   # 캡처 실패로 버린 폴링 시간 - 12초 예산에서 뺍니다 (규칙 15)
+    while ((Get-NyanWaitSeconds -Clock $rerollWaitClock -LostMs $rerollWaitLostMs) -lt 12) {
       if ($script:screenCaptureFailing) {
-        Test-SafeStopDuringCaptureFail
+        # 복구될 때까지 시계를 멈춘 채 안전 검사·2초 대기·탐침을 반복합니다 (2026-09-14 구현 리뷰 P2: 종전에는 탐침이
+        # 실패해도 Start 하고 다음 회전의 안전 검사가 Stop 앞에 있어, 탐침 사이의 시간이 12초 예산에 누적 - 11.95초
+        # 진입 반례). PURCHASE_WAIT 동결과 같은 모양.
         $rerollWaitClock.Stop()
-        Start-Sleep -Seconds 2
-        [void](Test-CaptureRecovered -Game $Game)
+        while ($script:screenCaptureFailing) {
+          Test-SafeStopDuringCaptureFail
+          Start-Sleep -Seconds 2
+          [void](Test-CaptureRecovered -Game $Game)   # 복구 탐침 (없으면 플래그가 영영 안 풀림)
+        }
         $rerollWaitClock.Start()
         continue
       }
+      $rerollPollStartMs = $rerollWaitClock.ElapsedMilliseconds
       Start-Sleep -Milliseconds $(if ($rerollSeen -ge 1) { 250 } else { 400 })
       $tagsNow = @(Read-NyanPriceTags -Game $Game)
+      if ($script:screenCaptureFailing) {
+        # 규칙 15: 캡처 실패의 빈 배열로 $rerollCleared 를 세우거나 재등장 카운터를 되돌리지 않습니다 (2026-09-13
+        # 구현 리뷰 지적). 실패 폴링의 경과를 예산에서 빼고 상단 동결 블록으로 갑니다.
+        Test-SafeStopDuringCaptureFail
+        $rerollWaitLostMs += ($rerollWaitClock.ElapsedMilliseconds - $rerollPollStartMs)
+        continue
+      }
       if (@($tagsNow).Count -gt 0) {
         if (-not $rerollCleared) { continue }   # 구판 잔존 가격표 - 아직 새 판 아님
         $rerollSeen++

@@ -1321,8 +1321,8 @@ Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($worke
 # 2026-09-09 +2: Resolve-DgEntryAfterYield / Resolve-HtEntryAfterYield 의 캡처 실패 동결 분기.
 #   두 함수는 판독을 건너뛰기만 해서 캡처 시도가 0이었고, 플래그가 안 풀려 무조건 'unknown'
 #   → 호출부 exit 4 였습니다 (Codex P1: 모의에서 추가 캡처 0회, 16초 뒤 unknown) → 15곳
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 15곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1 + 검증 종료 루프 1 + 냥코인 뽑기 2 + 양보 후 판정 2)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '15'
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 16곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 1 + 검증 종료 루프 1 + 냥코인 뽑기 3 + 양보 후 판정 2)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '16'   # 2026-09-13 냥코인 PURCHASE_WAIT 동결 +1
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `

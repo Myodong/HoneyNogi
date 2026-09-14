@@ -4,7 +4,7 @@ $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
-    -Names @('Get-NyanNumberValue', 'Test-NyanMerchantTitle', 'Get-NyanPriceTags', 'Test-NyanSameTag', 'Test-NyanCoinSuspect', 'Get-NyanCoinCorrection', 'Get-NyanCommonTags', 'Get-NyanStableTag')) {
+    -Names @('Get-NyanNumberValue', 'Test-NyanMerchantTitle', 'Get-NyanPriceTags', 'Test-NyanSameTag', 'Test-NyanCoinSuspect', 'Get-NyanCoinCorrection', 'Get-NyanCommonTags', 'Get-NyanStableTag', 'Get-NyanWaitSeconds')) {
   Invoke-Expression $definition
 }
 $workerText = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
@@ -107,9 +107,9 @@ Assert-Case '배선: 구매 확인은 클릭한 좌표의 소멸 (Test-NyanSameT
 # 횟수×간격은 벽시계가 아님). 벽시계 계약(4초/8초)은 그대로.
 # 2026-09-13 재개정: 폴링 500→150ms (수동 52판 프레임 실측 - 구매 클릭 뒤 가격표 소멸은 다음 프레임).
 Assert-Case '배선: 재클릭은 최대 1회 ($reclicked 래치, 경과 4초 판정)' `
-  ([bool]($workerText -match 'if \(\$purchaseWaitClock\.Elapsed\.TotalSeconds -ge 4 -and -not \$reclicked\)')) 'True'
+  ([bool]($workerText -match 'if \(\(Get-NyanWaitSeconds -Clock \$purchaseWaitClock -LostMs \$purchaseWaitLostMs\) -ge 4 -and -not \$reclicked\)')) 'True'
 Assert-Case '배선: 구매 확인은 경과 8초 타임아웃 + 150ms 폴링' `
-  ([bool]($workerText -match 'while \(\$purchaseWaitClock\.Elapsed\.TotalSeconds -lt 8\) \{\r?\n\s+Start-Sleep -Milliseconds 150')) 'True'
+  ([bool]($workerText -match 'while \(\(Get-NyanWaitSeconds -Clock \$purchaseWaitClock -LostMs \$purchaseWaitLostMs\) -lt 8\) \{\r?\n\s+\$pollStartMs = \$purchaseWaitClock\.ElapsedMilliseconds\r?\n\s+Start-Sleep -Milliseconds 150')) 'True'
 # 2026-08-15 재개정: 사용자 추가 단축 요청으로 '무조건 1200ms'가 '경계 근접/미확정 1200ms,
 # 원거리 300ms' 조건부로 완화됨 (Codex 승인 명시적 계약 완화 - stale-low는 경계 부근에서만
 # 유해, 여유폭 냥코인 30만/골드 10만은 현상금·가격표 실측 상한의 3~12배)
@@ -165,9 +165,9 @@ Assert-Case '배선: Read-NyanPriceTags 맨몸 할당 0건' `
 # 새 판 첫 클릭까지 한 주기 절약 (좌표가 흔들리면 시딩 없이 기존 2연속 유지)
 # 2026-08-15 재개정: 재등장 1회 확인 후의 2차 확인 폴만 250ms (첫 감지는 400ms 유지)
 Assert-Case '배선: REROLL_WAIT = Stopwatch 12초 + 400ms 폴링 (2차 확인 250ms)' `
-  ([bool]($workerText -match 'while \(\$rerollWaitClock\.Elapsed\.TotalSeconds -lt 12\) \{[\s\S]{0,400}Start-Sleep -Milliseconds \$\(if \(\$rerollSeen -ge 1\) \{ 250 \} else \{ 400 \}\)')) 'True'
-Assert-Case '배선: REROLL_WAIT 캡처 실패 중 시계 동결 (Stop→복구 탐침→Start)' `
-  ([bool]($workerText -match '\$rerollWaitClock\.Stop\(\)[\s\S]{0,120}Test-CaptureRecovered -Game \$Game[\s\S]{0,60}\$rerollWaitClock\.Start\(\)')) 'True'
+  ([bool]($workerText -match 'while \(\(Get-NyanWaitSeconds -Clock \$rerollWaitClock -LostMs \$rerollWaitLostMs\) -lt 12\) \{[\s\S]{0,900}Start-Sleep -Milliseconds \$\(if \(\$rerollSeen -ge 1\) \{ 250 \} else \{ 400 \}\)')) 'True'
+Assert-Case '배선: REROLL_WAIT 캡처 실패 중 시계 동결 (Stop → 복구까지 안전 검사·2초·탐침 반복 → Start)' `
+  ([bool]($workerText -match '\$rerollWaitClock\.Stop\(\)\r?\n\s+while \(\$script:screenCaptureFailing\) \{\r?\n\s+Test-SafeStopDuringCaptureFail\r?\n\s+Start-Sleep -Seconds 2\r?\n\s+\[void\]\(Test-CaptureRecovered -Game \$Game\)[^\r\n]*\r?\n\s+\}\r?\n\s+\$rerollWaitClock\.Start\(\)\r?\n\s+continue')) 'True'
 Assert-Case '배선: 재등장 2연속 시 $stableTags 는 최신 판독 전체 (그 다음 공통 카드 계산)' `
   ([bool]($workerText -match 'if \(\$rerollSeen -ge 2\) \{[\s\S]{0,900}?\$stableTags = @\(\$tagsNow\)\r?\n\s+\$rerollCommon = @\(Get-NyanCommonTags')) 'True'
 # 2026-08-15 개정: 소진 확정이 루프 상단 전체 주기 반복(잔량 OCR+800ms ×3 ≈ 5~7초)에서
@@ -206,7 +206,7 @@ Assert-Case '속도: 구매 클릭 2곳(체인·재클릭)의 포커스는 전�
 Assert-Case '속도: 냥 루프 안에 무조건 Focus-Game 호출 0건 (전부 전면 조건부)' `
   (([regex]::Matches($nyanCode, '(?m)^\s*Focus-Game -Game \$Game\s*$')).Count) 0
 Assert-Case '속도: 구매 확인 폴링 150ms 직후 가격표 판독 (4초 재클릭·8초 타임아웃 벽시계 불변)' `
-  ([bool]($nyanCode -match 'while \(\$purchaseWaitClock\.Elapsed\.TotalSeconds -lt 8\) \{\s+Start-Sleep -Milliseconds 150\s+\$tagsNow = @\(Read-NyanPriceTags')) 'True'
+  ([bool]($nyanCode -match 'while \(\(Get-NyanWaitSeconds -Clock \$purchaseWaitClock -LostMs \$purchaseWaitLostMs\) -lt 8\) \{\s+\$pollStartMs = \$purchaseWaitClock\.ElapsedMilliseconds\s+Start-Sleep -Milliseconds 150\s+\$tagsNow = @\(Read-NyanPriceTags')) 'True'
 Assert-Case '다시 뽑기: 앵커 있으면 단축키 A 1회 (Press-KeyOnce 0x41) - 앵커 클릭 0건·Press-KeyVerified 미사용' `
   ((([regex]::Matches($nyanCode, 'Press-KeyOnce -VirtualKey 0x41')).Count -eq 1) -and
    (([regex]::Matches($nyanCode, 'Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$rerollAnchor')).Count -eq 0) -and
@@ -302,6 +302,117 @@ Assert-Case '배선: $rerollPrevTags 는 재확인마다 최신 판독 전체로
   ((([regex]::Matches($nyanCode, '\$rerollPrevTags = @\(\$tagsNow\)')).Count -eq 1) -and (([regex]::Matches($nyanCode, '\$rerollPrevTags = @\(\)')).Count -eq 2) -and (([regex]::Matches($nyanCode, '\$rerollPrevTag(?!s)')).Count -eq 0)) 'True'
 Assert-Case '배선: 체인 구매는 최신 단일 판독 유지 ($firstTag = $tagsNow[0])' `
   (([regex]::Matches($nyanCode, '\$firstTag = \$tagsNow\[0\]')).Count) 1
+
+# ── 규칙 15 동결 (2026-09-13 구현 리뷰 지적: PURCHASE_WAIT 가 캡처 실패의 빈 배열을 '소멸'로 채택, REROLL_WAIT 가
+#    실패 빈 배열로 $rerollCleared 를 세움, 재화 판독 실패 카운터가 캡처 실패를 소모). 예산 경과 = 시계 − 버린 폴링 시간. ──
+$fakeClock = New-Object PSObject
+$fakeClock | Add-Member -MemberType ScriptProperty -Name ElapsedMilliseconds -Value { $script:fakeElapsed }
+$fakeClock | Add-Member -MemberType ScriptMethod -Name Stop -Value { $script:fakeRunning = $false }
+$fakeClock | Add-Member -MemberType ScriptMethod -Name Start -Value { $script:fakeRunning = $true }
+$script:fakeElapsed = 7900; $script:fakeRunning = $true
+Assert-Case '예산: 7,900ms − 버린 0 → 7.9초' (Get-NyanWaitSeconds -Clock $fakeClock -LostMs 0) 7.9
+$script:fakeElapsed = 8050
+Assert-Case '예산: 8,050ms − 버린 150 → 7.9초 (실패 폴링은 예산 밖)' (Get-NyanWaitSeconds -Clock $fakeClock -LostMs 150) 7.9
+$script:fakeElapsed = 4000
+Assert-Case '예산: LostMs 생략 = 0' (Get-NyanWaitSeconds -Clock $fakeClock) 4
+Assert-Case '배선: 냥코인·골드 판독 직후 캡처 실패 가드 (실패 카운터 미소모 → 상단 동결)' `
+  ((([regex]::Matches($nyanCode, '\$coinNow = Read-NyanAmount -Game \$Game -Region \$rgNyanCoin\s+if \(\$script:screenCaptureFailing\) \{\s+Test-SafeStopDuringCaptureFail\s+continue\s+\}')).Count -eq 1) -and
+   (([regex]::Matches($nyanCode, '\$goldNow = Read-NyanAmount -Game \$Game -Region \$rgNyanGold\s+if \(\$script:screenCaptureFailing\) \{\s+Test-SafeStopDuringCaptureFail\s+continue\s+\}')).Count -eq 1)) 'True'
+Assert-Case '배선: PURCHASE_WAIT 판독 직후 동결 = 버린 시간 보정 → 시계 정지 → 복구까지 안전 검사·2초·탐침 반복 → 재개 → continue' `
+  ([bool]($nyanCode -match '\$tagsNow = @\(Read-NyanPriceTags -Game \$Game\)\s+if \(\$script:screenCaptureFailing\) \{\s+\$purchaseWaitLostMs \+= \(\$purchaseWaitClock\.ElapsedMilliseconds - \$pollStartMs\)\s+\$purchaseWaitClock\.Stop\(\)\s+while \(\$script:screenCaptureFailing\) \{\s+Test-SafeStopDuringCaptureFail\s+Start-Sleep -Seconds 2\s+\[void\]\(Test-CaptureRecovered -Game \$Game\)\s+\}\s+\$purchaseWaitClock\.Start\(\)\s+continue\s+\}\s+if \(-not \(Test-NyanSameTag')) 'True'
+Assert-Case '배선: REROLL_WAIT 판독 직후 캡처 실패 가드 (안전 검사 + 버린 시간 보정 + continue, cleared/카운터 손대지 않음)' `
+  ([bool]($nyanCode -match '\$tagsNow = @\(Read-NyanPriceTags -Game \$Game\)\s+if \(\$script:screenCaptureFailing\) \{\s+Test-SafeStopDuringCaptureFail\s+\$rerollWaitLostMs \+= \(\$rerollWaitClock\.ElapsedMilliseconds - \$rerollPollStartMs\)\s+continue\s+\}\s+if \(@\(\$tagsNow\)\.Count -gt 0\) \{')) 'True'
+# PURCHASE_WAIT 를 실제 소스에서 잘라 모의 시계로 실행 (시간 경계 - 설계 합의 조건)
+$nyanPwSpan = [regex]::Match($nyanCode, '\$purchaseWaitLostMs = 0[\s\S]*?(?=\s+if \(-not \$purchaseGone\) \{)').Value
+Assert-Case '모의: PURCHASE_WAIT 구간 추출' ($nyanPwSpan.Length -gt 300 -and $nyanPwSpan.Contains('while (')) 'True'
+$nyanPwBlock = [scriptblock]::Create("foreach (`$nyanOnce in 1) {`n" + $nyanPwSpan + "`n}")
+function Reset-PwMock {
+  param([int]$ElapsedMs, [string[]]$Reads, [int]$RecoverAt = 1)
+  $script:fakeElapsed = $ElapsedMs; $script:fakeRunning = $true
+  $script:pwReads = [System.Collections.Generic.List[string]]$Reads; $script:pwRecoverAt = $RecoverAt
+  $script:screenCaptureFailing = $false; $script:pwProbes = 0; $script:pwSafeStops = 0; $script:pwClicks = 0
+  $script:lastClickPerformed = $false; $script:lastClickSkipReason = ''; $script:nyanLogs = @()
+  $script:mockUserActive = $false; $script:mockForeground = $true   # 앞 블록의 모의 상태 초기화 (조작 중 아님·전면)
+}
+function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY) $script:pwClicks++; $script:lastClickPerformed = $true }
+function Start-Sleep { param([int]$Milliseconds = 0, [int]$Seconds = 0) if ($script:fakeRunning) { $script:fakeElapsed += ($Milliseconds + 1000 * $Seconds) } }
+function Read-NyanPriceTags { param($Game)
+  $kind = if ($script:pwReads.Count -gt 1) { $k = $script:pwReads[0]; $script:pwReads.RemoveAt(0); $k } else { $script:pwReads[0] }
+  if ($kind -eq 'fail') { $script:screenCaptureFailing = $true; return @() }
+  if ($kind -eq 'present') { return @(@{ X = 480; Y = 414 }) }
+  return @()
+}
+function Test-SafeStopDuringCaptureFail { $script:pwSafeStops++ }
+function Test-CaptureRecovered { param($Game) $script:pwProbes++; if ($script:pwProbes -ge $script:pwRecoverAt) { $script:screenCaptureFailing = $false; return $true }; return $false }
+$purchaseWaitClock = $fakeClock; $firstTag = @{ X = 480; Y = 414 }
+# ① 캡처 정상: 잔존 2회 → 소멸 (재클릭 없음, 버린 시간 0)
+Reset-PwMock -ElapsedMs 0 -Reads @('present', 'present', 'gone'); $purchaseGone = $false; $reclicked = $false
+. $nyanPwBlock
+Assert-Case '모의 PW: 정상 경로 - 잔존·잔존·소멸 → 확인, 재클릭 0, 버린 시간 0' ('{0},{1},{2},{3}' -f $purchaseGone, $reclicked, $purchaseWaitLostMs, $script:pwSafeStops) 'True,False,0,0'
+# ② 7.9초 진입 뒤 캡처 실패 → 탐침 2회째 복구 → 새 판독 소멸 (실패 폴링 150ms 는 예산 밖 - 무보정이면 8.05초로 미확인 종료)
+Reset-PwMock -ElapsedMs 7900 -Reads @('fail', 'gone') -RecoverAt 2; $purchaseGone = $false; $reclicked = $false
+. $nyanPwBlock
+Assert-Case '모의 PW: 7.9초 진입 + 캡처 실패 → 복구 후 소멸 확인 (버린 150ms, 탐침 2, 안전 검사 2, 시계는 정지 중 안 흐름)' ('{0},{1},{2},{3},{4}' -f $purchaseGone, $purchaseWaitLostMs, $script:pwProbes, $script:pwSafeStops, $script:fakeElapsed) 'True,150,2,2,8200'
+# ③ 복구 탐침 연속 실패 5회 → 복구 → 소멸
+Reset-PwMock -ElapsedMs 0 -Reads @('fail', 'gone') -RecoverAt 5; $purchaseGone = $false; $reclicked = $false
+. $nyanPwBlock
+Assert-Case '모의 PW: 탐침 5회째 복구 - 그동안 안전 검사 5회, 예산 미소모' ('{0},{1},{2},{3}' -f $purchaseGone, $script:pwProbes, $script:pwSafeStops, (Get-NyanWaitSeconds -Clock $fakeClock -LostMs $purchaseWaitLostMs)) 'True,5,5,0.15'
+# ④ 3.9초 진입 + 실패 → 복구 후 잔존 → 4초 재클릭 1회 → 소멸
+Reset-PwMock -ElapsedMs 3900 -Reads @('fail', 'present', 'gone') -RecoverAt 1; $purchaseGone = $false; $reclicked = $false
+. $nyanPwBlock
+Assert-Case '모의 PW: 복구 후 잔존이면 4초 재클릭 1회 뒤 소멸 확인' ('{0},{1},{2}' -f $purchaseGone, $reclicked, $script:pwClicks) 'True,True,1'
+# ⑤ 냥코인 판독 직후 캡처 실패: 실패 카운터 7 유지 + 안전 검사 + continue
+$nyanCoinSpan = [regex]::Match($nyanCode, '\$coinNow = Read-NyanAmount -Game \$Game -Region \$rgNyanCoin\s+if \(\$script:screenCaptureFailing\) \{[\s\S]*?continue\s+\}').Value
+$nyanCoinBlock = [scriptblock]::Create("foreach (`$nyanOnce in 1) {`n" + $nyanCoinSpan + "`n`$script:nyanReachedEnd = `$true`n}")
+function Read-NyanAmount { param($Game, $Region) $script:screenCaptureFailing = $true; return [int64](-1) }
+$coinFailStreak = 7; $script:pwSafeStops = 0; $script:nyanReachedEnd = $false; $rgNyanCoin = @(1085, 40, 125, 45)
+. $nyanCoinBlock
+Assert-Case '모의 재화: 캡처 실패 판독은 실패 카운터(7) 유지 + 안전 검사 1 + continue' ('{0},{1},{2}' -f $coinFailStreak, $script:pwSafeStops, $script:nyanReachedEnd) '7,1,False'
+
+# ── 2026-09-14 구현 리뷰 반영: REROLL_WAIT 동결 시간 경계 + 재화 판독 창 좌표 예외 경계 + 카드 존 배율 상수 ──
+Assert-Case '배선: Read-NyanPriceTags 가 카드 존 배율 상수($nyanCardsScale)를 사용' `
+  ([bool]($workerText -match '-RegionWidth \$rgNyanCards\[2\] -RegionHeight \$rgNyanCards\[3\] -Scale \$nyanCardsScale -Engine \$ocrKoreanEngine')) 'True'
+Assert-Case '배선: 카드 존 배율 상수 = 5 (라벨 실험 - 값 변경 시 test_nyan_cards_scale_offline 재검)' `
+  ([bool]($workerText -match '(?m)^\$nyanCardsScale = 5\s*$')) 'True'
+# 재화 판독: 창 좌표 실패 예외(플래그 선 채 throw)는 -1 로 경계 처리, 다른 예외는 그대로 (실제 함수 추출)
+$readAmountDef = @(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('Read-NyanAmount'))[0]
+Invoke-Expression $readAmountDef
+$ocrKoreanEngine = $null
+function Get-GameRegionOcrText { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $Scale, $Engine, [switch]$BinaryWhiteText)
+  if ($script:amountMode -eq 'rect') { $script:screenCaptureFailing = $true; throw 'OCR용 게임 창 좌표를 읽지 못했습니다.' }
+  if ($script:amountMode -eq 'other') { throw 'unexpected' }
+  return '21,830,510'
+}
+$script:screenCaptureFailing = $false; $script:amountMode = 'ok'
+Assert-Case '재화 경계: 정상 판독 → 값' (Read-NyanAmount -Game $null -Region @(935, 40, 150, 45)) 21830510
+$script:amountMode = 'rect'
+$rectResult = 'threw'   # 예외가 그대로 올라오면 FAIL 로 잡히게 (변이 검증: 경계 제거 시 스크립트가 죽어 무적발이었음)
+try { $rectResult = Read-NyanAmount -Game $null -Region @(935, 40, 150, 45) } catch { $rectResult = 'threw' }
+Assert-Case '재화 경계: 창 좌표 실패(플래그 선 채 throw) → -1 (동결 경로로)' $rectResult (-1)
+$script:screenCaptureFailing = $false; $script:amountMode = 'other'
+$otherRethrown = $false
+try { [void](Read-NyanAmount -Game $null -Region @(935, 40, 150, 45)) } catch { $otherRethrown = ($_.Exception.Message -eq 'unexpected') }
+Assert-Case '재화 경계: 플래그 없는 다른 예외는 그대로 올림' $otherRethrown 'True'
+# REROLL_WAIT 구간을 실제 소스에서 잘라 모의 시계로 실행 (시간 경계: 안전 검사 비용이 예산에 누적되지 않아야 함)
+$nyanRwSpan = [regex]::Match($nyanCode, '\$rerollWaitLostMs = 0[\s\S]*?(?=\s+if \(\$rerollSeen -lt 2\) \{)').Value
+Assert-Case '모의: REROLL_WAIT 구간 추출' ($nyanRwSpan.Length -gt 300 -and $nyanRwSpan.Contains('while (')) 'True'
+$nyanRwBlock = [scriptblock]::Create("foreach (`$nyanOnce in 1) {`n" + $nyanRwSpan + "`n}")
+function Test-SafeStopDuringCaptureFail { $script:pwSafeStops++; if ($script:fakeRunning) { $script:fakeElapsed += 20 } }   # 검사 비용 20ms 모의 (시계가 돌 때만 누적)
+$rerollWaitClock = $fakeClock
+function Reset-RwMock { param([int]$ElapsedMs, [string[]]$Reads, [int]$RecoverAt = 1)
+  Reset-PwMock -ElapsedMs $ElapsedMs -Reads $Reads -RecoverAt $RecoverAt
+  $script:rerollSeen = 0; $script:rerollPrevTags = @(); $script:stableTags = @(); $script:pendingBoardTags = $null; $script:pendingBoardTagsClock = $null
+}
+# ① 11.5초 진입 + 캡처 실패 → 탐침 5회째 복구(그동안 안전 검사 5회 × 20ms 는 시계 정지 중) → 재등장 2연속 → 완료
+Reset-RwMock -ElapsedMs 11500 -Reads @('fail', 'present', 'present') -RecoverAt 5
+$rerollSeen = 0; $rerollPrevTags = @(); $rerollCleared = $true; $boardLimitReached = $false; $stableTags = @(); $pendingBoardTags = $null
+. $nyanRwBlock
+Assert-Case '모의 RW: 11.5초 진입 + 실패 → 복구까지 시계 정지(안전 검사 5회) → 재등장 2연속 완료 (버린 400ms + 판독 직후 안전 검사 20ms 도 보정, 예산 12초 안)' ('{0},{1},{2},{3}' -f $rerollSeen, $script:pwProbes, $rerollWaitLostMs, (Get-NyanWaitSeconds -Clock $fakeClock -LostMs $rerollWaitLostMs)) '2,5,420,12.15'
+# ② 실패 없음: 0개 1회 뒤 재등장 2연속 (한도 경로 - cleared 선행)
+Reset-RwMock -ElapsedMs 0 -Reads @('present', 'gone', 'present', 'present')
+$rerollSeen = 0; $rerollPrevTags = @(); $rerollCleared = $false; $boardLimitReached = $true; $stableTags = @(); $pendingBoardTags = $null
+. $nyanRwBlock
+Assert-Case '모의 RW: 한도 경로 - 구판 잔존(present) 무시 → 0개 1회 → 재등장 2연속 → 완료, pending 은 공통 카드' ('{0},{1},{2}' -f $rerollSeen, $rerollCleared, @($pendingBoardTags).Count) '2,True,1'
 
 # ── 배선 가드 (GUI) ──
 Assert-Case 'GUI: 기타 시작 시 커스텀 경로 배제' `

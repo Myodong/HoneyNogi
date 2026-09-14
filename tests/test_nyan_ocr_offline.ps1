@@ -20,7 +20,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectR
 }
 # 워커 영역 값을 소스에서 캡처합니다 (사본 진리표 금지 규칙)
 $nyanAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'mabinogi_run_once.ps1'), [ref]$null, [ref]$null)
-foreach ($nyanVar in @('rgNyanTitle', 'rgNyanCoin', 'rgNyanGold', 'rgNyanCards', 'rgNyanReroll')) {
+foreach ($nyanVar in @('rgNyanTitle', 'rgNyanCoin', 'rgNyanGold', 'rgNyanCards', 'rgNyanReroll', 'nyanCardsScale')) {
   $nyanAssign = $nyanAst.Find({
       param($node)
       ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
@@ -60,9 +60,12 @@ function Read-CaptureRegion {
       $words = @()
       foreach ($line in $ocr.Lines) {
         foreach ($word in $line.Words) {
-          $words += , @{ Text = [string]$word.Text
-            X = [int]($Region[0] + ($word.BoundingRect.X / $Scale))
-            Y = [int]($Region[1] + ($word.BoundingRect.Y / $Scale)) }
+          # 워커 Get-GameRegionOcrWords 와 같은 변환: 단어 **중심점**, 반올림, 공백 제거 (2026-09-14 리뷰 조건 - 종전 좌상단)
+          $centerXScaled = $word.BoundingRect.X + ($word.BoundingRect.Width / 2)
+          $centerYScaled = $word.BoundingRect.Y + ($word.BoundingRect.Height / 2)
+          $words += , @{ Text = ([string]$word.Text -replace '\s', '')
+            X = $Region[0] + [int][Math]::Round($centerXScaled / $Scale)
+            Y = $Region[1] + [int][Math]::Round($centerYScaled / $Scale) }
         }
       }
       return $words
@@ -79,7 +82,7 @@ try {
   foreach ($capPair in @(@('1272', $cap1272), @('1908', $cap1908))) {
     $capName = $capPair[0]; $capSrc = $capPair[1]
     Assert-Case "제목 게이트 ($capName)" (Test-NyanMerchantTitle -Text (Read-CaptureRegion -Src $capSrc -Region $rgNyanTitle -Scale 3)) 'True'
-    $capTags = @(Get-NyanPriceTags -Words (Read-CaptureRegion -Src $capSrc -Region $rgNyanCards -Scale 3 -AsWords))
+    $capTags = @(Get-NyanPriceTags -Words (Read-CaptureRegion -Src $capSrc -Region $rgNyanCards -Scale $nyanCardsScale -AsWords))
     Assert-Case "가격표 존재 ($capName - 새 판 = 클릭 가능 상태)" (@($capTags).Count -ge 4) 'True'
     $capReroll = @(Read-CaptureRegion -Src $capSrc -Region $rgNyanReroll -Scale 4 -AsWords | Where-Object { ([string]$_.Text) -replace '\s', '' -eq '뽑기' })
     Assert-Case "다시 뽑기 '뽑기' 앵커 ($capName)" (@($capReroll).Count -ge 1) 'True'
@@ -89,7 +92,7 @@ try {
   Assert-Case '골드 잔량 (1272 실측 21,830,510)' (Get-NyanNumberValue -Text (Read-CaptureRegion -Src $cap1272 -Region $rgNyanGold -Scale 4)) 21830510
   Assert-Case '골드 잔량 (1908 실측 21,788,110)' (Get-NyanNumberValue -Text (Read-CaptureRegion -Src $cap1908 -Region $rgNyanGold -Scale 4)) 21788110
   # 판 종료 화면: 가격표 0개 = 다시 뽑기 판정의 실측 근거
-  $doneTags = @(Get-NyanPriceTags -Words (Read-CaptureRegion -Src $capDone -Region $rgNyanCards -Scale 3 -AsWords))
+  $doneTags = @(Get-NyanPriceTags -Words (Read-CaptureRegion -Src $capDone -Region $rgNyanCards -Scale $nyanCardsScale -AsWords))
   Assert-Case '판 종료 화면 가격표 0개 (1908)' (@($doneTags).Count) 0
 } finally {
   $cap1272.Dispose(); $cap1908.Dispose(); $capDone.Dispose()
