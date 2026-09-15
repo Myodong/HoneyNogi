@@ -24,6 +24,14 @@ Assert-Case '재화: 정상 표기 → 21788110' (Get-NyanNumberValue -Text '21,
 Assert-Case '재화: 빈 판독 → -1' (Get-NyanNumberValue -Text '') (-1)
 Assert-Case '재화: 숫자 없음 → -1' (Get-NyanNumberValue -Text '골드') (-1)
 Assert-Case '재화: 12자리 초과(오독 뭉침) → -1' (Get-NyanNumberValue -Text '1234567890123') (-1)
+# 2026-09-15 골드 앞자리 소실 분석 (프레임 5,015장): 내부 잡음('기')은 틀린 값 대신 -1, 접두·접미 잡음은 그대로 무해
+Assert-Case "재화: 내부 잡음 '기'(실측 02965기124) → -1 (틀린 7자리 금지)" (Get-NyanNumberValue -Text '02965기124') (-1)
+Assert-Case "재화: 내부 잡음 + 마침표 구분(실측 @29.59기524) → -1" (Get-NyanNumberValue -Text '@29.59기524') (-1)
+Assert-Case "재화: 접두 ')'(냥코인 실측 )14,021,217) → 14021217" (Get-NyanNumberValue -Text ')14,021,217') 14021217
+Assert-Case "재화: 접두 '@' + 마침표(골드 실측 @30.062.324) → 30062324" (Get-NyanNumberValue -Text '@30.062.324') 30062324
+Assert-Case "재화: 접두 '0'(아이콘, 실측 029,962,924) → 29962924" (Get-NyanNumberValue -Text '029,962,924') 29962924
+Assert-Case '재화: 내부 공백(OCR 단어 분리)은 허용 → 29782324' (Get-NyanNumberValue -Text '29,782 324') 29782324
+Assert-Case '재화: 접미 잡음은 무해 → 29782324' (Get-NyanNumberValue -Text '29,782,324골') 29782324
 
 # ── 제목 게이트 (조각 2개: 고양이+뽑기) ──
 Assert-Case '제목: 실측 정상 → true' (Test-NyanMerchantTitle -Text '고양이 상인 뽑기') 'True'
@@ -194,7 +202,7 @@ Assert-Case '배선: 모든 종료가 exit 4 (기타 흐름에 exit 0 없음)' `
 Assert-Case '배선: 판독 영역 5종 실측값' `
   (($workerText.Contains('$rgNyanTitle  = @(25, 38, 300, 55)')) -and
    ($workerText.Contains('$rgNyanCoin   = @(1085, 40, 125, 45)')) -and
-   ($workerText.Contains('$rgNyanGold   = @(935, 40, 150, 45)')) -and
+   ($workerText.Contains('$rgNyanGold   = @(910, 40, 175, 45)')) -and
    ($workerText.Contains('$rgNyanCards  = @(390, 330, 480, 340)')) -and
    ($workerText.Contains('$rgNyanReroll = @(1090, 630, 170, 50)'))) 'True'
 
@@ -203,6 +211,9 @@ Assert-Case '배선: 판독 영역 5종 실측값' `
 $nyanCode = Remove-SourceComments -Text (@(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('Invoke-NyanMerchantRun'))[0])
 Assert-Case '속도: 구매 클릭 2곳(체인·재클릭)의 포커스는 전면 확인 조건부' `
   (([regex]::Matches($nyanCode, 'if \(-not \(Test-GameForeground -Game \$Game\)\) \{ Focus-Game -Game \$Game \}\s+Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$firstTag\.X \+ 20\)')).Count) 2
+# 2026-09-15: 골드 상한이 켜진 채 잔량 판독이 -1 이면 그 회전은 구매하지 않음 (실패 카운터 뒤 800ms + continue)
+Assert-Case '골드 상한: 판독 실패 분기가 구매 경로로 내려가지 않음 (8회 정지 검사 뒤 대기 + continue)' `
+  ([bool]($nyanCode -match "\`$goldFailStreak\+\+\s+if \(\`$goldFailStreak -ge 8\) \{[^}]*exit 4\s*\}\s+Start-Sleep -Milliseconds 800\s+continue")) 'True'
 Assert-Case '속도: 냥 루프 안에 무조건 Focus-Game 호출 0건 (전부 전면 조건부)' `
   (([regex]::Matches($nyanCode, '(?m)^\s*Focus-Game -Game \$Game\s*$')).Count) 0
 Assert-Case '속도: 구매 확인 폴링 150ms 직후 가격표 판독 (4초 재클릭·8초 타임아웃 벽시계 불변)' `
