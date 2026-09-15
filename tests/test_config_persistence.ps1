@@ -182,6 +182,20 @@ try {
   $sameUser = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   [System.IO.File]::WriteAllText($configPath, ($sameUser | ConvertTo-Json -Depth 20), $utf8Bom)
   Assert-Case '실배포: 같은 스키마면 이전하지 않음' (Update-ConfigToLatest) $false
+  # ★ 좌표 버전만 낮은 실배포 config (v15, 2026-09-15): 기존 좌표 키 값을 바꾸며 coordsVersion 만 올린 배포에서
+  #   스키마가 같은 기존 사용자가 새 좌표를 실제로 받는지. 위 검증은 스키마만 낮춰서 이 경로를 보지 못했습니다.
+  $realCoords = [int]$realDefault.coordsVersion
+  $coordsUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $coordsUser.coordsVersion = $realCoords - 1
+  $coordsUser.ocrRegions.questTracker = @(980, 190, 285, 77)   # v14 영역을 가진 사용자
+  $coordsUser.repeat.defaultCount = 43
+  [System.IO.File]::WriteAllText($configPath, ($coordsUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedCoords = Update-ConfigToLatest
+  $resultCoords = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '실배포(좌표만 낮음): 이전이 실행됨' $migratedCoords $true
+  Assert-Case '실배포(좌표만 낮음): coordsVersion 이 최신으로' ([int]$resultCoords.coordsVersion) $realCoords
+  Assert-Case '실배포(좌표만 낮음): questTracker 가 최신 기본값으로' (($resultCoords.ocrRegions.questTracker -join ',')) (($realDefault.ocrRegions.questTracker -join ','))
+  Assert-Case '실배포(좌표만 낮음): 사용자가 바꾼 값은 보존' $resultCoords.repeat.defaultCount 43
 
   $userConfigV4Life = [pscustomobject]@{
     configSchemaVersion = 4

@@ -39,7 +39,13 @@ Assert-Case '트래커: 범위 밖 층(3층) → false' (Test-DgQuestStageMatch 
 
 # ── 오류 캡처 재현 (규칙 9): 실제 트래커 영역 판독이 층·구역 일치를 확정하는가 ──
 $refW = 1272; $refH = 717
-$rgQuestTracker = @(980, 190, 285, 77)   # config 기본값과 동일 (ocrRegions.questTracker)
+# 영역은 소스 대입식에서 가져옵니다 (사본 진리표 금지 - v15 에서 하드코딩 사본이 옛 영역을 검증하던 것을 정정)
+$config = $null
+function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
+$reenterAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'mabinogi_run_once.ps1'), [ref]$null, [ref]$null)
+$reenterAssign = $reenterAst.Find({ param($n) ($n -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($n.Left.Extent.Text -eq '$rgQuestTracker') }, $true)
+if (-not $reenterAssign) { 'FAIL 본체에서 $rgQuestTracker 정의를 찾지 못했습니다'; exit 1 }
+Invoke-Expression $reenterAssign.Extent.Text
 function Read-CaptureRegionText {
   # test_nyan_ocr_offline 의 검증된 크롭/확대/판독 패턴 (기준 비율 크롭 → 기준×배율 확대 → ko OCR)
   param([System.Drawing.Bitmap]$Src, [int[]]$Region, [int]$Scale)

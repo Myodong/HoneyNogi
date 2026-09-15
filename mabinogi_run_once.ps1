@@ -453,7 +453,7 @@ if (Test-Path -LiteralPath $configPath) {
 # 버전을 나눈 이유: 각 단계의 실기 PC에 직전 버전 config가 이미 설치돼 있어, 같은 번호를
 # 유지하면 GUI 이전 게이트(사용자 버전 >= 기본 버전이면 이전 안 함)를 통과하지 못해
 # 구 영역이 남는다 (교차 리뷰 지적 - v9 이후 동일 사유).
-$coordsVersionCurrent = 14
+$coordsVersionCurrent = 15
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -699,10 +699,17 @@ $ptStellaClose  = @(Get-ConfigValue $config @('clickPoints', 'stellaClose') @(12
 # 첫 줄('…1층 2구역 소탕')이 ref y204(밴드 ~196..212)로 상단 212에 잘려 '구역' 소실 →
 # 클리어 대기 연장 안전망(Test-CombatStillRunning)이 발동하지 못하고 60초 하드 타임아웃
 # (기본 한도 600초 안에 끝나는 판에서는 연장 경로가 실행되지 않아 조용히 숨어 있었음).
-# 상단 190 = 첫 줄에 6px 여유 + 탭 행('이벤트/퀘스트', 네이티브 글자 하단 ~186) 배제.
+# (v14) 상단 190 = 첫 줄에 6px 여유 + 탭 행('이벤트/퀘스트', 네이티브 글자 하단 ~186) 배제.
 # 1272에서 탭이 영역에 들어와도 소비처 매칭이 전부 조각('구역/소탕/정찰/던전명')이라 무해.
-# 하단 267·x 불변 - 구 범위가 신 범위의 부분집합이라 기존 소비처 전부 보존.
-$rgQuestTracker = @(Get-ConfigValue $config @('ocrRegions', 'questTracker') @(980, 190, 285, 77))
+# ★ v15 (2026-09-15 타 PC 제보, 1272x717 창): 같은 창 크기인데 HUD 배치가 달라(미니맵이 작고 위쪽) 추적기
+#   제목 줄 '광기의 동굴 클리어'가 y≈190 에 그려져 상단 190 에서 잘림 → '• 부활 6회 이내로 클리어 …'만 읽혀
+#   어비스 파티 입장(Test-InDungeonQuest)을 감지하지 못해 300초 한도 초과 → '파티 매칭 완료 후 던전 입장
+#   대기 시간 초과' 오류. 캡처 오프라인 재현: 상단 190 False / 150·160·170 True. 상단을 150 으로 넓힘 (하단 267·x 불변 -
+#   구 범위가 신 범위의 부분집합). 탭 줄('이벤트 퀘스트+')이 영역에 들어오지만 소비처 13곳이 전부 조각 매칭
+#   (구역/소탕/정찰/던전명, 층·구역 파서는 첫 쌍) - 보관 창 전체 캡처 173장 전수 재생에서 제보 캡처(False→True) 외
+#   판정이 바뀐 캡처 없음. 진리표 tests\test_quest_tracker_offline.ps1, 캡처 보관
+#   던전이미지\실측기록\20260915_타PC_어비스_입장미감지_트래커상단잘림\. 생활 전용 영역(아래)은 그대로.
+$rgQuestTracker = @(Get-ConfigValue $config @('ocrRegions', 'questTracker') @(980, 150, 285, 117))
 # 생활(채집) 전용 추적기 영역 = v13까지의 구 영역 그대로 (2026-08-14 분리, 하드코딩).
 # 위 전투용 확장(190,77)을 생활에 그대로 쓰면 ①탭 행 유입으로 카운트('N/M') 판독이 깨지고
 # ②Get-LifeQuestCountText 의 '마지막 매치' 계약(다음 퀘스트 N/N 오염 금지)이 흔들립니다

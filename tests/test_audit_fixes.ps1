@@ -521,21 +521,24 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,900}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v14 - 네이티브 1908 계열)' `
-  ($workerSource -match '\$coordsVersionCurrent = 14') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v14 네이티브 1908 계열, v15 트래커 재확장)' `
+  ($workerSource -match '\$coordsVersionCurrent = 15') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 14' ([int]$auditConfigJson.coordsVersion) 14
+Assert-Case 'config: coordsVersion 15' ([int]$auditConfigJson.coordsVersion) 15
 # v14 (2026-08-14 15:49 실사고): 네이티브 1908 추적기 첫 줄('…1층 2구역 소탕')이 ref y204 -
 # 구영역 상단 212에 잘려 '구역' 소실 → 클리어 대기 연장 안전망 불발 → 60초 하드 타임아웃.
 # 상단 190 확장 (하단 267 유지 - 구 범위가 신 범위의 부분집합이라 기존 소비처 보존).
-Assert-Case 'v14: questTracker 워커 기본값 (980,190,285,77)' `
-  ($workerSource -match "'questTracker'\) @\(980, 190, 285, 77\)") $true
+# v15 (2026-09-15 타 PC 제보): 같은 1272 창인데 HUD 배치가 달라 제목 줄이 y≈190 - 상단 190 에서 잘려 어비스 파티
+# 입장 감지 300초 초과. 상단 150 으로 재확장 (하단 267 유지). 판독 재현은 test_quest_tracker_offline.
+Assert-Case 'v15: questTracker 워커 기본값 (980,150,285,117)' `
+  ($workerSource -match "'questTracker'\) @\(980, 150, 285, 117\)") $true
 $trackerRegion = $auditConfigJson.ocrRegions.questTracker
-Assert-Case 'config: questTracker 영역이 워커 기본값과 일치' (($trackerRegion -join ',')) '980,190,285,77'
+Assert-Case 'config: questTracker 영역이 워커 기본값과 일치' (($trackerRegion -join ',')) '980,150,285,117'
 $trackerTop = [int]$trackerRegion[1]; $trackerBottom = $trackerTop + [int]$trackerRegion[3]
 Assert-Case 'v14: 네이티브 1908 첫 줄(y204)을 덮음' (($trackerTop -le 204) -and ($trackerBottom -ge 204)) $true
 Assert-Case 'v14: 구 하단 경계(267) 유지 (소비처 보존)' $trackerBottom 267
+Assert-Case 'v15: 타 PC 배치의 제목 줄(y≈183~198)을 여유 있게 덮음 (상단 ≤ 175)' ($trackerTop -le 175) $true
 # v14 분리 (교차 리뷰): 생활(채집)은 확장 영역을 쓰면 카운트('N/M') 계약이 깨져(5b 실측)
 # 구 영역을 전용 하드코딩 변수로 보존. 전투 소비처는 조각 매칭이라 확장 무해.
 Assert-Case 'v14: 생활 전용 추적기 영역 = 구 영역 보존 (980,212,285,55)' `
