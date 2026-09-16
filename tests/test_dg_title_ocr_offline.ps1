@@ -462,4 +462,43 @@ if (-not (Test-Path -LiteralPath $huntCapturePath)) {
   }
 }
 
+# ── 2026-09-16 19:43 실사고 캡처 3장 (개발 PC 1273x718 심층 옵션 페카 2-1): 난이도 '어려움' 알약이
+#    배율 4·3·2 에서 빈 판독, 배율 5 만 '이己1움'@(662,129) 로 깨져 이형 목록에 없어 3회 미탐 → 코드 1 × 3
+#    (커스텀 자동 재시작 포함) 정지. 19:44 수동 재시작 뒤엔 같은 화면 정상 판독 = 프레임 특이 깨짐.
+#    보관 심층 옵션 22장은 전부 정상 PICK(배율 5 18·배율 4 4). 이형 '이己1움' 추가(07-29 선례)로 3장 전부
+#    PICK 이 계약 - 이형을 빼면 아래 단언이 실패. 위치 게이트(HardX 660±35)·짝 제외는 test_dg_layout_system.
+$pillBrokenDir = Join-Path $projectRoot '던전이미지/실측기록/20260916_심층옵션_어려움알약_이己1움_3연속미탐'
+$pillBrokenFrames = @('error_20260916_h19m43s32.png', 'error_20260916_h19m43s40.png', 'error_20260916_h19m43s47.png') |
+  ForEach-Object { Join-Path $pillBrokenDir $_ }
+if (@($pillBrokenFrames | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -gt 0) {
+  "SKIP 09-16 알약 이형 캡처가 없어 재현을 건너뜁니다: $pillBrokenDir"
+} elseif (-not (Get-Command Find-DgDifficultyPoint -ErrorAction SilentlyContinue)) {
+  'SKIP 알약 탐색 함수/스텁이 없어(네 번째 케이스 스킵) 09-16 알약 이형 재현을 건너뜁니다'
+} else {
+  $optRegionAssign = $sourceAst.Find({
+      param($node)
+      ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+      ($node.Left.Extent.Text -eq '$rgDgOptDifficulty')
+    }, $true)
+  if (-not $optRegionAssign) { 'FAIL 본체에서 $rgDgOptDifficulty 정의를 찾지 못했습니다'; $fails++ }
+  else {
+    Invoke-Expression $optRegionAssign.Extent.Text
+    foreach ($pillBrokenPath in $pillBrokenFrames) {
+      $pillBrokenName = Split-Path -Leaf $pillBrokenPath
+      $sourceBitmap = [System.Drawing.Bitmap]::FromFile($pillBrokenPath)
+      try {
+        $s5Words = @(Get-GameRegionOcrWords -Game $null -ReferenceX $rgDgOptDifficulty[0] -ReferenceY $rgDgOptDifficulty[1] `
+          -RegionWidth $rgDgOptDifficulty[2] -RegionHeight $rgDgOptDifficulty[3] -Scale 5 -Engine $ocrKoreanEngine)
+        "정보($pillBrokenName): 배율 5 단어 = $((@($s5Words | ForEach-Object { "'$([string]$_.Text)'@($([int]$_.X),$([int]$_.Y))" })) -join ' ')"
+        $brokenPick = Find-DgDifficultyPoint -Game $null -Region $rgDgOptDifficulty -Label '어려움' -HardX 660
+        Assert-Case "알약 이형 [$pillBrokenName]: 심층 옵션 사다리(4,3,5,2)가 어려움을 채택" ($null -ne $brokenPick) $true
+        if ($brokenPick) {
+          Assert-Case "알약 이형 [$pillBrokenName]: 채택 좌표가 알약 위 (662±10, 129±8)" `
+            (([Math]::Abs([int]$brokenPick.X - 662) -le 10) -and ([Math]::Abs([int]$brokenPick.Y - 129) -le 8)) $true
+        }
+      } finally { $sourceBitmap.Dispose() }
+    }
+  }
+}
+
 exit $fails

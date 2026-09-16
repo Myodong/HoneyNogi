@@ -22,28 +22,34 @@ function Assert-Case {
 }
 
 # ---- 1. 판정 조각 실측 진리표 (판정식 사본 - 소스와 조각 동기화 앵커 포함) ----
-# 조각을 넓히지 '않기로' 한 합의(Codex)를 고정합니다: 아래 unknown 문자열들은 실측인데도
-# 판정 불가여야 하고(폴백이 담당), selected/challenge 는 기존 계약 그대로여야 합니다.
-Assert-Case '판정식 조각 앵커(됨/선택/선태 + 도전 정확 일치)' `
+# 09-07 에는 조각을 넓히지 않고 폴백에 맡기기로 했고, 09-16 에 콘솔 프레임 12장 + 보관 캡처 118장 오탐 스윕을
+# 근거로 조각 '태되' 하나만 추가했습니다 (test_dg_card_console_offline 이 프레임 재현을 고정). 그 외 unknown
+# 문자열은 여전히 판정 불가여야 하고(폴백이 담당), selected/challenge 는 기존 계약 그대로여야 합니다.
+Assert-Case '판정식 조각 앵커(됨/선택/선태 → 태되 elseif → 도전 정확 일치 순서)' `
   ($workerSource.Contains("`$wordText.Contains('됨') -or `$wordText.Contains('선택') -or `$wordText.Contains('선태')") -and
-   $workerSource.Contains("`$wordText -eq '도전'")) 'True'
+   ($workerSource -match "Contains\('선태'\)\) \{\s+\`$isSelected = \`$true\s+\} elseif \(\`$wordText\.Contains\('태되'\)\) \{\s+\`$isSelected = \`$true\s+\`$matchedFragmentWord = \`$wordText\s+\} elseif \(\`$wordText -eq '도전'\)")) 'True'
 function Get-CardWordVerdict {
   param([string]$WordText)   # 소스 판정식 사본 (앵커가 동기화를 보증)
   if ($WordText.Contains('됨') -or $WordText.Contains('선택') -or $WordText.Contains('선태')) { return 'selected' }
+  if ($WordText.Contains('태되')) { return 'selected' }
   if ($WordText -eq '도전') { return 'challenge' }
   return 'unknown'
 }
 $cardWordCases = @(
-  # 콘솔 실사고 문자열 (09-06/09-07 동일) - 판정 불가 = 폴백 담당.
-  # ★ 주의(Codex): 사고 로그의 '人에E}1되'는 여러 Word 를 무구분 합친 값이라 실제 단어
-  #   분해는 불명입니다. 폴백 후보는 '한 단어에 글자·숫자 3자 이상'이 조건이므로, 전부
-  #   2자 이하 단어로 쪼개져 있었다면 후보 없음 = 기존 코드 4 정지 유지(안전 방향).
-  #   그래서 v2.1.6 부터 로그를 '|' 구분 + set-fail 단어별 좌표로 남겨 실측을 확보합니다.
+  # 콘솔 실사고 문자열 (09-06/09-07 동일) - 판정 불가 = 폴백 담당. 09-16 프레임 재현으로 배율 5 보조의
+  # **단일 단어**임이 확인됨(좌표 457,314). '태되' 조각이 없는 이 문자열은 그대로 unknown - 콘솔 구제는 3번째
+  # 판독(배율 3 주 ',k•i태되')이 담당.
   @{ W = '人에E}1되'; E = 'unknown' }
-  # 오늘 오프라인 재현 (원본 픽셀 × 배율 - 실효 배율 높은 계열의 깨짐)
-  @{ W = '人1태되'; E = 'unknown' }
-  @{ W = 'Ad태되'; E = 'unknown' }
-  @{ W = '人에태됩|'; E = 'unknown' }
+  @{ W = 'RdEHEl'; E = 'unknown' }     # 콘솔 배율 5 주 (09-16 재현)
+  # 09-16 조각 '태되' 추가 - 콘솔 12장 결정적 문자열 + 보관 118장 스윕에서 전부 진짜 선택됨(도전 9건 출현 0)
+  @{ W = '人1태되'; E = 'selected' }   # 콘솔 배율 3 보조·배율 4 주/보조·배율 2 보조 (48회)
+  @{ W = ',k•i태되'; E = 'selected' }  # 콘솔 배율 3 주 - 1회전 3번째 판독에서 확정되는 자리
+  @{ W = 'Ad태되'; E = 'selected' }    # 09-07 오프라인 재현(1908, 배율 3)
+  @{ W = 'A해태되'; E = 'selected' }   # 118장 스윕 (neg01 1272 배율 3)
+  @{ W = 'A-t태되'; E = 'selected' }   # 118장 스윕 (1908 배율 2)
+  @{ W = ',너태되'; E = 'selected' }   # 118장 스윕 (09-16 19:43 오류 캡처 1273 배율 4)
+  @{ W = 'A-I태되'; E = 'selected' }   # 09-16 21:00:41 실기 (RDP 1273 창 첫 판독 - 콘솔 아닌 정상 세션에서도 조각이 먼저 잡힘, 해제 클릭 → 도전 확인 정상)
+  @{ W = '人에태됩|'; E = 'unknown' }  # '태됩' - 조각 없음, 유지
   # 과거 실측 깨짐
   @{ W = '서대되'; E = 'unknown' }     # 2026-07-31 (1273 창 s5 - 당시 s3 정상)
   @{ W = '선태되'; E = 'selected' }    # 2026-07-19 ('선태' 조각)
@@ -55,6 +61,8 @@ $cardWordCases = @(
   @{ W = '선택됨'; E = 'selected' }
   @{ W = '도전'; E = 'challenge' }
   @{ W = '도전!'; E = 'unknown' }      # 정확 일치 - 설명문 앞단어 구분 계약
+  @{ W = '태되'; E = 'selected' }      # 조각 단독 (판정면 정의)
+  @{ W = '도젓'; E = 'unknown' }       # 가상의 '도전' 깨짐 - 조각과 무관함을 명시 (실측 아님)
 )
 foreach ($case in $cardWordCases) {
   Assert-Case "판정 [$($case.W)]" (Get-CardWordVerdict -WordText $case.W) $case.E
@@ -99,6 +107,19 @@ foreach ($case in $seqCases) {
 }
 
 # ---- 4. 배선 가드 ----
+# 09-16 '태되' 조각: 배율 회전은 불변(배율 2 추가안은 12장 중 8장만 살려 철회), 조각 매치는 회전마다 초기화되는
+# $matchedFragmentWord 로 추적해 확정 회전에만 [진단] 1줄 (주석 뺀 사본 검사)
+$toggleBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Set-DgToggleCard'))
+$toggleCode = ((($toggleBody -split "`r?`n") | ForEach-Object { ($_ -split '#', 2)[0] }) -join "`n")
+Assert-Case '배선: 카드 배율 회전 불변 = 1~2회전·재확인 @(5, 3, 4) 2곳 + 그 외 @(5) 1곳 (배율 2 추가안 철회)' `
+  (([regex]::Matches($toggleCode, '\$cardScales = @\(5, 3, 4\)').Count -eq 2) -and
+   ([regex]::Matches($toggleCode, '\$cardScales = @\(5\)').Count -eq 1) -and
+   ([regex]::Matches($toggleCode, '\$cardScales = @\(').Count -eq 3)) 'True'
+Assert-Case "배선: '태되' 매치 추적은 회전 서두 초기화 + 매치 단어 기록 + 확정 뒤 진단 1줄 (실측 단어 기록)" `
+  (($toggleCode -match '\$matchedWordPoint = \$null\s+\$matchedFragmentWord = ''''') -and
+   ($toggleCode.Contains('$matchedFragmentWord = $wordText')) -and
+   ($toggleCode.Contains('if ($matchedFragmentWord) {')) -and
+   ($toggleCode.Contains("조각으로 판독: '`$matchedFragmentWord'"))) 'True'
 Assert-Case '배선: UnknownWordPoint 초기화+정리 4곳(진입/성공/재확인생략/실패클릭)' `
   ([regex]::Matches($workerSource, '\$script:dgToggleUnknownWordPoint = \$null').Count) 4
 Assert-Case '배선: 판정 불가 판독에서 3자+ 최장 단어 후보 갱신' `

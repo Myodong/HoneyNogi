@@ -263,6 +263,17 @@ $w = Select-DgDifficultyWord -Words @(@{ Text = '이컪울'; X = 77; Y = 186 }) 
 Assert-Case '알약: 이컪울(s5) 깨짐도 표준 자리면 채택' "$($w.X)" '77'
 Assert-Case '알약: 이컪움도 표준 자리 밖이면 채택 금지' `
   ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이컪움'; X = 841; Y = 120 }) -Key '어려움' -HardX 660)) $true
+# 2026-09-16 19:43 실사고 (페카 심층 옵션 1273x718): 배율 4·3·2 빈 판독 + s5 '이己1움'@(662,129) 만 - 이형 목록에
+# 없어 3회 미탐 → 코드 1 × 3 정지. 오류 캡처 3장 동일 (오프라인 재현은 test_dg_title_ocr_offline). 이형은 어려움
+# 키 한정이고 짝 제외·앵커/HardX 게이트는 그대로 - 아래 4케이스가 그 계약을 고정 (설계 리뷰 조건: 짝 제외 케이스 필수).
+$w = Select-DgDifficultyWord -Words @(@{ Text = '이己1움'; X = 662; Y = 129 }) -Key '어려움' -HardX 660
+Assert-Case '알약: 이己1움(s5) 깨짐도 표준 자리(심층 옵션 660)면 채택 (09-16 실사고 좌표)' "$($w.X)" '662'
+Assert-Case '알약: 이己1움이 표준 자리 안이라도 매우 짝(오른쪽 70px)이면 제외' `
+  ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '매우'; X = 620; Y = 129 }, @{ Text = '이己1움'; X = 662; Y = 129 }) -Key '어려움' -HardX 660)) $true
+Assert-Case '알약: 이己1움도 앵커 없이 표준 자리 밖이면 채택 금지' `
+  ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이己1움'; X = 841; Y = 120 }) -Key '어려움' -HardX 660)) $true
+Assert-Case '알약: 이己1움 이형은 어려움 Key 전용 (일반 Key 에는 불인정)' `
+  ($null -eq (Select-DgDifficultyWord -Words @(@{ Text = '이己1움'; X = 652; Y = 120 }) -Key '일반')) $true
 # 다중 스케일 배선: Find-DgDifficultyPoint 가 4→3→5 순서 + '어려움' 한정 s2 최종 폴백
 # (2026-08-03 08:50 실사고: 1908 창 실효 배율 저하로 s4/s3/s5 전멸 - s2만 정상 판독.
 #  s2는 위치 게이트가 있는 '어려움' 키에만 추가 - 보수 조건)
