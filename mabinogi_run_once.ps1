@@ -4079,6 +4079,65 @@ function Test-DetailScreen {
   return ((Get-EnterButtonText -Game $Game) -match '입장|장하')
 }
 
+function Test-AbyssPartyNeededPopupText {
+  # "같이 할 동료가 필요합니다" 팝업 판정 (순수 - 진리표 대상). 하단 문구 영역($rgClearExit) 원문에 '만남'과 '입장'
+  # 두 조각이 함께 있을 때만 참 (규칙 7 - 조각 조합, 단일 조각 금지). 2026-09-16 01:21 실측 원문 '취소 Space 우연한 만남으로 입장'.
+  # 상세 화면 하단 문구('Space 입장하기'·'파티 찾기 이동하기' 등)에는 '만남'이 없고, 배경의 토글 라벨 '우연한 만남'(x≈1140,y≈341)은
+  # 이 영역(430~850, 570~695) 밖이라 같은 날 상세 캡처 3장(함께하기 켬/끔·혼자하기)에서 전부 거짓 (설계 리뷰 재판독).
+  param([string]$Text)
+  $normalized = ([string]$Text) -replace '\s', ''
+  return ($normalized.Contains('만남') -and $normalized.Contains('입장'))
+}
+
+function Test-AbyssPartyNeededPopup {
+  # 어비스 함께하기에서 '우연한 만남' 스위치가 꺼진 채 입장하기를 누르면 게임이 띄우는 팝업 (2026-09-16 01:15 실기 관측 -
+  # 파티 찾기 / 파티 만들기 / ESC 취소 / Space 우연한 만남으로 입장). 워커가 몰라서 매칭 대기 300초를 그대로 태웠던 화면.
+  # 캡처 실패 중에는 판정하지 않습니다 (규칙 15).
+  param([System.Diagnostics.Process]$Game)
+  if ($script:screenCaptureFailing) { return $false }
+  $bottomText = Get-GameOcrText -Game $Game
+  if ($script:screenCaptureFailing) { return $false }
+  return (Test-AbyssPartyNeededPopupText -Text $bottomText)
+}
+
+function Invoke-AbyssPartyNeededPopupEnter {
+  # 팝업의 '우연한 만남으로 입장' 버튼을 **글자 앵커**로 찾아 클릭합니다 (설정이 '우연한 만남'일 때만 부름 - 그 버튼이 곧 원하는
+  # 동작). Space 는 쓰지 않습니다: 팝업이 사라진 프레임이면 Space 가 상세 화면의 '입장하기'로 가지만, 글자 앵커는 좌표가 없어
+  # 클릭 자체가 없습니다(상태 기반). 탐색도 하단 문구 영역으로 한정 - 전체 화면에는 배경 토글 라벨 '우연한 만남'이 있고
+  # Find-GameTextPoint 는 첫 일치 단어를 돌려줍니다 (설계 리뷰). 반환 = "팝업을 처리했다"(클릭 전송/취소/커서 미확인 모두).
+  # 클릭 계약(규칙 4): 전송만 기록, user-active 는 기다린 뒤 호출부 재판독, cursor-not-ready 는 호출부 대기 예산을 소모.
+  param([System.Diagnostics.Process]$Game)
+  # 앵커는 버튼 중앙에 가까운 '만남'(단어 '만남으로', 버튼 x≈600~845 의 중앙부 - 실측 732,617)을 먼저, 없으면 '우연한'(660,617).
+  # 맨 왼쪽 단어 '우연한'은 'Space' 배지와 붙어 읽히면 중심이 버튼 좌측 가장자리로 밀릴 수 있음 (반박 검증 지적).
+  # 둘 다 없으면(단어 분할이 다름) 회차당 1회 로그를 남깁니다 - 무음으로 300초를 태우면 관측 사고와 같은 결말에 진단 흔적만 사라짐.
+  $enterPoint = $null
+  foreach ($anchorWord in @('만남', '우연한')) {
+    $enterPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+      -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -SearchText $anchorWord
+    if ($enterPoint) { break }
+  }
+  if (-not $enterPoint) {
+    if (-not $script:abyssPartyPopupAnchorMissLogged) {
+      $script:abyssPartyPopupAnchorMissLogged = $true
+      Write-RunLog "[경고] '같이 할 동료가 필요합니다' 팝업 문구는 읽혔는데 '우연한 만남으로 입장' 버튼 글자를 찾지 못했습니다 - 다음 감지에서 재시도 (이번 회차 첫 1회만 기록)"
+    }
+    return $false
+  }
+  Focus-Game -Game $Game
+  $script:lastClickSkipReason = ''
+  Click-ScreenPoint -X $enterPoint.X -Y $enterPoint.Y
+  if ($script:lastClickPerformed) {
+    Write-RunLog "[어비스] '같이 할 동료가 필요합니다' 팝업 - '우연한 만남으로 입장' 클릭 (설정이 우연한 만남)"
+    Start-Sleep -Seconds 1
+  } elseif ($script:lastClickSkipReason -eq 'user-active') {
+    Write-RunLog "[어비스] '같이 할 동료가 필요합니다' 팝업 - 사용자 조작으로 '우연한 만남으로 입장' 클릭을 취소했습니다 (조작 종료 후 재확인)"
+    Wait-UserYieldEnd -Game $Game -Context "'우연한 만남으로 입장' 클릭"
+  } else {
+    Write-RunLog "[어비스] '같이 할 동료가 필요합니다' 팝업 - 커서 확인 실패로 클릭을 건너뜀 (다음 감지에서 재시도)"
+  }
+  return $true
+}
+
 function Test-PartyDetailScreen {
   param([System.Diagnostics.Process]$Game)
 
@@ -14791,23 +14850,96 @@ try {
         if ($toggleState -eq 'unknown') {
           Write-RunLog "[경고] '우연한 만남' 토글 상태를 판별하지 못했습니다(화면 확인 불가) - 클릭 없이 현재 상태로 진행합니다"
         } elseif ($toggleState -ne 'on') {
-          Focus-Game -Game $game
-          Click-GamePoint -Game $game -ReferenceX $ptAbyssChanceToggle[0] -ReferenceY $ptAbyssChanceToggle[1]
-          Start-Sleep -Milliseconds 900
-          if ((Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle) -eq 'on') {
-            Write-RunLog "[어비스] '우연한 만남' 토글 켬"
+          # ★ 2026-09-16 01:15 실기 관측: 토글 켜기 클릭이 사용자 조작으로 취소됐는데(01:15:48 '이번 클릭은 건너뜁니다') 전송 여부를
+          #   읽지 않고 0.9초 뒤 재판독만 해 '켜진 것을 확인하지 못했습니다 - 현재 상태로 진행' → 스위치 꺼진 채 입장하기 → 게임의
+          #   "같이 할 동료가 필요합니다" 팝업을 모른 채 300초 대기 → 오류. 형제 루프('파티 찾기'의 끄기, 던전 경로의 켜기)와 같은
+          #   계약으로 고칩니다 (2026-09-10 합의 설계 ①~④, 설계 리뷰 보완):
+          #   ① 조작으로 취소 → 기다린 뒤 커서 대피 → 목표 던전 제목 확인(난이도 경로 14585 와 같은 계약 - 09-16 캡처 4장 판독 확인)
+          #      → 토글 재판독 → 사용자가 이미 켰으면 재클릭 0회, 여전히 꺼져 있으면 재클릭
+          #   ② 커서 미확인으로 전송 0회 → **다시 읽어** on 이면 진행, unknown 이면 경고 진행, 여전히 off 일 때만 조건부 정지
+          #   ③ 상태를 못 읽음(unknown) → 정지로 확대 금지 - 첫 판독과 같이 경고 진행 (형제 루프의 exit 4 와 다른 승인된 차이)
+          #   ④ 전송된 클릭의 미확인 → 기존 경고 진행 유지 (던전과 통일하지 않음)
+          #   캡처 실패 중에는 판정·정지를 확정하지 않고 재판독으로 돌아갑니다 (규칙 15).
+          $chanceOnSent = $false
+          $chanceOnRecheck = $false
+          $chanceOnUnknown = $false
+          while (-not $chanceOnSent -and $toggleState -ne 'on') {
+            if ($chanceOnRecheck -or (Test-UserRecentlyActive)) {
+              $chanceOnRecheck = $false
+              Wait-UserYieldEnd -Game $game -Context "'우연한 만남' 토글 켜기"
+              Move-CursorOutsideGame -Game $game   # 픽셀 판정도 커서가 덮으면 오판 (판독 직전 대피)
+              try {
+                $targetConfirmed = Test-AbyssDetailTargetConfirmed -Game $game
+              } catch {
+                # 창 좌표 실패는 캡처 실패 플래그를 세운 뒤 예외를 던지므로(-ThrowOnWindowRectFailure) 여기서 받아 아래 동결 분기로
+                # 보냅니다 - 안 받으면 최상위 catch 의 exit 1 로 빠져 동결을 우회 (구현 리뷰 P2). 다른 예외는 그대로 올립니다.
+                if (-not $script:screenCaptureFailing) { throw }
+                $targetConfirmed = $false
+              }
+              if ($script:screenCaptureFailing) {
+                # 제목 판독 도중 캡처 실패 = 판정이 아니라 동결 (규칙 15): 정지 확정 없이 안전 검사·복구 탐침 뒤 재양보·재판독
+                Test-SafeStopDuringCaptureFail
+                [void](Test-CaptureRecovered -Game $game)
+                Start-Sleep -Milliseconds 700
+                $chanceOnRecheck = $true
+                continue
+              }
+              if (-not $targetConfirmed) {
+                Write-RunLog "[완료] 양보 후 목표 던전 상세 화면을 확인하지 못했습니다 - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+                exit 4
+              }
+              # 토글은 픽셀 판독(Get-GamePixel)이라 캡처 실패 플래그를 세우지도 풀지도 않음 - 여기서는 동결 검사 없음 (반박 검증: 죽은 분기)
+              $toggleState = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
+              if ($toggleState -eq 'unknown') {
+                Write-RunLog "[경고] 양보 후 '우연한 만남' 토글 상태를 판별하지 못했습니다(화면 확인 불가) - 클릭 없이 현재 상태로 진행합니다"
+                $chanceOnUnknown = $true
+                break
+              }
+              continue
+            }
+            Focus-Game -Game $game
+            Click-GamePoint -Game $game -ReferenceX $ptAbyssChanceToggle[0] -ReferenceY $ptAbyssChanceToggle[1]
+            if ($script:lastClickPerformed) { $chanceOnSent = $true }
+            elseif ($script:lastClickSkipReason -eq 'user-active') { $chanceOnRecheck = $true }
+            else {
+              # 커서 미확인 (합의 ②): 옛 'off' 로 바로 정지하지 않고 다시 읽습니다 - on 이면 진행, unknown 이면 경고 진행
+              Move-CursorOutsideGame -Game $game
+              $toggleState = Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle
+              if ($toggleState -eq 'unknown') {
+                Write-RunLog "[경고] '우연한 만남' 토글 켜기 클릭을 전송하지 못했고(커서 미확인) 상태도 판별하지 못했습니다 - 클릭 없이 현재 상태로 진행합니다"
+                $chanceOnUnknown = $true
+              } elseif ($toggleState -ne 'on') {
+                Write-RunLog "[완료] '우연한 만남' 토글 켜기 클릭을 전송하지 못했습니다 (커서 미확인) - 오입장을 막기 위해 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+                exit 4
+              }
+              break
+            }
+          }
+          if ($chanceOnUnknown) {
+            # 합의 ③ - 경고는 위에서 남겼고 클릭 없이 진행
+          } elseif ($toggleState -eq 'on' -and -not $chanceOnSent) {
+            # 사용자가 양보 중에 켰거나, 커서 미확인 뒤 재판독으로 켜짐이 확인된 경우 - 클릭 없이 확정
+            Write-RunLog "[어비스] '우연한 만남' 토글 켜짐 확인 (클릭 없이 재판독으로 확인)"
           } else {
-            Write-RunLog "[경고] '우연한 만남' 토글이 켜진 것을 확인하지 못했습니다 - 현재 상태로 진행합니다"
+            Start-Sleep -Milliseconds 900
+            if ((Get-ChanceToggleState -Game $game -Point $ptAbyssChanceToggle) -eq 'on') {
+              Write-RunLog "[어비스] '우연한 만남' 토글 켬"
+            } else {
+              Write-RunLog "[경고] '우연한 만남' 토글이 켜진 것을 확인하지 못했습니다 - 현재 상태로 진행합니다"
+            }
           }
         } else {
           Write-RunLog "[어비스] '우연한 만남' 토글 켜짐 확인"
         }
 
-        # 입장하기 클릭 → 상세 화면이 닫히고 필드에서 매칭 대기가 시작됩니다
+        # 입장하기 클릭 → 상세 화면이 닫히고 필드에서 매칭 대기가 시작됩니다.
+        # "같이 할 동료가 필요합니다" 팝업(스위치 꺼진 채 입장하기 - 위 ③·④ 갈래)이 뜨면 상세 화면 글자('입장하기')가 그대로 읽혀
+        # 종료 조건이 안 되고 옛 좌표를 30초 재클릭하다 초과할 수 있으므로(설계 리뷰: 01:21 오류 캡처에서 Test-PartyDetailScreen 참),
+        # 팝업을 **종료 조건**으로 삼아 아래 매칭 대기의 복구(우연한 만남으로 입장 클릭)로 넘기고, 팝업 중에는 재클릭하지 않습니다.
         Write-RunLog '[어비스] 입장하기 클릭 - 파티원 대기 (모이면 자동 입장)'
         Invoke-ClickUntil -Game $game -Point $ptPartyEnter -Description '입장하기 클릭 확인(상세 화면 종료)' `
-          -TimeoutSeconds 30 -Condition { -not (Test-PartyDetailScreen -Game $game) } `
-          -SourceCondition { Test-PartyDetailScreen -Game $game }
+          -TimeoutSeconds 30 -Condition { (Test-AbyssPartyNeededPopup -Game $game) -or -not (Test-PartyDetailScreen -Game $game) } `
+          -SourceCondition { (Test-PartyDetailScreen -Game $game) -and -not (Test-AbyssPartyNeededPopup -Game $game) }
       } else {
         # 파티찾기: 토글이 켜져 있으면 '파티 찾기' 버튼이 없고 그 자리가 넓은 입장하기라
         # 잘못 누르면 우연한 만남으로 입장돼 버립니다. 반드시 토글을 먼저 끕니다.
@@ -14893,6 +15025,13 @@ try {
       }
       Wait-ForScreen -Game $game -TimeoutSeconds $timeoutPartyMatch -Description '파티 매칭 완료 후 던전 입장' -Condition {
         if (Invoke-PurchasePopupSweep -Game $game) { return $false }
+        # "같이 할 동료가 필요합니다" 팝업 복구 (2026-09-16 관측 - 우연한 만남 모드에서 스위치가 꺼진 채 입장하기를 누른 경우):
+        # 설정이 '우연한 만남'이면 팝업의 '우연한 만남으로 입장' 버튼이 곧 원하는 동작이라 글자 앵커로 눌러 매칭을 시작시킵니다.
+        # 처리한 회전은 같은 프레임으로 판정하지 않고 재판독 (스윕과 같은 계약).
+        if ($abyssMatching -eq '우연한 만남' -and (Test-AbyssPartyNeededPopup -Game $game)) {
+          [void](Invoke-AbyssPartyNeededPopupEnter -Game $game)
+          return $false
+        }
         Test-InDungeonQuest -Game $game
       }
       Write-RunLog '[어비스] 던전 입장 완료 감지'

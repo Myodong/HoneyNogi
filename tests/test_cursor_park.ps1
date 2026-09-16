@@ -198,8 +198,8 @@ Assert-Case '배선: 대피(줄 끝 주석 없는 형태)는 판독 직전에만
 #   없이 카드를 눌렀습니다(은동전 오소모 - Codex P2). 양보 재판독분이라 줄 끝 주석을 답니다.
 # 2026-09-10 +2: 던전·사냥터 '파티 찾기'의 양보 후 재판독 직전 대피 (전송 확인 없이 한 번만
 #   누르던 것을 '미전송만 재시도'로 바꾸면서, 재클릭 허가 판정 전에 커서를 물립니다)
-Assert-Case '배선: 대피 호출 총량 (양보 재판독 16곳 포함 - 늘리면 이 숫자도 함께)' `
-  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$[Gg]ame').Count) 28
+Assert-Case '배선: 대피 호출 총량 (양보 재판독 18곳 포함 - 늘리면 이 숫자도 함께)' `
+  ([regex]::Matches($workerRaw, '(?m)^\s*Move-CursorOutsideGame -Game \$[Gg]ame').Count) 30   # 2026-09-16 어비스 '우연한 만남' 켜기 루프 +2 (양보 후·커서 미확인 후 재판독 직전 대피)
 # 생활의 네 자리를 이름으로도 고정합니다 (개수만 맞추고 엉뚱한 데 넣는 것을 막음)
 Assert-Case '배선: 생활 창 열림 판정이 판독 전에 대피' `
   ([bool]([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-LifeWindowOpen')) -match

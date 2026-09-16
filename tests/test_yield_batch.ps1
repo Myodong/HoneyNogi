@@ -350,10 +350,11 @@ Assert-Case '난이도 확인: 양보 후 RefindPoint 재탐색(호출부 5곳 �
    ($workerCode.Contains('Write-RunLog "[경고] 양보 후 난이도 ''$Label'' 글자를 다시 찾지 못했습니다 - 재클릭하지 않고 확인 실패로 처리합니다"')) -and
    ($workerCode.Contains('$script:difficultyConfirmYieldPending = $true'))) 'True'
 # 2026-09-10: 같은 '재판독 계약'을 던전·사냥터 '파티 찾기' 2곳이 추가로 채택했습니다
-#   (단일 줄 elseif 형은 토글 3곳 전용 그대로 - 파티찾기는 여러 줄 형태)
-Assert-Case '토글 3곳 + 파티찾기 2곳: user-active 생략 뒤에는 유휴 여부와 무관하게 재판독(옛 상태 재사용 금지)' `
-  (([regex]::Matches($workerCode, "elseif \(\`$script:lastClickSkipReason -eq 'user-active'\) \{ \`$\w+Recheck = \`$true \}").Count -eq 3) -and
-   ([regex]::Matches($workerCode, '\$\w+Recheck -or \(Test-UserRecentlyActive\)').Count -eq 5)) 'True'
+#   (단일 줄 elseif 형은 토글 전용 그대로 - 파티찾기는 여러 줄 형태)
+# 2026-09-16: 어비스 '우연한 만남' 켜기가 4곳째 (실기 재현 - 취소된 켜기 클릭을 경고 진행하던 자리, test_abyss_chance_toggle_yield)
+Assert-Case '토글 4곳 + 파티찾기 2곳: user-active 생략 뒤에는 유휴 여부와 무관하게 재판독(옛 상태 재사용 금지)' `
+  (([regex]::Matches($workerCode, "elseif \(\`$script:lastClickSkipReason -eq 'user-active'\) \{ \`$\w+Recheck = \`$true \}").Count -eq 4) -and
+   ([regex]::Matches($workerCode, '\$\w+Recheck -or \(Test-UserRecentlyActive\)').Count -eq 6)) 'True'
 Assert-Case '어비스: 복귀 루프 클릭 로그 정직화 5곳(메뉴/ESC/공지 X/나가기 + 생략 시 마감 연장)' `
   (([regex]::Matches($workerCode, "클릭 건너뜀 \(\`$\(if \(\`$script:lastClickSkipReason -eq 'user-active'\)").Count -ge 4) -and
    ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count -ge 6)) 'True'
