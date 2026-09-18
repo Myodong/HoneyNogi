@@ -355,9 +355,12 @@ Assert-Case '난이도 확인: 양보 후 RefindPoint 재탐색(호출부 5곳 �
 Assert-Case '토글 4곳 + 파티찾기 2곳: user-active 생략 뒤에는 유휴 여부와 무관하게 재판독(옛 상태 재사용 금지)' `
   (([regex]::Matches($workerCode, "elseif \(\`$script:lastClickSkipReason -eq 'user-active'\) \{ \`$\w+Recheck = \`$true \}").Count -eq 4) -and
    ([regex]::Matches($workerCode, '\$\w+Recheck -or \(Test-UserRecentlyActive\)').Count -eq 6)) 'True'
-Assert-Case '어비스: 복귀 루프 클릭 로그 정직화 5곳(메뉴/ESC/공지 X/나가기 + 생략 시 마감 연장)' `
-  (([regex]::Matches($workerCode, "클릭 건너뜀 \(\`$\(if \(\`$script:lastClickSkipReason -eq 'user-active'\)").Count -ge 4) -and
-   ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count -ge 6)) 'True'
+# 2026-09-18: '나가기' 는 Invoke-AbyssExitClick 헬퍼로 이동(전송 확인·사유 로그는 헬퍼 안) - 복귀 루프 안의 생략 로그는 메뉴·ESC 2곳.
+# 개수는 워커 전체가 아니라 Return-ToAbyssSelection 본문(주석 제거)에서 셉니다 (전체 카운트는 던전·사냥터 줄로 통과해 버림)
+$abyssReturnCode = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection')))
+Assert-Case '어비스: 복귀 루프 클릭 로그 정직화 2곳(메뉴/ESC) + 나가기는 헬퍼 위임' `
+  (([regex]::Matches($abyssReturnCode, "클릭 건너뜀 \(\`$\(if \(\`$script:lastClickSkipReason -eq 'user-active'\)").Count -eq 2) -and
+   ([regex]::Matches($abyssReturnCode, 'Invoke-AbyssExitClick -Game \$Game').Count -eq 1)) 'True'
 Assert-Case '어비스: 스텔라·X 후보 카운터는 실제 클릭 뒤에만 증가(생략으로 상한 소진 금지)' `
   (($workerCode -match '\$script:lastClickPerformed\) \{\s+\$stellaHandled\+\+') -and
    ($workerCode -match '\$script:lastClickPerformed\) \{\s+\$xAttempts\+\+')) 'True'
@@ -372,9 +375,13 @@ Assert-Case "배선: '다음 층으로' 양보 사실을 '다시 하기' 게이�
 Assert-Case "배선: 40초 루프의 '계속하기'·공지 닫기 로그는 실제 클릭일 때만" `
   (([regex]::Matches($workerCode, "'계속하기' 클릭을 건너뜀").Count -eq 2) -and
    ($workerCode.Contains('공지 게시판 X 닫기 클릭을 건너뜀'))) 'True'
-# 어비스 복귀 루프의 클릭 생략 → 즉시 마감 연장 (메뉴·ESC·공지 X·나가기 4곳 + 스텔라 2·X 후보 1 = elseif)
-Assert-Case '배선: 어비스 복귀 루프 클릭 생략 시 즉시 마감 연장 7곳' `
-  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count) 9   # 서두 게이트 1 + 복구 ESC 게이트 1 + 클릭 생략 7
+# 어비스 복귀 루프의 클릭 생략 → 즉시 마감 연장 (메뉴·ESC·공지 X 3곳 + 스텔라 2·X 후보 1 = elseif)
+# 2026-09-18: '나가기' 분기는 Invoke-AbyssExitClick 헬퍼로 이동 - 헬퍼의 Wait-UserYieldEnd 가 $script:userYieldTotalMs 에
+# 누적하고 이 루프의 while 조건(Get-YieldAdjustedDeadline)이 반영하므로 직접 호출 1곳이 줄어 9→8 (캡처 동결은 FrozenMs 로 반영)
+Assert-Case '배선: 어비스 복귀 루프 클릭 생략 시 즉시 마감 연장 6곳' `
+  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count) 8   # 서두 게이트 1 + 복구 ESC 게이트 1 + 클릭 생략 6
+Assert-Case "배선: 어비스 복귀 루프 '나가기' 분기는 헬퍼 FrozenMs 를 마감에 반영" `
+  ([bool]($workerCode -match "Invoke-AbyssExitClick -Game \`$Game[^\r\n]*\r?\n\s*if \(\`$exitClick\.FrozenMs -gt 0\) \{ \`$deadline = \`$deadline\.AddMilliseconds")) 'True'
 
 # ---- 4c. Codex 리뷰 반영 (2026-09-08): 양보 후 입장 판정은 긍정 증거 / 결과 화면 인계 / 재탐색 실패 폐기 ----
 $rgQuestTracker = @(0, 0, 10, 10); $ocrKoreanEngine = $null

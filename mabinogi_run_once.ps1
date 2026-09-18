@@ -594,7 +594,7 @@ if ($dungeonProfiles) {
 }
 $ptEnter       = @(Get-ConfigValue $config @('clickPoints', 'enter') @(981, 654))
 $ptClearCenter = @(Get-ConfigValue $config @('clickPoints', 'clearScreenCenter') @(636, 358))
-$ptExitButton  = @(Get-ConfigValue $config @('clickPoints', 'exitButton') @(636, 655))
+$ptExitButton  = @(Get-ConfigValue $config @('clickPoints', 'exitButton') @(636, 655))   # 2026-09-18 보상 화면 3버튼 개편 뒤 클릭에는 미사용(그 자리가 '다시 하기') - 글자 탐색 Invoke-AbyssExitClick. 키는 config 호환용 유지
 $ptEscButton   = @(Get-ConfigValue $config @('clickPoints', 'escButton') @(1083, 89))
 $ptAbyssMenu   = @(Get-ConfigValue $config @('clickPoints', 'abyssMenu') @(971, 387))   # 2026-07-16 UI 개편: 아이콘 그리드 메뉴의 '어비스' 타일 (OCR 실측)
 
@@ -4968,6 +4968,131 @@ function Test-ExitButton {
   $ocrText = Get-GameOcrText -Game $Game
   $normalized = $ocrText -replace '\s', ''
   return $normalized.Contains('나가기')
+}
+
+function Select-AbyssExitWord {
+  param([object[]]$Words)
+
+  # 어비스 보상 화면 하단 버튼에서 '나가기' 단어를 고르는 **순수 판정** (진리표 대상 - 단어 목록을 값으로 받음).
+  # 2026-09-18 실측: 보상 화면이 1버튼(나가기 중앙 636,655)에서 3버튼('[ESC] 나가기' / '[Space] 다시 하기' /
+  # '다른 던전 가기')으로 바뀌어 옛 고정 좌표가 '다시 하기'(재입장) 한복판이 됐습니다
+  # (던전이미지\어비스\20260918_보상화면_3버튼_*.png). 같은 영역(clearAndExitText)·배율 3 판독의 기준좌표:
+  # 나가기@(478,654) / 다세@615·하기@657 (=다시 하기, 배율 4 는 '다셔') / 다른@759·던전@794·가기@829.
+  #  ① 단어 전체가 '나가기' 인 것을 우선 (부분 일치 단어가 앞에 있어도 정확 일치가 이김)
+  #  ② 없으면 '나가' 를 포함하는 첫 단어 ('나가'+'기' 로 쪼개진 판독 대비. '가기' 기준은 '다른 던전 가기' 에도
+  #     걸리므로 금지 - 그 버튼이 어디로 가는지 미실측)
+  #  ③ 없으면 $null (호출부가 재판독 - 고정 좌표 폴백 금지)
+  if (-not $Words) { return $null }
+  foreach ($word in $Words) {
+    if ([string]$word.Text -eq '나가기') { return $word }
+  }
+  foreach ($word in $Words) {
+    if (([string]$word.Text).Contains('나가')) { return $word }
+  }
+  return $null
+}
+
+function Find-AbyssExitButtonPoint {
+  param([System.Diagnostics.Process]$Game)
+
+  # 보상 화면 '나가기' 버튼의 기준 좌표를 글자로 찾습니다 - Test-ExitButton 과 같은 영역·배율·엔진이라
+  # 감지와 클릭이 같은 판독 기준입니다. 반환: @{ Text = 공백 뺀 판독문; Point = @{X;Y} 또는 $null }
+  # (빈 판독과 위치 선택 실패를 호출부가 구분해 로그에 남기도록 판독문을 같이 돌려줍니다.)
+  # 캡처 실패면 Get-GameRegionOcrWords 가 빈 배열 → Text '' / Point $null - 호출부는 플래그로 동결을 판단합니다.
+  $words = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+      -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $joined = (($words | ForEach-Object { [string]$_.Text }) -join '') -replace '\s', ''
+  $selected = Select-AbyssExitWord -Words $words
+  $point = $null
+  if ($selected) { $point = @{ X = [int]$selected.X; Y = [int]$selected.Y } }
+  return @{ Text = $joined; Point = $point }
+}
+
+function Invoke-AbyssExitClick {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$LogPrefix = '[어비스]',
+    [string]$Context = '나가기 클릭'
+  )
+
+  # 보상 화면 '나가기' 를 글자 위치로 클릭합니다 (2026-09-18 3버튼 개편 대응 - 고정 좌표 $ptExitButton 금지).
+  # 반환: @{ Result = 'clicked' | 'gone' | 'skipped'; FrozenMs = 캡처 실패로 멈춰 있던 ms }
+  #  'clicked' = 전송 확인 / 'gone' = 나가기 위치가 없고 **후속 화면(선택 화면·필드 HUD·ESC 메뉴)이 확인됨**
+  #  (사용자가 이미 눌렀거나 전환) - 호출부의 상태 기반 복귀가 이어받음 / 'skipped' = 커서 미확인으로 3회
+  #  전송 실패 - 호출부 복귀 루프가 재클릭·마감을 담당.
+  #  위치도 후속 화면도 확인되지 않는 판독(캡처 성공)이 **3회 이상이고 첫 미검출부터 20초(동결 시간 제외)** 가
+  #  지나면 진단 캡처를 남기고 코드 4 로 정지합니다 - '다시 하기' 자리를 누르는 재입장 오클릭보다 정지가 낫습니다
+  #  (사용자 결정 2026-09-18, 설계 리뷰 반영). 20초는 옛 복구 루프의 '알 수 없는 화면' 허용치와 같은 값입니다 -
+  #  구현 리뷰 실측: 나가기 클릭 → 필드 HUD 확인이 6~7초(로그 4건)라, 복구 루프가 페이드 중 Test-ExitButton 을
+  #  참으로 보고 들어오면 회전 3번(6~9초)만으로는 정상 전이 도중에 정지할 수 있어 시간 기준을 함께 둡니다.
+  # 계약: 규칙 4 (조작 중 생략은 예산 미소모, 양보 뒤 옛 좌표 재클릭 금지 → 재판독) / 규칙 15 (캡처 실패는
+  # 동결 - 회전마다 판독으로 캡처를 시도하고 안전 확인을 거침, 시도 미소모). 부모 마감이 있는 호출부는
+  # FrozenMs 만큼 마감을 늘립니다 (양보는 Wait-UserYieldEnd 가 $script:userYieldTotalMs 에 누적하므로 별도 가산 없음).
+  $missCount = 0
+  $missStart = $null            # 첫 미검출 시각 (20초 기준점)
+  $frozenAtMissStart = [double]0
+  $cursorMissCount = 0
+  $frozenMs = [double]0
+  while ($true) {
+    $turnStart = Get-Date
+    $read = Find-AbyssExitButtonPoint -Game $Game
+    $passed = ''
+    if ((-not $read.Point) -and (-not $script:screenCaptureFailing)) {
+      # 나가기 위치가 없음 - 후속 화면이 보이면 이미 지나간 것 (선택 화면 → 필드 HUD → ESC 메뉴 순.
+      # ESC 메뉴 판정은 상세 화면 헤더 오탐 이력이 있어 맨 뒤 - 이슈 목록 1절 타 PC 제보 ③)
+      if (Test-AbyssSelectionScreen -Game $Game) { $passed = '선택 화면' }
+      elseif (Test-HomeEndEscHud -Game $Game) { $passed = '필드 HUD' }
+      elseif (Test-AbyssMenu -Game $Game) { $passed = 'ESC 메뉴' }
+    }
+    if ($script:screenCaptureFailing) {
+      # 캡처 실패 = 판정이 아니라 동결 (규칙 15) - 위 판독이 이번 회전의 캡처 시도이자 복구 탐침
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Milliseconds 700
+      $frozenMs += ((Get-Date) - $turnStart).TotalMilliseconds
+      continue
+    }
+    # 조작 중이면 클릭하지 않고 끝날 때까지 기다린 뒤 **다시 읽습니다** (옛 좌표 재클릭 금지 - 시도 미소모)
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context $Context
+      continue
+    }
+    if ($read.Point) {
+      $script:lastClickSkipReason = ''
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $read.Point.X -ReferenceY $read.Point.Y
+      if ($script:lastClickPerformed) {
+        Write-RunLog "$LogPrefix $Context - 글자 탐색 기준좌표 ($($read.Point.X),$($read.Point.Y))"
+        return @{ Result = 'clicked'; FrozenMs = $frozenMs }
+      }
+      if ($script:lastClickSkipReason -eq 'user-active') {
+        Wait-UserYieldEnd -Game $Game -Context $Context
+        continue
+      }
+      $cursorMissCount++
+      Write-RunLog "$LogPrefix $Context 건너뜀 (커서 미확인 $cursorMissCount/3)"
+      if ($cursorMissCount -ge 3) {
+        Write-RunLog "[안내] $Context 을(를) 커서 미확인으로 3회 전송하지 못했습니다 - 화면 상태 판정으로 넘깁니다"
+        return @{ Result = 'skipped'; FrozenMs = $frozenMs }
+      }
+      Start-Sleep -Milliseconds 700
+      continue
+    }
+    if ($passed) {
+      Write-RunLog "[안내] $Context - 보상 화면 '나가기' 가 보이지 않고 $passed 이(가) 확인돼 클릭 없이 진행합니다 (판독: '$($read.Text)')"
+      return @{ Result = 'gone'; FrozenMs = $frozenMs }
+    }
+    $missCount++
+    if ($null -eq $missStart) { $missStart = Get-Date; $frozenAtMissStart = $frozenMs }
+    # 첫 미검출부터의 경과에서 그 사이 캡처 동결 시간을 뺍니다 (동결은 판정 시간을 소모하지 않음 - 규칙 15)
+    $missElapsedMs = ((Get-Date) - $missStart).TotalMilliseconds - ($frozenMs - $frozenAtMissStart)
+    Write-RunLog "$LogPrefix 보상 화면 '나가기' 위치를 찾지 못했습니다 - 재판독 ($missCount회, $([int]($missElapsedMs / 1000))초, 판독: '$($read.Text)')"
+    if ($missCount -ge 3 -and $missElapsedMs -ge 20000) {
+      Write-LifeDiagnostics -Game $Game -Context '어비스 나가기 위치 미발견' -CaptureOnly
+      Write-RunLog "[완료] 보상 화면에서 '나가기' 버튼 위치를 찾지 못했습니다 (재판독 $missCount회·$([int]($missElapsedMs / 1000))초, 판독: '$($read.Text)') - 재입장 오클릭('다시 하기' 자리)을 막기 위해 정지합니다"
+      exit 4
+    }
+    Start-Sleep -Milliseconds 1000
+  }
 }
 
 function Test-HomeEndEscHud {
@@ -10356,9 +10481,9 @@ function Invoke-AbyssPartyMemberCycle {
   }
 
   # --- 4. 나가기 → 필드 복귀 확인. 파티원은 어비스 선택 화면으로 복귀하지 않습니다 ---
-  Focus-Game -Game $Game
-  Click-GamePoint -Game $Game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
-  Write-RunLog '[파티원] 나가기 클릭'
+  # 2026-09-18 3버튼 개편: 글자 위치 클릭 (옛 고정 좌표는 '다시 하기' 자리). 전송 실패·이탈은 헬퍼 로그로 남고
+  # 이어지는 HUD 대기가 상태를 확인합니다 (재클릭 없는 30초 대기는 기존 한계 - 이슈 목록 1절 파티원 항목)
+  [void](Invoke-AbyssExitClick -Game $Game -LogPrefix '[파티원]' -Context '나가기 클릭')
   Wait-ForScreen -Game $Game -TimeoutSeconds $timeoutHud -Description '던전 밖(필드) 복귀' -Condition {
     Test-HomeEndEscHud -Game $Game
   }
@@ -10545,16 +10670,11 @@ function Return-ToAbyssSelection {
     # 4) 보상 화면(나가기 버튼)이 아직 남아 있으면 나가기 클릭 (앞선 클릭이 빗나간 경우 복구)
     if (Test-ExitButton -Game $Game) {
       $unknownSince = $null
-      Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
-      if ($script:lastClickPerformed) {
-        Write-RunLog '[어비스] 나가기 클릭 (복구 재시도)'
-      } else {
-        Write-RunLog "[어비스] 나가기 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 회전에서 재시도"
-        if ($script:lastClickSkipReason -eq 'user-active') {
-          Invoke-UserYieldWithDeadline -Game $Game -Context '어비스 선택 화면 복귀' -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs)
-        }
-      }
+      # 2026-09-18 3버튼 개편: 고정 좌표 대신 글자 위치 클릭 - 전송 확인·양보·캡처 동결은 헬퍼가 담당합니다.
+      # 헬퍼 안에서 캡처 실패로 멈춘 시간은 이 루프의 마감이 모르므로 되돌려 줍니다 (양보는 헬퍼의
+      # Wait-UserYieldEnd 가 $script:userYieldTotalMs 에 누적해 위 Get-YieldAdjustedDeadline 이 반영 - 중복 가산 금지)
+      $exitClick = Invoke-AbyssExitClick -Game $Game -LogPrefix '[어비스]' -Context '나가기 클릭 (복구 재시도)'
+      if ($exitClick.FrozenMs -gt 0) { $deadline = $deadline.AddMilliseconds($exitClick.FrozenMs) }
       Start-Sleep -Seconds 2
       continue
     }
@@ -14497,8 +14617,8 @@ try {
   if ($startExitDetected) {
     Write-RunLog '[어비스] 시작: 보상 화면(나가기) 감지 - 마무리부터 진행'
     if ($script:customMode -and -not $script:customCleanupOnly) { Write-CustomClearMarker }
-    Click-GamePoint -Game $game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
-    Write-RunLog '[어비스] 나가기 클릭'
+    # 2026-09-18 3버튼 개편: 글자 위치 클릭 (고정 좌표 (636,655) 는 '다시 하기' 자리 - 재입장 오클릭)
+    [void](Invoke-AbyssExitClick -Game $game -LogPrefix '[어비스]' -Context '나가기 클릭')
     Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:customMode -and $script:customCleanupOnly) { 10 } else { 0 })
     Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
     if ($script:customMode -and $script:customCleanupOnly) { exit 10 }
@@ -14516,9 +14636,8 @@ try {
       -SourceCondition { Test-DungeonClearPrompt -Game $game }
     Write-RunLog '[어비스] 나가기 버튼 감지'
     if ($script:customMode -and -not $script:customCleanupOnly) { Write-CustomClearMarker }
-    Focus-Game -Game $game
-    Click-GamePoint -Game $game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
-    Write-RunLog '[어비스] 나가기 클릭'
+    # 2026-09-18 3버튼 개편: 글자 위치 클릭 (고정 좌표 (636,655) 는 '다시 하기' 자리 - 재입장 오클릭)
+    [void](Invoke-AbyssExitClick -Game $game -LogPrefix '[어비스]' -Context '나가기 클릭')
     Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:customMode -and $script:customCleanupOnly) { 10 } else { 0 })
     Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
     if ($script:customMode -and $script:customCleanupOnly) { exit 10 }
@@ -15200,9 +15319,9 @@ try {
     Write-CustomClearMarker
   }
   if ($clearOutcome -ne 'selection') {
-    Focus-Game -Game $game
-    Click-GamePoint -Game $game -ReferenceX $ptExitButton[0] -ReferenceY $ptExitButton[1]
-    Write-RunLog '[어비스] 나가기 클릭'
+    # 2026-09-18 3버튼 개편('[ESC] 나가기' / '[Space] 다시 하기' / '다른 던전 가기'): 옛 고정 좌표 (636,655) 는
+    # '다시 하기' 자리라 글자 위치로 클릭합니다 (미검출은 재판독 후 코드 4 - 재입장 오클릭 방지)
+    [void](Invoke-AbyssExitClick -Game $game -LogPrefix '[어비스]' -Context '나가기 클릭')
   }
   Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:customMode -and $script:customCleanupOnly) { 10 } else { 0 })
   Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
