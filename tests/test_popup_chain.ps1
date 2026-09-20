@@ -224,6 +224,9 @@ Assert-Case '보상: 공용 소함수 게이트(아이템을누르/상세정보)
    ($rewardFnCode -match '-ReferenceX 400 -ReferenceY 628')) 'True'
 Assert-Case '보상: BottomText 전달 여부는 PSBoundParameters 로 판정 (재판독 생략 정밀화)' `
   ($rewardFnCode.Contains("PSBoundParameters.ContainsKey('BottomText')")) 'True'
+# 2026-09-20 거짓 로그 정정: '확인 클릭' 은 전송된 클릭에만, 생략은 '건너뜀' - 반환 $true 는 그대로 (협동 완료와 같은 계약)
+Assert-Case '보상: 확인 클릭 로그는 lastClickPerformed 조건부 (건너뜀 분기 포함, 반환 true 유지)' `
+  ([bool]($rewardFnCode -match 'Click-ScreenPoint -X \$confirmPoint\.X -Y \$confirmPoint\.Y\s*\n\s*Write-RunLog \$\(if \(\$script:lastClickPerformed\) \{ "\[안내\] \$\{LogPrefix\}퀘스트 클리어 보상 화면 감지 - 확인 클릭" \} else \{ "[^\n]*확인 클릭 건너뜀[^\n]*\}\)\s*\n\s*Start-Sleep -Seconds 1\s*\n\s*return \$true')) 'True'
 Assert-Case '보상: 스윕은 이미 읽은 하단 문구를 넘겨 재판독 생략' `
   ([bool]($workerSource -match 'if \(Close-QuestRewardScreen -Game \$Game -BottomText \$bottomText\) \{ return \$true \}')) 'True'
 Assert-Case '보상: 클리어 문구 판정이 판독문을 스태시 (조기 return 전)' `

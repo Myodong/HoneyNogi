@@ -521,11 +521,11 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,900}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v14 네이티브 1908 계열, v15 트래커 재확장)' `
-  ($workerSource -match '\$coordsVersionCurrent = 15') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v14 네이티브 1908 계열, v15 트래커 재확장, v16 난이도 알약 상단 확장)' `
+  ($workerSource -match '\$coordsVersionCurrent = 16') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 15' ([int]$auditConfigJson.coordsVersion) 15
+Assert-Case 'config: coordsVersion 16' ([int]$auditConfigJson.coordsVersion) 16
 # v14 (2026-08-14 15:49 실사고): 네이티브 1908 추적기 첫 줄('…1층 2구역 소탕')이 ref y204 -
 # 구영역 상단 212에 잘려 '구역' 소실 → 클리어 대기 연장 안전망 불발 → 60초 하드 타임아웃.
 # 상단 190 확장 (하단 267 유지 - 구 범위가 신 범위의 부분집합이라 기존 소비처 보존).
@@ -709,4 +709,29 @@ Assert-Case '어비스 메뉴: 광고 없을 때 위치(y387)를 덮음' (($abys
 Assert-Case '어비스 메뉴: 광고 있을 때 위치(y531)를 덮음' (($abyssTop -le 531) -and ($abyssBottom -ge 531)) $true
 # 배너 영역(y33~175)은 **일부러 제외**합니다 - 포함하면 광고 문구의 '어비스'를 누릅니다
 Assert-Case '어비스 메뉴: 상단 광고 배너 영역은 제외 (광고 문구 오클릭 방지)' ($abyssTop -ge 176) $true
+
+# v16 (2026-09-20, 09-15 타 PC 제보 ①): 어비스 상세 난이도 알약 영역 difficultyTabs 상단 150→120·높이 60→90 (하단 210 유지).
+# 제보 캡처(1272 창)의 알약이 y136~162 라 옛 상단 150 이 글자 한가운데를 지나 '매우 어려움' 미탐 → 일반 반복은 '현재 선택된
+# 난이도로 진행' 경고(제보 로그 9회차 중 3회차 관측), 커스텀은 코드 4 정지(코드 확정, 관측 아님). 개발 PC 배치는 y163~195.
+# 판독 재현(고치기 전 재현 → 고친 후 통과)은 test_difficulty_tabs_offline.
+Assert-Case 'v16: difficultyTabs 워커 기본값 (30,120,500,90)' `
+  ($workerSource -match "'difficultyTabs'\) @\(30, 120, 500, 90\)") $true
+$difficultyRegion = $auditConfigJson.ocrRegions.difficultyTabs
+Assert-Case 'config: difficultyTabs 영역이 워커 기본값과 일치' (($difficultyRegion -join ',')) '30,120,500,90'
+$difficultyTop = [int]$difficultyRegion[1]; $difficultyBottom = $difficultyTop + [int]$difficultyRegion[3]
+Assert-Case 'v16: 제보 배치 알약(y136~162)을 통째로 덮음' (($difficultyTop -le 136) -and ($difficultyBottom -ge 162)) $true
+Assert-Case 'v16: 개발 PC 배치 알약(y163~195)도 통째로 덮음' (($difficultyTop -le 163) -and ($difficultyBottom -ge 195)) $true
+Assert-Case 'v16: 하단 경계 210 유지 (옛 영역이 새 영역의 부분집합 - 소비처 보존)' $difficultyBottom 210
+
+# 2026-09-20 계측 2줄 (판정 미사용 - 존재·가드만 고정): 창 정보 1줄은 값마다 try/catch 로 '측정 불가' 처리, 가드 소진 1줄은
+# $initialPopupRounds++ 직후 10 도달 시. 둘 다 제보 로그 grep 의 앵커라 문구가 바뀌면 분석 grep 이 깨집니다.
+Assert-Case '계측: 창 정보 1줄이 창 정렬 블록 뒤에 있고 DPI 조회가 try 안 (구 OS 진입점 없음 → 측정 불가)' `
+  ($workerSource -match "try \{\r?\n\s+\`$windowDpi = \[HoneyNogiInput\]::GetDpiForWindow\([^\r\n]*\r?\n[\s\S]{0,200}\} catch \{ \}[\s\S]{0,1200}Write-RunLog `"\[준비\] 게임 창 정보: \`${infoW}x\`${infoH}@") $true
+Assert-Case '계측: 창 정보 블록 전체가 try/catch 로 감싸여 실패해도 회차를 끝내지 않음' `
+  ($workerSource -match "try \{\r?\n\s+\`$infoRect = New-Object HoneyNogiInput\+RECT[\s\S]{0,2600}\} catch \{\r?\n\s+Write-RunLog `"\[준비\] 게임 창 정보: 측정 불가") $true
+Assert-Case '계측: 생활 시작 팝업 가드 소진 1줄은 라운드 증가 직후 10 도달 시' `
+  ($workerSource -match "\`$initialPopupRounds\+\+\r?\n\s+if \(\`$initialPopupRounds -ge 10\) \{[\s\S]{0,700}\[생활\] 시작 확인 팝업 가드 소진 \(10라운드") $true
+# 2026-09-20 동승 ⑤: '다음 층으로' 완료 판정의 현행 조건 고정 - 4절 '층 검증 없음' 항목의 표류 감지용 (본체 착수 때 교체)
+Assert-Case "'다음 층으로' 완료 판정: 현행 조건은 제목 '구역' 조각 또는 선택 화면 제목 (층 검증 없음 - 알려진 한계)" `
+  ($workerSource -match "if \(\`$floorTitleNow\.Contains\('구역'\) -or \(Test-DgSelectionTitle -TitleText \`$floorTitleNow\)\) \{\r?\n\s+\`$movedToNextFloor = \`$true") $true
 exit $fails

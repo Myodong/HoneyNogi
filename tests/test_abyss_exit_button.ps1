@@ -10,7 +10,7 @@
 #   ① 순수 판정 Select-AbyssExitWord: 정확 일치 '나가기' 우선 → '나가' 포함 → $null ('가기' 기준 금지: '다른 던전 가기')
 #   ② Invoke-AbyssExitClick: 규칙 4(조작 중 미소모·양보 뒤 재판독·전송 확인) / 규칙 15(캡처 실패 동결·안전 확인·시도 미소모,
 #      동결 시간을 FrozenMs 로 부모 마감에 반환 - 가상 시계로 생산까지 단언) / 위치·후속 화면 모두 없음이 3회 이상 + 첫
-#      미검출부터 20초(동결 제외) → 진단 캡처 + [완료] + exit 4 / 후속 화면(선택 화면 → 필드 HUD → ESC 메뉴 순) 확인 →
+#      미검출부터 20초(동결·양보 제외 - 양보 제외는 2026-09-20 사후 구현 리뷰 P2) → 진단 캡처 + [완료] + exit 4 / 후속 화면(선택 화면 → 필드 HUD → ESC 메뉴 순) 확인 →
 #      'gone' / 커서 미확인 3회 → 'skipped' / 후속 판정 도중 캡처 실패는 동결(미소모)
 #   ③ 배선: 고정 좌표 클릭 0곳, 헬퍼 호출 5곳, 복구 루프가 FrozenMs 를 마감에 반영
 $ErrorActionPreference = 'Stop'
@@ -87,7 +87,7 @@ function Get-GameRegionOcrWords { param($Game, $ReferenceX, $ReferenceY, $Region
   return $r
 }
 function Test-UserRecentlyActive { return [bool](Next-Seq 'active' $false) }
-function Wait-UserYieldEnd { param($Game, $Context) $script:yieldWaits++; $script:yieldContexts += $Context; $script:vclock = $script:vclock.AddSeconds(5) }   # 양보 5초 (FrozenMs 에 섞이면 안 됨)
+function Wait-UserYieldEnd { param($Game, $Context) $script:yieldWaits++; $script:yieldContexts += $Context; $script:vclock = $script:vclock.AddSeconds($script:yieldSeconds); $script:userYieldTotalMs += $script:yieldSeconds * 1000 }   # 양보 N초(기본 5) - 실제처럼 $script:userYieldTotalMs 에 누적 (사후 리뷰 P3: 모의 충실도. FrozenMs 에 섞이면 안 됨)
 function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY)
   $script:clickPoints += "$ReferenceX,$ReferenceY"
   $r = Next-Seq 'send' 'sent'
@@ -112,6 +112,7 @@ function Reset-Case {
   $script:lastClickPerformed = $false; $script:lastClickSkipReason = 'user-active'   # 잔존 메타 - 오발동 없어야 함
   $script:screenCaptureFailing = $false
   $script:selectionVisible = $false; $script:hudVisible = $false; $script:menuVisible = $false; $script:selectionFailOnce = $false
+  $script:yieldSeconds = 5; $script:userYieldTotalMs = [double]0
 }
 function Count-Log { param([string]$Pattern) @($script:logs | Where-Object { $_ -match $Pattern }).Count }
 function Run-Click { param([string]$Context = '나가기 클릭') Invoke-AbyssExitClick -Game $game -LogPrefix '[어비스]' -Context $Context }
@@ -139,6 +140,15 @@ $r = Run-Click
 Check-Equal '조작 중: 양보 1회 → 재판독 → 새 좌표 (480,654) 클릭 (첫 판독 478 재클릭 없음)' ("$($script:yieldWaits)/$($script:readCalls)/$($script:clickPoints -join ';')") '1/2/480,654'
 Check-Equal '조작 중: 양보 5초는 FrozenMs 에 가산되지 않음 (중복 가산 금지)' ([int]$r.FrozenMs) 0
 
+#    2-3b. ★ 사후 구현 리뷰 P2(2026-09-20): 미검출 사이의 양보 시간은 20초 미검출 창을 소모하지 않음.
+#    미검출(0s) → 조작 감지 → 양보 30초 → 미검출(경과 31-30=1s) → … 경과 20s 인 21번째 미검출에서 정지 = 판독 22회(양보 회전 1 포함).
+#    양보를 빼지 않으면 세 번째 미검출(실시간 32초)에서 즉시 정지 = 판독 4회 (변이 검증 대상)
+Reset-Case -DefaultWords $noExit -ActiveSeq @($false, $true)
+$script:yieldSeconds = 30
+$r = Run-Click
+$thirdMissLog = Count-Log '재판독 \(3회, 2초'
+Check-Equal '양보 30초 교차: 판독 22회(미검출 21 + 양보 회전 1), 양보 1, exit 4, 세 번째 미검출 경과 2초(양보 제외)' ("$($script:readCalls)/$($script:yieldWaits)/$($script:exitCode)/$thirdMissLog") '22/1/4/1'
+
 # 2-4. 규칙 4: 클릭이 조작으로 생략(user-active) → 양보 → 재판독 → 전송. 예산 미소모
 Reset-Case -SendSeq @('user-active', 'sent')
 $r = Run-Click
@@ -163,6 +173,7 @@ Check-Equal '미검출: exit 4, 클릭 0, 판독 21회(20초), 재판독 로그 
 $stopReasonLogs = Count-Log "재입장 오클릭\('다시 하기' 자리\)"
 Check-Equal '미검출: 진단 캡처 1회(CaptureOnly, 문맥) + 정지 사유가 재입장 오클릭' ("$($script:diagCalls)/$($script:diagContext)/$($script:diagCaptureOnly)/$stopReasonLogs") '1/어비스 나가기 위치 미발견/True/1'
 Check-Equal '미검출: 판독문이 로그에 남음 (다음 진리표 재료)' ((Count-Log "판독: '다세하기다른던전가기'")) 22
+Check-Equal '미검출: 마지막 재판독 로그에 횟수·초가 찍힘 (PS 5.1 ${missCount}회 - 사후 리뷰 P3: $missCount회 는 빈 변수)' ((Count-Log '재판독 \(21회, 20초')) 1
 #    2-6b. 3회는 됐지만 20초가 안 됐으면 정지하지 않음: 미검출 3회 뒤 나가기가 다시 보이면 클릭 (페이드 중 판독 공백 허용)
 Reset-Case -WordsSeq @($noExit, $noExit, $noExit, $captureS3)
 $r = Run-Click
@@ -201,6 +212,10 @@ Reset-Case -DefaultWords $noExit
 $script:hudVisible = $true; $script:menuVisible = $true
 $r = Run-Click
 Check-Equal '판정 순서: 필드 HUD + ESC 메뉴 동시 → 필드 HUD 로 기록' ("$((Count-Log '필드 HUD'))/$((Count-Log 'ESC 메뉴'))") '1/0'
+Reset-Case -DefaultWords $noExit
+$script:selectionVisible = $true; $script:hudVisible = $true
+$r = Run-Click
+Check-Equal '판정 순서: 선택 화면 + 필드 HUD 동시 → 선택 화면으로 기록 (사후 리뷰 P3 - HUD 우선 변이 검출)' ("$((Count-Log '선택 화면 이'))/$((Count-Log '필드 HUD'))") '1/0'
 
 # 2-9. 위치 선택 불가('나'+'가기')도 미검출과 같은 정지 경로 - '가기' 로 다른 던전 가기를 누르지 않음
 Reset-Case -DefaultWords $splitNa

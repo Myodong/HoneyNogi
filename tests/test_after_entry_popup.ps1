@@ -48,8 +48,11 @@ Assert-Case '협동: 부제 영역(360,285,560,35) 판독' `
   ($coopSource -match '-ReferenceX 360 -ReferenceY 285[\s\S]{0,120}-RegionWidth 560 -RegionHeight 35') $true
 Assert-Case '협동: 부제 조각 조건(우편으로+전송 / 캐릭터가위치한)' `
   ($coopSource -match "우편으로'\)[\s\S]{0,60}전송'\)[\s\S]{0,80}캐릭터가위치한'\)") $true
-Assert-Case '협동: 확인 버튼 영역 재사용 + 클릭 후 true' `
-  ($coopSource -match '협동 미션 완료 화면 감지[\s\S]{0,120}return \$true') $true
+Assert-Case '협동: 확인 버튼 영역 재사용 + 클릭 후 true (09-20 로그 조건부화로 거리 120→400)' `
+  ($coopSource -match '협동 미션 완료 화면 감지[\s\S]{0,400}return \$true') $true
+# 2026-09-20 거짓 로그 정정: '확인 클릭' 은 전송된 클릭에만 - 생략(조작 양보·커서 미확인)은 '건너뜀' 으로 남김 (반환 $true 불변)
+Assert-Case '협동: 확인 클릭 로그는 lastClickPerformed 조건부 (건너뜀 분기 포함)' `
+  ($coopSource -match "Click-ScreenPoint -X \`$coopConfirmPoint\.X -Y \`$coopConfirmPoint\.Y[\s\S]{0,400}if \(\`$script:lastClickPerformed\) \{ [^\r\n]*협동 미션 완료 화면 감지 - 확인 클릭`" \} else \{ [^\r\n]*확인 클릭 건너뜀") $true
 # 제목 조각을 감지에 쓰지 않아야 함 (OCR 깨짐 실측 - '협동 미션 완료' 문자열 매칭 금지)
 Assert-Case '협동: 깨지는 제목 조각은 감지에 미사용' `
   ($coopSource -notmatch "Contains\('협동미션완료'\)") $true
@@ -74,7 +77,10 @@ Assert-Case '협동: 호출 2곳(스윕 + 클리어 대기)' `
 Assert-Case '협동: 확인 버튼 다중 스케일(3,4,5)' `
   ($coopSource -match "foreach \(\`$coopBtnScale in @\(3, 4, 5\)\)") $true
 Assert-Case '협동: 폴백은 부제 재확인 후 실측 좌표(636,654)' `
-  ($coopSource -match '\$coopRecheck[\s\S]{0,400}실측 좌표로 클릭[\s\S]{0,200}-ReferenceX 636 -ReferenceY 654') $true
+  ($coopSource -match '\$coopRecheck[\s\S]{0,400}-ReferenceX 636 -ReferenceY 654[\s\S]{0,400}if \(\$script:lastClickPerformed\) \{ [^\r\n]*실측 좌표로 클릭') $true
+# 2026-09-20: 폴백 로그는 클릭 **뒤에** 전송된 경우에만 (옛 순서 '로그 → 클릭' 은 생략돼도 눌렀다고 남는 거짓 로그)
+Assert-Case '협동: 폴백 로그가 클릭 전에 나오지 않음' `
+  ($coopSource -notmatch '\$coopRecheck[\s\S]{0,400}Write-RunLog[^\r\n]*실측 좌표로 클릭[\s\S]{0,200}-ReferenceX 636 -ReferenceY 654') $true
 # 시작 화면 판정 전 팝업 스윕 (재시도 워커 즉사 → 자가 복구 전환): 던전/심층 + 사냥터 +
 # 메인 공통 = 3곳, '닫은 경우에만 1.2초 대기, 최대 2회' 계약
 # 2026-09-13: 스윕과 1.2초 대기 사이에 '사용자 조작 취소 → 기다린 뒤 시도 되돌림' 분기가 끼었다 (test_popup_helper_yield

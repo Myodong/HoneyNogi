@@ -453,7 +453,10 @@ if (Test-Path -LiteralPath $configPath) {
 # 버전을 나눈 이유: 각 단계의 실기 PC에 직전 버전 config가 이미 설치돼 있어, 같은 번호를
 # 유지하면 GUI 이전 게이트(사용자 버전 >= 기본 버전이면 이전 안 함)를 통과하지 못해
 # 구 영역이 남는다 (교차 리뷰 지적 - v9 이후 동일 사유).
-$coordsVersionCurrent = 15
+# v15(2026-09-15 퀘스트 추적기 상단 150 재확장 - 타 PC 제보) / v16(2026-09-20 어비스 상세 난이도 알약 영역 상단 확장 -
+# 09-15 타 PC 제보의 알약 y136~162 가 옛 상단 150 에 잘려 '매우 어려움' 미탐. 증분은 전 사용자 config 이전 = 커스텀
+# 진행 기록 초기화 1회 - 같은 커밋의 다른 좌표 변경과 묶어 한 번만).
+$coordsVersionCurrent = 16
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -666,7 +669,11 @@ if ($script:abyssCustomPreparsed) {
 }
 # 상세 화면에서 난이도 버튼들(입문/어려움/매우 어려움...)이 표시되는 좌상단 영역.
 # 난이도가 추가되어 버튼 위치가 바뀌어도 되도록, 이 영역에서 글자를 OCR로 찾아 클릭합니다.
-$rgDifficultyTabs  = @(Get-ConfigValue $config @('ocrRegions', 'difficultyTabs') @(30, 150, 500, 60))
+# v16 (2026-09-20): 상단 150→120·높이 60→90, 하단 210 유지 - 09-15 타 PC 제보(1272 창)의 알약이 y136~162 라 옛 상단이
+# 글자 한가운데를 지나 빈 판독('매우 어려움' 미탐, 일반 반복 '현재 선택된 난이도로 진행' 경고 3회차 관측). 개발 PC 는
+# y163~195. 두 PC 캡처 4장 오프라인 재현 전부 '입문 어려움 매우 어려움' (30px 이동만 하면 개발 PC 캡처가 제목 조각으로
+# 깨짐 - 그래서 이동이 아니라 확장). 진리표 tests\test_difficulty_tabs_offline.ps1.
+$rgDifficultyTabs  = @(Get-ConfigValue $config @('ocrRegions', 'difficultyTabs') @(30, 120, 500, 90))
 
 # 아침 6시 리셋 후 뜨는 출석/이벤트 화면 처리용 영역 (2026-07-15 실측):
 #  - eventSkip: 출석부 우상단 '출석부 건너뛰기' 버튼 영역
@@ -1375,7 +1382,7 @@ $rgDgRetryBtn   = @(Get-ConfigValue $config @('ocrRegions', 'dgRetryButton') @(5
 $ptDgRetry      = @(637, 655)      # '다시 하기' 예비 좌표 (글자 탐색 실패 시 - 3버튼 배치 기준)
 
 # '다시 하기'로 온 진입 옵션 화면의 구역 지도:
-# 선택 화면의 세로 지도와 배치가 달라 $ndStagePoints 를 재사용하면 왼쪽 소탕 카드를 오클릭합니다.
+# 선택 화면의 세로 지도와 배치가 달라 $dgSelStagePoints 를 재사용하면 왼쪽 소탕 카드를 오클릭합니다.
 # 카드 숫자 라벨 OCR을 우선하고, 못 읽으면 층별 실측 예비 좌표를 씁니다. 1층과 2층은 배치가
 # 다릅니다(2026-07-21 실측: 2층은 2-2/2-1이 왼쪽에 세로로 놓이고 2-3이 오른쪽에 위치).
 $rgDgOptStageMap = @(750, 170, 360, 210) # 옵션 화면 구역 지도 영역
@@ -2220,6 +2227,20 @@ public static class HoneyNogiInput {
 
   [DllImport("user32.dll")]
   public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint);
+
+  // Window-info diagnostics only (2026-09-20, never used for decisions). Missing entry points on old OS
+  // raise EntryPointNotFoundException at call time - the caller wraps each call in try/catch.
+  [DllImport("user32.dll")]
+  public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+
+  [DllImport("user32.dll")]
+  public static extern uint GetDpiForWindow(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
+  public static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+
+  [DllImport("shcore.dll")]
+  public static extern int GetDpiForMonitor(IntPtr hMonitor, int dpiType, out uint dpiX, out uint dpiY);
 
   [DllImport("user32.dll")]
   public static extern int GetSystemMetrics(int index);
@@ -5028,9 +5049,12 @@ function Invoke-AbyssExitClick {
   # 계약: 규칙 4 (조작 중 생략은 예산 미소모, 양보 뒤 옛 좌표 재클릭 금지 → 재판독) / 규칙 15 (캡처 실패는
   # 동결 - 회전마다 판독으로 캡처를 시도하고 안전 확인을 거침, 시도 미소모). 부모 마감이 있는 호출부는
   # FrozenMs 만큼 마감을 늘립니다 (양보는 Wait-UserYieldEnd 가 $script:userYieldTotalMs 에 누적하므로 별도 가산 없음).
+  # 20초 미검출 창은 동결 시간과 **양보 차분**을 둘 다 뺍니다 (2026-09-20 사후 구현 리뷰 P2: 양보를 안 빼면 미검출 1~2회 뒤
+  # 30초 조작만으로 세 번째 미검출에서 즉시 정지 - 조작 생략은 문턱을 소모하지 않는다는 규칙 4 위반).
   $missCount = 0
   $missStart = $null            # 첫 미검출 시각 (20초 기준점)
   $frozenAtMissStart = [double]0
+  $yieldAtMissStart = [double]0  # 첫 미검출 시점의 누적 양보 ms (20초 창에서 양보 차분 제외)
   $cursorMissCount = 0
   $frozenMs = [double]0
   while ($true) {
@@ -5082,13 +5106,14 @@ function Invoke-AbyssExitClick {
       return @{ Result = 'gone'; FrozenMs = $frozenMs }
     }
     $missCount++
-    if ($null -eq $missStart) { $missStart = Get-Date; $frozenAtMissStart = $frozenMs }
-    # 첫 미검출부터의 경과에서 그 사이 캡처 동결 시간을 뺍니다 (동결은 판정 시간을 소모하지 않음 - 규칙 15)
-    $missElapsedMs = ((Get-Date) - $missStart).TotalMilliseconds - ($frozenMs - $frozenAtMissStart)
-    Write-RunLog "$LogPrefix 보상 화면 '나가기' 위치를 찾지 못했습니다 - 재판독 ($missCount회, $([int]($missElapsedMs / 1000))초, 판독: '$($read.Text)')"
+    if ($null -eq $missStart) { $missStart = Get-Date; $frozenAtMissStart = $frozenMs; $yieldAtMissStart = [double]$script:userYieldTotalMs }
+    # 첫 미검출부터의 경과에서 그 사이 캡처 동결 시간(규칙 15)과 사용자 양보 시간(규칙 4)을 뺍니다 - 둘 다 판정 시간을
+    # 소모하지 않습니다 (양보 차분: 2026-09-20 사후 리뷰 P2)
+    $missElapsedMs = ((Get-Date) - $missStart).TotalMilliseconds - ($frozenMs - $frozenAtMissStart) - ([double]$script:userYieldTotalMs - $yieldAtMissStart)
+    Write-RunLog "$LogPrefix 보상 화면 '나가기' 위치를 찾지 못했습니다 - 재판독 (${missCount}회, $([int]($missElapsedMs / 1000))초, 판독: '$($read.Text)')"
     if ($missCount -ge 3 -and $missElapsedMs -ge 20000) {
       Write-LifeDiagnostics -Game $Game -Context '어비스 나가기 위치 미발견' -CaptureOnly
-      Write-RunLog "[완료] 보상 화면에서 '나가기' 버튼 위치를 찾지 못했습니다 (재판독 $missCount회·$([int]($missElapsedMs / 1000))초, 판독: '$($read.Text)') - 재입장 오클릭('다시 하기' 자리)을 막기 위해 정지합니다"
+      Write-RunLog "[완료] 보상 화면에서 '나가기' 버튼 위치를 찾지 못했습니다 (재판독 ${missCount}회·$([int]($missElapsedMs / 1000))초, 판독: '$($read.Text)') - 재입장 오클릭('다시 하기' 자리)을 막기 위해 정지합니다"
       exit 4
     }
     Start-Sleep -Milliseconds 1000
@@ -6199,7 +6224,9 @@ function Close-CoopMissionScreen {
   if ($coopConfirmPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $coopConfirmPoint.X -Y $coopConfirmPoint.Y
-    Write-RunLog "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 클릭"
+    # 전송된 클릭에만 '확인 클릭' 을 씁니다 (2026-09-20 거짓 로그 정정 - 조작 양보·커서 미확인으로 건너뛴 클릭까지
+    # 눌렀다고 남았음. 반환 $true 와 호출부의 메타 판독은 그대로 - 로그만 바뀝니다)
+    Write-RunLog $(if ($script:lastClickPerformed) { "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 클릭" } else { "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })
     Start-Sleep -Seconds 1
     return $true
   }
@@ -6209,9 +6236,10 @@ function Close-CoopMissionScreen {
   $coopRecheck = (Get-GameRegionOcrText -Game $Game -ReferenceX 360 -ReferenceY 285 `
       -RegionWidth 560 -RegionHeight 35 -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
   if ((($coopRecheck.Contains('우편으로') -and $coopRecheck.Contains('전송')) -or $coopRecheck.Contains('캐릭터가위치한'))) {
-    Write-RunLog "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 글자 탐색 실패, 실측 좌표로 클릭 (부제 재확인 완료)"
     Focus-Game -Game $Game
     Click-GamePoint -Game $Game -ReferenceX 636 -ReferenceY 654
+    # 클릭 뒤에, 전송된 경우에만 기록합니다 (2026-09-20 거짓 로그 정정 - 클릭 전에 '실측 좌표로 클릭' 을 남겼음)
+    Write-RunLog $(if ($script:lastClickPerformed) { "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 글자 탐색 실패, 실측 좌표로 클릭 (부제 재확인 완료)" } else { "$($script:contentTag) 협동 미션 완료 화면 감지 - 확인 글자 탐색 실패, 실측 좌표 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })
     Start-Sleep -Seconds 1
     return $true
   }
@@ -6256,7 +6284,8 @@ function Close-QuestRewardScreen {
   if ($confirmPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $confirmPoint.X -Y $confirmPoint.Y
-    Write-RunLog "[안내] ${LogPrefix}퀘스트 클리어 보상 화면 감지 - 확인 클릭"
+    # 전송된 클릭에만 '확인 클릭' (2026-09-20 거짓 로그 정정 - 협동 완료와 같은 계약, 반환·메타 판독은 그대로)
+    Write-RunLog $(if ($script:lastClickPerformed) { "[안내] ${LogPrefix}퀘스트 클리어 보상 화면 감지 - 확인 클릭" } else { "[안내] ${LogPrefix}퀘스트 클리어 보상 화면 감지 - 확인 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })
     Start-Sleep -Seconds 1
     return $true
   }
@@ -7895,7 +7924,7 @@ function Invoke-NormalDungeonCycle {
     if ($startAction -eq 'stay-select') {
       # 같은 층의 다른 구역: 이 옵션 화면에서도 같은 층 구역 카드는 선택할 수 있습니다
       # (2026-07-20 실측 - 역방향 포함). 구역 지도가 화면 오른쪽 중앙 '가로 배치'라
-      # 선택 화면 좌표($ndStagePoints)와 다름 - 전용 탐색(Get-DgOptStageCardPoint:
+      # 선택 화면 좌표($dgSelStagePoints)와 다름 - 전용 탐색(Get-DgOptStageCardPoint:
       # 카드 숫자 라벨 글자 탐색 + 실측 예비 좌표)으로 클릭하고, 제목 재판독으로 전환을
       # 확인합니다. 상태 기반 클릭(무조건 재클릭 금지): 이 분기 도달 = '같은 층의 다른
       # 구역'이 이미 확정된 상태(명확한 제목 또는 보조 판정 2표)라, 제목이 다시 불명확해져도
@@ -9168,10 +9197,12 @@ function Invoke-NormalDungeonCycle {
             Get-ChanceToggleState -Game $Game -Point @([int]$chanceNowPoint.X, [int]$chanceNowPoint.Y)
           } else { 'unknown' })
         # 여기에는 캡처 플래그 재검사를 두지 않습니다: Get-ChanceToggleState 는 Get-GamePixel
-        # 직접 픽셀 판독이라 Register-CaptureSuccess 를 부르지 않아 플래그를 갱신하지 않습니다
-        # (이슈_개선점_목록.md 의 'Get-GamePixel 캡처 실패 플래그 대칭' 항목 - 알려진 미구현).
+        # 직접 픽셀 판독이라 Register-CaptureSuccess 를 부르지 않아 플래그를 갱신하지 않습니다.
+        # 이 비대칭은 알고 유지하는 결정입니다 (2026-09-20 이력 기록 - 대칭 미도입): 픽셀 판독에 성공 등록을 붙이면
+        # 빈 프레임이 플래그를 잘못 풀고, 실패 등록을 붙이면 표본×재시도만큼 실패가 곱해집니다. 앞선 OCR 판독의
+        # 플래그로 동결을 판단하는 현행을 유지하며, 09-16 수정도 이 비대칭을 알고 수용했습니다.
         # 픽셀 판독 실패는 'unknown' 으로 나오고 아래 off 확정 요구에 그대로 걸립니다.
-        # 플래그를 세울 수 있는 것은 바로 위 앵커 OCR 뿐이고 그건 이미 검사했습니다 (2026-09-10 Codex).
+        # 플래그를 세울 수 있는 것은 바로 위 앵커 OCR 뿐이고 그건 이미 검사했습니다 (2026-09-10 리뷰).
         if ($chanceNowState -ne 'off') {
           Write-RunLog "$($script:contentTag) 양보 후 '우연한 만남' 토글이 꺼짐으로 확인되지 않습니다 (${chanceNowState}) - 그 자리가 '입장하기'일 수 있어 다시 누르지 않고 입장 여부를 관측합니다"
           break
@@ -13242,6 +13273,7 @@ function Invoke-LifeGatherCycle {
   $loadingNoticed = $false
   $initialProbes = 0
   $initialPopupRounds = 0
+  $initialPopupLastBranch = ''   # 가드 소진 계측용 - 마지막으로 처리한 팝업 분기명 (2026-09-20, 판정에 쓰지 않음)
   while ($initialProbes -lt 20) {
     Test-LifeUntilReached   # 지정 시간은 사이클 한도보다 우선 (사유 정확성)
     if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
@@ -13265,14 +13297,15 @@ function Invoke-LifeGatherCycle {
     # 초기 확인에만 빠져 있었습니다 (2026-08-07 감사)
     if ($initialPopupRounds -lt 10) {
       $popupHandled = $false
-      if (Invoke-PurchasePopupSweep -Game $Game) { $popupHandled = $true }
-      elseif (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { $popupHandled = $true }
+      if (Invoke-PurchasePopupSweep -Game $Game) { $popupHandled = $true; $initialPopupLastBranch = '구매 팝업 스윕' }
+      elseif (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { $popupHandled = $true; $initialPopupLastBranch = '주간 리셋 팝업' }
       elseif (Test-NoticeBoardPopup -Game $Game) {
         Focus-Game -Game $Game
         Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
         # 전송된 클릭에만 '닫기'라고 씁니다 (던전·어비스 복귀 분기와 같은 계약)
         Write-RunLog $(if ($script:lastClickPerformed) { '[생활] 공지 게시판 팝업 감지 - X로 닫기 (시작 확인 중)' } else { "[생활] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })
         $popupHandled = $true
+        $initialPopupLastBranch = '공지 게시판 X'
       }
       if ($popupHandled) {
         # ★ 사용자 조작으로 취소된 클릭은 **팝업 가드 예산을 쓰지 않습니다** (2026-09-10 설계 합의).
@@ -13292,6 +13325,13 @@ function Invoke-LifeGatherCycle {
           continue
         }
         $initialPopupRounds++
+        if ($initialPopupRounds -ge 10) {
+          # 가드 소진 계측 1줄 (2026-09-20, 이슈 목록 1절 '계측 2줄' ②): 소진을 말하는 문구가 코드에 없어 제보 로그
+          # grep 으로 발생률을 알 수 없었습니다. 소진 이후 동작(이 확인 루프에서는 팝업 처리 중단, 대기 루프는 별도
+          # 방어)은 그대로 - 관측이 모이면 정지/계속을 설계 합의. 사용자 조작 취소는 위에서 continue 라 여기 못 옴 =
+          # 마지막 클릭은 '전송' 또는 '커서 미확인' 둘 중 하나.
+          Write-RunLog "[생활] 시작 확인 팝업 가드 소진 (10라운드 - 마지막 처리 '$initialPopupLastBranch', 마지막 클릭 $(if ($script:lastClickPerformed) { '전송' } else { '생략(커서 미확인)' })) - 이후 이 시작 확인에서는 팝업을 닫지 않습니다"
+        }
         Start-Sleep -Seconds 2
         continue      # 닫은 회차는 반드시 재캡처 - 같은 프레임으로 판정하면 오판 (리뷰 계약)
       }
@@ -14500,6 +14540,55 @@ try {
         Write-RunLog "[준비] 게임 창 정렬($windowMode): ${currentWidth}x${currentHeight}@($currentX,$currentY) -> ${targetWidth}x${targetHeight}@($targetX,$targetY)"
       }
     }
+  }
+
+  # 창 정보 계측 1줄 (2026-09-20, 이슈 목록 1절 '계측 2줄' ①). 실측 창 크기는 창 정렬이 실제로 일어난 회차의
+  # '[준비] 게임 창 정렬' 줄과 진단 캡처의 '[진단]' 줄에만 남아(보존 표본 233개에 정렬 줄 0건), 08-13 DWM 스트레치
+  # 1908 창·09-11 RDP 150% 두 실사고가 캡처 픽셀로만 판별됐습니다. 정렬 여부와 무관하게 매 회차 시작에 한 줄 남기며
+  # **판정에는 쓰지 않습니다.** 값마다 따로 try/catch - 구 OS 에 진입점이 없는 API(GetDpiForWindow: Win10 1607+,
+  # GetDpiForMonitor: Win8.1+)는 호출 시 예외라 '측정 불가' 로 적고 넘어갑니다 (이 블록은 최상위 try 안이라 가드 없는
+  # 예외는 그 PC 의 모든 회차를 시작 직후 코드 1 로 끝냄 - 2266~ DPI 컨텍스트 try/catch 선례).
+  # 읽는 법: 창 DPI 는 게임 창 자신의 DPI 라 DPI 미인식 게임은 항상 96. 모니터 DPI 144 인데 창이 1908 이면 = Windows 가
+  # 1272 렌더를 1.5배 늘린 창(09-11 실사고), 모니터 DPI 96 에 창 1908 이면 = 네이티브 1908(08-13).
+  try {
+    $infoRect = New-Object HoneyNogiInput+RECT
+    if ([HoneyNogiInput]::GetWindowRect($game.MainWindowHandle, [ref]$infoRect)) {
+      $infoW = $infoRect.Right - $infoRect.Left
+      $infoH = $infoRect.Bottom - $infoRect.Top
+      $infoClient = '측정 불가'
+      $infoTitleBar = '측정 불가'
+      try {
+        $clientRect = New-Object HoneyNogiInput+RECT
+        if ([HoneyNogiInput]::GetClientRect($game.MainWindowHandle, [ref]$clientRect)) {
+          $clientW = $clientRect.Right - $clientRect.Left
+          $clientH = $clientRect.Bottom - $clientRect.Top
+          $infoClient = "${clientW}x${clientH}"
+          # 창 높이 - 클라이언트 높이 = 제목줄 + 위아래 테두리 (1272 창 100% 에서 약 39px)
+          $infoTitleBar = "$($infoH - $clientH)px"
+        }
+      } catch { }
+      $infoWindowDpi = '측정 불가'
+      try {
+        $windowDpi = [HoneyNogiInput]::GetDpiForWindow($game.MainWindowHandle)
+        if ($windowDpi -gt 0) { $infoWindowDpi = [string]$windowDpi }
+      } catch { }
+      $infoMonitorDpi = '측정 불가'
+      try {
+        # MONITOR_DEFAULTTONEAREST(2): 창이 화면 밖이어도 가장 가까운 모니터 / MDT_EFFECTIVE_DPI(0)
+        $monitorHandle = [HoneyNogiInput]::MonitorFromWindow($game.MainWindowHandle, 2)
+        [uint32]$monitorDpiX = 0
+        [uint32]$monitorDpiY = 0
+        if ($monitorHandle -ne [IntPtr]::Zero -and
+            [HoneyNogiInput]::GetDpiForMonitor($monitorHandle, 0, [ref]$monitorDpiX, [ref]$monitorDpiY) -eq 0 -and $monitorDpiX -gt 0) {
+          $infoMonitorDpi = "$monitorDpiX ($([int][Math]::Round($monitorDpiX * 100 / 96))%)"
+        }
+      } catch { }
+      Write-RunLog "[준비] 게임 창 정보: ${infoW}x${infoH}@($($infoRect.Left),$($infoRect.Top)), 클라이언트 $infoClient, 제목줄·테두리 $infoTitleBar, 창 DPI $infoWindowDpi, 모니터 DPI $infoMonitorDpi"
+    } else {
+      Write-RunLog '[준비] 게임 창 정보: 측정 불가 (GetWindowRect 실패)'
+    }
+  } catch {
+    Write-RunLog "[준비] 게임 창 정보: 측정 불가 ($($_.Exception.Message))"
   }
 
   # 시작 화면 판정 전 전체 화면 팝업 정리 (2026-08-01 실사고: 물약 부족 팝업+협동 미션 완료
