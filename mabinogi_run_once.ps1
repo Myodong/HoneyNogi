@@ -1845,6 +1845,8 @@ $safeStopFlagPath = Join-Path $logDir 'safe_stop.flag'
 # 원격 데스크톱 창 최소화 등으로 화면 캡처가 안 되는 동안 true가 되는 상태 플래그입니다.
 # 이 동안에는 각 대기 단계의 제한 시간이 흐르지 않습니다(화면 복구 후 이어서 감지).
 $script:screenCaptureFailing = $false
+$script:captureFailSerial = 0   # 캡처 실패 일련번호 (Register-CaptureFailure 마다 +1). 한 회전에 판독이 여럿이면 앞 실패 뒤 다른 캡처 성공이
+                                  # 플래그를 풀어 실패 회전이 미검출·연속 수로 소모될 수 있어, 루프는 회전 서두 값과 비교해 '실패가 있던 회전' 을 버림 (2026-09-21 구현 리뷰 P2)
 # 캡처 실패 중 마지막으로 안내한 원인 문구/원인 종류입니다. 실패 도중 원인이 바뀌면
 # (예: 최소화 → RDP 연결 끊김) 새 원인을 한 번 더 안내하고, 복구 시에는 기억해 둔
 # 원인에 맞춰 "어떻게 복구됐는지"(본체 전환/RDP 재개 등)를 로그에 남깁니다.
@@ -3438,6 +3440,7 @@ function Register-CaptureFailure {
   # (RDP 연결 끊김 / RDP 창 최소화 / 게임 창 최소화 / 그 외 - 과소 게이트는 철회함).
   # 실패 도중 원인이 바뀌면 한 번 더 안내합니다.
   param([string]$GameWindowIssue = '')
+  $script:captureFailSerial++   # 실패마다 증가 - 회전 단위 '실패 있었음' 판정용 (플래그는 뒤 성공이 풀 수 있음)
   $failInfo = Get-CaptureFailInfo -GameWindowIssue $GameWindowIssue
   # 'RDP 끊김' 실패가 이어지던 중 세션이 다시 RDP 활성으로 바뀌면, 창 최소화가 아니라
   # 사용자가 RDP로 재접속하는 중입니다(끊김에서 RDP 활성으로 가는 경로는 재접속뿐).
@@ -4328,7 +4331,8 @@ function Wait-ForDungeonClearScreen {
   # 사용자가 클리어 화면을 직접 터치해 이미 결과 화면으로 넘어간 경우를 잡습니다.
 
   # 반환값: 'clear' = 클리어 화면 감지 / 'reward' = 이미 보상 화면(사용자가 직접 터치해 넘긴 경우)
-  #         'selection' = 이미 어비스 선택 화면(사용자가 끝까지 직접 진행한 경우)
+  #         ('selection' 은 2026-09-21 부터 돌려주지 않습니다 - 선택 화면 오버레이는 전투 중에도 열려 완료 증거가 못 됨.
+  #          호출부의 'selection' 분기는 남아 있지만 도달하지 않음 - 설계 합의 A2)
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $lastFocus = Get-Date
   $reviveCount = 0              # 이번 회차에 자동 부활한 횟수 (**실제 전송된** 입력만 - 2026-08-11 ②)
@@ -4341,6 +4345,11 @@ function Wait-ForDungeonClearScreen {
   $pollCounter = 0               # 팝업(2회)/컷신(3회) 확인 주기 조절용
   $useStatueRevive = $false      # 부활 재료 부족이 확인되면 이후 부활을 여신상으로 전환
   $wipeButtonMisses = 0          # 전멸 감지 상태에서 '여신' 버튼 연속 미발견 횟수 (3회째 예비 좌표)
+  $ambiguousOverlaySeen = $false # 어비스: 완료 증거 없는 선택 화면 오버레이를 본 적 (마감 시 코드 4 사유 - 설계 합의 A2)
+  $ambiguousLogged = $false
+  $matchingLogged = $false
+  $fieldStreak = 0               # 어비스: 필드(HUD + 추적기 던전명 없음) 연속 확인 수 (2연속 = 필드 증거, 클리어 증거는 아님)
+  $fieldSeen = $false
   # 전투 진행 중 연장 한도: 제한 시간이 다 됐어도 퀘스트 추적기에 클리어 목표가 남아
   # 있으면(= 판이 길어진 것뿐) 오류 대신 대기를 연장하되, 이 절대 한도까지만 허용합니다.
   $extendLimit = (Get-Date).AddSeconds([Math]::Max($TimeoutSeconds * 3, 1800))
@@ -4365,8 +4374,7 @@ function Wait-ForDungeonClearScreen {
         # 오류로 확정하지 않고 아래 캡처 실패 처리(시간 동결)에 맡깁니다 (교차 리뷰 지적)
       } elseif ((Test-DungeonClearPrompt -Game $Game) -or
           ($FindResultButton -and (& $FindResultButton) -and -not (Test-HomeEndEscHud -Game $Game)) -or
-          ((-not $DungeonMode) -and (Test-ExitButton -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game)) -or
-          ((-not $DungeonMode) -and (Test-AbyssSelectionScreen -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game))) {
+          ((-not $DungeonMode) -and (Test-ExitButton -Game $Game) -and -not (Test-HomeEndEscHud -Game $Game))) {
         # 마감 도달 순간 이미 성공 화면(클리어/결과/보상/선택)이면 오류가 아니라 이번 바퀴의
         # 정상 판정에 맡깁니다 (3차 점검: 마감 직전 전환을 놓치고 throw 하던 회귀. 결과/보상
         # 판정의 HUD 부재 조건은 본문과 동일 - 리뷰 조건. 탐침만 하고 처리·로그는 본문이 담당)
@@ -4376,6 +4384,19 @@ function Wait-ForDungeonClearScreen {
         # 마감 도달 순간 보상 전체 화면이 덮여 있던 경우 (2026-08-27 Codex 경계 지적 -
         # 마지막 폴 간격에 처음 뜨면 본문 처리 전에 여기서 timeout 확정됨): 닫고 이번
         # 바퀴는 throw 하지 않음 - 다음 바퀴의 정상 판정/연장 판정이 실제 화면을 처리
+      } elseif ($script:screenCaptureFailing) {
+        # 보상 전체 화면 닫기 판독 도중 캡처 실패가 새로 시작된 경우도 동결 처리에 맡깁니다 (2026-09-21 구현 리뷰 P2)
+      } elseif ($ambiguousOverlaySeen -or $fieldSeen) {
+        # 어비스 전용 (설계 합의 A2): 완료 증거 없는 선택 화면 오버레이 / 필드 상태를 봤지만 마감까지 클리어가 없었음 -
+        # 사용자가 직접 진행했거나 전투 중 메뉴를 열어 둔 상태. 코드 1 은 커스텀 재시작이 같은 불명 상태를 반복하므로
+        # 진단 캡처 + 조건부 정지(코드 4). 커스텀은 유효 마커가 없어 전진 없이 멈춥니다 (이 판은 완료로 계상하지 않음).
+        Write-LifeDiagnostics -Game $Game -Context '어비스 클리어 대기 불명 종료' -CaptureOnly
+        if ($ambiguousOverlaySeen) {
+          Write-RunLog '[완료] 클리어 대기 한도 안에 클리어를 확인하지 못했습니다 (선택 화면 오버레이 관측 - 전투 중에도 열리는 화면이라 던전 안·밖을 확정할 수 없어 회차를 완료로 처리하지 않고 정지합니다). 화면을 확인하고 다시 시작해 주세요.'
+        } else {
+          Write-RunLog '[완료] 클리어 대기 한도 안에 클리어를 확인하지 못했습니다 (필드 상태 확인 - 직접 나간 것으로 보이나 클리어 증거가 없어 회차를 완료로 처리하지 않고 정지합니다). 화면을 확인하고 다시 시작해 주세요.'
+        }
+        exit 4
       } else {
         throw '던전 클리어 화면 감지 대기 시간이 초과됐습니다.'
       }
@@ -4414,8 +4435,18 @@ function Wait-ForDungeonClearScreen {
 
     # 어비스 전용: 사용자가 직접 진행해 보상/선택 화면으로 넘어간 경우 감지 (던전 모드에서는 건너뜀)
     if (-not $DungeonMode) {
+      # 재매칭 패널('다시 하기' 뒤 - 09-18 실측)이 먼저입니다: 카드 영역이 선택 화면으로, 하단 '나가기'(매칭 취소)가
+      # 보상 화면으로 읽히는 화면이라 아래 두 판정보다 앞에서 걸러야 합니다 (2026-09-21 설계 합의 A3).
+      # 사용자가 누른 재매칭은 곧 자동 입장으로 이어지므로 이 대기 안에서는 아무것도 누르지 않고 계속 관측합니다
+      # (입장 뒤엔 HUD+추적기가 다시 보여 평소 클리어 대기로 돌아감).
+      if (Test-AbyssMatchingPanel -Game $Game) {
+        if (-not $matchingLogged) { Write-RunLog '[어비스] 클리어 대기 중 재매칭 패널 감지 - 클릭 없이 입장을 기다립니다'; $matchingLogged = $true }
+        Start-Sleep -Seconds 2
+        continue
+      }
       # 사용자가 클리어 화면을 직접 터치해서 이미 보상 화면으로 넘어간 경우를 감지합니다.
-      # (전투 중 채팅에 '나가기'가 지나가는 오탐을 막기 위해, HUD가 사라진 상태인지 함께 확인)
+      # (전투 중 채팅에 '나가기'가 지나가는 오탐을 막기 위해, HUD가 사라진 상태인지 함께 확인.
+      #  Test-ExitButton 은 3버튼 서명이라 재매칭 패널의 취소용 '나가기' 에는 걸리지 않음)
       if (Test-ExitButton -Game $Game) {
         if (-not (Test-HomeEndEscHud -Game $Game)) {
           Write-RunLog '[어비스] 보상 화면 감지 (클리어 화면이 이미 지나감)'
@@ -4423,11 +4454,30 @@ function Wait-ForDungeonClearScreen {
         }
       }
 
-      # 사용자가 나가기까지 직접 눌러 어비스 선택 화면으로 돌아간 경우
+      # 선택 화면 오버레이 (2026-09-20 23:24 실사고 - 설계 합의 A2): 옛 코드는 여기서 'selection' 을 돌려줘 회차를
+      # 끝냈는데, 이 오버레이는 **전투 중에도 ESC 메뉴로 열리고** 추적기·HUD 를 가려 던전 안·밖을 구분할 수 없습니다.
+      # 이 대기는 클리어·보상 화면을 본 적이 없는 문맥이라 완료 증거가 없으므로 '불명 오버레이' 로 1회만 기록하고 클릭
+      # 없이 계속 관측합니다 - 오버레이가 닫히면 던전 안(HUD+추적기)이면 평소 대기로, 필드면 아래 필드 증거로 이어지고,
+      # 마감까지 불명이면 코드 4 로 멈춥니다 (코드 1 재시작은 같은 불명 상태를 반복할 뿐).
       if (Test-AbyssSelectionScreen -Game $Game) {
         if (-not (Test-HomeEndEscHud -Game $Game)) {
-          Write-RunLog '[어비스] 선택 화면 복귀 상태 감지 (직접 진행됨)'
-          return 'selection'
+          $ambiguousOverlaySeen = $true
+          if (-not $ambiguousLogged) { Write-RunLog '[어비스] 클리어 대기 중 선택 화면 오버레이 감지 - 클리어 증거가 없어 완료로 보지 않고 관측을 계속합니다'; $ambiguousLogged = $true }
+          Start-Sleep -Seconds 2
+          continue
+        }
+      }
+      # 필드 증거(HUD + 추적기에 던전명 없음) 2연속: 사용자가 직접 나간 경우 - '밖' 의 증거일 뿐 클리어 증거가 아니라
+      # 회차를 마치지 않고(마커·코드 0 금지) 마감까지 기다린 뒤 코드 4 사유로만 씁니다. 캡처 실패 표본은 세지 않습니다.
+      $fieldSerial = $script:captureFailSerial
+      if (-not $script:screenCaptureFailing -and (Test-HomeEndEscHud -Game $Game)) {
+        $questNow = Test-InDungeonQuest -Game $Game
+        if (-not $script:screenCaptureFailing -and $script:captureFailSerial -eq $fieldSerial) {
+          if ($questNow) { $fieldStreak = 0 } else { $fieldStreak++ }
+          if ($fieldStreak -ge 2 -and -not $fieldSeen) {
+            $fieldSeen = $true
+            Write-RunLog '[어비스] 클리어 대기 중 필드 상태(HUD, 던전 목표 없음) 2연속 - 클리어 증거가 없어 완료로 보지 않고 관측을 계속합니다'
+          }
         }
       }
     }
@@ -4983,12 +5033,56 @@ function Test-NoticeBoardPopup {
   return ($text.Contains('공지') -and $text.Contains('이벤트'))
 }
 
+function Test-AbyssRewardText {
+  param([string]$Text)
+
+  # 어비스 보상 화면의 하단 3버튼 서명 (순수 판정 - 진리표 대상). 2026-09-18 개편 뒤 하단은
+  # '[ESC] 나가기 / [Space] 다시 하기 / 다른 던전 가기' 이고, 워커 영역(clearAndExitText, 배율 3) 판독은
+  # '아이템을누르면상세정보를수있습니다나가기Space다세하기다른던전가기' (배율 4 는 '다셔').
+  # '나가기' 하나로 보상 화면을 판정하면 **'다시 하기' 뒤 재매칭 패널의 매칭 취소 '나가기'**
+  # ('사제아이템을누르면상세정보를7나가기' - 09-18 실측 프레임)에도 참이 돼, 나가기 헬퍼가 매칭을 취소하고
+  # 복구 루프가 회차를 잘못 마칩니다 (2026-09-21 설계 합의 A3). 그래서 '나가기' 에 더해 나머지 두 버튼
+  # 조각 중 하나('다시/다세/다셔'+'하기' 또는 '다른'+'던전')를 요구합니다. 옛 1버튼 배치는 관측되면 명시 분기로
+  # 넣습니다 - 자동 폴백으로 섞지 않습니다 (규칙 8).
+  if ([string]::IsNullOrEmpty($Text)) { return $false }
+  $normalized = $Text -replace '\s', ''
+  if (-not $normalized.Contains('나가기')) { return $false }
+  $retryPair = ($normalized.Contains('다시') -or $normalized.Contains('다세') -or $normalized.Contains('다셔')) -and $normalized.Contains('하기')
+  $otherPair = $normalized.Contains('다른') -and $normalized.Contains('던전')
+  return ($retryPair -or $otherPair)
+}
+
 function Test-ExitButton {
   param([System.Diagnostics.Process]$Game)
 
+  # 보상 화면 판정 = 3버튼 서명 (Test-AbyssRewardText). 캡처 실패면 '' → 거짓 (fail-closed, 호출부가 플래그로 동결 판단)
   $ocrText = Get-GameOcrText -Game $Game
-  $normalized = $ocrText -replace '\s', ''
-  return $normalized.Contains('나가기')
+  return (Test-AbyssRewardText -Text $ocrText)
+}
+
+function Test-AbyssMatchingPanelText {
+  param([string]$Text)
+
+  # '다시 하기' 를 누른 뒤 보상 화면 위에 뜨는 우연한 만남 재매칭 패널 (순수 판정 - 진리표 대상).
+  # 2026-09-18 실측 3프레임(abyssMenu 영역 (850,180,350,520) 배율 4): '빻지/입문근든플레이어가모이면자동입장합니다.00:00' /
+  # '4지/입문\밀러프핫빙결술사도H지자식대결전人l근든플레이어가모이면자동입장합니다.' / '…=플레이어가모이면자동입장합니다.'
+  # → '플레이어가모이면' 과 '자동입장' 두 조각을 모두 요구합니다 (abyssCards 의 '만남' 은 변동이 커 진단 보조만).
+  # 입장하기 뒤 정상 매칭 대기도 같은 패널이라 참이 되는데, 그것은 오탐이 아니라 같은 상태입니다.
+  if ([string]::IsNullOrEmpty($Text)) { return $false }
+  $normalized = $Text -replace '\s', ''
+  return ($normalized.Contains('플레이어가모이면') -and $normalized.Contains('자동입장'))
+}
+
+function Test-AbyssMatchingPanel {
+  param([System.Diagnostics.Process]$Game)
+
+  # 재매칭 패널 판정 - 이 패널은 추적기·HUD 를 가리고, 카드 영역이 '우연한만남…허상의정박지/입문' 으로 읽혀
+  # 선택 화면으로, 하단 '나가기'(매칭 취소)가 보상 화면으로 오판됩니다 (09-20 사후 리뷰 P2·설계 합의 A3).
+  # 선택 화면 판정(Test-AbyssSelectionScreen)은 양성일 때 이 판정으로 배제하고, 나가기 헬퍼·복구 루프·클리어 감시·
+  # 시작 디스패치는 직접 물어 '매칭 취소 클릭' 을 막습니다. 캡처 실패면 '' → 거짓.
+  $menuText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssMenu[0] -ReferenceY $rgAbyssMenu[1] `
+    -RegionWidth $rgAbyssMenu[2] -RegionHeight $rgAbyssMenu[3] -Scale 4 -Engine $ocrKoreanEngine
+  return (Test-AbyssMatchingPanelText -Text $menuText)
 }
 
 function Select-AbyssExitWord {
@@ -5037,10 +5131,12 @@ function Invoke-AbyssExitClick {
   )
 
   # 보상 화면 '나가기' 를 글자 위치로 클릭합니다 (2026-09-18 3버튼 개편 대응 - 고정 좌표 $ptExitButton 금지).
-  # 반환: @{ Result = 'clicked' | 'gone' | 'skipped'; FrozenMs = 캡처 실패로 멈춰 있던 ms }
-  #  'clicked' = 전송 확인 / 'gone' = 나가기 위치가 없고 **후속 화면(선택 화면·필드 HUD·ESC 메뉴)이 확인됨**
-  #  (사용자가 이미 눌렀거나 전환) - 호출부의 상태 기반 복귀가 이어받음 / 'skipped' = 커서 미확인으로 3회
-  #  전송 실패 - 호출부 복귀 루프가 재클릭·마감을 담당.
+  # 반환: @{ Result = 'clicked' | 'gone' | 'skipped' | 'matching'; FrozenMs = 캡처 실패로 멈춰 있던 ms }
+  #  'clicked' = 전송 확인(화면 전이 확인이 아님 - 완료 판단은 호출부) / 'gone' = 나가기 위치가 없고 **후속 화면(선택 화면,
+  #  또는 필드 = HUD + 추적기에 던전명 없음 2연속)이 확인됨** (사용자가 이미 눌렀거나 전환) - 호출부의 상태 기반 복귀가
+  #  이어받음. ESC 메뉴는 2026-09-21 부터 증거가 아님(상세 헤더 오탐·던전 안 메뉴 반례 - 설계 합의 A4) / 'skipped' = 커서
+  #  미확인으로 3회 전송 실패 - 호출부 복귀 루프가 재클릭·마감을 담당 / 'matching' = 재매칭 패널('다시 하기' 뒤)이라 하단
+  #  '나가기' 가 매칭 취소 버튼 - 누르지 않음 (설계 합의 A3).
   #  위치도 후속 화면도 확인되지 않는 판독(캡처 성공)이 **3회 이상이고 첫 미검출부터 20초(동결 시간 제외)** 가
   #  지나면 진단 캡처를 남기고 코드 4 로 정지합니다 - '다시 하기' 자리를 누르는 재입장 오클릭보다 정지가 낫습니다
   #  (사용자 결정 2026-09-18, 설계 리뷰 반영). 20초는 옛 복구 루프의 '알 수 없는 화면' 허용치와 같은 값입니다 -
@@ -5056,17 +5152,36 @@ function Invoke-AbyssExitClick {
   $frozenAtMissStart = [double]0
   $yieldAtMissStart = [double]0  # 첫 미검출 시점의 누적 양보 ms (20초 창에서 양보 차분 제외)
   $cursorMissCount = 0
+  $fieldStreak = 0               # 필드 증거(HUD + 추적기 던전명 없음) 연속 수 (2연속 = gone)
   $frozenMs = [double]0
   while ($true) {
     $turnStart = Get-Date
+    $turnSerial = $script:captureFailSerial   # 이 회전에 캡처 실패가 있었는지 (판독이 여럿이라 플래그만으로는 모름 - 구현 리뷰 P2)
     $read = Find-AbyssExitButtonPoint -Game $Game
     $passed = ''
+    $matchingNow = $false
+    if ($read.Point -and (-not $script:screenCaptureFailing)) {
+      # '나가기' 가 보여도 재매칭 패널이면 그 버튼은 매칭 취소입니다 (09-18 실측 - 설계 합의 A3): 누르지 않고 'matching' 반환
+      $matchingNow = Test-AbyssMatchingPanel -Game $Game
+    }
     if ((-not $read.Point) -and (-not $script:screenCaptureFailing)) {
-      # 나가기 위치가 없음 - 후속 화면이 보이면 이미 지나간 것 (선택 화면 → 필드 HUD → ESC 메뉴 순.
-      # ESC 메뉴 판정은 상세 화면 헤더 오탐 이력이 있어 맨 뒤 - 이슈 목록 1절 타 PC 제보 ③)
+      # 나가기 위치가 없음 - 후속 화면이 보이면 이미 지나간 것: 선택 화면(재매칭 패널은 판정 안에서 배제됨) 또는
+      # 필드(HUD + 추적기 던전명 없음, 2연속). ESC 메뉴는 증거에서 뺐습니다 (2026-09-21 설계 합의 A4 - 상세 화면 헤더
+      # 오탐 이력 + 던전 안에서도 열리는 메뉴, 두 반례). HUD 단독도 던전 안에서 참이라 추적기 부정 증거를 함께 요구합니다.
       if (Test-AbyssSelectionScreen -Game $Game) { $passed = '선택 화면' }
-      elseif (Test-HomeEndEscHud -Game $Game) { $passed = '필드 HUD' }
-      elseif (Test-AbyssMenu -Game $Game) { $passed = 'ESC 메뉴' }
+      elseif (Test-HomeEndEscHud -Game $Game) {
+        $questNow = Test-InDungeonQuest -Game $Game
+        if (-not $script:screenCaptureFailing) {
+          if ($questNow) { $fieldStreak = 0 } else { $fieldStreak++ }
+          if ($fieldStreak -ge 2) { $passed = '필드 HUD' }
+        }
+      }
+    }
+    if (-not $script:screenCaptureFailing -and $script:captureFailSerial -ne $turnSerial) {
+      # 이 회전 도중 캡처 실패가 있었지만 뒤 판독 성공이 플래그를 풀었음 - 화면은 돌아왔으니 동결은 아니지만 이 회전의
+      # 음성 판정(미검출·필드 연속)은 믿지 않고 버립니다 (미소모, 구현 리뷰 P2)
+      Start-Sleep -Milliseconds 300
+      continue
     }
     if ($script:screenCaptureFailing) {
       # 캡처 실패 = 판정이 아니라 동결 (규칙 15) - 위 판독이 이번 회전의 캡처 시도이자 복구 탐침
@@ -5077,8 +5192,13 @@ function Invoke-AbyssExitClick {
     }
     # 조작 중이면 클릭하지 않고 끝날 때까지 기다린 뒤 **다시 읽습니다** (옛 좌표 재클릭 금지 - 시도 미소모)
     if (Test-UserRecentlyActive) {
+      $fieldStreak = 0   # 양보 중 화면이 바뀔 수 있음(재입장 등) - 필드 증거 연속도 새로 (구현 리뷰 P1)
       Wait-UserYieldEnd -Game $Game -Context $Context
       continue
+    }
+    if ($matchingNow) {
+      Write-RunLog "[안내] $Context - 재매칭 패널('다시 하기' 뒤)이라 하단 '나가기' 는 매칭 취소 버튼입니다 - 누르지 않고 입장 대기에 맡깁니다"
+      return @{ Result = 'matching'; FrozenMs = $frozenMs }
     }
     if ($read.Point) {
       $script:lastClickSkipReason = ''
@@ -5089,6 +5209,7 @@ function Invoke-AbyssExitClick {
         return @{ Result = 'clicked'; FrozenMs = $frozenMs }
       }
       if ($script:lastClickSkipReason -eq 'user-active') {
+        $fieldStreak = 0
         Wait-UserYieldEnd -Game $Game -Context $Context
         continue
       }
@@ -5178,13 +5299,24 @@ function Test-AbyssSelectionScreen {
   # 기존 제목 '비스' 검사는 보조 기준으로 유지합니다 (배너가 가려진 경우 대비).
   $cardsText = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssCards[0] -ReferenceY $rgAbyssCards[1] `
     -RegionWidth $rgAbyssCards[2] -RegionHeight $rgAbyssCards[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', ''
+  $cardsMatched = $false
   foreach ($titleKeyword in $allDungeonKeywords) {
-    if ($cardsText.Contains($titleKeyword)) { return $true }
+    if ($cardsText.Contains($titleKeyword)) { $cardsMatched = $true; break }
   }
-  $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssSelect[0] -ReferenceY $rgAbyssSelect[1] `
-    -RegionWidth $rgAbyssSelect[2] -RegionHeight $rgAbyssSelect[3] -Scale 3 -Engine $ocrKoreanEngine
-  $normalized = $ocrText -replace '\s', ''
-  return $normalized.Contains('비스')
+  if (-not $cardsMatched) {
+    $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssSelect[0] -ReferenceY $rgAbyssSelect[1] `
+      -RegionWidth $rgAbyssSelect[2] -RegionHeight $rgAbyssSelect[3] -Scale 3 -Engine $ocrKoreanEngine
+    $normalized = $ocrText -replace '\s', ''
+    if (-not $normalized.Contains('비스')) { return $false }
+  }
+  # 양성일 때만 재매칭 패널을 배제합니다 (2026-09-21 설계 합의 A3): '다시 하기' 뒤 패널의 "허상의 정박지 / 입문" 줄이
+  # 카드 영역에 걸려 '우연한만남!6`4허상의정박지/입문' 으로 읽히면 위 키워드가 맞아 선택 화면으로 오판됩니다
+  # (09-18 실측 3프레임). 이 판정이 '회차 완료' 의 근거로 쓰이는 4곳(클리어 감시·복귀 루프·커스텀 복구·나가기 헬퍼)
+  # 모두 여기서 걸러집니다. 음성일 때는 추가 판독이 없어 폴링 비용 불변.
+  $matchingNow = Test-AbyssMatchingPanel -Game $Game
+  if ($script:screenCaptureFailing) { return $false }   # 배제 판독이 캡처 실패면 '선택 화면 아님' - 실패 중 양성 반환 금지 (구현 리뷰 P1)
+  if ($matchingNow) { return $false }
+  return $true
 }
 
 function Invoke-ClickUntil {
@@ -5388,6 +5520,7 @@ function Test-KnownScreen {
   if (Test-HomeEndEscHud -Game $Game) { return $true }
   if (Test-AbyssSelectionScreen -Game $Game) { return $true }
   if (Test-ExitButton -Game $Game) { return $true }
+  if (Test-AbyssMatchingPanel -Game $Game) { return $true }   # '다시 하기' 뒤 재매칭 패널 - 팝업이 아님 (2026-09-21, 이벤트 정리가 X 를 누르지 않게)
   if (Test-AbyssMenu -Game $Game) { return $true }
   $title = Get-DetailTitleText -Game $Game
   foreach ($titleKeyword in $allDungeonKeywords) {
@@ -10514,9 +10647,44 @@ function Invoke-AbyssPartyMemberCycle {
   # --- 4. 나가기 → 필드 복귀 확인. 파티원은 어비스 선택 화면으로 복귀하지 않습니다 ---
   # 2026-09-18 3버튼 개편: 글자 위치 클릭 (옛 고정 좌표는 '다시 하기' 자리). 전송 실패·이탈은 헬퍼 로그로 남고
   # 이어지는 HUD 대기가 상태를 확인합니다 (재클릭 없는 30초 대기는 기존 한계 - 이슈 목록 1절 파티원 항목)
-  [void](Invoke-AbyssExitClick -Game $Game -LogPrefix '[파티원]' -Context '나가기 클릭')
-  Wait-ForScreen -Game $Game -TimeoutSeconds $timeoutHud -Description '던전 밖(필드) 복귀' -Condition {
-    Test-HomeEndEscHud -Game $Game
+  # 필드 복귀 확인 루프 (2026-09-21 설계 합의 A4/파티원): 옛 코드는 헬퍼 결과를 버리고 raw HUD 하나로 필드를 인정했는데,
+  # HUD 는 던전 안에서도 참이고(09-20 실사고) 커서 미확인 'skipped'·게임 미수신 뒤 재클릭 경로가 없어 timeout → 코드 1
+  # 이었습니다(사후 리뷰 P2). 필드 = HUD + 추적기 던전명 없음 **2연속**, 보상 화면이 다시 보이면 헬퍼 재호출(재클릭),
+  # 재매칭 패널이면 누르지 않고 기다림, 캡처 실패는 동결, 조작은 양보(마감은 양보 차분만큼 연장).
+  [void](Invoke-AbyssExitClick -Game $Game -LogPrefix '[파티원]' -Context '나가기 클릭')   # 첫 호출의 동결 시간은 아래 마감 생성 전이라 가산하지 않음 (구현 리뷰 P2)
+  $memberFieldDeadline = (Get-Date).AddSeconds($timeoutHud)
+  $memberFieldSeenYieldMs = [double]$script:userYieldTotalMs
+  $memberFieldStreak = 0
+  while ($true) {
+    $turnSerial = $script:captureFailSerial
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+      # 마감 되돌림은 복구 탐침 뒤에 (구현 리뷰 P2). 연속 수는 유지(동결)
+      $memberFieldDeadline = (Get-Date).AddSeconds($timeoutHud)
+      $memberFieldSeenYieldMs = [double]$script:userYieldTotalMs
+      continue
+    }
+    if ((Get-Date) -ge (Get-YieldAdjustedDeadline -Deadline ([ref]$memberFieldDeadline) -SeenYieldMs ([ref]$memberFieldSeenYieldMs))) {
+      throw '던전 밖(필드) 복귀 대기 시간이 초과됐습니다.'
+    }
+    if (Test-UserRecentlyActive) { $memberFieldStreak = 0; Wait-UserYieldEnd -Game $Game -Context '파티원 필드 복귀 확인'; continue }   # 양보 뒤 연속 수 새로 (구현 리뷰 P1)
+    if (Test-AbyssMatchingPanel -Game $Game) { $memberFieldStreak = 0; Start-Sleep -Seconds 2; continue }
+    if (Test-ExitButton -Game $Game) {
+      # 보상 화면이 그대로면(전송 생략·게임 미수신) 헬퍼로 다시 누릅니다 - 헬퍼가 양보·동결·커서 예산을 담당
+      $memberExit = Invoke-AbyssExitClick -Game $Game -LogPrefix '[파티원]' -Context '나가기 재클릭'
+      if ($memberExit.FrozenMs -gt 0) { $memberFieldDeadline = $memberFieldDeadline.AddMilliseconds($memberExit.FrozenMs) }
+      $memberFieldStreak = 0
+      Start-Sleep -Seconds 2
+      continue
+    }
+    $memberHud = Test-HomeEndEscHud -Game $Game
+    $memberQuest = $(if ($memberHud) { Test-InDungeonQuest -Game $Game } else { $false })
+    if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }   # 실패 표본 - 연속 수 유지(동결)
+    if ($memberHud -and -not $memberQuest) { $memberFieldStreak++ } else { $memberFieldStreak = 0 }
+    if ($memberFieldStreak -ge 2) { break }
+    Start-Sleep -Milliseconds 700
   }
   Write-RunLog '[완료] 파티원 회차 완료 - 필드에서 다음 입장을 기다립니다'
   exit 0
@@ -10544,21 +10712,42 @@ function Return-ToAbyssSelection {
   $abyssMenuMissCount = 0 # 메뉴에서 '어비스' 글자를 못 찾은 횟수 (진단 캡처 1회용)
   $seenYieldMs = [double]$script:userYieldTotalMs   # 양보 마감 연장 기준값 (허브와 같은 계약)
   $unknownSeenYieldMs = [double]$script:userYieldTotalMs   # '알 수 없는 화면 지속' 판정의 양보 제외 기준값
+  $fieldProven = $false        # 이 루프가 필드(HUD + 추적기 던전명 없음)를 직접 확인한 뒤에만 메뉴의 '어비스' 를 누름 (설계 합의 A1)
+  $insideStreak = 0            # 던전 안(HUD + 추적기 던전명) 연속 확인 수
+  $insideSince = $null         # 던전 안 첫 확인 시각 - 나가기 클릭 직후 6~7초 전환 잔상을 20초 창 안에서 재관측
+  $menuCloseTries = 0          # 필드 미확인 상태로 열린 메뉴를 ESC 로 닫은 횟수 (상한 3 → 코드 4)
+  $matchingLogged = $false
 
   # 만료 판정 직전에 누적 양보를 반영 (2026-09-08: 조작 중 클릭이 버려지는 동안 60초가 그대로 소모)
-  while ((Get-Date) -lt (Get-YieldAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs))) {
+  while ($true) {
+    $turnSerial = $script:captureFailSerial   # 회전 단위 캡처 실패 판정용 (구현 리뷰 P2)
     # 0) 화면 캡처가 안 되는 동안은 판단이 불가능하므로 제한 시간을 멈추고 기다립니다.
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       $deadline = (Get-Date).AddSeconds($timeoutHud + $timeoutAbyssMenu + $timeoutAbyssSelect)
       $seenYieldMs = [double]$script:userYieldTotalMs
+      $fieldProven = $false   # 캡처가 끊긴 사이 화면이 바뀌었을 수 있음 - 필드 증거 토큰 폐기 (구현 리뷰 P1)
       Start-Sleep -Milliseconds 700
       # 아래 상태 검사(OCR)는 계속 시도해 복구 여부를 확인합니다.
     }
     # 사용자 조작 중이면 어떤 클릭도 하지 않고 끝날 때까지 기다린 뒤 마감을 늘리고 화면 판정부터 다시
     # (2026-09-08 22:51 실사고: 조작 중 "어비스 메뉴 클릭"이 5회 연속 기록됐으나 실제 클릭은 0회)
     if (Test-UserRecentlyActive) {
+      $fieldProven = $false; $insideStreak = 0; $insideSince = $null   # 양보 중 재입장·메뉴 열기 가능 - 증거 토큰·연속 수 폐기 (구현 리뷰 P1)
       Invoke-UserYieldWithDeadline -Game $Game -Context '어비스 선택 화면 복귀' -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs)
+      continue
+    }
+    # 만료 판정 (2026-09-21 구현 리뷰 P2: 옛 while 조건은 continue 뒤 위 동결 블록보다 먼저 재평가돼 마감 직전의 캡처 실패가
+    # throw 로 샜음 - 캡처 실패 중에는 판정하지 않고, 동결 블록이 마감을 되돌린 뒤에만 봅니다. 이슈 목록 '복귀 루프 마감 경계')
+    if (-not $script:screenCaptureFailing -and (Get-Date) -ge (Get-YieldAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs))) { break }
+
+    # 0-1) 재매칭 패널('다시 하기' 뒤)이면 아무것도 누르지 않습니다 - 하단 '나가기' 는 매칭 취소, 카드 영역은 선택 화면으로
+    #      읽힙니다 (09-18 실측, 설계 합의 A3). 자동 입장이 이어지면 아래 던전 안 판정이 코드 4 로 정직하게 멈춥니다.
+    if (Test-AbyssMatchingPanel -Game $Game) {
+      if (-not $matchingLogged) { Write-RunLog '[어비스] 복귀 중 재매칭 패널 감지 - 매칭 취소를 누르지 않고 기다립니다'; $matchingLogged = $true }
+      $unknownSince = $null
+      $fieldProven = $false; $insideStreak = 0; $insideSince = $null
+      Start-Sleep -Seconds 2
       continue
     }
 
@@ -10584,6 +10773,26 @@ function Return-ToAbyssSelection {
     if (Test-AbyssMenu -Game $Game) {
       $unknownSince = $null
       if (-not $loggedMenu) { Write-RunLog '[어비스] 어비스 메뉴 감지'; $loggedMenu = $true }
+      # 메뉴도 던전 안·밖을 가립니다. 이 루프가 필드를 직접 확인하고 연 메뉴가 아니면(시작부터 열려 있던 메뉴, 사용자가
+      # 전투 중 연 메뉴) '어비스' 를 눌러선 안 됩니다 - 2026-09-20 23:25 실사고에서 던전 안 메뉴의 '어비스' 가 선택 화면
+      # 오버레이를 열어 회차가 오종료됐습니다. ESC 로 닫고 아래 화면(HUD+추적기)을 먼저 확인합니다 (설계 합의 A1, 3회 상한).
+      if (-not $fieldProven) {
+        if ($menuCloseTries -ge 3) {
+          Write-LifeDiagnostics -Game $Game -Context '어비스 복귀 메뉴 출처 미확인' -CaptureOnly
+          Write-RunLog '[완료] 선택 화면 복귀 중 필드를 확인하지 못한 채 메뉴가 계속 열려 있어 자동 조작을 중단합니다 (던전 안일 수 있음). 화면을 확인하고 다시 시작해 주세요.'
+          exit 4
+        }
+        if (Test-UserRecentlyActive) { continue }   # 키 주입도 조작 중엔 금지 - 서두 양보 게이트로 돌아감
+        # 전면 확인 뒤 정확히 1회 전송 - 전면화 실패면 다른 창에 ESC 가 들어가고 예산만 축나므로 전송 성공에만 셉니다 (구현 리뷰 P2)
+        if (Press-KeyVerified -Game $Game -VirtualKey 0x1B -Label '메뉴 닫기') {
+          $menuCloseTries++
+          Write-RunLog "[어비스] 복귀 중 메뉴가 열려 있지만 필드를 아직 확인하지 못해 ESC 로 닫고 화면을 먼저 확인합니다 ($menuCloseTries/3)"
+        } else {
+          Write-RunLog '[어비스] 복귀 중 메뉴 닫기 ESC 를 보내지 못했습니다 (게임 전면 확인 실패) - 다음 회전에서 재시도'
+        }
+        Start-Sleep -Seconds 2
+        continue
+      }
       # **글자를 찾아 누릅니다** - 고정 좌표는 메뉴 구성이 바뀌면 조용히 다른 항목을 누릅니다.
       # 2026-08-08 실사고: 상단에 'NEXON ESSENTIAL' 광고 배너(y33~175)가 생기면서 타일
       # 그리드가 통째로 아래로 밀려, 옛 좌표 (971,387) 이 '아르바이트' 아이콘이 됐습니다
@@ -10610,6 +10819,7 @@ function Return-ToAbyssSelection {
         continue
       }
       Write-RunLog "[어비스] 어비스 메뉴 클릭 (글자 탐색 화면좌표 $([int]$abyssMenuPoint.X),$([int]$abyssMenuPoint.Y))"
+      $fieldProven = $false   # 토큰 소비 - 다음 메뉴는 다시 필드 확인이 필요 (구현 리뷰 P1)
       Start-Sleep -Seconds 2
       # **클릭 검증** (2026-08-08 사용자 요청): 눌렀는데 다른 화면이 열렸으면 메뉴로 되돌립니다.
       # 검증 없이 넘기면 엉뚱한 창(아르바이트 등)이 열린 채 '알 수 없는 화면'으로만 돌다가
@@ -10637,8 +10847,28 @@ function Return-ToAbyssSelection {
       continue
     }
 
-    # 3) 던전 밖 Home/End/ESC HUD가 보이면 ESC를 눌러 메뉴 열기
+    # 3) Home/End/ESC HUD 가 보이면 - 던전 안에서도 보이는 HUD 라(2026-09-20 23:25 실사고) 추적기의 던전명으로 안·밖을 가릅니다
     if (Test-HomeEndEscHud -Game $Game) {
+      $questNow = Test-InDungeonQuest -Game $Game
+      if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }   # HUD·추적기 두 판독 사이 캡처 실패 - 이 표본으로 안·밖을 정하지 않음 (규칙 15, 구현 리뷰 P2)
+      if ($questNow) {
+        # 던전 안 (HUD + '<던전명> 클리어' 목표): ESC 를 누르면 메뉴 → '어비스' 오버레이가 던전 안에서 열려 회차가 오종료됩니다.
+        # 캡처 유효 표본 2연속 + 첫 확인부터 20초(나가기 클릭 직후 6~7초 전환 잔상 - 리뷰 실측 - 를 재관측하는 창)가 지나면
+        # 진단 캡처 + 코드 4 로 멈춥니다. 클리어 대기로 되돌리는 구조는 다음 단계(상태 기계 리팩터) - 이 함수는 void 이고
+        # 호출부 5곳이 반환 직후 exit 0/10 이라 한 곳만 놓쳐도 같은 오계상이 재발합니다 (설계 합의 A1).
+        $insideStreak++
+        if ($null -eq $insideSince) { $insideSince = Get-Date }
+        $unknownSince = $null
+        $fieldProven = $false   # 던전 안 증거 - 옛 필드 토큰 폐기
+        if ($insideStreak -ge 2 -and ((Get-Date) - $insideSince).TotalSeconds -ge 20) {
+          Write-LifeDiagnostics -Game $Game -Context '어비스 복귀 중 던전 안 확인' -CaptureOnly
+          Write-RunLog "[완료] 선택 화면 복귀 중 던전 안 상태(HUD + 던전 목표)를 확인해 자동 조작을 중단합니다 (${insideStreak}회, 20초 이상) - 이 판은 완료로 처리하지 않습니다. 클리어 뒤 다시 시작해 주세요."
+          exit 4
+        }
+        Start-Sleep -Seconds 2
+        continue
+      }
+      $insideStreak = 0; $insideSince = $null
       $unknownSince = $null
       if (-not $loggedHud) { Write-RunLog '[어비스] 던전 밖(HUD) 확인'; $loggedHud = $true }
       # 안전 중지가 예약된 경우: 어차피 멈출 것이므로 어비스 선택 화면까지 복귀하지 않고
@@ -10687,6 +10917,7 @@ function Return-ToAbyssSelection {
       }
       if ($script:lastClickPerformed) {
         Write-RunLog '[어비스] ESC 클릭'
+        $fieldProven = $true   # 필드(HUD + 추적기 던전명 없음)를 확인하고 워커가 직접 연 메뉴에만 유효한 일회성 토큰 (구현 리뷰 P1)
       } else {
         Write-RunLog "[어비스] ESC 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 회전에서 재시도"
         if ($script:lastClickSkipReason -eq 'user-active') {
@@ -14653,6 +14884,47 @@ try {
   # 던전 안/클리어·결과 화면이면 해당 판은 목록 항목으로 계상하지 않고 선택 화면까지만 정리한
   # 뒤 코드 10으로 본 항목을 다시 시작합니다. 오류 재시작은 정상적으로 현재 항목에 계상합니다.
   $startClearDetected = Test-DungeonClearPrompt -Game $game
+  # 재매칭 패널('다시 하기' 뒤 - 09-18 실측)에서 시작한 경우(재시작·복구): 하단 '나가기' 는 매칭 취소라 취소하지 않고, 입장까지
+  # 이어받아 그 판의 클리어 대기로 갑니다 (2026-09-21 설계 합의 A3). 화면만으로는 최초 입장 매칭과 구분할 수 없어 이전 판을
+  # 선계상하지 않습니다 - 커스텀은 아래 수동 진행분 보호 규칙(던전 안 시작 = 정리 전용)이 그대로 적용됩니다.
+  $startMatchingDetected = (-not $startExitDetected) -and (-not $startClearDetected) -and (Test-AbyssMatchingPanel -Game $game)
+  if ($startMatchingDetected) {
+    if ($script:customMode -and $script:customRecoveryOnly) {
+      Write-RunLog '[완료] 완료 항목 마무리 복구 중 재매칭 패널이 감지됐습니다 - 어느 판의 매칭인지 확정할 수 없어 취소하지 않고 중단합니다. 입장이 끝난 뒤 다시 시작해 주세요.'
+      exit 4
+    }
+    Write-RunLog "[어비스] 시작: 재매칭 패널 감지 - 매칭 취소 없이 입장을 기다립니다 (최대 ${timeoutPartyMatch}초)"
+    $startMatchDeadline = (Get-Date).AddSeconds($timeoutPartyMatch)
+    $startMatchSeenYieldMs = [double]$script:userYieldTotalMs
+    $startInsideStreak = 0
+    while ($true) {
+      $turnSerial = $script:captureFailSerial
+      if ($script:screenCaptureFailing) {
+        Test-SafeStopDuringCaptureFail
+        Start-Sleep -Seconds 2
+        [void](Test-CaptureRecovered -Game $game)
+        # 마감 되돌림은 복구 탐침 뒤에 - 앞에 두면 마지막 동결 2초가 예산에서 빠짐 (구현 리뷰 P2). 연속 수는 유지(동결)
+        $startMatchDeadline = (Get-Date).AddSeconds($timeoutPartyMatch)
+        $startMatchSeenYieldMs = [double]$script:userYieldTotalMs
+        continue
+      }
+      if ((Get-Date) -ge (Get-YieldAdjustedDeadline -Deadline ([ref]$startMatchDeadline) -SeenYieldMs ([ref]$startMatchSeenYieldMs))) {
+        Write-LifeDiagnostics -Game $game -Context '시작 재매칭 입장 대기 초과' -CaptureOnly
+        Write-RunLog "[완료] 재매칭 패널에서 시작해 ${timeoutPartyMatch}초 안에 입장을 확인하지 못했습니다 - 매칭을 취소하지 않고 정지합니다. 화면을 확인하고 다시 시작해 주세요."
+        exit 4
+      }
+      if (Test-UserRecentlyActive) { $startInsideStreak = 0; Wait-UserYieldEnd -Game $game -Context '시작 재매칭 입장 대기'; continue }   # 양보 뒤 연속 수 새로 (구현 리뷰 P1)
+      if (Invoke-PurchasePopupSweep -Game $game) { $startInsideStreak = 0; continue }
+      # 입장 확인 = HUD + 추적기 던전명 2연속 (Test-DungeonEntered 는 HUD 그 자체라 필드도 참 - 설계 합의 B2 와 같은 조건)
+      $entryHud = Test-HomeEndEscHud -Game $game
+      $entryQuest = $(if ($entryHud) { Test-InDungeonQuest -Game $game } else { $false })
+      if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }   # 실패 표본 - 연속 수 유지(동결), 이 회전 미소모
+      if ($entryHud -and $entryQuest) { $startInsideStreak++ } else { $startInsideStreak = 0 }
+      if ($startInsideStreak -ge 2) { break }
+      Start-Sleep -Seconds 2
+    }
+    Write-RunLog '[어비스] 재매칭 입장 완료 감지 - 이 판의 클리어 대기부터 진행합니다'
+  }
   # ★ '어비스 안'을 HUD 하나로 판정하면 **필드도 안으로 오판**합니다. Test-DungeonEntered 는
   #   Test-HomeEndEscHud 그 자체인데(3392~3399), 그 HUD 는 게임플레이 화면이면 필드에서도
   #   보입니다. 그래서 복구 전용 회차가 필드에서 시작하면 아래 가드가 걸려 무조건 오류로
@@ -15402,16 +15674,17 @@ try {
       -SourceCondition { Test-DungeonClearPrompt -Game $game }
     Write-RunLog '[어비스] 나가기 버튼 감지'
   }
-  if ($script:customMode -and -not $script:customCleanupOnly) {
-    # 결과/선택 화면 도달 = 현재 어비스 항목의 클리어 확정. 이후 나가기·선택 화면 복귀에서
+  if ($script:customMode -and -not $script:customCleanupOnly -and ($clearOutcome -eq 'clear' -or $clearOutcome -eq 'reward')) {
+    # 결과 화면 도달 = 현재 어비스 항목의 클리어 확정. 이후 나가기·선택 화면 복귀에서
     # 끊겨도 GUI가 같은 판을 다시 입장하지 않고 마무리만 복구할 수 있게 먼저 기록합니다.
+    # 마커는 클리어·보상 화면을 본 문맥에서만 씁니다 - 클리어 감시는 2026-09-21 부터 'selection' 을 돌려주지 않지만
+    # (불명 오버레이는 관측 지속 → 마감 시 코드 4), 증거 없는 결과에 마커가 찍히는 경로를 명시로 막습니다 (설계 합의 A2).
     Write-CustomClearMarker
   }
-  if ($clearOutcome -ne 'selection') {
-    # 2026-09-18 3버튼 개편('[ESC] 나가기' / '[Space] 다시 하기' / '다른 던전 가기'): 옛 고정 좌표 (636,655) 는
-    # '다시 하기' 자리라 글자 위치로 클릭합니다 (미검출은 재판독 후 코드 4 - 재입장 오클릭 방지)
-    [void](Invoke-AbyssExitClick -Game $game -LogPrefix '[어비스]' -Context '나가기 클릭')
-  }
+  # 2026-09-18 3버튼 개편('[ESC] 나가기' / '[Space] 다시 하기' / '다른 던전 가기'): 옛 고정 좌표 (636,655) 는
+  # '다시 하기' 자리라 글자 위치로 클릭합니다 (미검출은 재판독 후 코드 4 - 재입장 오클릭 방지). 'matching'(재매칭 패널)이면
+  # 누르지 않고 아래 복귀 루프가 기다립니다.
+  [void](Invoke-AbyssExitClick -Game $game -LogPrefix '[어비스]' -Context '나가기 클릭')
   Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:customMode -and $script:customCleanupOnly) { 10 } else { 0 })
   Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
   if ($script:customMode -and $script:customCleanupOnly) { exit 10 }

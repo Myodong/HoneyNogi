@@ -49,7 +49,8 @@ $deadlineBlock = [regex]::Match($clearCode, '(?s)if \(\(Get-Date\) -ge \$deadlin
 Assert-Case '워커: 마감 처리 블록을 찾음' ([bool]$deadlineBlock.Success) $true
 $captureFailBranches = @([regex]::Matches($deadlineBlock.Groups[1].Value,
   '(?s)(?:if|\} elseif) \(\$script:screenCaptureFailing\) \{(.*?)\r?\n      \}'))
-Assert-Case '워커: 마감 처리의 캡처 실패 분기 3곳' $captureFailBranches.Count 3
+# 2026-09-21 +1: 보상 전체 화면 닫기(Close-QuestRewardScreen) 판독 뒤 캡처 실패 가드 - 어비스 불명 종료 코드 4 분기 앞 (구현 리뷰 P2)
+Assert-Case '워커: 마감 처리의 캡처 실패 분기 4곳' $captureFailBranches.Count 4
 $throwInCaptureFail = 0
 foreach ($m in $captureFailBranches) { if ($m.Groups[1].Value -match 'throw') { $throwInCaptureFail++ } }
 Assert-Case '워커: 캡처 실패 분기에서는 던지지 않는다' $throwInCaptureFail 0
@@ -161,9 +162,11 @@ Assert-Case '런처: 시스템 PowerShell 절대 경로 우선' `
 # 옵션 화면이 확정된 회차는 죽은 제목의 '고분' 조각이 만드는 선택 화면 오판을 제외)
 Assert-Case '3차: 복구 판정이 onSelectionScreen 플래그 신뢰 (+probe 옵션 제외)' `
   ($workerSource -match '\$recoveryOnSelection = \(-not \$optionsByProbe\) -and \(\$onSelectionScreen -or \(Test-DgSelectionTitle') $true
-# 회귀: 마감 throw 직전 성공 화면(클리어/결과/보상/선택) 최종 탐침 + 탐침 중 캡처 실패 동결
-Assert-Case '3차: 마감 직전 성공 화면 최종 탐침(4상태+HUD 부재)' `
-  ($workerSource -match 'elseif \(\(Test-DungeonClearPrompt -Game \$Game\) -or\s+\(\$FindResultButton[\s\S]{0,120}Test-HomeEndEscHud[\s\S]{0,400}Test-AbyssSelectionScreen') $true
+# 회귀: 마감 throw 직전 성공 화면(클리어/결과/보상) 최종 탐침 + 탐침 중 캡처 실패 동결
+# 2026-09-21: 선택 화면은 성공 화면에서 제외 - 오버레이는 전투 중에도 열려 완료 증거가 못 되고, 탐침에 남기면 불명 오버레이가
+# 마감을 영영 넘깁니다 (test_abyss_screen_signatures 가 부재를 단언). 3상태 + HUD 부재만 남음.
+Assert-Case '3차: 마감 직전 성공 화면 최종 탐침(3상태+HUD 부재 - 선택 화면 제외)' `
+  ($workerSource -match 'elseif \(\(Test-DungeonClearPrompt -Game \$Game\) -or\s+\(\$FindResultButton[\s\S]{0,120}Test-HomeEndEscHud[\s\S]{0,200}Test-ExitButton -Game \$Game\) -and -not \(Test-HomeEndEscHud -Game \$Game\)\)\) \{') $true
 Assert-Case '3차: 최종 탐침 중 캡처 실패도 동결' `
   ([regex]::Matches($workerSource, '\} elseif \(\$script:screenCaptureFailing\) \{').Count -ge 2) $true
 # 과소 게이트 보강: 사용 경로 재판독 null + 미사용 경로 유효 밖 값

@@ -10,7 +10,7 @@
 #   ① 순수 판정 Select-AbyssExitWord: 정확 일치 '나가기' 우선 → '나가' 포함 → $null ('가기' 기준 금지: '다른 던전 가기')
 #   ② Invoke-AbyssExitClick: 규칙 4(조작 중 미소모·양보 뒤 재판독·전송 확인) / 규칙 15(캡처 실패 동결·안전 확인·시도 미소모,
 #      동결 시간을 FrozenMs 로 부모 마감에 반환 - 가상 시계로 생산까지 단언) / 위치·후속 화면 모두 없음이 3회 이상 + 첫
-#      미검출부터 20초(동결·양보 제외 - 양보 제외는 2026-09-20 사후 구현 리뷰 P2) → 진단 캡처 + [완료] + exit 4 / 후속 화면(선택 화면 → 필드 HUD → ESC 메뉴 순) 확인 →
+#      미검출부터 20초(동결·양보 제외 - 양보 제외는 2026-09-20 사후 구현 리뷰 P2) → 진단 캡처 + [완료] + exit 4 / 후속 화면(선택 화면 / 필드 = HUD + 추적기 던전명 없음 2연속; ESC 메뉴 제외 2026-09-21 설계 합의 A4) 확인 → / 재매칭 패널 → 'matching'(설계 합의 A3) /
 #      'gone' / 커서 미확인 3회 → 'skipped' / 후속 판정 도중 캡처 실패는 동결(미소모)
 #   ③ 배선: 고정 좌표 클릭 0곳, 헬퍼 호출 5곳, 복구 루프가 FrozenMs 를 마감에 반영
 $ErrorActionPreference = 'Stop'
@@ -80,7 +80,7 @@ function Next-Seq { param([string]$Name, $Default)
 function Get-GameRegionOcrWords { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $Scale, $Engine)
   $script:readCalls++; $script:readRegion = "$ReferenceX,$ReferenceY,$RegionWidth,$RegionHeight/$Scale/$Engine"
   $r = Next-Seq 'words' 'default'
-  if ("$r" -eq 'capfail') { $script:screenCaptureFailing = $true; return @() }     # 캡처 실패 = 플래그 세우고 빈 배열 (실제 계약)
+  if ("$r" -eq 'capfail') { $script:screenCaptureFailing = $true; $script:captureFailSerial++; return @() }     # 캡처 실패 = 플래그·일련번호 (Register-CaptureFailure 계약)
   $script:screenCaptureFailing = $false                                              # 캡처 성공 = 플래그 해제 (Register-CaptureSuccess 계약)
   if ("$r" -eq 'default') { return $script:defaultWords }
   if ("$r" -eq 'empty') { return @() }                                               # 캡처 성공·단어 0개 (판독 '')
@@ -94,11 +94,15 @@ function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY)
   $script:lastClickPerformed = ($r -eq 'sent'); $script:lastClickSkipReason = $(if ($r -eq 'sent') { '' } else { $r })
   if ($r -eq 'sent') { $script:clicksSent++ }
 }
+# 후속 판정 모의는 실제처럼 **판독 성공이 캡처 실패 플래그를 풉니다** (Register-CaptureSuccess 계약 - 2026-09-21 구현 리뷰 P3:
+# 이 부작용이 없으면 '실패 뒤 다른 판독 성공이 플래그를 풀어 실패 회전이 소모되는' 결함(P2)이 모의에서 안 보임)
 function Test-AbyssSelectionScreen { param($Game) $script:successorChecks++
-  if ($script:selectionFailOnce) { $script:selectionFailOnce = $false; $script:screenCaptureFailing = $true; return $false }   # 후속 판정 도중 캡처 실패
-  return $script:selectionVisible }
-function Test-HomeEndEscHud { param($Game) $script:successorChecks++; return $script:hudVisible }
-function Test-AbyssMenu { param($Game) $script:successorChecks++; return $script:menuVisible }
+  if ($script:selectionFailOnce) { $script:selectionFailOnce = $false; $script:screenCaptureFailing = $true; $script:captureFailSerial++; return $false }   # 후속 판정 도중 캡처 실패
+  $script:screenCaptureFailing = $false; return $script:selectionVisible }
+function Test-HomeEndEscHud { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:hudVisible }
+function Test-AbyssMenu { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:menuVisible }
+function Test-AbyssMatchingPanel { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:matchingVisible }   # 재매칭 패널 (2026-09-21)
+function Test-InDungeonQuest { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:questVisible }         # 추적기 던전명 (필드 부정 증거)
 function Reset-Case {
   param($WordsSeq = @(), $ActiveSeq = @(), $SendSeq = @(), $DefaultWords = $null)
   $script:wordsSeq = @($WordsSeq); $script:wordsIdx = 0
@@ -113,6 +117,8 @@ function Reset-Case {
   $script:screenCaptureFailing = $false
   $script:selectionVisible = $false; $script:hudVisible = $false; $script:menuVisible = $false; $script:selectionFailOnce = $false
   $script:yieldSeconds = 5; $script:userYieldTotalMs = [double]0
+  $script:matchingVisible = $false; $script:questVisible = $false
+  $script:captureFailSerial = 0
 }
 function Count-Log { param([string]$Pattern) @($script:logs | Where-Object { $_ -match $Pattern }).Count }
 function Run-Click { param([string]$Context = '나가기 클릭') Invoke-AbyssExitClick -Game $game -LogPrefix '[어비스]' -Context $Context }
@@ -130,7 +136,7 @@ Check-Equal '기준: FrozenMs 0 (캡처 실패 없음)' ([int]$r.FrozenMs) 0
 Reset-Case -WordsSeq @('capfail', 'capfail', $captureS3)
 $r = Run-Click
 Check-Equal '캡처 실패 2회: 안전 확인 2회, 판독 3회(회전마다 캡처 시도), 클릭 1회, 재판독 소모 0' ("$($script:safeStopCalls)/$($script:readCalls)/$($script:clicksSent)/$((Count-Log '재판독'))") '2/3/1/0'
-Check-Equal '캡처 실패 2회: 실패 중 후속 화면 판정 0회, 결과 clicked' ("$($script:successorChecks)/$($r.Result)") '0/clicked'
+Check-Equal '캡처 실패 2회: 실패 중 후속 화면 판정 0회 (정상 회전의 재매칭 패널 확인 1회만), 결과 clicked' ("$($script:successorChecks)/$($r.Result)") '1/clicked'
 Check-Equal '캡처 실패 2회: FrozenMs = 1400 (동결 회전 700ms×2 - 부모 마감 연장 근거가 실제로 생산됨)' ([int]$r.FrozenMs) 1400
 
 # 2-3. 규칙 4: 클릭 전 조작 감지 → 양보 → **다시 읽은** 좌표로 클릭 (옛 좌표 재클릭 금지). 양보 시간은 FrozenMs 에 안 섞임
@@ -184,13 +190,21 @@ Check-Equal '미검출 3회 뒤 재출현: 정지 없이 클릭 (시간 기준 -
 Reset-Case -WordsSeq @($noExit, 'capfail', $noExit, 'capfail', $noExit) -DefaultWords $noExit
 $r = Run-Click
 Check-Equal '미검출+캡처 실패 교차: 판독 23회(미검출 21 + 실패 2), 안전 확인 2회, exit 4, FrozenMs 1400' ("$($script:readCalls)/$($script:safeStopCalls)/$($script:exitCode)/$([int]$r.FrozenMs)") '23/2/4/1400'
-#    2-7b. 후속 화면 판정 도중 캡처 실패 → 그 회전은 동결(안전 확인·미소모), 다음 회전에 정상 판독 → 클릭
+#    2-7b. 후속 화면 판정 도중 캡처 실패 → 뒤의 HUD 판독 성공이 플래그를 풀어도 **그 회전은 폐기**(미검출 미소모, 화면은 돌아왔으니
+#    동결 아님 - 안전 확인 0·FrozenMs 0), 다음 회전에 정상 판독 → 클릭 (2026-09-21 구현 리뷰 P2: 일련번호로 '실패가 있던 회전' 판정)
 Reset-Case -WordsSeq @($noExit, $captureS3)
 $script:selectionFailOnce = $true
 $r = Run-Click
-Check-Equal '후속 판정 중 캡처 실패: 안전 확인 1, 재판독 소모 0, 다음 회전 clicked, FrozenMs 700' ("$($script:safeStopCalls)/$((Count-Log '재판독'))/$($r.Result)/$([int]$r.FrozenMs)") '1/0/clicked/700'
+Check-Equal '후속 판정 중 캡처 실패(뒤 판독 성공): 회전 폐기 - 재판독 소모 0, 안전 확인 0, 다음 회전 clicked, FrozenMs 0' ("$((Count-Log '재판독'))/$($script:safeStopCalls)/$($r.Result)/$([int]$r.FrozenMs)") '0/0/clicked/0'
+#    2-7c. 양보 뒤에는 필드 증거 연속도 새로 셉니다 (구현 리뷰 P1: 양보 중 재입장하면 옛 필드 1회 + 새 판독 1회로 gone 이 나옴)
+#    필드(0s, 연속 1) → 조작 감지 → 양보 → 필드(연속 1 - 리셋) → 필드(연속 2) → gone = 판독 4회 (리셋 없으면 3회)
+Reset-Case -DefaultWords $noExit -ActiveSeq @($false, $true)
+$script:hudVisible = $true
+$r = Run-Click
+Check-Equal '양보 뒤 필드 연속 리셋: 판독 4회 뒤 gone (양보 1)' ("$($r.Result)/$($script:readCalls)/$($script:yieldWaits)") 'gone/4/1'
 
-# 2-8. 후속 화면 확인 → gone (사용자가 이미 눌렀거나 전환), 클릭 0, 정지 없음. 판정 순서 = 선택 화면 → 필드 HUD → ESC 메뉴
+# 2-8. 후속 화면 확인 → gone (사용자가 이미 눌렀거나 전환), 클릭 0, 정지 없음. 증거 = 선택 화면 / 필드(HUD + 추적기 던전명 없음 2연속).
+#      ESC 메뉴는 2026-09-21 부터 증거가 아님 (상세 헤더 오탐 + 던전 안에서도 열리는 메뉴 - 09-20 실사고, 설계 합의 A4)
 Reset-Case -DefaultWords $noExit
 $script:selectionVisible = $true
 $r = Run-Click
@@ -199,23 +213,24 @@ Check-Equal '후속 화면(선택 화면): gone, 클릭 0, exit 없음, 안내 �
 Reset-Case -DefaultWords $noExit
 $script:hudVisible = $true
 $r = Run-Click
-Check-Equal '후속 화면(필드 HUD): gone' ("$($r.Result)/$((Count-Log '필드 HUD'))") 'gone/1'
+Check-Equal '후속 화면(필드 HUD, 추적기 없음): 2연속 뒤 gone - 판독 2회, 첫 회전은 미검출로 셈' ("$($r.Result)/$($script:readCalls)/$((Count-Log '필드 HUD'))") 'gone/2/1'
+Reset-Case -DefaultWords $noExit
+$script:hudVisible = $true; $script:questVisible = $true
+$r = Run-Click
+Check-Equal '던전 안(HUD + 추적기 던전명): gone 아님 - 미검출 정지 경로 (exit 4, 클릭 0, 필드 로그 0)' ("$($script:exitCode)/$($script:clicksSent)/$((Count-Log '필드 HUD'))") '4/0/0'
 Reset-Case -DefaultWords $noExit
 $script:menuVisible = $true
 $r = Run-Click
-Check-Equal '후속 화면(ESC 메뉴): gone' ("$($r.Result)/$((Count-Log 'ESC 메뉴'))") 'gone/1'
-Reset-Case -DefaultWords $noExit
-$script:selectionVisible = $true; $script:menuVisible = $true
-$r = Run-Click
-Check-Equal '판정 순서: 선택 화면 + ESC 메뉴 동시 → 선택 화면으로 기록 (메뉴는 상세 헤더 오탐 이력이라 맨 뒤)' ("$((Count-Log '선택 화면 이'))/$((Count-Log 'ESC 메뉴'))") '1/0'
-Reset-Case -DefaultWords $noExit
-$script:hudVisible = $true; $script:menuVisible = $true
-$r = Run-Click
-Check-Equal '판정 순서: 필드 HUD + ESC 메뉴 동시 → 필드 HUD 로 기록' ("$((Count-Log '필드 HUD'))/$((Count-Log 'ESC 메뉴'))") '1/0'
+Check-Equal 'ESC 메뉴만 보임: gone 아님 - 미검출 정지 경로 (메뉴는 증거에서 제외)' ("$($script:exitCode)/$($script:clicksSent)/$((Count-Log 'ESC 메뉴'))") '4/0/0'
 Reset-Case -DefaultWords $noExit
 $script:selectionVisible = $true; $script:hudVisible = $true
 $r = Run-Click
 Check-Equal '판정 순서: 선택 화면 + 필드 HUD 동시 → 선택 화면으로 기록 (사후 리뷰 P3 - HUD 우선 변이 검출)' ("$((Count-Log '선택 화면 이'))/$((Count-Log '필드 HUD'))") '1/0'
+#    2-8b. 재매칭 패널 ('다시 하기' 뒤 - 09-18 실측): 나가기 위치는 보이지만 그 버튼은 매칭 취소 → 'matching', 클릭 0 (설계 합의 A3)
+Reset-Case
+$script:matchingVisible = $true
+$r = Run-Click
+Check-Equal '재매칭 패널: matching 반환, 클릭 0, exit 없음, 안내 로그' ("$($r.Result)/$($script:clicksSent)/$($script:exitCode)/$((Count-Log '매칭 취소 버튼입니다'))") 'matching/0//1'
 
 # 2-9. 위치 선택 불가('나'+'가기')도 미검출과 같은 정지 경로 - '가기' 로 다른 던전 가기를 누르지 않음
 Reset-Case -DefaultWords $splitNa
@@ -231,19 +246,19 @@ Check-Equal "빈 판독: exit 4, 클릭 0, 판독문 '' 기록" ("$($script:exit
 Reset-Case
 $script:menuVisible = $true
 $r = Run-Click
-Check-Equal '나가기 보임 + 메뉴 오탐: 후속 판정 없이 클릭 (successorChecks 0)' ("$($r.Result)/$($script:successorChecks)/$($script:clicksSent)") 'clicked/0/1'
+Check-Equal '나가기 보임 + 메뉴 오탐: 후속 판정 없이 클릭 (재매칭 패널 확인 1회만 - successorChecks 1)' ("$($r.Result)/$($script:successorChecks)/$($script:clicksSent)") 'clicked/1/1'
 
 # ── 3. 배선 (주석 뺀 사본) ─────────────────────────────────────────────────────
 $workerSource = Remove-SourceComments -Text ([IO.File]::ReadAllText($workerPath))
 Check-Equal '배선: 고정 좌표 $ptExitButton 클릭 0곳' ([regex]::Matches($workerSource, 'Click-GamePoint[^\r\n]*\$ptExitButton').Count) 0
-Check-Equal '배선: 헬퍼 호출 5곳 (본류·시작 보상·시작 클리어·파티원·복구 루프)' ([regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game').Count) 5
+Check-Equal '배선: 헬퍼 호출 6곳 (본류·시작 보상·시작 클리어·파티원 클릭·파티원 재클릭·복구 루프)' ([regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game').Count) 6
 $returnDef = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection')))
 Check-Equal '배선: 복구 루프가 헬퍼 FrozenMs 를 마감에 반영' ([bool]($returnDef -match 'FrozenMs -gt 0\)\s*\{\s*\$deadline = \$deadline\.AddMilliseconds')) 'True'
 Check-Equal '배선: 복구 루프에 옛 메타 분기(나가기 클릭 건너뜀) 없음' ([bool]($returnDef -match '나가기 클릭 건너뜀')) 'False'
 $clickCode = Remove-SourceComments -Text $defs['Invoke-AbyssExitClick']
 Check-Equal '헬퍼: 캡처 실패 동결이 공통 진입점을 거침' ([bool]($clickCode -match 'if \(\$script:screenCaptureFailing\)\s*\{[\s\S]{0,160}Test-SafeStopDuringCaptureFail')) 'True'
 Check-Equal '헬퍼: 판독이 동결 검사보다 앞 (회전마다 캡처 시도 = 복구 탐침)' ($clickCode.IndexOf('Find-AbyssExitButtonPoint') -lt $clickCode.IndexOf('if ($script:screenCaptureFailing)')) 'True'
-Check-Equal '헬퍼: 후속 화면 판정 3종이 동결 검사보다 앞 (판정 중 캡처 실패도 그 회전에서 동결)' ($clickCode.IndexOf('Test-AbyssMenu') -lt $clickCode.IndexOf('if ($script:screenCaptureFailing)')) 'True'
+Check-Equal '헬퍼: 후속 화면 판정(선택·HUD·추적기)이 동결 검사보다 앞 (판정 중 캡처 실패도 그 회전에서 동결)' ($clickCode.IndexOf('Test-InDungeonQuest') -lt $clickCode.IndexOf('if ($script:screenCaptureFailing)')) 'True'
 Check-Equal '헬퍼: 조작 검사가 재판독 카운트보다 앞 (규칙 4 - 조작이 예산을 소모하지 않음)' ($clickCode.IndexOf('Test-UserRecentlyActive') -lt $clickCode.IndexOf('$missCount++')) 'True'
 Check-Equal '헬퍼: 정지 조건 = 3회 이상 + 20초(동결 제외)' ([bool]($clickCode -match '\$missCount -ge 3 -and \$missElapsedMs -ge 20000')) 'True'
 $findCode = Remove-SourceComments -Text $defs['Find-AbyssExitButtonPoint']

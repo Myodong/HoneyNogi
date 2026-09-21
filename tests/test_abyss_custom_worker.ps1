@@ -76,7 +76,7 @@ Check-Pattern '항목 던전이 프로파일 선택 전에 적용됨' `
 Check-Pattern '어비스 항목이 입장 방식·매칭·난이도 덮어씀' `
   '\$dungeonMode\s*=\s*\[string\]\$script:abyssCustomPreparsed\.Mode[\s\S]{0,300}\$abyssMatching\s*=\s*\[string\]\$script:abyssCustomPreparsed\.Matching[\s\S]{0,400}\$dungeonDifficulty'
 Check-Pattern '클리어 확정 후 완료 마커 기록' `
-  '결과/선택 화면 도달 = 현재 어비스 항목의 클리어 확정[\s\S]{0,300}Write-CustomClearMarker'
+  '결과 화면 도달 = 현재 어비스 항목의 클리어 확정[\s\S]{0,700}Write-CustomClearMarker'
 # 2026-08-01: Return-ToAbyssSelection 에 -SafeStopExitCode 가 추가되어 호출부가 길어짐
 # (준비/정리 실행 중 안전 중지도 회차로 계상하지 않는 계약 - 거리 상한 완화)
 Check-Pattern '수동 진행분 정리 후 코드 10' `

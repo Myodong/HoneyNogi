@@ -85,7 +85,7 @@ foreach ($node in $stallAst.FindAll({
     Line = $node.Extent.StartLineNumber
     Body = $clause.Item2.Extent.Text; PreCheck = $preCheck }
 }
-Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 37   # 2026-09-18 어비스 보상 화면 '나가기' 글자 클릭 헬퍼(Invoke-AbyssExitClick) 동결 +1 / 2026-09-16 어비스 '우연한 만남' 켜기 양보 후 제목 판독 동결 +1 / 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1 / 2026-09-13 냥코인 규칙 15: PURCHASE_WAIT 동결(if + 내부 while) +2, 냥코인·골드 판독 직후 가드 +2, REROLL_WAIT 판독 직후 가드 +1 / 2026-09-14 REROLL_WAIT 동결 블록 내부 복구 대기 while +1
+Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 39   # 2026-09-21 던전 안 선택 화면 오판 핫픽스(설계 합의 A5 예상치 그대로): 시작 재매칭 입장 대기 루프 +1, 파티원 필드 복귀 루프 +1 (복귀 루프의 추적기 판독 뒤 if-continue 는 조건식이 플래그 단독이라 함께 계수 - 아래 if-continue 참고) / 2026-09-18 어비스 보상 화면 '나가기' 글자 클릭 헬퍼(Invoke-AbyssExitClick) 동결 +1 / 2026-09-16 어비스 '우연한 만남' 켜기 양보 후 제목 판독 동결 +1 / 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1 / 2026-09-13 냥코인 규칙 15: PURCHASE_WAIT 동결(if + 내부 while) +2, 냥코인·골드 판독 직후 가드 +2, REROLL_WAIT 판독 직후 가드 +1 / 2026-09-14 REROLL_WAIT 동결 블록 내부 복구 대기 while +1
 Assert-Case '동결 지점: while 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'while' }).Count) 9   # 2026-09-13 PURCHASE_WAIT 내부 복구 대기 +1 / 2026-09-14 REROLL_WAIT 내부 복구 대기 +1
 # 한도 되돌림 형 3곳 (클리어 대기 본문 / 어비스 선택 화면 복귀 / 그 밖). 11차에서 감시망에
 # 새로 들어온 형태입니다 - 이 자리들이 캡처 실패 중 유일한 게임 사망 감지 지점입니다.
@@ -98,7 +98,7 @@ Assert-Case '동결 지점: if-renew 형(한도 되돌림)' (@($freezeSpots | Wh
 #   Codex P1 - 판독만 건너뛰어 캡처 시도 0회 → 무조건 unknown → exit 4 였음) +
 #   어비스 **혼자하기** 이동하기 루프(함께하기 쪽과 비대칭이라 마감 되돌림·안전 중지가 빠져 있었음)
 # 2026-09-10 +2: 던전·사냥터 '파티 찾기'의 양보 후 재판독 앞 캡처 실패 동결
-Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 25   # 2026-09-18 어비스 나가기 글자 클릭 헬퍼 +1 / 2026-09-16 어비스 우연한 만남 켜기 제목 판독 뒤 +1 / 2026-09-08 어비스 이동하기 +1 / 2026-09-13 냥코인 규칙 15 +4 (PURCHASE_WAIT·냥코인·골드·REROLL_WAIT 판독 직후)
+Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 27   # 2026-09-21 핫픽스 +2 (시작 재매칭 대기·파티원 필드 복귀 루프의 서두 동결) / 2026-09-18 어비스 나가기 글자 클릭 헬퍼 +1 / 2026-09-16 어비스 우연한 만남 켜기 제목 판독 뒤 +1 / 2026-09-08 어비스 이동하기 +1 / 2026-09-13 냥코인 규칙 15 +4 (PURCHASE_WAIT·냥코인·골드·REROLL_WAIT 판독 직후)
 $loopMissing = @()
 foreach ($spot in $freezeSpots) {
   $bodyCode = (($spot.Body -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
