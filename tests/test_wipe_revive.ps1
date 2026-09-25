@@ -104,8 +104,9 @@ foreach ($btnWord in @('도움요청그만두기', '나가기', '동행부르기
 
 # ── 4. 배선 가드 (워커 소스 - 전멸 분기 구조 유지 확인) ─────────────────────
 $workerSource = Get-Content -LiteralPath (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Raw -Encoding UTF8
+$workerCode = Remove-SourceComments -Text $workerSource   # 주석 뺀 사본 (2026-09-25 - 주석에 인용된 문구가 개수 단언을 흔들지 않게)
 Assert-Case '배선: Wiped 를 Dead 보다 먼저 분기' `
-  ($workerSource -match 'if \(\$death\.Wiped\) \{[\s\S]{100,3000}\} elseif \(\$death\.Dead\) \{') $true
+  ($workerSource -match 'if \(\$death\.Wiped\) \{[\s\S]{100,6000}\} elseif \(\$death\.Dead\) \{') $true   # 09-25 전멸 분기가 길어져 창 6000
 # ★ 2026-08-11: 거점 부활 버튼은 화면에 따라 '여신상에서 부활' 또는 '캠프파이어에서 부활'
 #   하나만 있습니다(실측 전멸 2장이 각각). '여신'만 찾으면 캠프파이어 화면에서 못 찾습니다.
 #   손실 순서상 **캠프파이어가 여신상보다 유리**하므로(중간 세이브 vs 처음부터) 캠프 우선입니다.
@@ -125,35 +126,56 @@ Assert-Case '배선: 개인 거점 부활도 공용 탐색을 쓴다' `
 Assert-Case "배선: '여신' 단독 검색이 남아 있지 않다" `
   ([bool]($workerSource -match "-SearchText '여신'")) $false
 Assert-Case '배선: 예비 좌표는 전멸 재확인 후에만' `
-  ($workerSource -match '\$wipeRecheck = Get-DeathScreenInfo[\s\S]{0,200}if \(\$wipeRecheck\.Wiped\)') $true
-Assert-Case '배선: 전멸 해제 시 미발견 누적 초기화' `
-  ($workerSource -match 'if \(-not \$death\.Wiped\) \{ \$wipeButtonMisses = 0 \}') $true
-Assert-Case '배선: 재도전 횟수는 기존 부활 상한 공유' `
-  ($workerSource -match 'Wiped\)[\s\S]{0,300}\$reviveCount -ge \$reviveMaxPerCycle') $true
+  ($workerSource -match '\$wipeRecheck = Get-DeathScreenInfo[\s\S]{0,300}if \(\$recheckValid -and \$wipeRecheck\.Wiped\)') $true   # 09-25 재확인도 캡처 유효성 게이트
+Assert-Case '배선: 전멸 해제 시 미발견 누적 초기화 (유효 표본에서만 - 2026-09-25)' `
+  ($workerCode -match 'if \(\$deathValid -and -not \$death\.Wiped\) \{ \$wipeButtonMisses = 0 \}') $true
+# 2026-09-25 부활 상태 머신: 상한·예산 판정은 Resolve-ReviveSample 이 Wiped/Dead 분기보다 **앞에서** 끝냅니다 (진리표는
+# test_revive_state_machine). 여기서는 분기 배선만 - 전멸 분기에 자체 상한 비교가 남아 있으면 안 됩니다.
+Assert-Case '배선: 상한·예산 판정(Resolve-ReviveSample)이 Wiped/Dead 분기 앞' `
+  ($workerCode -match '(?s)\$reviveAction = Resolve-ReviveSample -State \$reviveState[\s\S]{0,2500}if \(\$death\.Wiped\) \{') $true
+Assert-Case '배선: 전멸 분기에 옛 상한 비교(reviveCount -ge)가 남아 있지 않다' `
+  ([bool]($workerCode -match '\$reviveCount -ge \$reviveMaxPerCycle')) $false
 Assert-Case '배선: 전멸 예비 좌표 config 키' `
   ($workerSource -match "wipeStatueRevive'\) @\(986, 670\)") $true
 
-# ── 2026-08-11 ② 부활 입력 계상 게이트 (클릭/키가 실제로 나갔을 때만 계상) ──
-# 실측 근거: 13:33 사냥터 실기에서 클릭 생략 + 거짓 로그 기전 확정 (같은 클릭 함수).
-Assert-Case '배선(②): 전멸 앵커 클릭 성공 여부를 lastClickPerformed 로 판정' `
-  ([bool]($workerSource -match '(?s)Click-ScreenPoint -X \$wipeAnchorHit\.Point\.X[\s\S]{0,700}\$wipeClicked = \$script:lastClickPerformed')) $true
+# ── 2026-08-11 ② → 2026-09-25 전송 확인 게이트 (클릭/키가 실제로 나갔을 때만 '보냈다' = Register-ReviveDispatch) ──
+# 실측 근거: 13:33 사냥터 실기에서 클릭 생략 + 거짓 로그 기전 확정 (같은 클릭 함수). 계상 자체는 성공 확인 시점(상태 머신).
+Assert-Case '배선(②): 전멸 앵커 클릭은 lastClickPerformed 일 때만 전송 종류 기록, 아니면 생략 사유 기록' `
+  ([bool]($workerCode -match "(?s)Click-ScreenPoint -X \`$wipeAnchorHit\.Point\.X[\s\S]{0,400}if \(\`$script:lastClickPerformed\) \{ \`$dispatchKind = '전멸 재도전' \} else \{ \`$dispatchSkipReason = \`$script:lastClickSkipReason \}")) $true
 Assert-Case '배선(②): 전멸 예비 좌표도 같은 판정' `
-  ([bool]($workerSource -match '(?s)ptWipeStatueRevive[\s\S]{0,300}\$wipeClicked = \$script:lastClickPerformed')) $true
-Assert-Case '배선(②): 전멸 클릭을 무조건 성공으로 세지 않음' `
-  ([bool]($workerSource -match '(?m)^\s*\$wipeClicked = \$true\s*$')) $false
-Assert-Case '배선(②): 개인 거점 계상은 전송 성공 분기 안 (reviveDispatched 게이트)' `
-  ([bool]($workerSource -match '(?s)if \(\$reviveDispatched\) \{\s*\r?\n\s*\$reviveCount\+\+')) $true
-Assert-Case '배선(②): 거점 성공 로그도 전송 확인 뒤 (클릭 앞 선기록 제거)' `
-  ([bool]($workerSource -match '(?s)Click-ScreenPoint -X \$anchorHit\.Point\.X[\s\S]{0,200}if \(\$script:lastClickPerformed\) \{[\s\S]{0,200}에서 부활 클릭')) $true
-Assert-Case '배선(②): R키는 검증 입력 + 성공 시에만 계상' `
-  ([bool]($workerSource -match '(?s)if \(Press-KeyVerified -Game \$Game -VirtualKey \(\[byte\]\$reviveKey\)[\s\S]{0,160}\$reviveCount\+\+')) $true
-Assert-Case '배선(②): 전송 실패 지속 상한 20초 (거점/R 각각 throw)' `
-  (@([regex]::Matches($workerSource, '20초 동안 한 번도 전송하지 못했습니다')).Count) 2
-Assert-Case '배선(②): 상한 시계는 첫 생략에 시작 (AddSeconds 20)' `
-  (@([regex]::Matches($workerSource, '\$reviveDispatchDeadline = \(Get-Date\)\.AddSeconds\(20\)')).Count) 2
-Assert-Case '배선(②): 사망 상태 해제 시 상한 초기화' `
-  ([bool]($workerSource -match 'if \(-not \$death\.Dead -and -not \$death\.Wiped\) \{ \$reviveDispatchDeadline = \$null \}')) $true
-Assert-Case '배선(②): 성공 전송 시 상한 초기화 (초기화 선언 + 거점 + R + 해제 = 4곳 이상)' `
-  (@([regex]::Matches($workerSource, '\$reviveDispatchDeadline = \$null')).Count -ge 4) $true
+  ([bool]($workerCode -match "(?s)ptWipeStatueRevive\[0\][\s\S]{0,300}if \(\`$script:lastClickPerformed\) \{ \`$dispatchKind = '전멸 재도전' \} else \{ \`$dispatchSkipReason = \`$script:lastClickSkipReason \}")) $true
+Assert-Case '배선(②): 개인 예비 좌표도 같은 판정' `
+  ([bool]($workerCode -match "(?s)ptStatueRevive\[0\][\s\S]{0,300}if \(\`$script:lastClickPerformed\) \{ \`$dispatchKind = '여신상 부활' \} else \{ \`$dispatchSkipReason = \`$script:lastClickSkipReason \}")) $true
+Assert-Case '배선(②): 거점 성공 로그·종류 기록은 전송 확인 뒤 (클릭 앞 선기록 제거)' `
+  ([bool]($workerCode -match '(?s)Click-ScreenPoint -X \$anchorHit\.Point\.X[\s\S]{0,200}if \(\$script:lastClickPerformed\) \{[\s\S]{0,200}에서 부활 클릭[\s\S]{0,120}\$dispatchKind = "\$\(\$anchorHit\.Name\) 부활"')) $true
+Assert-Case '배선(②): R키는 검증 입력 + 성공 시에만 전송 종류 기록' `
+  ([bool]($workerCode -match "(?s)if \(Press-KeyVerified -Game \`$Game -VirtualKey \(\[byte\]\`$reviveKey\)[\s\S]{0,200}\`$dispatchKind = '가루 부활'")) $true
+Assert-Case '배선(②): 전송 종류 기록은 5곳 (전멸 앵커·전멸 예비·개인 앵커·개인 예비·R) - 위 다섯 단언이 전부' `
+  (@([regex]::Matches($workerCode, "\`$dispatchKind = (?:'[^']|`")")).Count) 5
+Assert-Case '배선(②): 상태 머신 전송 등록은 dispatchKind 게이트 안 1곳 + 3초 대기 + continue' `
+  ([bool]($workerCode -match '(?s)if \(\$dispatchKind\) \{\s*\r?\n\s*Register-ReviveDispatch -State \$reviveState -Kind \$dispatchKind -Now \(Get-Date\) -SettleSeconds \$reviveSettleSeconds\s*\r?\n\s*Start-Sleep -Seconds 3\s*\r?\n\s*continue')) $true
+Assert-Case '배선(②): Register-ReviveDispatch 호출은 1곳' `
+  (@([regex]::Matches($workerCode, 'Register-ReviveDispatch -State \$reviveState')).Count) 1
+# 20초 상한 (2026-09-25 - 목록 '조작 생략이 20초 상한을 소모'·'전멸 재도전 커서 미확인 상한 없음' 두 건 통합): 세 경로(전멸/거점/R)가
+# Resolve-ReviveDispatchSkip 하나를 공유하고, user-active 는 상한을 세우지 않습니다 (진리표는 test_revive_state_machine).
+Assert-Case '배선(②): 20초 초과 throw 는 공용 헬퍼 timeout 판정 뒤 1곳' `
+  (@([regex]::Matches($workerCode, '20초 동안 한 번도 전송하지 못했습니다')).Count) 1
+Assert-Case '배선(②): throw 직전이 Resolve-ReviveDispatchSkip 의 timeout' `
+  ([bool]($workerCode -match "(?s)\`$skipOutcome = Resolve-ReviveDispatchSkip -State \`$reviveState -Reason \`$dispatchSkipReason -Now \(Get-Date\)[^\r\n]*\r?\n\s*if \(\`$skipOutcome -eq 'timeout'\) \{\s*\r?\n\s*throw")) $true
+Assert-Case '배선(②): 20초 상한은 헬퍼 안 연속 생략 누적(-ge 20000) 1곳, 호출부에 자체 시계(AddSeconds 20) 없음' `
+  ('{0}/{1}' -f (@([regex]::Matches($workerCode, '\$State\.SkipElapsedMs -ge 20000')).Count), (@([regex]::Matches($workerCode, 'AddSeconds\(20\)')).Count)) '1/0'
+$skipHelper = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('Resolve-ReviveDispatchSkip')))
+Assert-Case '배선(②): 헬퍼는 user-active 분기가 경과 누적 앞 (상한 미설정·미전진)' `
+  (($skipHelper.IndexOf("-eq 'user-active'") -ge 0) -and ($skipHelper.IndexOf("-eq 'user-active'") -lt $skipHelper.IndexOf('SkipElapsedMs = [double]$State.SkipElapsedMs +'))) $true
+Assert-Case '배선(②): 생략 상한은 시도가 있었을 때만 (앵커 미탐 회전은 시계를 돌리지 않음)' `
+  ([bool]($workerCode -match '(?s)if \(\$dispatchAttempted\) \{[\s\S]{0,900}Resolve-ReviveDispatchSkip')) $true
+Assert-Case '배선(②): 시도 없는 회전은 Register-ReviveNoAttempt 로 연속을 끊는다 (구현 리뷰 P1)' `
+  ([bool]($workerCode -match '(?s)\} else \{\s*\r?\n\s*Register-ReviveNoAttempt -State \$reviveState\s*\r?\n\s*\}\s*\r?\n\s*Start-Sleep -Milliseconds 800')) $true
+Assert-Case '배선(②): 전멸 예비 좌표 격상 문턱은 전송·cursor-not-ready 에서만 소모 (user-active 는 유지 - 규칙 4)' `
+  ([bool]($workerCode -match "if \(\`$script:lastClickPerformed -or \`$dispatchSkipReason -ne 'user-active'\) \{ \`$wipeButtonMisses = 0 \}")) $true
+Assert-Case '배선(②): 전멸 미탐 누적을 재확인 앞에서 무조건 0 으로 되돌리지 않는다' `
+  ([bool]($workerCode -match '(?s)if \(\$wipeButtonMisses -ge 3\) \{\s*\r?\n\s*\$wipeButtonMisses = 0')) $false
+Assert-Case '배선(②): 전멸 재확인도 캡처 유효성(일련번호) 게이트' `
+  ([bool]($workerCode -match '(?s)\$recheckSerial = \$script:captureFailSerial\s*\r?\n\s*\$wipeRecheck = Get-DeathScreenInfo -Game \$Game\s*\r?\n\s*\$recheckValid = \(-not \$script:screenCaptureFailing\) -and \(\$script:captureFailSerial -eq \$recheckSerial\)\s*\r?\n\s*if \(\$recheckValid -and \$wipeRecheck\.Wiped\)')) $true
 
 exit $fails

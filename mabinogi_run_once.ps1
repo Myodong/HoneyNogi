@@ -456,7 +456,7 @@ if (Test-Path -LiteralPath $configPath) {
 # v15(2026-09-15 퀘스트 추적기 상단 150 재확장 - 타 PC 제보) / v16(2026-09-20 어비스 상세 난이도 알약 영역 상단 확장 -
 # 09-15 타 PC 제보의 알약 y136~162 가 옛 상단 150 에 잘려 '매우 어려움' 미탐. 증분은 전 사용자 config 이전 = 커스텀
 # 진행 기록 초기화 1회 - 같은 커밋의 다른 좌표 변경과 묶어 한 번만).
-$coordsVersionCurrent = 16
+$coordsVersionCurrent = 17   # v17 (2026-09-25): 퇴장 팝업 제목 영역 abyssExitPopupTitle 값 변경 - 같은 날 먼저 배포된 사본(v16, 좁은 영역)이 사용자 config 에 남아 실기 3 에서 나가기 미클릭 (규칙 5: 기존 좌표 키 값 변경 = +1)
 $script:staleCoordsIgnored = $false
 $configCoordsVersion = Get-ConfigInteger $config @('coordsVersion') 0 0 100000
 if ($config -and $configCoordsVersion -lt $coordsVersionCurrent) {
@@ -1748,7 +1748,20 @@ if ($deepMode) {
 # 보이면(=행동불능 상태), 남은 횟수가 있을 때 R키(여기서 부활)를 눌러 전투를 이어갑니다.
 $reviveEnabled     = Get-ConfigBoolean $config @('revive', 'enabled') $true
 $reviveKey         = Get-ConfigInteger $config @('revive', 'key') 82 1 255    # 82 = R ('여기서 부활' 단축키)
-$reviveMaxPerCycle = Get-ConfigInteger $config @('revive', 'maxPerCycle') 10 0 1000
+# 거점 부활(캠프파이어·여신상·전멸 재도전) 성공 상한 - 어비스에서 이 횟수를 다 쓴 뒤 다시 거점 부활이 필요해지면 부활 대신 던전을 나가
+# 새 파티로 재입장합니다(코드 10, 회차 미계상). 2026-09-25 사용자 확정: 옛 '전체 부활 상한 10(maxPerCycle)' 은 게임 규칙이 아니었고(캠프파이어
+# 착석·여신상 부활로 횟수 초기화), 가루(R)는 게임이 남은 횟수 3회로 스스로 막는다. 던전·심층·사냥터는 상한 없음.
+$reviveCheckpointLimit = Get-ConfigInteger $config @('revive', 'checkpointReviveLimit') 3 0 1000
+# 사망 1회(에피소드)당 실제로 전송하는 부활 입력 상한. 그 뒤에도 사망 화면이 그대로면 조건부 정지(코드 4) - 2026-09-25 설계 합의
+# (09-21 22:33 실사고: 예비 좌표 헛클릭 7회가 옛 상한을 소진). 거점 상한은 성공 확인 수의 상한, 이 값은 전송 수의 상한.
+$reviveDispatchBudget = 3
+# 부활 입력 직후 '정착 창'(초): 이 안의 사망 표본은 전송 무효로 확정하지 않습니다. 실측 R키→'부활 완료' 3~4초(09-21 로그 4건) - 3초 대기 직후
+# 표본이 아직 사망이면 두 번째 입력을 보내 가루·파티 부활 횟수를 중복 소모할 수 있음 (구현 리뷰 P1). 생존 표본은 창과 무관하게 즉시 확인.
+# 4초는 고정 3초 대기 뒤 여유가 회전 오버헤드(마감 판독·에피소드 중 매 폴 팝업 탐색·사망 판독)에 먹혀 0~1초라 5초로 (자체 리뷰 지적). 생존 표본은 창과 무관.
+$reviveSettleSeconds = 5
+# 거점 부활 버튼(캠프파이어/여신상) 등장 정착(ms): 사망 화면이 뜬 직후의 첫 클릭은 버튼 위에 정확히 떨어져도 게임이 받지 않았음 - 2026-09-25 실기 2
+# 에서 3/3(19:57:31·20:03:52·20:06:27, 프레임 확인), 6초 뒤 재클릭이 먹음. 실기 1 에서 등장 2초 뒤 첫 클릭은 4/4 먹음. 이 시간 전에는 시도하지 않음.
+$reviveAnchorSettleMs = 1500
 # 부활 완료 후 전투를 다시 시작하는 키: 부활하면 자동전투가 꺼진 상태라 자동출발(Space)을
 # 다시 눌러야 전투가 이어집니다. 0 을 넣으면 누르지 않습니다.
 $reviveResumeKey   = Get-ConfigInteger $config @('revive', 'resumeKey') 32 0 255   # 32 = Space
@@ -1762,6 +1775,10 @@ $ptWipeStatueRevive = @(Get-ConfigValue $config @('clickPoints', 'wipeStatueRevi
 # 부활 버튼들이 표시되는 우하단 영역: 버튼 배치가 남은 횟수에 따라 달라지므로
 # 이 영역 안에서 '여신상' 글자를 OCR로 찾아 실제 위치를 클릭합니다.
 $rgReviveButtons   = @(Get-ConfigValue $config @('ocrRegions', 'reviveButtons') @(700, 570, 555, 135))
+# 사망 화면 퇴장(거점 부활 상한 뒤 - 2026-09-25 수동 조작 실측): 미니맵 옆 문 아이콘, '던전에서 퇴장하시겠습니까?' 팝업 제목·버튼 줄
+$ptAbyssDeathExit  = @(Get-ConfigValue $config @('clickPoints', 'abyssDeathExit') @(1229, 62))
+$rgAbyssExitPopupTitle   = @(Get-ConfigValue $config @('ocrRegions', 'abyssExitPopupTitle') @(400, 440, 470, 110))   # 제목+본문 (실기 2: 좁은 영역은 '-00')
+$rgAbyssExitPopupButtons = @(Get-ConfigValue $config @('ocrRegions', 'abyssExitPopupButtons') @(400, 600, 460, 70))
 # 게임 '너무 오랫동안 실행' 재시작 요구 팝업의 본문 영역 (2026-08-11 19:00 실사고 실측 -
 # 상단 중앙 알림. config 좌표가 아니라 하드코딩 = coordsVersion 무관. Test-GameRestartPopup)
 $rgRestartPopup    = @(430, 70, 410, 70)
@@ -1855,6 +1872,9 @@ $script:captureFailCause = $null
 # 캡처 실패가 '시작된 시각'입니다. 안전 중지 예약을 캡처 실패 대기 중에 소비하는 것은
 # 실패가 충분히 오래(2분 이상) 지속되어 '영영 복구되지 않는 상황'으로 보일 때만 하기 위한 기준.
 $script:captureFailingSince = $null
+# 캡처 실패로 흘려보낸 시간의 누적(ms). 끝난 실패 구간의 합 - 진행 중인 구간은 Get-CaptureFailTotalMs 가 더해 돌려줍니다. 대기 루프는
+# 마지막으로 본 값과의 차분만큼 자기 마감(연장 절대 한도 등)을 미룹니다 (userYieldTotalMs 와 같은 계약 - 2026-09-25 구현 리뷰 P1).
+$script:captureFailTotalMs = [double]0
 # 마지막으로 캡처에 성공했을 때의 세션 연결 이름입니다(예: 'rdp-tcp#3', 'console').
 # RDP는 접속할 때마다 새 연결 이름이 되므로, 실패 시점에 이름이 바뀌어 있으면
 # '창 최소화'(연결 유지, 이름 동일)가 아니라 'RDP 재접속 직후'로 판별합니다.
@@ -2896,6 +2916,11 @@ function Click-ScreenPoint {
     default { }
   }
   if (-not $cursorReady) { $script:lastClickSkipReason = 'cursor-not-ready'; return }
+  # 커서 이동도 자기 입력으로 등록 (2026-09-25 실기 2·3: 사망 화면 문 아이콘 클릭 뒤 다음 관측이 매번 '입력 판정 창 밖 즉시 확정: 후보 -484ms'
+  # = 클릭 430ms 전 = SetCursorPos 시각 → '마우스 이동' 으로 1초 양보. 2026-08-16 실측(콘솔)과 달리 이 세션에서는 SetCursorPos 가 dwTime 을
+  # 갱신했고(원격 세션 포인터 반영 추정), 그 dwTime 이 주입 직전 관측(아래 Update-UserInputObservation)에 옛 주입 기준으로 사용자 후보로
+  # 잡힌 뒤 클릭 주입이 기준을 앞질러 '주입보다 과거인 진짜 사용자 입력' 으로 분류됐다). 기준을 여기서 한 번 올려 그 되돌림을 자기 입력으로.
+  Register-SelfInput
   Start-Sleep -Milliseconds 250
   # 주입 직전 사용자 입력 증거 보존 + 직후 자기 주입 시각 기록 (사용자 판별용 - v2.1.1)
   Update-UserInputObservation
@@ -3477,6 +3502,8 @@ function Register-CaptureSuccess {
   $script:gameWindowMissingSince = $null
   $justRecovered = $false
   if ($script:screenCaptureFailing) {
+    # 끝난 실패 구간을 누적합니다 (Get-CaptureFailTotalMs 계약 - 복구 시각까지 정확히 한 번 가산)
+    if ($script:captureFailingSince) { $script:captureFailTotalMs = [double]$script:captureFailTotalMs + ((Get-Date) - $script:captureFailingSince).TotalMilliseconds }
     $script:screenCaptureFailing = $false
     Write-RunLog (Get-CaptureRecoveryMessage -FailCause $script:captureFailCause)
     $script:captureFailMessage = $null
@@ -3498,6 +3525,15 @@ function Register-CaptureSuccess {
     }
   }
   if ($currentStation) { $script:lastGoodStationName = $currentStation }
+}
+
+function Get-CaptureFailTotalMs {
+  # 이 워커가 시작된 뒤 캡처 실패로 흘려보낸 시간의 누적(ms) = 끝난 실패 구간의 합 + 진행 중인 구간의 경과. 단조 증가라 대기
+  # 루프는 '마지막으로 본 값' 과의 차분만큼 자기 마감을 미루면 됩니다 - 회전 단위 표식으로는 첫 실패 회전의 부분 경과·복구 회전의
+  # 꼬리·같은 회전 안의 실패→복구를 놓칩니다 (2026-09-25 구현 리뷰 P1, 규칙 15).
+  $total = [double]$script:captureFailTotalMs
+  if ($script:screenCaptureFailing -and $script:captureFailingSince) { $total += ((Get-Date) - $script:captureFailingSince).TotalMilliseconds }
+  return $total
 }
 
 function Test-SafeStopDuringCaptureFail {
@@ -4330,32 +4366,35 @@ function Wait-ForDungeonClearScreen {
   # FindResultButton: 콘텐츠별 결과 화면 버튼 탐색(던전='다시 하기'/사냥터='새 임무 선택').
   # 사용자가 클리어 화면을 직접 터치해 이미 결과 화면으로 넘어간 경우를 잡습니다.
 
-  # 반환값: 'clear' = 클리어 화면 감지 / 'reward' = 이미 보상 화면(사용자가 직접 터치해 넘긴 경우)
+  # 반환값: 'clear' = 클리어 화면 감지 / 'reward' = 이미 보상 화면(사용자가 직접 터치해 넘긴 경우) /
+  #         'left' = 거점 부활 상한으로 사망 화면에서 던전을 나와 필드 확인 (어비스 전용 - 호출부가 코드 10 으로 마침, 2026-09-25)
   #         ('selection' 은 2026-09-21 부터 돌려주지 않습니다 - 선택 화면 오버레이는 전투 중에도 열려 완료 증거가 못 됨.
   #          호출부의 'selection' 분기는 남아 있지만 도달하지 않음 - 설계 합의 A2)
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $lastFocus = Get-Date
-  $reviveCount = 0              # 이번 회차에 자동 부활한 횟수 (**실제 전송된** 입력만 - 2026-08-11 ②)
-  $reviveDispatchDeadline = $null # 부활 입력이 계속 생략될 때의 전송 상한(첫 생략 +20초, 초과 = throw)
-  $reviveConfirmPending = $false # R키 입력 후 부활 완료 확인 대기 중
-  $revivePendingKind = ''        # 진행 중인 부활 종류 (가루 부활/여신상 부활/전멸 재도전 - 완료 로그에 표기)
-  $reviveBlockedLogged = $false  # 부활 불가 경고를 이미 남겼는지(반복 출력 방지)
+  $reviveState = New-ReviveState # 자동 부활 상태 머신 (성공 확인 수·에피소드 전송 수·pending·거점 전환·생략 상한 - Resolve-ReviveSample 주석)
   $autoHuntPresses = 0           # 자동사냥 꺼짐 감시가 자동출발 키를 누른 횟수(로그 정리용)
   $assistPresses = 0             # ASSIST 꺼짐 감시가 H키를 누른 횟수(로그 정리용)
   $pollCounter = 0               # 팝업(2회)/컷신(3회) 확인 주기 조절용
-  $useStatueRevive = $false      # 부활 재료 부족이 확인되면 이후 부활을 여신상으로 전환
   $wipeButtonMisses = 0          # 전멸 감지 상태에서 '여신' 버튼 연속 미발견 횟수 (3회째 예비 좌표)
   $ambiguousOverlaySeen = $false # 어비스: 완료 증거 없는 선택 화면 오버레이를 본 적 (마감 시 코드 4 사유 - 설계 합의 A2)
   $ambiguousLogged = $false
   $matchingLogged = $false
   $fieldStreak = 0               # 어비스: 필드(HUD + 추적기 던전명 없음) 연속 확인 수 (2연속 = 필드 증거, 클리어 증거는 아님)
   $fieldSeen = $false
-  $reviveAnchorDiagDone = $false # 거점 부활 앵커 미탐 진단 캡처를 이 회차에 이미 남겼는지 (2026-09-22 진단, 회차당 1회)
+  $reviveAnchorDiagDone = $false # 개인 사망 거점 부활 앵커 미탐 진단 캡처를 이 회차에 이미 남겼는지 (2026-09-22 진단, 회차당 1회)
+  $wipeAnchorDiagDone = $false   # 전멸 화면의 같은 진단 (배치가 달라 개인 사망과 별도 플래그 - 09-25 설계 리뷰)
+  $seenCaptureFailMs = Get-CaptureFailTotalMs   # 캡처 실패 누적 시간의 마지막 관측값 - 차분만큼 연장 절대 한도를 미룸 (규칙 15, 구현 리뷰 P1)
+  $deadlineDeathLogged = $false  # 마감 도달 시 사망 화면·부활 대기라 마감을 확정하지 않는다는 안내를 남겼는지 (성공 확인 때 초기화)
   # 전투 진행 중 연장 한도: 제한 시간이 다 됐어도 퀘스트 추적기에 클리어 목표가 남아
   # 있으면(= 판이 길어진 것뿐) 오류 대신 대기를 연장하되, 이 절대 한도까지만 허용합니다.
   $extendLimit = (Get-Date).AddSeconds([Math]::Max($TimeoutSeconds * 3, 1800))
   $extendLogged = $false
   while ($true) {
+    # 캡처 실패 누적 시간(캡처 계층이 잼)의 차분만큼 전투 연장 절대 한도를 미룹니다 - 규칙 15 (구현 리뷰 P1: 회전 단위 표식은 첫 실패
+    # 회전의 부분 경과·복구 회전의 꼬리·같은 회전 안의 실패→복구를 놓쳤음). $deadline 은 아래 동결 블록이 통째로 되돌립니다.
+    $captureFailDelta = (Get-CaptureFailTotalMs) - $seenCaptureFailMs
+    if ($captureFailDelta -gt 0) { $extendLimit = $extendLimit.AddMilliseconds($captureFailDelta); $seenCaptureFailMs += $captureFailDelta }
     # 마감/전투 연장 판정 (본문 최상단 - 2026-08-01 전수 점검: 기존 do-while 은 이 판정이
     # 루프 바닥에 있어 팝업/부활/협동 처리의 continue 가 판정을 건너뛰었고, 마감 직전에
     # 팝업을 닫으면 전투가 진행 중이어도 연장 없이 시간 초과로 죽을 수 있었음. 최상단으로
@@ -4364,6 +4403,15 @@ function Wait-ForDungeonClearScreen {
       if ($script:screenCaptureFailing) {
         # 캡처 실패 중에는 연장 판독이 불가 - throw 하지 않고 아래 캡처 실패 처리(시간 동결)에
         # 맡깁니다 (리뷰 조건: 실패 중 마감 도달을 오류로 확정하지 않음)
+      } elseif ($reviveEnabled -and ($reviveState.Pending -or (Test-DeathScreenValid -Game $Game))) {
+        # 부활 입력을 보내고 확인을 기다리는 중이거나 유효 판독이 사망·전멸 화면이면 마감을 이 회전에 확정하지 않습니다 - 성공 확인
+        # (마감 초기화)·무효 전송 확정(재전송 또는 예산·상한 코드 4)은 아래 부활 상태 머신이 하고, 그쪽이 마감·연장보다 앞입니다
+        # (설계 합의 B. 구현 리뷰 P1: 옛 코드는 전송 시점에 마감을 초기화해 이 창이 없었고, 사망 화면에서 추적기가 안 읽히면
+        # 상태 머신보다 throw 가 먼저 나 커스텀이 죽은 화면에 워커를 재시작했음). 규칙 4 대로 user-active 생략이 이어지면 상한 없음.
+        if (-not $deadlineDeathLogged) {
+          Write-RunLog "$($script:contentTag) 클리어 대기 한도 도달 - 사망/전멸 화면 또는 부활 확인 대기 중이라 마감을 확정하지 않고 부활 처리를 먼저 합니다"
+          $deadlineDeathLogged = $true
+        }
       } elseif ((Get-Date) -lt $extendLimit -and (Test-CombatStillRunning -Game $Game)) {
         if (-not $extendLogged) {
           Write-RunLog "$($script:contentTag) 클리어 대기 한도(${TimeoutSeconds}초)를 넘겼지만 전투가 아직 진행 중 - 끝날 때까지 연장 대기합니다"
@@ -4493,7 +4541,9 @@ function Wait-ForDungeonClearScreen {
     # 구매 제안 팝업(회복 물약 부족 등)이 떠 있으면 화면 중앙을 덮어 감지가 가려지므로
     # '닫기'를 찾아 클릭합니다(부하를 줄이려고 2회 폴링마다 확인). 부활 시도 직후에 떴다면
     # 부활 재료(불사의 가루) 부족으로 판단하고 이후 부활은 여신상으로 전환합니다.
-    if (($pollCounter % 2) -eq 0 -and -not $script:screenCaptureFailing) {
+    # 사망 에피소드 중(전송 대기 포함)에는 **매 폴** 먼저 확인합니다 - 짝수 폴에만 보면 R키 뒤 홀수 폴에 뜬 팝업이 사망 영역 판독을 덮어
+    # Dead=false 로 읽혀 허위 '부활 완료' 가 됩니다 (구현 리뷰 P1). 평시는 2폴 주기 그대로.
+    if ((($pollCounter % 2) -eq 0 -or $reviveState.Episode) -and -not $script:screenCaptureFailing) {
       # 탐색 **전**에도 대피시킵니다. 클릭 직후 대피만으로는 부족합니다 - SetCursorPos 가
       # 한 번 실패하거나 사용자가 커서를 다시 창 안에 두면, 다음 팝업의 '닫기'를 또 가려
       # 원래 정체가 재현됩니다 (2026-08-09 리뷰). 이미 창 밖이면 무동작이라 비용이 없습니다.
@@ -4513,9 +4563,8 @@ function Wait-ForDungeonClearScreen {
         # '가루 부족' 해석은 R키 가루 부활 직후에만 (2026-08-01 전수 점검: 여신상/전멸 부활은
         # 가루를 안 쓰므로 그 직후의 임의 구매 팝업(물약 부족 등)을 재료 부족으로 오인해
         # 여신상 전환이 영구 고정되던 문제 - 리뷰 승인. 완료 로그용 pending 은 종류 무관 유지)
-        if ($reviveConfirmPending -and $revivePendingKind -eq '가루 부활') {
-          $useStatueRevive = $true
-          $reviveConfirmPending = $false
+        if ($reviveState.Pending -and $reviveState.PendingKind -eq '가루 부활') {
+          Register-RevivePurchasePopup -State $reviveState   # 거점 전환 + 그 R키 전송은 무효 처리 (에피소드 전송 수는 유지 - 설계 합의)
           # 이 분기도 '닫았다'를 실제 클릭 여부로 구분합니다 (형제 두 분기와 같은 계약 -
           # 5차 점검에서 여기만 빠져 있었음). 여신상 전환 판정 자체는 팝업이 뜬 사실만으로
           # 성립하므로 클릭 성패와 무관하게 그대로 둡니다.
@@ -4547,7 +4596,7 @@ function Wait-ForDungeonClearScreen {
       # 처치 누적으로 완료되므로 정작 전투/클리어 대기 중에 뜰 확률이 가장 높은데, 이 루프는
       # 입장 대기용 팝업 스윕을 쓰지 않아 화면이 덮인 채 클리어 감지가 가려졌습니다).
       # 구매 팝업 '닫기'를 못 찾았을 때만 확인하고, 실제로 닫았을 때만 폴링을 다시 돕니다.
-      # 부활 대기 상태($reviveConfirmPending)는 구매 팝업이 아니므로 건드리지 않습니다.
+      # 부활 대기 상태($reviveState.Pending)는 구매 팝업이 아니므로 건드리지 않습니다.
       if (Close-CoopMissionScreen -Game $Game) { continue }
       # 오클릭으로 열린 '보유한 재화' 전체 화면도 같은 주기로 정리 (2026-08-02 실사고)
       if (Close-CurrencyOverviewScreen -Game $Game) { continue }
@@ -4562,148 +4611,194 @@ function Wait-ForDungeonClearScreen {
     #    재도전 (2026-07-28 실기 오류 + 사용자 확정 스펙. Dead 보다 먼저 판정)
     #  - 남은 부활 횟수가 있으면 R키로 '여기서 부활' (그 자리에서 바로 전투 재개)
     #  - 남은 횟수가 없으면 '여신상에서 부활' 클릭 (여신상에서 살아나 전투를 이어감)
+    # ★ 2026-09-25 부활 상태 머신 (설계 합의 A+B - 목록 1절 1번 09-21 22:33 실사고: 남은 부활 0회 화면에서 거점 버튼 글자를 못 찾아
+    #   예비 좌표를 7회 클릭 → 전부 무효(화면 그대로)인데 '전송됨' 만으로 상한 10회를 소진 → 그 뒤 파티 전멸 화면을 24분 방치).
+    #   판정은 전부 Resolve-ReviveSample(순수 함수, 진리표 tests\test_revive_state_machine.ps1) - 이 자리는 표본 유효성 + 입력 전송만:
+    #   - 계상은 전송이 아니라 **성공 확인**(전송 뒤 다음 유효 표본이 사망·전멸 아님)으로만. 거점 부활 성공 수는 revive.checkpointReviveLimit 의 대상
+    #   - 사망 1회당 실제 전송은 $reviveDispatchBudget 회까지. 그 뒤에도 유효 사망 표본이면 진단 캡처 + [완료] 코드 4
+    #   - 거점 부활(캠프파이어·여신상·전멸 재도전) 성공이 $reviveCheckpointLimit 회에 닿은 뒤 다시 거점 부활이 필요하면 어비스는 부활 대신
+    #     던전 퇴장 → 'left' 반환 → 호출부가 선택 화면 복귀 + 코드 10 (2026-09-25 사용자 확정 - 옛 '전체 상한 뒤 코드 4' 폐기). 마감 판정
+    #     블록이 사망 화면·pending 에서 물러서는 게이트는 그대로 (Test-CombatStillRunning 은 추적기만 봐서 사망 화면도 '전투 중')
+    #   - 캡처 실패 중·판독 도중 실패가 있던 표본은 무효 - 빈 판독(Dead=false)이 '부활 성공' 으로 읽히면 거짓 '부활 완료' +
+    #     클리어 마감 초기화가 나므로 (규칙 15) 성공도 실패도 아닌 것으로 둡니다. 앵커 탐색·재확인 판독도 같은 일련번호 게이트
+    #   - 전송 직후 정착 창($reviveSettleSeconds) 안의 사망 표본은 무효 전송으로 확정하지 않음 (구현 리뷰 P1 - 중복 입력 방지)
     if ($reviveEnabled) {
+      $deathSerial = $script:captureFailSerial
       $death = Get-DeathScreenInfo -Game $Game
-      if (-not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (리뷰 조건)
-      # 사망 상태가 풀리면(부활 성공/화면 전환) 전송 상한도 초기화 - 다음 사망은 새로 잽니다
-      if (-not $death.Dead -and -not $death.Wiped) { $reviveDispatchDeadline = $null }
-      if ($death.Wiped) {
-        if ($reviveCount -ge $reviveMaxPerCycle) {
-          # 전멸 재도전도 자동 복구 시도이므로 기존 부활 상한을 공유합니다 (무한 재도전 루프 방지)
-          if (-not $reviveBlockedLogged) {
-            Write-RunLog "[경고] 이번 회차 자동 부활이 ${reviveMaxPerCycle}회에 도달해 전멸 재도전을 더 시도하지 않습니다."
-            $reviveBlockedLogged = $true
-          }
-        } else {
+      $deathValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $deathSerial)
+      if ($deathValid -and -not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (리뷰 조건)
+      # 거점 부활이 필요한 사망인가 (남은 횟수 0·가루 부족 전환·전멸) - 상한 판정은 이 경우에만 (가루 R 부활은 게임이 남은 횟수로 제한)
+      $checkpointNeeded = [bool]($death.Wiped -or $reviveState.StatueMode -or (($null -ne $death.Remaining) -and ($death.Remaining -le 0)))
+      $reviveAction = Resolve-ReviveSample -State $reviveState -Valid $deathValid -Dead ([bool]$death.Dead) -Wiped ([bool]$death.Wiped) `
+        -CheckpointNeeded $checkpointNeeded -CheckpointLimit $reviveCheckpointLimit -LeaveOnLimit (-not $DungeonMode) `
+        -Now (Get-Date) -DispatchBudget $reviveDispatchBudget
+      if ($reviveAction -eq 'confirmed') {
+        # 성공 확인 시점에만 계상·완료 로그·클리어 마감 초기화 (전송 시점이 아님 - 무효 전송이 마감을 늘리던 것도 함께 막습니다)
+        $reviveDoneKind = $(if ($reviveState.LastConfirmedKind) { "($($reviveState.LastConfirmedKind))" } else { '' })
+        $checkpointText = $(if ($DungeonMode) { "거점 $($reviveState.CheckpointConfirmed)" } else { "거점 $($reviveState.CheckpointConfirmed)/${reviveCheckpointLimit}" })
+        Write-RunLog "$($script:contentTag) 부활 완료$reviveDoneKind - 전투 계속 (이번 회차 ${checkpointText}, 가루 $($reviveState.PowderConfirmed))"
+        # 부활 후 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        $deadlineDeathLogged = $false
+      } elseif ($reviveAction -eq 'cleared') {
+        Write-RunLog "$($script:contentTag) 사망 화면이 사라짐 (부활 입력 확인 없이 - 직접 부활했거나 입력이 생략된 채 해소) - 전투 계속"
+      } elseif ($reviveAction -eq 'stop-exhausted') {
+        # 조건부 정지(코드 4): 코드 1 은 커스텀이 같은 항목을 최대 2회 재시작해 죽은 화면에 워커를 다시 붙이고, 사망 화면은 클리어
+        # 대기가 스스로 풀 수 없는 상태입니다. 원인 확인용 화면을 남깁니다 (09-21 은 이 캡처가 없어 앵커 미탐 원인을 못 봤음.
+        # 진단 함수는 실패를 안에서 삼키므로 로그는 '시도' 로 적습니다).
+        $deathKindText = $(if ($death.Wiped) { '파티 전멸' } else { '행동불능' })
+        Write-LifeDiagnostics -Game $Game -Context '부활 입력 예산 소진 뒤 사망 화면 지속' -CaptureOnly
+        Write-RunLog "[완료] 부활 입력을 ${reviveDispatchBudget}회 전송했지만 ${deathKindText} 화면이 그대로입니다 - 부활 버튼 위치·상태를 확인해 주세요 (진단 캡처 시도, 이 판은 완료로 계상하지 않음)"
+        exit 4
+      } elseif ($reviveAction -eq 'leave') {
+        # 거점 부활 상한 도달 (2026-09-25 사용자 확정): 부활하지 않고 던전을 나가 새 파티로 재입장합니다 - 호출부(어비스 본류·파티원)가 'left'
+        # 를 받아 선택 화면 복귀 뒤 코드 10(준비 실행, 회차 미계상)으로 끝내면 GUI 가 곧바로 다음 회차를 시작합니다. 옛 '상한 뒤 코드 4' 는
+        # 이길 수 있는 판을 끊었음(09-25 실기 1). 'stay' = 나가기 전에 사망 화면이 사라짐(직접 부활 등) → 다음 회전이 새 표본으로 판정.
+        $deathKindText = $(if ($death.Wiped) { '파티 전멸' } else { '행동불능' })
+        Write-RunLog "$($script:contentTag) 거점 부활 ${reviveCheckpointLimit}회를 다 쓴 뒤 다시 ${deathKindText} - 부활하지 않고 던전을 나가 새 파티로 재입장합니다 (이번 회차 가루 $($reviveState.PowderConfirmed)회)"
+        if ((Invoke-AbyssDeathExit -Game $Game) -eq 'left') { return 'left' }
+        Write-RunLog "$($script:contentTag) 던전 퇴장 전에 사망 화면이 사라졌습니다 - 상태를 다시 판정합니다"
+        continue
+      } elseif ($reviveAction -eq 'settling') {
+        # 전송 뒤 정착 창 안의 사망 표본 - 사망 화면인 채로 아래 자동사냥·ASSIST·컷신 감시로 내려가지 않습니다 (옛 코드는 사망 표본에서 항상
+        # continue 였음 - 자체 리뷰 지적). 무효 표본('skip')은 바닥의 캡처 실패 동결 블록에 닿아야 하므로 그대로 흘려보냅니다.
+        Start-Sleep -Milliseconds 800
+        continue
+      } elseif ($reviveAction -eq 'dispatch') {
+        $dispatchKind = ''          # 이번 회전에 실제로 나간 부활 입력의 종류 ('' = 전송 없음)
+        $dispatchAttempted = $false # 클릭·키를 시도했는지 (앵커 미탐·무효 판독으로 시도 자체가 없던 회전은 생략 상한을 돌리지 않음)
+        $dispatchSkipReason = ''    # 시도했지만 생략된 사유 (user-active / cursor-not-ready / foreground)
+        if ($death.Wiped) {
           # 이중 확인: 우하단에서 거점 부활 버튼 글자를 실제로 찾은 뒤에만 클릭합니다
           # (중앙 문구 오탐 방어 + 상태 기반 클릭 정책. 실측: '여신상에서' 중심 (986,670))
           # ★ 2026-08-11: '여신'만 찾다가 **캠프파이어만 있는 전멸 화면**(사용자 전수 캡처
           #   00:06 실측 '으캠프파이어에서부활성장가이드')에서 버튼을 못 찾았습니다.
           #   캠프파이어 우선으로 둘 다 찾습니다 (Find-ReviveAnchorPoint).
-          $wipeClicked = $false
+          # 앵커 탐색은 캡처 2회('캠프'→'여신')라 앞 실패가 뒤 성공에 가려질 수 있습니다 - 일련번호로 회전 단위 '실패 있었음' 을 보고,
+          # 있으면 이 회전은 시도·미탐 누적·예산 어느 것도 움직이지 않습니다 (구현 리뷰 P1, 규칙 15)
           $wipeAnchorName = '여신상'
-          $wipeAnchorHit = Find-ReviveAnchorPoint -Game $Game
-          if ($wipeAnchorHit) {
+          $anchorSerial = $script:captureFailSerial
+          $wipeAnchorHit = $null; $anchorValid = $false
+          # 버튼 등장 정착 전($reviveAnchorSettleMs)에는 시도하지 않음 - 첫 클릭 미수신 3/3 (실기 2). 정착 뒤 회전이 같은 조건으로 클릭
+          if ((Get-ReviveEpisodeAgeMs -State $reviveState -Now (Get-Date)) -ge $reviveAnchorSettleMs) {
+            $wipeAnchorHit = Find-ReviveAnchorPoint -Game $Game
+            $anchorValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $anchorSerial)
+          }
+          if (-not $anchorValid) {
+            # 무효 회전 또는 정착 전 - 아무것도 세지 않음
+          } elseif ($wipeAnchorHit) {
             $wipeButtonMisses = 0
             $wipeAnchorName = $wipeAnchorHit.Name
             Focus-Game -Game $Game
+            $dispatchAttempted = $true
             Click-ScreenPoint -X $wipeAnchorHit.Point.X -Y $wipeAnchorHit.Point.Y
-            # 클릭이 실제로 나갔을 때만 '눌렀다'로 칩니다 (2026-08-11 ② - 커서 확인 실패로
-            # 생략된 클릭을 무조건 성공으로 세면 부활 횟수만 소모되고 화면은 그대로입니다.
-            # 실측 13:33 사냥터에서 같은 기전(생략+거짓 로그) 실기 확정). 생략이면 전멸
-            # 화면이 남아 있어 다음 감지에서 상태 기반으로 재시도됩니다.
-            $wipeClicked = $script:lastClickPerformed
+            # 클릭이 실제로 나갔을 때만 '보냈다'로 칩니다 (2026-08-11 ② - 생략된 클릭을 성공으로 세면 예산만 소모되고 화면은
+            # 그대로. 실측 13:33 사냥터에서 같은 기전(생략+거짓 로그) 확정). 생략이면 전멸 화면이 남아 다음 감지에서 재시도됩니다.
+            if ($script:lastClickPerformed) { $dispatchKind = '전멸 재도전' } else { $dispatchSkipReason = $script:lastClickSkipReason }
           } else {
             $wipeButtonMisses++
             if ($wipeButtonMisses -ge 3) {
               # 예비 좌표는 클릭 직전 전멸 상태를 한 번 더 확인한 뒤에만 사용합니다 (리뷰 조건 -
-              # 그 사이 화면이 바뀌었으면 고정 좌표 클릭이 다른 버튼을 누를 수 있음)
-              $wipeButtonMisses = 0
+              # 그 사이 화면이 바뀌었으면 고정 좌표 클릭이 다른 버튼을 누를 수 있음). 재확인도 캡처 유효성을 봅니다.
+              $recheckSerial = $script:captureFailSerial
               $wipeRecheck = Get-DeathScreenInfo -Game $Game
-              if ($wipeRecheck.Wiped) {
+              $recheckValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $recheckSerial)
+              if ($recheckValid -and $wipeRecheck.Wiped) {
                 Write-RunLog '[경고] 전멸 화면에서 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다'
-                if (-not $reviveAnchorDiagDone) { $reviveAnchorDiagDone = $true; Write-LifeDiagnostics -Game $Game -Context '전멸 거점 부활 앵커 미탐' -CaptureOnly }   # 진단 (2026-09-22, 개인 사망 분기와 공유)
+                # 진단 (2026-09-22, 목록 1절 1번) - 회차당 1회. 개인 사망 화면과 배치가 달라 플래그를 따로 둡니다 (09-25 설계 리뷰)
+                if (-not $wipeAnchorDiagDone) { $wipeAnchorDiagDone = $true; Write-LifeDiagnostics -Game $Game -Context '전멸 거점 부활 앵커 미탐' -CaptureOnly }
                 Focus-Game -Game $Game
+                $dispatchAttempted = $true
                 Click-GamePoint -Game $Game -ReferenceX $ptWipeStatueRevive[0] -ReferenceY $ptWipeStatueRevive[1]
-                # 예비 좌표도 같은 계약 - 생략된 클릭을 성공으로 세지 않습니다 (2026-08-11 ②)
-                $wipeClicked = $script:lastClickPerformed
+                if ($script:lastClickPerformed) { $dispatchKind = '전멸 재도전' } else { $dispatchSkipReason = $script:lastClickSkipReason }
+                # 격상 문턱(미탐 3회)은 클릭이 나갔거나 자동화 자신의 실패(cursor-not-ready)일 때만 소모합니다. user-active 생략은
+                # '예비 좌표 준비 완료' 를 유지해 다음 감지에서 미탐 3회를 다시 요구하지 않습니다 (규칙 4, 구현 리뷰 P1)
+                if ($script:lastClickPerformed -or $dispatchSkipReason -ne 'user-active') { $wipeButtonMisses = 0 }
+              } elseif ($recheckValid) {
+                $wipeButtonMisses = 0   # 전멸 화면이 아님(화면 전환) - 다음 유효 표본이 새로 판정
               }
             }
           }
-          if ($wipeClicked) {
-            $reviveCount++
-            Write-RunLog "$($script:contentTag) 전멸 감지 - ${wipeAnchorName}에서 부활 클릭 (세이브 지점부터 재도전)"
-            $revivePendingKind = '전멸 재도전'
-            $reviveConfirmPending = $true
-            Start-Sleep -Seconds 3
-            # 재도전으로 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
-            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-            continue
+          if ($dispatchKind) { Write-RunLog "$($script:contentTag) 전멸 감지 - ${wipeAnchorName}에서 부활 클릭 (세이브 지점부터 재도전)" }
+        } elseif ($death.Dead) {
+          if ($reviveState.StatueMode -or ($null -ne $death.Remaining -and $death.Remaining -le 0)) {
+            $statueReason = if ($reviveState.StatueMode) { '부활 재료 부족' } else { '남은 부활 횟수 없음' }
+            Focus-Game -Game $Game
+            # 부활 버튼 배치는 남은 횟수 유무에 따라 달라지므로(0회면 버튼들이 한 줄로 재배치됨),
+            # 고정 좌표 대신 글자를 OCR로 찾아 실제 버튼 위치를 클릭합니다.
+            # 캠프파이어 우선 - 여신상은 던전 처음부터라 손실이 큽니다 (Find-ReviveAnchorPoint 주석).
+            $anchorSerial = $script:captureFailSerial
+            $anchorHit = $null; $anchorValid = $false
+            if ((Get-ReviveEpisodeAgeMs -State $reviveState -Now (Get-Date)) -ge $reviveAnchorSettleMs) {
+              $anchorHit = Find-ReviveAnchorPoint -Game $Game
+              $anchorValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $anchorSerial)
+            }
+            if (-not $anchorValid) {
+              # 무효 회전 또는 정착 전 - 아무것도 세지 않음 (전멸 경로와 같은 계약)
+            } elseif ($anchorHit) {
+              $dispatchAttempted = $true
+              Click-ScreenPoint -X $anchorHit.Point.X -Y $anchorHit.Point.Y
+              if ($script:lastClickPerformed) {
+                Write-RunLog "$($script:contentTag) 행동불능($statueReason) - $($anchorHit.Name)에서 부활 클릭"
+                $dispatchKind = "$($anchorHit.Name) 부활"
+              } else { $dispatchSkipReason = $script:lastClickSkipReason }
+            } else {
+              # 예비 좌표는 클릭 직전 사망 상태를 한 번 더 확인한 뒤에만 (전멸 경로와 같은 계약 - 09-25 설계 리뷰: 이 경로만 재확인이
+              # 없었음. 09-21 22:33 실사고의 헛클릭 7회가 바로 이 자리 - 이제는 예산 뒤 코드 4 로 멈추고 진단 캡처가 원인을 남깁니다).
+              # 개인용 예비 좌표(statueRevive)는 **개인 사망 화면**에서만 - 그 사이 파티 전멸로 바뀌었으면 전멸 배치(wipeStatueRevive)라
+              # 다른 자리입니다 (구현 리뷰 P1). 전멸이면 이 회전은 넘기고 다음 표본이 전멸 경로로 처리합니다.
+              $recheckSerial = $script:captureFailSerial
+              $deadRecheck = Get-DeathScreenInfo -Game $Game
+              $recheckValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $recheckSerial)
+              if ($recheckValid -and $deadRecheck.Dead -and -not $deadRecheck.Wiped) {
+                Write-RunLog "[경고] 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다"
+                # 진단(2026-09-22, 목록 1절 1번): 09-21 22:33 남은 부활 0회 화면에서 이 미탐이 7회 연속이었고 예비 좌표 클릭이 전부
+                # 무효였는데 그 화면 캡처가 없었다. 회차당 1회만 남긴다.
+                if (-not $reviveAnchorDiagDone) { $reviveAnchorDiagDone = $true; Write-LifeDiagnostics -Game $Game -Context '거점 부활 앵커 미탐' -CaptureOnly }
+                $dispatchAttempted = $true
+                Click-GamePoint -Game $Game -ReferenceX $ptStatueRevive[0] -ReferenceY $ptStatueRevive[1]
+                if ($script:lastClickPerformed) { $dispatchKind = '여신상 부활' } else { $dispatchSkipReason = $script:lastClickSkipReason }
+              }
+            }
+          } else {
+            # R키(여기서 부활)도 같은 계약 - 전면 확인 후 실제로 전송됐을 때만 '보냈다' (④와 결합)
+            $remainText = if ($null -ne $death.Remaining) { "남은 부활 횟수 $($death.Remaining)회" } else { '남은 횟수 인식 불가' }
+            $dispatchAttempted = $true
+            if (Press-KeyVerified -Game $Game -VirtualKey ([byte]$reviveKey) -Label 'R 부활') {
+              Write-RunLog "$($script:contentTag) 행동불능($remainText) - 여기서 부활 (R키, 불사의 가루 소모)"
+              $dispatchKind = '가루 부활'
+            } else { $dispatchSkipReason = $(if (Test-UserRecentlyActive) { 'user-active' } else { 'foreground' }) }   # 다른 창 조작 중이면 사용자 시간 (규칙 4)
           }
         }
-      } elseif ($death.Dead) {
-        if ($reviveCount -ge $reviveMaxPerCycle) {
-          if (-not $reviveBlockedLogged) {
-            Write-RunLog "[경고] 이번 회차 자동 부활이 ${reviveMaxPerCycle}회에 도달해 더 시도하지 않습니다."
-            $reviveBlockedLogged = $true
-          }
-        } elseif ($useStatueRevive -or ($null -ne $death.Remaining -and $death.Remaining -le 0)) {
-          # ★ 2026-08-11 ②: 계상(reviveCount)·성공 로그·대기 리셋은 **입력이 실제로 나간
-          #   뒤에만** 합니다. 예전에는 카운트가 클릭보다 먼저라, 커서 확인 실패로 클릭이
-          #   생략돼도 횟수만 소모되고(상한 10회를 채우면 정말 죽어 있어도 포기) 로그는
-          #   '부활 클릭'이라고 거짓말했습니다. 생략이면 사망 화면이 남아 있어 다음 감지에서
-          #   상태 기반으로 재시도됩니다 (전송 상한은 아래 reviveDispatchDeadline).
-          $statueReason = if ($useStatueRevive) { '부활 재료 부족' } else { '남은 부활 횟수 없음' }
-          Focus-Game -Game $Game
-          # 부활 버튼 배치는 남은 횟수 유무에 따라 달라지므로(0회면 버튼들이 한 줄로 재배치됨),
-          # 고정 좌표 대신 글자를 OCR로 찾아 실제 버튼 위치를 클릭합니다.
-          # 캠프파이어 우선 - 여신상은 던전 처음부터라 손실이 큽니다 (Find-ReviveAnchorPoint 주석).
-          $reviveDispatched = $false
-          $anchorHit = Find-ReviveAnchorPoint -Game $Game
-          if ($anchorHit) {
-            Click-ScreenPoint -X $anchorHit.Point.X -Y $anchorHit.Point.Y
-            if ($script:lastClickPerformed) {
-              Write-RunLog "$($script:contentTag) 행동불능($statueReason) - $($anchorHit.Name)에서 부활 클릭"
-              $revivePendingKind = "$($anchorHit.Name) 부활"
-              $reviveDispatched = $true
-            }
-          } else {
-            Write-RunLog "[경고] 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다"
-            # 진단(2026-09-22, 목록 1절 1번): 09-21 22:33 남은 부활 0회 화면에서 이 미탐이 7회 연속이었고 예비 좌표 클릭이 전부 무효였는데
-            # 그 화면 캡처가 없었다. 회차당 1회만 남긴다 (전멸 분기의 미탐과 공유).
-            if (-not $reviveAnchorDiagDone) { $reviveAnchorDiagDone = $true; Write-LifeDiagnostics -Game $Game -Context '거점 부활 앵커 미탐' -CaptureOnly }
-            Click-GamePoint -Game $Game -ReferenceX $ptStatueRevive[0] -ReferenceY $ptStatueRevive[1]
-            if ($script:lastClickPerformed) {
-              $revivePendingKind = '여신상 부활'
-              $reviveDispatched = $true
-            }
-          }
-          if ($reviveDispatched) {
-            $reviveCount++
-            $reviveDispatchDeadline = $null
-            $reviveConfirmPending = $true
-            Start-Sleep -Seconds 3
-            # 부활 후 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
-            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-          } else {
-            # 입력 생략: 카운트/대기 리셋 없이 다음 감지에서 재시도. 단 20초 안에 한 번도
-            # 전송하지 못하면 입력 계통 장애로 보고 오류로 던집니다 (조건부 정지가 아니라
-            # 오류라야 자동 재시작 1회와 오류 세트가 남음 - 설계 합의)
-            if ($null -eq $reviveDispatchDeadline) { $reviveDispatchDeadline = (Get-Date).AddSeconds(20) }
-            elseif ((Get-Date) -gt $reviveDispatchDeadline) {
-              throw '거점 부활 입력을 20초 동안 한 번도 전송하지 못했습니다 - 커서/입력 계통을 확인해 주세요.'
-            }
-            Start-Sleep -Milliseconds 800
-          }
+        if ($dispatchKind) {
+          Register-ReviveDispatch -State $reviveState -Kind $dispatchKind -Now (Get-Date) -SettleSeconds $reviveSettleSeconds
+          Start-Sleep -Seconds 3
           continue
+        }
+        if ($dispatchAttempted) {
+          # 전송 생략 3갈래 (목록 '행동불능 거점 부활 — 조작 생략이 20초 상한을 소모' 설계 합의, 규칙 4): user-active 는 상한을
+          # 세우지도 전진시키지도 않고 재감지 / cursor-not-ready·전면 미확인은 자동화 자신의 실패라 20초 상한을 공유하고 초과면 throw
+          # (조건부 정지가 아니라 오류라야 자동 재시작(최대 2회)과 오류 세트가 남음 - 설계 합의). 전멸 경로도 같은 상한 - 예전엔 없어서
+          # 마감까지 헛돌다 '대기 시간 초과' 로 원인이 뭉개졌음 (목록 '전멸 재도전 — 커서 미확인에 상한이 없어').
+          $skipOutcome = Resolve-ReviveDispatchSkip -State $reviveState -Reason $dispatchSkipReason -Now (Get-Date) -YieldTotalMs ([double]$script:userYieldTotalMs)
+          if ($skipOutcome -eq 'timeout') {
+            throw "부활 입력을 20초 동안 한 번도 전송하지 못했습니다 (사유: $dispatchSkipReason) - 커서/게임 전면 입력 계통을 확인해 주세요."
+          }
+          # 안내는 사유군이 바뀔 때마다 1회 (구현 리뷰 P2: 커서 실패 안내 뒤 사용자 조작이 시작되면 '사용자 조작으로 취소' 가 0줄이었음)
+          $skipGroup = $(if ($skipOutcome -eq 'yield') { 'user' } else { 'auto' })
+          if ($reviveState.SkipLoggedReason -ne $skipGroup) {
+            $reviveState.SkipLoggedReason = $skipGroup
+            if ($skipGroup -eq 'user') {
+              Write-RunLog "$($script:contentTag) 부활 입력을 사용자 조작으로 취소 - 조작이 끝나면 다음 감지에서 다시 시도합니다"
+            } else {
+              Write-RunLog "$($script:contentTag) 부활 입력을 건너뜀 (사유: $dispatchSkipReason) - 20초 안에 전송되지 않으면 오류로 정지합니다"
+            }
+          }
         } else {
-          # R키(여기서 부활)도 같은 계약 - 전면 확인 후 실제로 전송됐을 때만 계상합니다 (④와 결합)
-          $remainText = if ($null -ne $death.Remaining) { "남은 부활 횟수 $($death.Remaining)회" } else { '남은 횟수 인식 불가' }
-          if (Press-KeyVerified -Game $Game -VirtualKey ([byte]$reviveKey) -Label 'R 부활') {
-            $reviveCount++
-            $reviveDispatchDeadline = $null
-            Write-RunLog "$($script:contentTag) 행동불능($remainText) - 여기서 부활 (R키, 불사의 가루 소모)"
-            $revivePendingKind = '가루 부활'
-            $reviveConfirmPending = $true
-            Start-Sleep -Seconds 3
-            # 부활 후 전투가 이어지므로 클리어 제한 시간을 처음부터 다시 셉니다.
-            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-          } else {
-            if ($null -eq $reviveDispatchDeadline) { $reviveDispatchDeadline = (Get-Date).AddSeconds(20) }
-            elseif ((Get-Date) -gt $reviveDispatchDeadline) {
-              throw 'R키 부활 입력을 20초 동안 한 번도 전송하지 못했습니다 - 게임 전면화/입력 계통을 확인해 주세요.'
-            }
-            Start-Sleep -Milliseconds 800
-          }
-          continue
+          Register-ReviveNoAttempt -State $reviveState
         }
-      } elseif ($reviveConfirmPending) {
-        $reviveConfirmPending = $false
-        $reviveBlockedLogged = $false
-        # 어떤 부활이었는지 종류를 함께 표기 (사용자가 로그만 보고 사망/부활 경위를 알 수 있게)
-        $reviveDoneKind = $(if ($revivePendingKind) { "($revivePendingKind)" } else { '' })
-        Write-RunLog "$($script:contentTag) 부활 완료$reviveDoneKind - 전투 계속"
-        $revivePendingKind = ''
+        Start-Sleep -Milliseconds 800
+        continue
       }
 
       # 자동사냥 꺼짐 상시 감시: 입장 키가 씹혔거나(그 순간 사용자가 마우스/키보드를 쓴 경우 등),
@@ -4798,6 +4893,7 @@ function Wait-ForDungeonClearScreen {
       # 원격 창 최소화 등으로 캡처가 안 되는 동안은 제한 시간을 멈춥니다.
       Test-SafeStopDuringCaptureFail
       $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      # 전투 연장의 절대 한도($extendLimit)는 회전 서두의 캡처 실패 누적 차분이 미룹니다 (규칙 15)
     }
     # 게임 창이 가려져 있으면 OCR이 계속 실패하므로 주기적으로 게임을 앞으로 가져옵니다.
     if ($refocusEverySeconds -gt 0 -and
@@ -4986,6 +5082,233 @@ function Get-DeathScreenInfo {
   $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgDeathStatus[0] -ReferenceY $rgDeathStatus[1] `
     -RegionWidth $rgDeathStatus[2] -RegionHeight $rgDeathStatus[3] -Scale 3 -Engine $ocrKoreanEngine
   return Get-DeathInfoFromText -Text $ocrText
+}
+
+function New-ReviveState {
+  # 자동 부활 상태 (Wait-ForDungeonClearScreen 전용 - 2026-09-25 설계 합의 A+B → 같은 날 저녁 사용자 확정으로 '상한 = 거점 부활, 도달 시 퇴장').
+  #   PowderConfirmed  : 이번 회차에 성공이 확인된 **가루(R키) 부활** 수 - 로그용 (게임이 남은 횟수 3회로 스스로 제한)
+  #   CheckpointConfirmed: 성공이 확인된 **거점 부활**(캠프파이어·여신상·전멸 재도전) 수 - revive.checkpointReviveLimit 의 대상. 거점 부활은
+  #                      가루·부활 횟수를 다 쓴 뒤에야 나오므로 '고전 중' 신호 (사용자 확정 09-25: "부활 우선순위가 가루 → 안 되면 거점")
+  #   Dispatched       : 현재 사망 에피소드에서 실제로 나간 부활 입력 수 (상한 $reviveDispatchBudget). 생략된 입력은 세지 않음
+  #   Pending          : 입력을 보낸 뒤 다음 유효 표본을 기다리는 중
+  #   PendingKind      : 보낸 부활 종류 (가루 부활/캠프파이어 부활/여신상 부활/전멸 재도전 - 완료 로그·계수 분류용)
+  #   PendingNotBefore : 이 시각 전의 사망 표본은 '전송 무효' 로 확정하지 않음 (전송 직후 정착 창 - 실측 R키→완료 3~4초. 구현 리뷰 P1:
+  #                      3초 대기 직후 표본이 아직 사망이면 두 번째 입력을 보내 가루·파티 부활 횟수를 중복 소모할 수 있음)
+  #   LastConfirmedKind: 직전에 성공이 확인된 부활 종류 (호출부가 완료 로그에 표기)
+  #   Episode          : 유효 사망·전멸 표본을 본 뒤 유효 생존 표본을 아직 못 봄 (Dead↔Wiped 전환은 같은 에피소드)
+  #   EpisodeSince     : 에피소드가 열린 시각 (거점 버튼 등장 정착 $reviveAnchorSettleMs 판정용 - 실기 2 첫 클릭 미수신 3/3)
+  #   StatueMode       : 가루 부족(R키 직후 구매 팝업)이 확인돼 이후 개인 부활은 거점으로
+  #   SkipElapsedMs    : 입력 생략(커서 미확인·전면 미확인)이 **연속된** 회전 사이의 경과 합 (20초 상한). user-active 생략은 0 으로 되돌리고,
+  #                      시도 자체가 없던 회전(앵커 미탐 등)은 SkipLastAt 을 비워 그 사이 시간을 세지 않음 (규칙 4, 구현 리뷰 P1)
+  #   SkipLastAt       : 직전 생략 시각 (연속 판정용) / SkipLastYieldMs: 그때의 양보 누적(userYieldTotalMs) - 두 생략 사이에 간접 양보(구매 팝업
+  #                      스윕의 커서 대피 등)가 있었으면 그 구간은 사용자 시간이라 누적하지 않음 (리뷰 P2) / SkipLoggedReason: 안내 로그를 남긴 생략
+  #                      사유군 ('user'/'auto', 바뀌면 다시 안내)
+  return @{
+    PowderConfirmed = 0; CheckpointConfirmed = 0; Dispatched = 0; Pending = $false; PendingKind = ''; PendingNotBefore = $null; LastConfirmedKind = ''
+    Episode = $false; EpisodeSince = $null; StatueMode = $false; SkipElapsedMs = [double]0; SkipLastAt = $null; SkipLastYieldMs = [double]0; SkipLoggedReason = ''
+  }
+}
+
+function Resolve-ReviveSample {
+  param([hashtable]$State, [bool]$Valid, [bool]$Dead, [bool]$Wiped, [bool]$CheckpointNeeded, [int]$CheckpointLimit, [bool]$LeaveOnLimit,
+    [datetime]$Now, [int]$DispatchBudget = 3)
+  # 사망 판독 표본 1개를 상태에 반영하고 호출부가 할 일을 돌려줍니다 (순수 함수 - tests\test_revive_state_machine.ps1 진리표).
+  #   'skip'           : 무효 표본(캡처 실패 중 / 판독 도중 실패) - 성공도 실패도 아님. 카운터·pending 전부 유지 (규칙 15)
+  #   'none'           : 유효 생존 표본, 에피소드 없음
+  #   'confirmed'      : 유효 생존 표본 + pending → 부활 성공 확인. 종류별 계수 +1, 에피소드 종료 (호출부: 완료 로그·클리어 마감 초기화)
+  #   'cleared'        : 유효 생존 표본 + 에피소드 중이지만 pending 없음(입력이 전부 생략됐거나 팝업으로 무효 처리) → 계상 없이 종료
+  #   'settling'       : 유효 사망 표본이지만 전송 뒤 정착 창(PendingNotBefore) 안 - 아직 성공·실패 어느 쪽도 아님 (생존 표본은 창과 무관하게 즉시 확인)
+  #   'stop-exhausted' : 유효 사망 표본인데 이 에피소드의 전송이 예산을 다 씀 → 조건부 정지 (마지막 전송 '직후' 가 아니라 그 뒤 표본에서)
+  #   'leave'          : 유효 사망 표본이고 **거점 부활이 필요한데**(CheckpointNeeded: 남은 횟수 0·거점 전환·전멸) 거점 부활 성공 수가 상한 이상
+  #                      → 부활하지 않고 던전을 나감 (어비스: LeaveOnLimit. 던전·심층·사냥터는 상한 없음 - 사용자 확정 09-25)
+  #   'dispatch'       : 유효 사망 표본, 입력을 (다시) 보낼 차례. pending 이었다면 그 전송은 무효로 확정 (화면이 그대로)
+  # 왜 성공 확인으로 세나: 2026-09-21 22:33 실사고 - 남은 부활 0회 화면에서 예비 좌표 클릭 7회가 전부 무효(화면 그대로)였는데
+  # '전송됨' 만으로 옛 상한 10회를 소진했고, 그 뒤 파티 전멸 화면을 24분 방치했다. 전송 수는 에피소드 예산으로 따로 묶는다.
+  # 왜 거점만 세나: 옛 '전체 부활 상한 10' 은 게임 규칙이 아니었다 - 캠프파이어 착석·여신상 부활로 횟수가 초기화돼 실질 상한이 없고(09-25 실기:
+  # 3회 → 여신상 → 3회 → 캠프파이어 → 3회), 상한 뒤 코드 4 는 이길 수 있는 판을 끊었다. 가루(R)는 게임이 남은 횟수로 막는다.
+  if (-not $Valid) {
+    $State.SkipElapsedMs = [double]0; $State.SkipLastAt = $null   # 캡처 실패 구간은 생략 상한 시계도 초기화 (현행 유지 - 동결이 아니라 초기화, 오발동 없음)
+    return 'skip'
+  }
+  if (-not ($Dead -or $Wiped)) {
+    $State.SkipElapsedMs = [double]0; $State.SkipLastAt = $null; $State.SkipLoggedReason = ''
+    if ($State.Pending) {
+      if ($State.PendingKind -eq '가루 부활') { $State.PowderConfirmed++ } else { $State.CheckpointConfirmed++ }
+      $State.LastConfirmedKind = $State.PendingKind
+      $State.Pending = $false; $State.PendingKind = ''; $State.PendingNotBefore = $null; $State.Dispatched = 0; $State.Episode = $false; $State.EpisodeSince = $null
+      return 'confirmed'
+    }
+    if ($State.Episode) {
+      $State.Dispatched = 0; $State.Episode = $false; $State.EpisodeSince = $null; $State.PendingKind = ''; $State.PendingNotBefore = $null
+      return 'cleared'
+    }
+    return 'none'
+  }
+  # 유효 사망·전멸 표본
+  if ($State.Pending -and ($null -ne $State.PendingNotBefore) -and ($Now -lt $State.PendingNotBefore)) { return 'settling' }
+  if (-not $State.Episode) { $State.EpisodeSince = $Now }
+  $State.Episode = $true
+  $State.Pending = $false; $State.PendingNotBefore = $null   # 보냈는데 정착 창이 지나도 사망 화면이 그대로 = 그 전송은 무효 (Dispatched 는 그대로 - 예산 소모)
+  if ($State.Dispatched -ge $DispatchBudget) { return 'stop-exhausted' }
+  if ($CheckpointNeeded -and $LeaveOnLimit -and ($State.CheckpointConfirmed -ge $CheckpointLimit)) { return 'leave' }
+  return 'dispatch'
+}
+
+function Register-ReviveDispatch {
+  param([hashtable]$State, [string]$Kind, [datetime]$Now, [int]$SettleSeconds = 4)
+  # 부활 입력이 **실제로 나갔을 때만** 호출합니다 (클릭 생략·전면 미확인은 호출부가 Resolve-ReviveDispatchSkip 으로 처리).
+  $State.Dispatched++
+  $State.Pending = $true
+  $State.PendingKind = $Kind
+  $State.PendingNotBefore = $Now.AddSeconds($SettleSeconds)
+  $State.SkipElapsedMs = [double]0; $State.SkipLastAt = $null; $State.SkipLoggedReason = ''
+}
+
+function Register-RevivePurchasePopup {
+  param([hashtable]$State)
+  # R키(가루 부활) 직후 구매 팝업 = 불사의 가루 부족. 이후 개인 부활은 거점으로 전환하고, 그 R키 전송은 무효로 처리합니다
+  # (pending 해제). 에피소드·전송 수는 유지 - 같은 사망에서 거점 시도가 이어지므로 예산을 새로 주지 않습니다 (설계 합의).
+  $State.StatueMode = $true
+  $State.Pending = $false
+  $State.PendingNotBefore = $null
+}
+
+function Get-ReviveEpisodeAgeMs {
+  param([hashtable]$State, [datetime]$Now)
+  # 에피소드가 열린 뒤 경과(ms). 에피소드 밖이면 아주 큰 값 (정착 게이트를 막지 않음).
+  if ($null -eq $State.EpisodeSince) { return [double]999999 }
+  return [double]($Now - $State.EpisodeSince).TotalMilliseconds
+}
+
+function Register-ReviveNoAttempt {
+  param([hashtable]$State)
+  # 유효 사망 표본이었지만 입력을 시도조차 못 한 회전(거점 앵커 미탐, 앵커·재확인 판독 도중 캡처 실패, 재확인 불일치): 생략 상한
+  # 시계의 '연속' 을 끊어 이 회전의 시간은 세지 않습니다 (누적값은 유지 - 다음 생략부터 다시 이어 셈). 구현 리뷰 P1.
+  $State.SkipLastAt = $null
+}
+
+function Resolve-ReviveDispatchSkip {
+  param([hashtable]$State, [string]$Reason, [datetime]$Now, [double]$YieldTotalMs = 0)
+  # 부활 입력이 생략됐을 때의 20초 상한 - 사유 3갈래 (목록 '행동불능 거점 부활 — 조작 생략이 20초 상한을 소모' 설계 합의, 규칙 4):
+  #   user-active                         → 'yield'  : 누적을 0 으로 - 상한을 세우지도 전진시키지도 않음. 다음 감지에서 재시도
+  #   cursor-not-ready / 전면 미확인 / 그 외 → 'wait'   : 직전 생략과 연속이면 그 사이 경과를 누적. 20초 미만이면 재시도
+  #                                       → 'timeout': 연속 생략 누적이 20초 이상 - 호출부가 throw (입력 계통 장애 = 오류)
+  # 절대 마감이 아니라 **연속 생략 사이의 경과 합**입니다 - 시도가 없던 회전(Register-ReviveNoAttempt)이 끼면 그 구간은 빠집니다.
+  # 두 생략 사이에 간접 양보(YieldTotalMs = $script:userYieldTotalMs 가 직전 생략 때와 다름 - 에피소드 중 매 폴 도는 구매 팝업 스윕의 커서 대피
+  # 가 상한 없이 양보함)가 있었으면 그 경과는 사용자 시간이라 'yield' 로 봅니다 (규칙 4 차분 계약 - 자체 리뷰 P2).
+  $indirectYield = ($null -ne $State.SkipLastAt) -and ($YieldTotalMs -ne [double]$State.SkipLastYieldMs)
+  if ($Reason -eq 'user-active' -or $indirectYield) { $State.SkipElapsedMs = [double]0; $State.SkipLastAt = $null; $State.SkipLastYieldMs = $YieldTotalMs; return 'yield' }
+  if ($null -ne $State.SkipLastAt) { $State.SkipElapsedMs = [double]$State.SkipElapsedMs + ($Now - $State.SkipLastAt).TotalMilliseconds }
+  $State.SkipLastAt = $Now; $State.SkipLastYieldMs = $YieldTotalMs
+  if ($State.SkipElapsedMs -ge 20000) { return 'timeout' }
+  return 'wait'
+}
+
+function Test-DeathScreenValid {
+  param([System.Diagnostics.Process]$Game)
+  # 유효한(캡처 실패·일련번호 변경 없는) 판독이 사망·전멸일 때만 $true. 클리어 대기의 마감 판정 자리에서 '사망 화면이면 마감을
+  # 확정하지 말고 부활 상태 머신에 맡긴다' 게이트로 씁니다 (설계 합의 B: 상한·예산 코드 4 가 마감·연장보다 앞. 구현 리뷰 P1).
+  $serial = $script:captureFailSerial
+  $info = Get-DeathScreenInfo -Game $Game
+  if ($script:screenCaptureFailing -or ($script:captureFailSerial -ne $serial)) { return $false }
+  return [bool]($info.Dead -or $info.Wiped)
+}
+
+function Test-AbyssExitPopupText {
+  param([string]$Text)
+  # '던전에서 퇴장하시겠습니까?' 팝업 제목 판정의 순수부 (2026-09-25 수동 조작 실측 - 던전이미지\어비스\20260925_사망화면_던전퇴장_수동조작_흐름
+  # 01 프레임: 제목 '던전에서 퇴장하시겠습니까?', 본문 '완료하지 못한 도전이 있습니다.', 버튼 '[ESC] 취소' '[Space] 나가기').
+  # 영역이 제목+본문을 덮으므로(실기 2: 좁은 제목 영역은 실제 팝업에서 '-00' - 팝업이 수동 캡처보다 15px 위) 조각은 '퇴장' 또는 본문
+  # '완료하'+'도전이' (오프라인 재현 4장: '던전에서퇴장하ÅI겠습LI)가?완료하지못한도전이있습니다.' / '…완료하天l못한도전이…'). '나가시' 는 보상
+  # 화면 '나가기' 와 겹쳐 쓰지 않음.
+  $normalized = ([string]$Text) -replace '\s', ''
+  return [bool]($normalized.Contains('퇴장') -or ($normalized.Contains('완료하') -and $normalized.Contains('도전이')))
+}
+
+function Invoke-AbyssDeathExit {
+  param([System.Diagnostics.Process]$Game, [int]$TimeoutSeconds = 90)
+  # 사망·전멸 화면에서 던전을 나갑니다 (2026-09-25 사용자 확정: 거점 부활 상한 뒤엔 부활 대신 퇴장 → 새 파티로 재입장).
+  # 흐름(09-25 19:18 수동 조작 실측, 던전이미지\어비스\20260925_사망화면_던전퇴장_수동조작_흐름): 미니맵 옆 문 아이콘($ptAbyssDeathExit) 클릭
+  # → 팝업 '던전에서 퇴장하시겠습니까? / 완료하지 못한 도전이 있습니다.' ([ESC] 취소 · [Space] 나가기) → '나가기' 클릭 → 로딩('이멘마하')
+  # → 필드(HUD + 추적기에 던전명 없음). Space 는 위험 화면 오입력 금지 정책상 쓰지 않고 팝업 버튼 영역에서 '나가기' 글자 위치를 클릭합니다.
+  # 상태 기반(규칙 4): 아이콘은 '사망 화면이 보이고 팝업이 없을 때' 만, '나가기' 는 팝업 제목이 확인될 때만 - 생략·미수신이면 다음 회전이
+  # 같은 조건으로 재클릭. 캡처 실패는 동결(마감 되돌림, 규칙 15), 조작은 양보(Wait-UserYieldEnd, 마감은 양보 차분 연장).
+  # 반환 'left' = 필드 확인(HUD + 던전명 없음 2연속) / 'stay' = '나가기' 를 누르기 전에 사망 화면이 사라지고 던전 안(HUD + 던전명 2연속 -
+  # 사용자가 직접 부활 등). 마감 초과는 throw(오류 세트 - 원인 확인용).
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $seenYieldMs = [double]$script:userYieldTotalMs
+  $fieldStreak = 0; $insideStreak = 0
+  $iconClicks = 0; $exitClicks = 0; $popupMisses = 0
+  while ($true) {
+    $turnSerial = $script:captureFailSerial
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+      # 마감 되돌림은 복구 탐침 뒤에 (구현 리뷰 P2 선례). 연속 수는 유지(동결)
+      $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      $seenYieldMs = [double]$script:userYieldTotalMs
+      continue
+    }
+    if ((Get-Date) -ge (Get-YieldAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs))) {
+      Write-LifeDiagnostics -Game $Game -Context '던전 퇴장 확인 초과' -CaptureOnly
+      throw "사망 화면에서 던전 퇴장을 ${TimeoutSeconds}초 안에 확인하지 못했습니다 (문 아이콘 클릭 ${iconClicks}회, '나가기' 클릭 ${exitClicks}회)."
+    }
+    if (Test-UserRecentlyActive) { $fieldStreak = 0; $insideStreak = 0; Wait-UserYieldEnd -Game $Game -Context '던전 퇴장'; continue }
+    # 1) 퇴장 확인 팝업이 떠 있으면 '나가기' (글자 위치 클릭 - 실측 (742,634), 취소는 (528,634))
+    $popupTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssExitPopupTitle[0] -ReferenceY $rgAbyssExitPopupTitle[1] `
+        -RegionWidth $rgAbyssExitPopupTitle[2] -RegionHeight $rgAbyssExitPopupTitle[3] -Scale 3 -Engine $ocrKoreanEngine)
+    if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }
+    if (Test-AbyssExitPopupText -Text $popupTitle) {
+      $exitWord = Find-GameTextPoint -Game $Game -ReferenceX $rgAbyssExitPopupButtons[0] -ReferenceY $rgAbyssExitPopupButtons[1] `
+        -RegionWidth $rgAbyssExitPopupButtons[2] -RegionHeight $rgAbyssExitPopupButtons[3] -SearchText '나가기'
+      if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }
+      if ($exitWord) {
+        Focus-Game -Game $Game
+        Click-ScreenPoint -X $exitWord.X -Y $exitWord.Y
+        if ($script:lastClickPerformed) { $exitClicks++; Write-RunLog "$($script:contentTag) 퇴장 확인 팝업 - '나가기' 클릭 (${exitClicks}회)" }
+      } else {
+        $popupMisses++
+        if (($popupMisses % 3) -eq 0) { Write-RunLog "[경고] 퇴장 확인 팝업에서 '나가기' 글자를 ${popupMisses}회 찾지 못했습니다 - 계속 시도합니다" }
+      }
+      Start-Sleep -Seconds 2
+      continue
+    }
+    # 2) 사망·전멸 화면이 그대로면 문 아이콘 (팝업이 아직 없을 때만)
+    $deathSerial = $script:captureFailSerial
+    $death = Get-DeathScreenInfo -Game $Game
+    if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $deathSerial) { continue }
+    if ($death.Dead -or $death.Wiped) {
+      $fieldStreak = 0; $insideStreak = 0
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptAbyssDeathExit[0] -ReferenceY $ptAbyssDeathExit[1]
+      if ($script:lastClickPerformed) {
+        $iconClicks++
+        if ($iconClicks -eq 1) { Write-RunLog "$($script:contentTag) 던전 나가기(미니맵 옆 문 아이콘) 클릭" }
+        elseif (($iconClicks % 3) -eq 0) { Write-RunLog "[경고] 던전 나가기 아이콘 ${iconClicks}회째 클릭 - 퇴장 확인 팝업이 아직 보이지 않습니다" }
+      }
+      Start-Sleep -Milliseconds 1500
+      continue
+    }
+    # 3) 사망 화면도 팝업도 없음: 로딩(HUD 없음) → 필드(HUD + 던전명 없음 2연속) = 퇴장 확인 / 던전 안(HUD + 던전명 2연속) = 직접 부활 등
+    $hud = Test-HomeEndEscHud -Game $Game
+    $quest = $(if ($hud) { Test-InDungeonQuest -Game $Game } else { $false })
+    if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }
+    if ($hud -and -not $quest) { $fieldStreak++; $insideStreak = 0 }
+    elseif ($hud -and $quest) { $insideStreak++; $fieldStreak = 0 }
+    else { $fieldStreak = 0; $insideStreak = 0 }
+    if ($fieldStreak -ge 2) {
+      # 퇴장 확정은 이 헬퍼가 '나가기' 를 실제로 보낸 뒤에만 - 보내기 전에 사망 화면이 사라지고 필드 증거가 보이면(사용자 직접 조작, 또는 보스
+      # 이펙트가 추적기를 덮어 던전 안을 필드로 읽는 오판 - 목록 1절 1번 ③, 관측 6건) 'stay' 로 돌려 바깥 루프가 재판정합니다 (자체 리뷰 P2)
+      if ($exitClicks -gt 0) {
+        Write-RunLog "$($script:contentTag) 던전 퇴장 확인 - 필드 (HUD, 던전 목표 없음 2연속)"
+        return 'left'
+      }
+      return 'stay'
+    }
+    if ($insideStreak -ge 2 -and $exitClicks -eq 0) { return 'stay' }
+    Start-Sleep -Seconds 1
+  }
 }
 
 function Test-DungeonClearPrompt {
@@ -10662,6 +10985,12 @@ function Invoke-AbyssPartyMemberCycle {
       Write-RunLog '[완료] 파티원 회차 완료 (선택 화면 상태)'
       exit 0
     }
+    if ($clearOutcome -eq 'left') {
+      # 거점 부활 상한으로 사망 화면에서 나옴 (2026-09-25): 파티원은 퇴장 뒤 자동 재입장 흐름이 없고(파티 유지 여부 미실측 - 코드 10 이면 다음 회차가
+      # '준비 완료' 를 최대 30분 기다리다 코드 1 - 자체 리뷰 지적) 조건부 정지합니다. 새 파티 재입장은 파티장·우연한 만남 흐름의 몫.
+      Write-RunLog '[완료] 파티원: 거점 부활 상한으로 던전을 나왔습니다 - 파티원은 퇴장 뒤 자동 재입장 흐름이 없어 정지합니다'
+      exit 4
+    }
   }
 
   # --- 4. 나가기 → 필드 복귀 확인. 파티원은 어비스 선택 화면으로 복귀하지 않습니다 ---
@@ -15727,6 +16056,13 @@ try {
 
   Write-RunLog '[어비스] 클리어 화면 감지 대기 시작'
   $clearOutcome = Wait-ForDungeonClearScreen -Game $game -TimeoutSeconds $timeoutClear
+  if ($clearOutcome -eq 'left') {
+    # 거점 부활 상한으로 사망 화면에서 나온 판 (2026-09-25 사용자 확정): 클리어가 아니므로 마커 없이, 회차로 세지 않고 선택 화면으로
+    # 복귀 → 코드 10 → GUI 가 곧바로 다음 회차(새 파티 매칭)를 시작합니다. 커스텀은 같은 항목 재실행. 준비 실행 3회 연속은 GUI 가 오류 정지.
+    Return-ToAbyssSelection -Game $game -SafeStopExitCode 10
+    Write-RunLog '[완료] 거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)'
+    exit 10
+  }
 
   # 사용자가 직접 화면을 넘긴 경우(reward/selection)에는 해당 단계를 건너뛰고 이어갑니다.
   if ($clearOutcome -eq 'clear') {

@@ -196,6 +196,19 @@ try {
   Assert-Case '실배포(좌표만 낮음): coordsVersion 이 최신으로' ([int]$resultCoords.coordsVersion) $realCoords
   Assert-Case '실배포(좌표만 낮음): questTracker 가 최신 기본값으로' (($resultCoords.ocrRegions.questTracker -join ',')) (($realDefault.ocrRegions.questTracker -join ','))
   Assert-Case '실배포(좌표만 낮음): 사용자가 바꾼 값은 보존' $resultCoords.repeat.defaultCount 43
+  # 2026-09-25: 거점 부활 상한은 사용자 편집값 - 좌표 버전 이전에서 기본값(3)으로 되돌리지 않는다 (실기 4 에서 상한 0 테스트 설정이 되돌아갔음)
+  $limitUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $limitUser.coordsVersion = $realCoords - 1
+  $limitUser.revive.checkpointReviveLimit = 0
+  [System.IO.File]::WriteAllText($configPath, ($limitUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  [void](Update-ConfigToLatest)
+  $resultLimit = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '실배포(좌표만 낮음): revive.checkpointReviveLimit 편집값(0) 보존' ([int]$resultLimit.revive.checkpointReviveLimit) 0
+  $limitUser.revive.checkpointReviveLimit = 'abc'
+  [System.IO.File]::WriteAllText($configPath, ($limitUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  [void](Update-ConfigToLatest)
+  $resultLimit = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '실배포(좌표만 낮음): 정수가 아닌 상한은 기본값(3)으로' ([int]$resultLimit.revive.checkpointReviveLimit) 3
 
   $userConfigV4Life = [pscustomobject]@{
     configSchemaVersion = 4

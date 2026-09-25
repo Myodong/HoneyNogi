@@ -118,6 +118,8 @@ Check-Equal '클리어 대기: 팝업 if 블록 추출' ($null -ne $popupIf) $tr
 # 1회 루프로 감싸 continue 를 소비합니다 - 블록 뒤에 도달하면 $reachedAfter 가 참 (continue 가 없으면 실패)
 $popupLoop = [scriptblock]::Create("for (`$__once = 0; `$__once -lt 1; `$__once++) {`n" + $popupIf.Extent.Text + "`n`$script:reachedAfter = `$true`n}")
 $script:contentTag = '[심층]'
+# 2026-09-25 상태 머신: 블록이 Register-RevivePurchasePopup 을 부르므로 운영 정의를 추출해 둡니다 (사본 재구현 금지)
+Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Register-RevivePurchasePopup')))
 function Run-PopupBlock {
   param([bool]$Pending, [string]$Kind, [string]$Click)
   $script:vclock = [datetime]'2026-01-01 00:00:00'
@@ -126,13 +128,15 @@ function Run-PopupBlock {
   $script:sendIdx = 0; $script:sendSeq = @($Click)
   $script:popupChain = 1
   $popupClosePoint = [pscustomobject]@{ X = 640; Y = 500 }
-  $reviveConfirmPending = $Pending; $revivePendingKind = $Kind; $useStatueRevive = $false
+  # 2026-09-25 상태 머신: 팝업 훅은 $reviveState.Pending/.PendingKind 를 읽고 Register-RevivePurchasePopup 이 해시테이블을 제자리 갱신
+  $reviveState = @{ Pending = $Pending; PendingKind = $Kind; StatueMode = $false; Dispatched = 1; Episode = $true }
   $Game = $null
-  # 점소싱(.) 으로 실행 - & 로 부르면 새 스코프라 블록 안의 $useStatueRevive/$reviveConfirmPending 대입이
-  # 이 함수의 지역 변수에 닿지 않는다 (PS 5.1: 읽기는 부모로 올라가지만 쓰기는 새 변수를 만듦)
+  # 점소싱(.) 으로 실행 - & 로 부르면 새 스코프라 블록 안의 지역 변수 대입이 이 함수의 지역 변수에 닿지 않는다
+  # (PS 5.1: 읽기는 부모로 올라가지만 쓰기는 새 변수를 만듦)
   . $popupLoop
   return [pscustomobject]@{
-    Statue = $useStatueRevive; Pending = $reviveConfirmPending; Sleep = (($script:vclock - [datetime]'2026-01-01 00:00:00').TotalSeconds)
+    Statue = $reviveState.StatueMode; Pending = $reviveState.Pending; Dispatched = $reviveState.Dispatched
+    Sleep = (($script:vclock - [datetime]'2026-01-01 00:00:00').TotalSeconds)
     Yield = $script:yieldCalls; After = $script:reachedAfter; Logs = $script:logs
   }
 }
@@ -147,7 +151,7 @@ Check-Equal '클리어 일반/커서 실패: 기존 문구 + 1초 + continue' ("
 # 가루 부활 pending × 클릭 3종 - 여신상 전환은 사유와 무관하게 성립
 foreach ($c in @('sent','user-active','cursor-not-ready')) {
   $r = Run-PopupBlock -Pending $true -Kind '가루 부활' -Click $c
-  Check-Equal ("클리어 가루부활/{0}: 여신상 전환 + pending 해제 (사유 무관)" -f $c) ("$($r.Statue)/$($r.Pending)") 'True/False'
+  Check-Equal ("클리어 가루부활/{0}: 여신상 전환 + pending 해제 (사유 무관) + 에피소드 전송 수 유지" -f $c) ("$($r.Statue)/$($r.Pending)/$($r.Dispatched)") 'True/False/1'
   Check-Equal ("클리어 가루부활/{0}: 재료 부족 로그 1 + 양보 없음" -f $c) ("$((@($r.Logs | Where-Object { $_ -match '재료 부족 추정' })).Count)/$($r.Yield)") '1/0'
 }
 $r = Run-PopupBlock -Pending $true -Kind '가루 부활' -Click 'user-active'
@@ -160,7 +164,8 @@ Check-Equal '클리어 pending 없음(종류만 잔존): 여신상 전환 없음
 # 주기 게이트: 구매 팝업 탐색을 **직접** 감싸는 조건이 % 2 인지 (함수 전체가 아니라 탐색 줄 바로 앞)
 $clearBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Wait-ForDungeonClearScreen'))
 $clearCode = (($clearBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
-Check-Equal '클리어 대기: 구매 팝업 탐색이 % 2 게이트 바로 안에' ($clearCode -match '(?s)if \(\(\$pollCounter % 2\) -eq 0 -and -not \$script:screenCaptureFailing\) \{\s*Move-CursorOutsideGame -Game \$Game\s*\$popupClosePoint = Find-GameTextPoint') $true
+# 2026-09-25 구현 리뷰 P1: 사망 에피소드 중에는 매 폴 - 짝수 폴에만 보면 R키 뒤 홀수 폴의 구매 팝업이 사망 판독을 덮어 허위 '부활 완료'
+Check-Equal '클리어 대기: 구매 팝업 탐색이 (% 2 또는 사망 에피소드) 게이트 바로 안에' ($clearCode -match '(?s)if \(\(\(\$pollCounter % 2\) -eq 0 -or \$reviveState\.Episode\) -and -not \$script:screenCaptureFailing\) \{\s*Move-CursorOutsideGame -Game \$Game\s*\$popupClosePoint = Find-GameTextPoint') $true
 
 # ── 6. 자리 1 소스 구조 단언 ──────────────────────────────────────────────────
 $entryBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-AfterEntryKeys'))

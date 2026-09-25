@@ -32,7 +32,7 @@ Assert-Case '워커: 복귀 성공 후 onSelectionScreen 확정 3곳' `
 $clearBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Wait-ForDungeonClearScreen'))
 $clearCode = (($clearBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '워커: 클리어 대기 while($true) + 최상단 마감 판정' `
-  ([bool]($clearCode -match 'while \(\$true\) \{\s*\r?\n\s*if \(\(Get-Date\) -ge \$deadline\) \{')) $true
+  ([bool]($clearCode -match 'while \(\$true\) \{\s*\r?\n\s*\$captureFailDelta = \(Get-CaptureFailTotalMs\) - \$seenCaptureFailMs\s*\r?\n\s*if \(\$captureFailDelta -gt 0\) \{[^\r\n]*\}\s*\r?\n\s*if \(\(Get-Date\) -ge \$deadline\) \{')) $true   # 09-25: 서두의 캡처 실패 누적 차분 2줄(규칙 15) 뒤 곧바로 마감 판정
 Assert-Case '워커: 마감 도달의 최종 결말은 throw (무한 대기 금지)' `
   ([bool]($clearCode -match '(?s)if \(\(Get-Date\) -ge \$deadline\) \{.*throw ''던전 클리어 화면 감지 대기 시간이 초과됐습니다\.''')) $true
 Assert-Case '워커: 마감 판정이 폴링 카운터보다 앞(continue 가 건너뛰지 못함)' `
@@ -99,7 +99,7 @@ Assert-Case '워커: 사냥터 재시도 소탕만 계속 폴백' `
 
 # ⑧ '가루 부족' 해석은 R키 가루 부활 직후에만 (여신상/전멸 후 팝업 오인 방지)
 Assert-Case '워커: 가루 부족 해석은 가루 부활 한정' `
-  ($workerSource -match "reviveConfirmPending -and \`$revivePendingKind -eq '가루 부활'") $true
+  ($workerSource -match "reviveState\.Pending -and \`$reviveState\.PendingKind -eq '가루 부활'") $true   # 2026-09-25 상태 머신 (Register-RevivePurchasePopup)
 
 # ⑨ Wait-ForScreen: 캡처 실패 중에는 Condition 성공을 인정하지 않음 (실행은 유지)
 Assert-Case '워커: Wait-ForScreen 캡처 실패 게이트' `
@@ -283,7 +283,7 @@ Assert-Case 'GUI: 회차 시작 시 사유 초기화' `
 #   판정 → 게이트 → mouse_event 순서가 유지되는지를 봅니다.
 # v2.1.6 양보 확장: 반환 직전에 생략 원인 메타('cursor-not-ready') 기록이 계약에 추가됨
 Assert-Case '워커: 커서 미확인 시 클릭 건너뜀(강행 제거)' `
-  ($workerSource -match "Get-CursorClickWarnAction[\s\S]{0,1500}if \(-not \`$cursorReady\) \{ \`$script:lastClickSkipReason = 'cursor-not-ready'; return \}[\s\S]{0,300}mouse_event\(0x0002") $true
+  ($workerSource -match "Get-CursorClickWarnAction[\s\S]{0,1500}if \(-not \`$cursorReady\) \{ \`$script:lastClickSkipReason = 'cursor-not-ready'; return \}[\s\S]{0,900}mouse_event\(0x0002") $true
 Assert-Case '워커: 보유한 재화 화면 감지 조각(유한/보유+재화)' `
   ($workerSource -match "Contains\('보유'\) -or \`$ccTitle\.Contains\('유한'\)\) -and \`$ccTitle\.Contains\('재화'\)") $true
 Assert-Case '워커: 재화 화면 닫기 배선 2곳(클리어 대기+결과 대기)' `
@@ -372,7 +372,7 @@ Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life/etc allowlist'
 $auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 # 스키마 9 (2026-08-15): etc(기타 - 고양이 상인) 섹션 신설
 Assert-Case 'config: 스키마 9 + mainCategory 기본 battle + life/etc 섹션' `
-  (([int]$auditConfigJson.configSchemaVersion -eq 9) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
+  (([int]$auditConfigJson.configSchemaVersion -eq 10) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
    ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily') -and
    ($null -ne $auditConfigJson.etc) -and ([string]$auditConfigJson.etc.content -eq 'catMerchant')) $true
 # 버전 번호를 고정값으로 박으면 올릴 때마다 이 테스트가 깨집니다 (2026-08-09 v2.0.1 에서 발생).
@@ -524,11 +524,11 @@ Assert-Case '어비스 메뉴: 클릭 후 검증 - 다른 화면이면 ESC 복�
   ($workerSource -match '어비스가 아닌 화면이 열렸습니다[\s\S]{0,900}Press-KeyOnce -VirtualKey 0x1B') $true
 Assert-Case '어비스 메뉴: 판독 영역이 타일 그리드 전체 (한 줄 아님)' `
   ($workerSource -match "\`$rgAbyssMenu\s*=\s*@\(Get-ConfigValue \`$config @\('ocrRegions', 'abyssMenu'\) @\(850, 180, 350, 520\)\)") $true
-Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v14 네이티브 1908 계열, v15 트래커 재확장, v16 난이도 알약 상단 확장)' `
-  ($workerSource -match '\$coordsVersionCurrent = 16') $true
+Assert-Case '어비스 메뉴: 좌표 영역 변경이라 coordsVersion 인상 (v8~v14 네이티브 1908 계열, v15 트래커 재확장, v16 난이도 알약 상단 확장, v17 퇴장 팝업 제목 영역)' `
+  ($workerSource -match '\$coordsVersionCurrent = 17') $true
 $abyssMenuRegion = $auditConfigJson.ocrRegions.abyssMenu
 Assert-Case 'config: abyssMenu 영역이 워커 기본값과 일치' (($abyssMenuRegion -join ',')) '850,180,350,520'
-Assert-Case 'config: coordsVersion 16' ([int]$auditConfigJson.coordsVersion) 16
+Assert-Case 'config: coordsVersion 17' ([int]$auditConfigJson.coordsVersion) 17
 # v14 (2026-08-14 15:49 실사고): 네이티브 1908 추적기 첫 줄('…1층 2구역 소탕')이 ref y204 -
 # 구영역 상단 212에 잘려 '구역' 소실 → 클리어 대기 연장 안전망 불발 → 60초 하드 타임아웃.
 # 상단 190 확장 (하단 267 유지 - 구 범위가 신 범위의 부분집합이라 기존 소비처 보존).

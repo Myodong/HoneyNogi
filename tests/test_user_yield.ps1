@@ -51,8 +51,9 @@ Assert-Case '배선: 양보 상태 변수 3종 초기화' `
    ($workerText -match '(?m)^\$script:lastYieldClickNoticeTick = \[uint32\]0')) 'True'
 # 주입 4곳(클릭/ALT 전면화/범용 키/생활 드래그) 전부: 직전 관측 + 직후 자기 시각 기록.
 # 하나라도 빠지면 그 주입이 dwTime 을 덮어 이후 판별이 전부 '사용자'로 오인됩니다.
-Assert-Case '배선: 주입 직후 Register-SelfInput 4곳' `
-  ([regex]::Matches($workerText, '(?m)^\s+Register-SelfInput\b').Count) 4
+# 2026-09-25 +1: 클릭 함수의 SetCursorPos 확인 직후 (커서 이동 되돌림이 사용자 후보로 잡혀 자기 클릭 뒤 매번 양보하던 실기 2·3 관측) → 5곳
+Assert-Case '배선: 주입 직후 Register-SelfInput 5곳' `
+  ([regex]::Matches($workerText, '(?m)^\s+Register-SelfInput\b').Count) 5
 Assert-Case '배선: 주입 직전 관측(Update-UserInputObservation) 4곳 + 판별 내 1곳' `
   ([regex]::Matches($workerText, '(?m)^\s+Update-UserInputObservation\b').Count) 5
 # v2.1.7: 50ms 조건 뒤에 '흡수 tick 이하 재후보 금지' 조건이 -and 로 붙음

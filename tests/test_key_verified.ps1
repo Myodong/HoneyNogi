@@ -73,7 +73,7 @@ Assert-Case '회복 - 전송 재개 + 안내' ('{0}/{1}' -f $r, (@($script:logLi
 # ── 2. 배선 가드 (호출부가 검증 입력을 쓰는가) ────────────────────────────────
 $workerRaw = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
 Assert-Case '배선: R 부활이 검증 입력 경유 + 성공 시에만 계상' `
-  ([bool]($workerRaw -match '(?s)if \(Press-KeyVerified -Game \$Game -VirtualKey \(\[byte\]\$reviveKey\)[^\)]*\) \{\s*\r?\n\s*\$reviveCount\+\+')) 'True'
+  ([bool]($workerRaw -match "(?s)if \(Press-KeyVerified -Game \`$Game -VirtualKey \(\[byte\]\`$reviveKey\)[^\)]*\) \{\s*\r?\n\s*Write-RunLog[^\r\n]*여기서 부활[^\r\n]*\r?\n\s*\`$dispatchKind = '가루 부활'")) 'True'   # 2026-09-25 상태 머신: 계상은 성공 확인 시점, 여기선 '보냈다' 기록만
 Assert-Case '배선: 자동사냥 재개가 검증 입력 경유 + 성공 시에만 계상' `
   ([bool]($workerRaw -match '(?s)if \(Press-KeyVerified -Game \$Game -VirtualKey \(\[byte\]\$reviveResumeKey\)[^\)]*\) \{\s*\r?\n\s*\$autoHuntPresses\+\+')) 'True'
 Assert-Case '배선: ASSIST 가 검증 입력 경유 + 성공 시에만 계상' `

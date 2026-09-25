@@ -525,10 +525,18 @@ function Update-ConfigToLatest {
       $script:customProgressReset = ($script:customProgressReset -or $hadLifeCustomProgress)
       if ($hadLifeCustomProgress) { $script:customProgressResetSections += 'lifeCustomRepeat' }
     }
-    # 3) 자동부활 on/off (키 코드/횟수 상한은 최신 기본값 유지)
-    if ($usr.PSObject.Properties['revive'] -and $def.PSObject.Properties['revive'] -and
-        $usr.revive.PSObject.Properties['enabled']) {
-      $def.revive.enabled = ConvertTo-StrictBoolean $usr.revive.enabled $def.revive.enabled
+    # 3) 자동부활 on/off (키 코드는 최신 기본값 유지). 거점 부활 상한(checkpointReviveLimit)은 사용자가 편집하는 값이라 정수(0~1000)면 이전
+    #    (2026-09-25 실기 4: 상한을 0 으로 낮춘 테스트 설정이 좌표 버전 이전에서 3 으로 되돌아가 손으로 막아야 했음 - 자체 리뷰 P3)
+    if ($usr.PSObject.Properties['revive'] -and $def.PSObject.Properties['revive']) {
+      if ($usr.revive.PSObject.Properties['enabled']) {
+        $def.revive.enabled = ConvertTo-StrictBoolean $usr.revive.enabled $def.revive.enabled
+      }
+      if ($usr.revive.PSObject.Properties['checkpointReviveLimit']) {
+        $usrLimit = 0
+        if ([int]::TryParse([string]$usr.revive.checkpointReviveLimit, [ref]$usrLimit) -and $usrLimit -ge 0 -and $usrLimit -le 1000) {
+          $def.revive.checkpointReviveLimit = $usrLimit
+        }
+      }
     }
     # 4) 입장 후 키 입력의 켬/끔 (키 코드로 짝을 맞춰 이전)
     if ($usr.PSObject.Properties['afterEntry'] -and $def.PSObject.Properties['afterEntry']) {
@@ -7740,7 +7748,7 @@ function Save-SettingsFromUi {
       '_설명'  = '던전에서 캐릭터가 행동불능(사망)이 되면 자동으로 부활하는 기능입니다.'
       enabled  = [bool]$chkRevive.Checked
       key      = 82
-      maxPerCycle = 10
+      checkpointReviveLimit = 3   # 거점 부활 상한 (2026-09-25 - 옛 전체 부활 상한 키는 제거, schema 10)
     })
   }
   # 탭 토글(설정/로그 표시) 상태도 최종 병합 - 즉시 저장(Save-UiToggleState)과 별개로 시작 시
