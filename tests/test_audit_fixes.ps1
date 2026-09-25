@@ -32,7 +32,7 @@ Assert-Case '워커: 복귀 성공 후 onSelectionScreen 확정 3곳' `
 $clearBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Wait-ForDungeonClearScreen'))
 $clearCode = (($clearBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '워커: 클리어 대기 while($true) + 최상단 마감 판정' `
-  ([bool]($clearCode -match 'while \(\$true\) \{\s*\r?\n\s*\$captureFailDelta = \(Get-CaptureFailTotalMs\) - \$seenCaptureFailMs\s*\r?\n\s*if \(\$captureFailDelta -gt 0\) \{[^\r\n]*\}\s*\r?\n\s*if \(\(Get-Date\) -ge \$deadline\) \{')) $true   # 09-25: 서두의 캡처 실패 누적 차분 2줄(규칙 15) 뒤 곧바로 마감 판정
+  ([bool]($clearCode -match 'while \(\$true\) \{\s*\r?\n\s*\$captureFailDelta = \(Get-CaptureFailTotalMs\) - \$seenCaptureFailMs\s*\r?\n\s*if \(\$captureFailDelta -gt 0\) \{[^\r\n]*\}\s*\r?\n\s*\$deadlineSerial = \$script:captureFailSerial\s*\r?\n\s*if \(\(Get-Date\) -ge \$deadline\) \{')) $true   # 09-25: 서두의 캡처 실패 누적 차분 2줄(규칙 15) + 마감 탐침 일련번호 기록(구현 리뷰 2차) 뒤 곧바로 마감 판정
 Assert-Case '워커: 마감 도달의 최종 결말은 throw (무한 대기 금지)' `
   ([bool]($clearCode -match '(?s)if \(\(Get-Date\) -ge \$deadline\) \{.*throw ''던전 클리어 화면 감지 대기 시간이 초과됐습니다\.''')) $true
 Assert-Case '워커: 마감 판정이 폴링 카운터보다 앞(continue 가 건너뛰지 못함)' `
@@ -48,12 +48,15 @@ Assert-Case '워커: 마감 판정이 폴링 카운터보다 앞(continue 가 �
 $deadlineBlock = [regex]::Match($clearCode, '(?s)if \(\(Get-Date\) -ge \$deadline\) \{(.*?)\r?\n    \}')
 Assert-Case '워커: 마감 처리 블록을 찾음' ([bool]$deadlineBlock.Success) $true
 $captureFailBranches = @([regex]::Matches($deadlineBlock.Groups[1].Value,
-  '(?s)(?:if|\} elseif) \(\$script:screenCaptureFailing\) \{(.*?)\r?\n      \}'))
+  '(?s)(?:if|\} elseif) \(\$script:screenCaptureFailing(?: -or \(\$script:captureFailSerial -ne \$deadlineSerial\))?\) \{(.*?)\r?\n      \}'))
 # 2026-09-21 +1: 보상 전체 화면 닫기(Close-QuestRewardScreen) 판독 뒤 캡처 실패 가드 - 어비스 불명 종료 코드 4 분기 앞 (구현 리뷰 P2)
-Assert-Case '워커: 마감 처리의 캡처 실패 분기 4곳' $captureFailBranches.Count 4
+# 2026-09-25 +1: 사망 표본 탐침(Test-DeathScreenValid) 뒤 플래그∨일련번호 가드 - 뒤 탐침의 캡처 성공이 플래그를 풀어 마감을 확정하던 경로 (구현 리뷰 2차 P2).
+#   elseif 4곳은 전부 일련번호($deadlineSerial)도 대조합니다 - 진입부 if 는 탐침 전이라 플래그만.
+Assert-Case '워커: 마감 처리의 캡처 실패 분기 5곳' $captureFailBranches.Count 5
+Assert-Case '워커: 마감 처리의 elseif 동결 분기는 전부 일련번호 대조' (@($captureFailBranches | Where-Object { $_.Value -like '} elseif*' -and $_.Value -notlike '*-ne $deadlineSerial*' })).Count 0
 $throwInCaptureFail = 0
-foreach ($m in $captureFailBranches) { if ($m.Groups[1].Value -match 'throw') { $throwInCaptureFail++ } }
-Assert-Case '워커: 캡처 실패 분기에서는 던지지 않는다' $throwInCaptureFail 0
+foreach ($m in $captureFailBranches) { if ($m.Groups[1].Value -match '\b(?:throw|exit)\b') { $throwInCaptureFail++ } }   # 09-25: exit 도 (구현 리뷰 2차 보강)
+Assert-Case '워커: 캡처 실패 분기에서는 던지지도 끝내지도 않는다 (throw·exit 없음)' $throwInCaptureFail 0
 # ★ 연장 판정은 **콘텐츠별**이어야 합니다. 어비스 전용 Test-InDungeonQuest 하나만 쓰면
 #   퀘스트 추적기 문구가 다른 던전·심층·사냥터에서는 절대 매칭되지 않아, 2026-07-17 에 넣은
 #   '전투 중이면 60초씩 연장' 안전망이 4개 콘텐츠 중 1개에서만 살아 있게 됩니다
@@ -125,7 +128,8 @@ Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path (Join-Path $proj
 Assert-Case 'GUI: 거점 퇴장 사유 판정 - 워커 실제 문구' (Test-CheckpointLeaveReason -Reason '거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)') $true
 Assert-Case 'GUI: 거점 퇴장 사유 판정 - 다른 코드 10 사유 3종·빈 값은 거짓' ((@('어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)', '안전 중지 예약 확인 - 수동 진행분 정리 중이라 판으로 계상하지 않고 마칩니다 (준비 실행)', '파티원: 거점 부활 상한으로 던전을 나왔습니다 - 파티원은 퇴장 뒤 자동 재입장 흐름이 없어 정지합니다', '') | ForEach-Object { Test-CheckpointLeaveReason -Reason $_ }) -join ',') 'False,False,True,False'
 Assert-Case 'GUI: 워커의 퇴장 [완료] 문구가 판정 조각을 포함' ($workerSource -match "Write-RunLog '\[완료\] 거점 부활 상한으로 던전을 나왔습니다") $true
-Assert-Case 'GUI: 코드 10 분기가 잔여 로그 수집 → 퇴장 사유면 streak 0 + 재입장 안내, 아니면 streak++ + 준비 실행 안내' ($guiSource -match '(?s)elseif \(\$exitCode -eq 10\) \{[\s\S]{0,1200}?Read-NewLogLines -Path \$workerLog[\s\S]{0,600}?if \(Test-CheckpointLeaveReason -Reason \$script:lastWorkerDoneReason\) \{\s*\r?\n\s*\$script:preparedStreak = 0\s*\r?\n\s*Add-GuiLog ''\[안내\] 거점 부활 상한으로[^\r\n]*''\s*\r?\n\s*\} else \{\s*\r?\n\s*\$script:preparedStreak\+\+') $true
+Assert-Case 'GUI: 코드 10 분기가 잔여 로그 수집 → 퇴장 사유면 streak 0 + 재입장 안내, 아니면 streak++ + 준비 실행 안내' ($guiSource -match '(?s)elseif \(\$exitCode -eq 10\) \{[\s\S]{0,1200}?Read-NewLogLines -Path \$workerLog[\s\S]{0,900}?if \(Test-CheckpointLeaveReason -Reason \$script:lastWorkerDoneReason\) \{\s*\r?\n\s*\$script:preparedStreak = 0\s*\r?\n\s*Add-GuiLog ''\[안내\] 거점 부활 상한으로[^\r\n]*''\s*\r?\n\s*\} else \{\s*\r?\n\s*\$script:preparedStreak\+\+') $true
+Assert-Case 'GUI: 코드 10 잔여 수집이 기본 로그 + 복구 로그 둘 다 (코드 4·최종 수집과 같은 계약 - 구현 리뷰 2차 P2)' ($guiSource -match '(?s)elseif \(\$exitCode -eq 10\) \{[\s\S]{0,1400}?\$tailLines \+= @\(Read-NewLogLines -Path \$workerLog -Offset \(\[ref\]\$script:logOffset\)\)\s*\r?\n\s*\$tailLines \+= @\(Read-NewLogLines -Path \$workerRecoveryLog -Offset \(\[ref\]\$script:recoveryLogOffset\)\)[^\r\n]*\r?\n\s*foreach \(\$tailLine in \$tailLines\) \{') $true
 Assert-Case 'GUI: preparedStreak 은 코드 10 외 전부 초기화' `
   ($guiSource -match 'if \(\$exitCode -ne 10\) \{ \$script:preparedStreak = 0 \}') $true
 # v2.1.4: 워커 스폰이 임베디드 호스트/기존 powershell 2분기가 되어 try 와 스폰 사이에
@@ -174,7 +178,7 @@ Assert-Case '3차: 복구 판정이 onSelectionScreen 플래그 신뢰 (+probe �
 Assert-Case '3차: 마감 직전 성공 화면 최종 탐침(3상태+HUD 부재 - 선택 화면 제외)' `
   ($workerSource -match 'elseif \(\(Test-DungeonClearPrompt -Game \$Game\) -or\s+\(\$FindResultButton[\s\S]{0,120}Test-HomeEndEscHud[\s\S]{0,200}Test-ExitButton -Game \$Game\) -and -not \(Test-HomeEndEscHud -Game \$Game\)\)\) \{') $true
 Assert-Case '3차: 최종 탐침 중 캡처 실패도 동결' `
-  ([regex]::Matches($workerSource, '\} elseif \(\$script:screenCaptureFailing\) \{').Count -ge 2) $true
+  ([regex]::Matches($workerSource, '\} elseif \(\$script:screenCaptureFailing(?: -or \(\$script:captureFailSerial -ne \$deadlineSerial\))?\) \{').Count -ge 2) $true   # 09-25: 마감 블록의 동결 분기는 일련번호도 대조 (구현 리뷰 2차)
 # 과소 게이트 보강: 사용 경로 재판독 null + 미사용 경로 유효 밖 값
 Assert-Case '3차: 사용 경로 재판독 null 커스텀 정지' `
   ($workerSource -match '소모량 재판독도 실패했습니다[\s\S]{0,120}exit 4') $true

@@ -4752,7 +4752,7 @@ $btnClearHelp.Add_Click({
 
 $toolTip = New-Object System.Windows.Forms.ToolTip
 $toolTip.SetToolTip($btnClearHelp, '클릭하면 자세한 설명이 나옵니다')
-$toolTip.SetToolTip($chkRevive, "전투 중 행동불능이 되면 남은 부활 횟수를 확인해 R키(여기서 부활)로 자동 부활합니다.`r`n남은 횟수가 없으면 '여신상에서 부활'을 클릭해 이어갑니다.`r`n불사의 가루 등 부활 재화가 소모될 수 있으니 원치 않으면 꺼 두세요.")
+$toolTip.SetToolTip($chkRevive, "전투 중 행동불능이 되면 남은 부활 횟수를 확인해 R키(여기서 부활)로 자동 부활합니다.`r`n남은 횟수가 없으면 거점(캠프파이어/여신상) 부활을 클릭해 이어갑니다. 전멸도 '여신상에서 부활'로 재도전합니다.`r`n어비스는 한 판에서 거점 부활이 설정 횟수(기본 3회, config revive.checkpointReviveLimit)에 닿은 뒤 다시 거점 부활이 필요하면`r`n부활하지 않고 던전을 나가 새 파티로 재입장합니다. 부활 입력을 3번 보내도 사망 화면이 그대로면 정지합니다.`r`n불사의 가루 등 부활 재화가 소모될 수 있으니 원치 않으면 꺼 두세요.")
 $toolTip.SetToolTip($chkAssist, "전투 중 화면 우측의 ASSIST(어시스트 모드) 토글이 꺼져 있으면 자동으로 H키를 눌러 켭니다.`r`n분홍(클래스 특화)/초록(일반) 어느 쪽이든 켜져 있으면 건드리지 않습니다.")
 $toolTip.SetToolTip($chkCrRandom, "켜면 매 바퀴 시작 때 리스트 순서를 무작위로 섞어 진행합니다 (항목 구성은 동일).`r`n1층·2층이 섞인 리스트에서는 사용할 수 없습니다.")
 $toolTip.SetToolTip($chkDcrRandom, "켜면 매 바퀴 시작 때 리스트 순서를 무작위로 섞어 진행합니다 (항목 구성은 동일).`r`n1층·2층이 섞인 리스트에서는 사용할 수 없습니다.")
@@ -8450,7 +8450,10 @@ $timer.Add_Tick({
         # 거점 부활 상한 퇴장(2026-09-25 사용자 확정 "계속 돌리는 게 맞아")도 같은 코드 10 이지만 화면 오판이 아니라 실제로 입장·전투한
         # 판이라 '준비 실행 3회 연속' 상한을 소모하지 않고 몇 판이든 새 파티로 재입장합니다. 판별은 워커의 [완료] 사유 - 타이머 tail 과
         # 종료 사이의 경쟁으로 마지막 줄을 못 봤을 수 있어 코드 4 상태줄과 같은 계약으로 잔여 로그를 먼저 수집합니다.
-        foreach ($tailLine in @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))) {
+        $tailLines = @()
+        $tailLines += @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))
+        $tailLines += @(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))   # 복구 로그도 - 코드 4·최종 수집과 같은 계약 (구현 리뷰 2차 P2)
+        foreach ($tailLine in $tailLines) {
           if ($null -eq $tailLine) { continue }
           if ($tailLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
           $displayLine = Convert-WorkerLogLineForGui -Line $tailLine -CustomActive $script:customActive

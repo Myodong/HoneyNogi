@@ -43,7 +43,7 @@ $entry = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invo
 # 2026-08-16 개정: v2.1.1 사용자 양보 루프(500ms 폴링)가 함수 앞부분에 끼어 '첫 번째
 # 슬립' 앵커가 무효화됨 - 프레임 대기는 SetCursorPos 실패 throw 뒤의 슬립으로 앵커 이동
 Assert-Case '상수: 대피 후 프레임 대기 120ms' `
-  (Get-Captured $park 'SetCursorPos 실패[\s\S]{0,600}?Start-Sleep -Milliseconds (\d+)(?!\d)') 120
+  (Get-Captured $park 'SetCursorPos 실패[\s\S]{0,1200}?Start-Sleep -Milliseconds (\d+)(?!\d)') 120   # 09-25 밤: 사이에 자기 입력 등록(Register-SelfInput) + 주석 3줄이 들어와 창 600→1200
 Assert-Case '상수: 사용자 양보 폴링 500ms' `
   (Get-Captured $park 'while \(\(Test-CursorOverGame[\s\S]{0,700}?Start-Sleep -Milliseconds (\d+)(?!\d)') 500
 Assert-Case '상수: 대피 후 위치 비교 허용 오차 3px' `

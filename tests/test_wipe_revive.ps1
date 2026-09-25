@@ -171,8 +171,10 @@ Assert-Case '배선(②): 생략 상한은 시도가 있었을 때만 (앵커 �
   ([bool]($workerCode -match '(?s)if \(\$dispatchAttempted\) \{[\s\S]{0,900}Resolve-ReviveDispatchSkip')) $true
 Assert-Case '배선(②): 시도 없는 회전은 Register-ReviveNoAttempt 로 연속을 끊는다 (구현 리뷰 P1)' `
   ([bool]($workerCode -match '(?s)\} else \{\s*\r?\n\s*Register-ReviveNoAttempt -State \$reviveState\s*\r?\n\s*\}\s*\r?\n\s*Start-Sleep -Milliseconds 800')) $true
-Assert-Case '배선(②): 전멸 예비 좌표 격상 문턱은 전송·cursor-not-ready 에서만 소모 (user-active 는 유지 - 규칙 4)' `
-  ([bool]($workerCode -match "if \(\`$script:lastClickPerformed -or \`$dispatchSkipReason -ne 'user-active'\) \{ \`$wipeButtonMisses = 0 \}")) $true
+Assert-Case '배선(②): 전멸 예비 좌표 격상 문턱은 클릭이 실제로 나갔을 때만 소모 (생략은 user-active·cursor-not-ready 모두 준비 완료 유지 - 구현 리뷰 2차 병행 검토 P2)' `
+  ([bool]($workerCode -match '(?s)Click-GamePoint -Game \$Game -ReferenceX \$ptWipeStatueRevive\[0\] -ReferenceY \$ptWipeStatueRevive\[1\]\s*\r?\n\s*if \(\$script:lastClickPerformed\) \{ \$dispatchKind = ''전멸 재도전'' \} else \{ \$dispatchSkipReason = \$script:lastClickSkipReason \}\s*\r?\n\s*if \(\$script:lastClickPerformed\) \{ \$wipeButtonMisses = 0 \}')) $true
+Assert-Case '배선(②): cursor-not-ready 가 문턱을 되감던 옛 배선 없음 (시도 사이 미탐 2회가 생략 연속을 끊어 20초 상한이 영영 차지 않았음)' `
+  ([bool]($workerCode -match "-or \`$dispatchSkipReason -ne 'user-active'\) \{ \`$wipeButtonMisses = 0 \}")) $false
 Assert-Case '배선(②): 전멸 미탐 누적을 재확인 앞에서 무조건 0 으로 되돌리지 않는다' `
   ([bool]($workerCode -match '(?s)if \(\$wipeButtonMisses -ge 3\) \{\s*\r?\n\s*\$wipeButtonMisses = 0')) $false
 Assert-Case '배선(②): 전멸 재확인도 캡처 유효성(일련번호) 게이트' `

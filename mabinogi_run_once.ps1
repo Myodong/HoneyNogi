@@ -3145,7 +3145,10 @@ function Move-CursorOutsideGame {
     if (-not [HoneyNogiInput]::SetCursorPos([int]$park.X, [int]$park.Y)) {
       throw "SetCursorPos 실패 (목표 $($park.X),$($park.Y))"
     }
-    Update-ObservedCursor   # 우리 대피 이동을 '마우스 이동' 입력으로 오인하지 않게 기준점 갱신
+    # 대피 이동(SetCursorPos)을 **자기 입력으로 등록** (Register-SelfInput 이 기준점 갱신 Update-ObservedCursor 도 포함). 기준점만 갱신하던 옛 배선은
+    # SetCursorPos 가 dwTime 을 갱신하는 세션에서 '창 밖 즉시 확정' 으로 1~2초 양보를 냈습니다 (실기 5 09-25 밤 관측 5건: 21:47:48·21:51:59·
+    # 22:22:20·22:31:24·22:31:28 - 전부 '창 밖 즉시 확정 / 흡수 -'). 클릭 함수의 커서 확인 뒤 등록(실기 3)과 같은 계약.
+    Register-SelfInput
     # 실제로 옮겼을 때만 한 프레임 분량을 기다립니다. 호버 UI 가 걷히려면 게임이 새 프레임을
     # 한 장 더 그려야 하는데, 대피 직후 곧바로 캡처하면 호버가 남은 옛 프레임을 읽습니다.
     # (30fps 면 33ms, 60fps 면 17ms - 여유 있게 120ms. 이미 창 밖이라 무동작이면 여기 오지
@@ -4399,6 +4402,9 @@ function Wait-ForDungeonClearScreen {
     # 루프 바닥에 있어 팝업/부활/협동 처리의 continue 가 판정을 건너뛰었고, 마감 직전에
     # 팝업을 닫으면 전투가 진행 중이어도 연장 없이 시간 초과로 죽을 수 있었음. 최상단으로
     # 옮기면 continue 가 어디서 나와도 매 바퀴 반드시 거침 - 리뷰 승인).
+    # 마감 블록 안의 탐침(사망 표본·전투 연장·성공 화면·보상 화면) 도중 캡처가 실패하면 그 탐침의 $false 는 '아님' 이 아니라 '판독 불가'
+    # 입니다. 뒤 탐침의 성공이 플래그를 풀어 버리므로 플래그만으로는 못 잡고 일련번호로 잡습니다 (구현 리뷰 2차 P2 - 규칙 15).
+    $deadlineSerial = $script:captureFailSerial
     if ((Get-Date) -ge $deadline) {
       if ($script:screenCaptureFailing) {
         # 캡처 실패 중에는 연장 판독이 불가 - throw 하지 않고 아래 캡처 실패 처리(시간 동결)에
@@ -4412,13 +4418,15 @@ function Wait-ForDungeonClearScreen {
           Write-RunLog "$($script:contentTag) 클리어 대기 한도 도달 - 사망/전멸 화면 또는 부활 확인 대기 중이라 마감을 확정하지 않고 부활 처리를 먼저 합니다"
           $deadlineDeathLogged = $true
         }
+      } elseif ($script:screenCaptureFailing -or ($script:captureFailSerial -ne $deadlineSerial)) {
+        # 사망 표본 탐침(Test-DeathScreenValid) 도중 캡처 실패 - 연장·성공 화면·불명 종료·throw 어느 것도 확정하지 않고 동결에 맡깁니다
       } elseif ((Get-Date) -lt $extendLimit -and (Test-CombatStillRunning -Game $Game)) {
         if (-not $extendLogged) {
           Write-RunLog "$($script:contentTag) 클리어 대기 한도(${TimeoutSeconds}초)를 넘겼지만 전투가 아직 진행 중 - 끝날 때까지 연장 대기합니다"
           $extendLogged = $true
         }
         $deadline = (Get-Date).AddSeconds(60)
-      } elseif ($script:screenCaptureFailing) {
+      } elseif ($script:screenCaptureFailing -or ($script:captureFailSerial -ne $deadlineSerial)) {
         # 연장 판독(Test-InDungeonQuest) 도중 캡처 실패가 새로 시작된 경우 - 판독 불가를
         # 오류로 확정하지 않고 아래 캡처 실패 처리(시간 동결)에 맡깁니다 (교차 리뷰 지적)
       } elseif ((Test-DungeonClearPrompt -Game $Game) -or
@@ -4427,13 +4435,13 @@ function Wait-ForDungeonClearScreen {
         # 마감 도달 순간 이미 성공 화면(클리어/결과/보상/선택)이면 오류가 아니라 이번 바퀴의
         # 정상 판정에 맡깁니다 (3차 점검: 마감 직전 전환을 놓치고 throw 하던 회귀. 결과/보상
         # 판정의 HUD 부재 조건은 본문과 동일 - 리뷰 조건. 탐침만 하고 처리·로그는 본문이 담당)
-      } elseif ($script:screenCaptureFailing) {
+      } elseif ($script:screenCaptureFailing -or ($script:captureFailSerial -ne $deadlineSerial)) {
         # 위 최종 탐침 도중 캡처 실패가 새로 시작된 경우도 동결 처리에 맡깁니다 (리뷰 조건)
       } elseif (Close-QuestRewardScreen -Game $Game -LogPrefix "$($script:contentTag) ") {
         # 마감 도달 순간 보상 전체 화면이 덮여 있던 경우 (2026-08-27 Codex 경계 지적 -
         # 마지막 폴 간격에 처음 뜨면 본문 처리 전에 여기서 timeout 확정됨): 닫고 이번
         # 바퀴는 throw 하지 않음 - 다음 바퀴의 정상 판정/연장 판정이 실제 화면을 처리
-      } elseif ($script:screenCaptureFailing) {
+      } elseif ($script:screenCaptureFailing -or ($script:captureFailSerial -ne $deadlineSerial)) {
         # 보상 전체 화면 닫기 판독 도중 캡처 실패가 새로 시작된 경우도 동결 처리에 맡깁니다 (2026-09-21 구현 리뷰 P2)
       } elseif ($ambiguousOverlaySeen -or $fieldSeen) {
         # 어비스 전용 (설계 합의 A2): 완료 증거 없는 선택 화면 오버레이 / 필드 상태를 봤지만 마감까지 클리어가 없었음 -
@@ -4543,6 +4551,11 @@ function Wait-ForDungeonClearScreen {
     # 부활 재료(불사의 가루) 부족으로 판단하고 이후 부활은 여신상으로 전환합니다.
     # 사망 에피소드 중(전송 대기 포함)에는 **매 폴** 먼저 확인합니다 - 짝수 폴에만 보면 R키 뒤 홀수 폴에 뜬 팝업이 사망 영역 판독을 덮어
     # Dead=false 로 읽혀 허위 '부활 완료' 가 됩니다 (구현 리뷰 P1). 평시는 2폴 주기 그대로.
+    # ★ 사망 표본 유효성의 기준 시점은 **이 스윕 앞** (구현 리뷰 2차 P2): 스윕 도중 캡처가 실패해 팝업을 못 닫았는데 뒤의 사망 판독만
+    #   성공하면 팝업이 사망 문구를 덮어 Dead=false → 허위 '부활 완료'(+클리어 마감 초기화). 스윕이 캡처 실패로 생략된 회전도 같은 이유로
+    #   무효 - 실패 구간은 판정이 아니라 동결 (규칙 15). 스윕~사망 판독 사이 어느 캡처든 실패했으면 그 표본은 성공도 실패도 아님.
+    $deathSampleSerial = $script:captureFailSerial
+    $deathSampleBlocked = [bool]$script:screenCaptureFailing
     if ((($pollCounter % 2) -eq 0 -or $reviveState.Episode) -and -not $script:screenCaptureFailing) {
       # 탐색 **전**에도 대피시킵니다. 클릭 직후 대피만으로는 부족합니다 - SetCursorPos 가
       # 한 번 실패하거나 사용자가 커서를 다시 창 안에 두면, 다음 팝업의 '닫기'를 또 가려
@@ -4623,9 +4636,9 @@ function Wait-ForDungeonClearScreen {
     #     클리어 마감 초기화가 나므로 (규칙 15) 성공도 실패도 아닌 것으로 둡니다. 앵커 탐색·재확인 판독도 같은 일련번호 게이트
     #   - 전송 직후 정착 창($reviveSettleSeconds) 안의 사망 표본은 무효 전송으로 확정하지 않음 (구현 리뷰 P1 - 중복 입력 방지)
     if ($reviveEnabled) {
-      $deathSerial = $script:captureFailSerial
+      # 기준 일련번호·차단 플래그는 구매 팝업 스윕 앞($deathSampleSerial/$deathSampleBlocked) - 스윕 생략·스윕 도중 실패도 표본 무효
       $death = Get-DeathScreenInfo -Game $Game
-      $deathValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $deathSerial)
+      $deathValid = (-not $deathSampleBlocked) -and (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $deathSampleSerial)
       if ($deathValid -and -not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (리뷰 조건)
       # 거점 부활이 필요한 사망인가 (남은 횟수 0·가루 부족 전환·전멸) - 상한 판정은 이 경우에만 (가루 R 부활은 게임이 남은 횟수로 제한)
       $checkpointNeeded = [bool]($death.Wiped -or $reviveState.StatueMode -or (($null -ne $death.Remaining) -and ($death.Remaining -le 0)))
@@ -4711,9 +4724,11 @@ function Wait-ForDungeonClearScreen {
                 $dispatchAttempted = $true
                 Click-GamePoint -Game $Game -ReferenceX $ptWipeStatueRevive[0] -ReferenceY $ptWipeStatueRevive[1]
                 if ($script:lastClickPerformed) { $dispatchKind = '전멸 재도전' } else { $dispatchSkipReason = $script:lastClickSkipReason }
-                # 격상 문턱(미탐 3회)은 클릭이 나갔거나 자동화 자신의 실패(cursor-not-ready)일 때만 소모합니다. user-active 생략은
-                # '예비 좌표 준비 완료' 를 유지해 다음 감지에서 미탐 3회를 다시 요구하지 않습니다 (규칙 4, 구현 리뷰 P1)
-                if ($script:lastClickPerformed -or $dispatchSkipReason -ne 'user-active') { $wipeButtonMisses = 0 }
+                # 격상 문턱(미탐 3회)은 클릭이 **실제로 나갔을 때만** 소모합니다. 생략(user-active·cursor-not-ready)은 '예비 좌표 준비 완료'
+                # 를 유지해 다음 회전이 곧바로 재시도합니다. cursor-not-ready 가 문턱을 소모하던 옛 배선은 시도 사이에 미탐 회전 2회
+                # (Register-ReviveNoAttempt = 생략 연속 끊기)를 강제해 20초 상한이 영영 차지 않았고, 전송 예산(Dispatched)도 0 이라
+                # 전멸 화면에서 종료 경로가 0개였습니다 (구현 리뷰 2차 병행 검토 P2). cursor-not-ready 의 소모는 20초 생략 상한이 담당(규칙 4).
+                if ($script:lastClickPerformed) { $wipeButtonMisses = 0 }
               } elseif ($recheckValid) {
                 $wipeButtonMisses = 0   # 전멸 화면이 아님(화면 전환) - 다음 유효 표본이 새로 판정
               }
@@ -5238,9 +5253,10 @@ function Invoke-AbyssDeathExit {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $seenYieldMs = [double]$script:userYieldTotalMs
   $fieldStreak = 0; $insideStreak = 0
-  $iconClicks = 0; $exitClicks = 0; $popupMisses = 0
+  $iconClicks = 0; $exitClicks = 0; $popupMisses = 0; $insideAfterExitLogged = $false; $lastExitClickAt = $null
   while ($true) {
     $turnSerial = $script:captureFailSerial
+    $script:lastClickSkipReason = ''   # 직전 회전의 생략 메타가 남아 오발동하지 않게 (규칙 4)
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 2
@@ -5250,23 +5266,31 @@ function Invoke-AbyssDeathExit {
       $seenYieldMs = [double]$script:userYieldTotalMs
       continue
     }
+    # 조작 양보는 마감 판정보다 **앞** - 조작 중에 90초 경계를 넘으면 양보 대신 throw 가 나던 순서 (구현 리뷰 2차 P2, 규칙 4: 양보는 시간 상한 없음)
+    if (Test-UserRecentlyActive) { $fieldStreak = 0; $insideStreak = 0; Wait-UserYieldEnd -Game $Game -Context '던전 퇴장'; continue }
     if ((Get-Date) -ge (Get-YieldAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs))) {
+      # 마감 확정 전 캡처 탐침 1회 (구현 리뷰 2차 P2): 회전 서두의 플래그는 '마지막으로 시도한 캡처가 성공했다' 는 뜻일 뿐이라 직전 판독
+      # 뒤 캡처 계층이 죽었으면 여기서 throw 하는 것이 실패 구간의 부정 판정이 됩니다(규칙 15). 진단 캡처(Write-LifeDiagnostics)는
+      # 캡처 계층을 거치지 않아 탐침이 못 되므로 Test-CaptureRecovered 로 실패를 등록시키고, 실패면 서두 동결 블록이 마감을 되돌립니다.
+      if (-not (Test-CaptureRecovered -Game $Game)) { continue }
       Write-LifeDiagnostics -Game $Game -Context '던전 퇴장 확인 초과' -CaptureOnly
       throw "사망 화면에서 던전 퇴장을 ${TimeoutSeconds}초 안에 확인하지 못했습니다 (문 아이콘 클릭 ${iconClicks}회, '나가기' 클릭 ${exitClicks}회)."
     }
-    if (Test-UserRecentlyActive) { $fieldStreak = 0; $insideStreak = 0; Wait-UserYieldEnd -Game $Game -Context '던전 퇴장'; continue }
     # 1) 퇴장 확인 팝업이 떠 있으면 '나가기' (글자 위치 클릭 - 실측 (742,634), 취소는 (528,634))
     $popupTitle = (Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssExitPopupTitle[0] -ReferenceY $rgAbyssExitPopupTitle[1] `
         -RegionWidth $rgAbyssExitPopupTitle[2] -RegionHeight $rgAbyssExitPopupTitle[3] -Scale 3 -Engine $ocrKoreanEngine)
     if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }
     if (Test-AbyssExitPopupText -Text $popupTitle) {
+      $fieldStreak = 0; $insideStreak = 0   # 팝업 회전은 필드/던전 안 '연속' 을 끊습니다 (구현 리뷰 2차 P3)
       $exitWord = Find-GameTextPoint -Game $Game -ReferenceX $rgAbyssExitPopupButtons[0] -ReferenceY $rgAbyssExitPopupButtons[1] `
         -RegionWidth $rgAbyssExitPopupButtons[2] -RegionHeight $rgAbyssExitPopupButtons[3] -SearchText '나가기'
       if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { continue }
       if ($exitWord) {
         Focus-Game -Game $Game
         Click-ScreenPoint -X $exitWord.X -Y $exitWord.Y
-        if ($script:lastClickPerformed) { $exitClicks++; Write-RunLog "$($script:contentTag) 퇴장 확인 팝업 - '나가기' 클릭 (${exitClicks}회)" }
+        if ($script:lastClickPerformed) { $exitClicks++; $lastExitClickAt = Get-Date; Write-RunLog "$($script:contentTag) 퇴장 확인 팝업 - '나가기' 클릭 (${exitClicks}회)" }
+        # 사용자 조작으로 생략된 클릭은 마감(90초)을 먹지 않고 양보 뒤 새 판독으로 (규칙 4 - 구현 리뷰 2차 P2). 커서 미확인은 기존대로 소비
+        elseif ($script:lastClickSkipReason -eq 'user-active') { $fieldStreak = 0; $insideStreak = 0; Wait-UserYieldEnd -Game $Game -Context '던전 퇴장'; continue }
       } else {
         $popupMisses++
         if (($popupMisses % 3) -eq 0) { Write-RunLog "[경고] 퇴장 확인 팝업에서 '나가기' 글자를 ${popupMisses}회 찾지 못했습니다 - 계속 시도합니다" }
@@ -5287,6 +5311,7 @@ function Invoke-AbyssDeathExit {
         if ($iconClicks -eq 1) { Write-RunLog "$($script:contentTag) 던전 나가기(미니맵 옆 문 아이콘) 클릭" }
         elseif (($iconClicks % 3) -eq 0) { Write-RunLog "[경고] 던전 나가기 아이콘 ${iconClicks}회째 클릭 - 퇴장 확인 팝업이 아직 보이지 않습니다" }
       }
+      elseif ($script:lastClickSkipReason -eq 'user-active') { Wait-UserYieldEnd -Game $Game -Context '던전 퇴장'; continue }   # 규칙 4 - 위 '나가기' 와 같은 계약
       Start-Sleep -Milliseconds 1500
       continue
     }
@@ -5306,7 +5331,17 @@ function Invoke-AbyssDeathExit {
       }
       return 'stay'
     }
-    if ($insideStreak -ge 2 -and $exitClicks -eq 0) { return 'stay' }
+    if ($insideStreak -ge 2) {
+      if ($exitClicks -eq 0) { return 'stay' }
+      # '나가기' 를 보낸 뒤에도 던전 안(HUD + 던전 목표 2연속): 정상 전환에서도 로딩 전 1~2초는 옛 화면이 남을 수 있고(실기: 클릭→필드 확인 7초),
+      # 사용자가 팝업을 취소해 직접 부활한 경우도 가능하지만 실측 0건 - 동작은 바꾸지 않고(규칙 8) 관측용 안내 1회만 중립 문구로 남깁니다
+      # (전송 수·마지막 전송 뒤 경과 포함 - 정상 전환 시간 분포와 구분할 재료). 마감(90초)까지 같은 조건으로 재시도 → throw (구현 리뷰 2차, 이슈 목록 2절)
+      if (-not $insideAfterExitLogged) {
+        $sinceExitSec = $(if ($null -ne $lastExitClickAt) { [int]((Get-Date) - $lastExitClickAt).TotalSeconds } else { -1 })
+        Write-RunLog "[안내] '나가기' 전송(${exitClicks}회, 마지막 ${sinceExitSec}초 전) 뒤에도 던전 안 화면(HUD + 던전 목표 2연속) - 전환 대기를 계속합니다 (관측용)"
+        $insideAfterExitLogged = $true
+      }
+    }
     Start-Sleep -Seconds 1
   }
 }

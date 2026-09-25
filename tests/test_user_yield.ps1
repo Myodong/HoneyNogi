@@ -52,8 +52,10 @@ Assert-Case '배선: 양보 상태 변수 3종 초기화' `
 # 주입 4곳(클릭/ALT 전면화/범용 키/생활 드래그) 전부: 직전 관측 + 직후 자기 시각 기록.
 # 하나라도 빠지면 그 주입이 dwTime 을 덮어 이후 판별이 전부 '사용자'로 오인됩니다.
 # 2026-09-25 +1: 클릭 함수의 SetCursorPos 확인 직후 (커서 이동 되돌림이 사용자 후보로 잡혀 자기 클릭 뒤 매번 양보하던 실기 2·3 관측) → 5곳
-Assert-Case '배선: 주입 직후 Register-SelfInput 5곳' `
-  ([regex]::Matches($workerText, '(?m)^\s+Register-SelfInput\b').Count) 5
+Assert-Case '배선: 주입 직후 Register-SelfInput 6곳 (09-25 밤 +1: 커서 대피 SetCursorPos - 실기 5 창 밖 즉시 확정 양보 5건)' `
+  ([regex]::Matches($workerText, '(?m)^\s+Register-SelfInput\b').Count) 6
+Assert-Case '배선: 커서 대피(Move-CursorOutsideGame)는 SetCursorPos 성공 직후 자기 입력 등록 (기준점 갱신만으로는 창 밖 즉시 확정 양보)' `
+  ([bool]($workerText -match '(?s)if \(-not \[HoneyNogiInput\]::SetCursorPos\(\[int\]\$park\.X, \[int\]\$park\.Y\)\) \{\s*\r?\n\s*throw "SetCursorPos 실패[^\r\n]*\r?\n\s*\}\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*Register-SelfInput\s*\r?\n')) $true
 Assert-Case '배선: 주입 직전 관측(Update-UserInputObservation) 4곳 + 판별 내 1곳' `
   ([regex]::Matches($workerText, '(?m)^\s+Update-UserInputObservation\b').Count) 5
 # v2.1.7: 50ms 조건 뒤에 '흡수 tick 이하 재후보 금지' 조건이 -and 로 붙음
@@ -71,8 +73,8 @@ Assert-Case '배선: 양보 루프에 시간 상한 없음' `
 Assert-Case '배선: 양보 시작/재개 안내 로그 (입력 종류 표기)' `
   (($workerText.Contains('사용자 입력 감지($($script:lastUserInputKind)) - 조작이 끝날 때까지 자동화를 잠시 양보합니다')) -and
    ($workerText.Contains('사용자 조작이 끝나 자동화를 재개합니다 (양보 {0}초)'))) 'True'
-Assert-Case '배선: 입력 종류 추정 - 관측 커서 기준점 갱신 3곳(관측/자기 주입/대피 이동)' `
-  ([regex]::Matches($workerText, '(?m)^\s+Update-ObservedCursor\b').Count) 3
+Assert-Case '배선: 입력 종류 추정 - 관측 커서 기준점 갱신 2곳(관측/자기 주입 - 대피 이동은 09-25 밤부터 Register-SelfInput 경유)' `
+  ([regex]::Matches($workerText, '(?m)^\s+Update-ObservedCursor\b').Count) 2
 Assert-Case '배선: 입력 종류는 커서 이동 여부로 분기' `
   (($workerText.Contains("`$script:lastUserInputKind = '마우스 이동'")) -and ($workerText.Contains("`$script:lastUserInputKind = '키/버튼 입력'"))) 'True'
 # 지속 확인 배선: 새 후보(확정과 다름) → 연장 아니면 350ms 재확인 → 단발이면 기준 시각을 그 이벤트로 옮기고
