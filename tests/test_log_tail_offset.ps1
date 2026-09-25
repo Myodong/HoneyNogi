@@ -78,8 +78,8 @@ try {
 $guiRaw = Get-Content -LiteralPath $guiPath -Raw -Encoding UTF8
 # 호출부 계약: 4곳(타이머의 기본/복구 로그 + 종료 마무리의 기본/복구 로그) 전부 @() 로
 # 감싸야 합니다. 감사 당시 종료 마무리 2곳은 이미 감싸져 있었고 타이머 2곳만 빠져 있었습니다.
-Check-Equal 'GUI: Read-NewLogLines 호출 4곳 모두 @() 로 감쌈' `
-  ([regex]::Matches($guiRaw, '@\(Read-NewLogLines ').Count) 4
+Check-Equal 'GUI: Read-NewLogLines 호출 5곳 모두 @() 로 감쌈 (2026-09-25 코드 10 분기의 잔여 수집 추가로 4→5)' `
+  ([regex]::Matches($guiRaw, '@\(Read-NewLogLines ').Count) 5
 Check-Equal 'GUI: 감싸지 않은 Read-NewLogLines 대입 없음' `
   ([regex]::Matches($guiRaw, '=\s*Read-NewLogLines ').Count) 0
 if ($guiRaw.Contains('\[설정\]|\[준비\]\s*게임 확인:\s*PID')) {

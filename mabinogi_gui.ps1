@@ -409,6 +409,14 @@ function Save-Config {
   Write-Utf8FileAtomic -Path $configPath -Text $json
 }
 
+function Test-CheckpointLeaveReason {
+  # 워커 [완료] 사유가 '거점 부활 상한 퇴장' 인가 (순수부 - 진리표). 워커 문구: '[완료] 거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀
+  # 완료 (준비 실행 - …)'. 조각 '거점 부활 상한으로 던전을 나왔' 하나 - 다른 코드 10 사유('안전 중지 예약 확인 - 수동 진행분 정리',
+  # '어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)')와 겹치지 않음.
+  param([string]$Reason)
+  return [bool](([string]$Reason) -match '거점 부활 상한으로 던전을 나왔')
+}
+
 function Update-ConfigToLatest {
   # exe 업데이트 자동 이전: 사용자 config 의 좌표 버전(coordsVersion) 또는 설정 구조 버전
   # (configSchemaVersion)이 내장 최신 config(config.default.json)보다 낮으면 최신 config 를 기반으로
@@ -8439,8 +8447,22 @@ $timer.Add_Tick({
       } elseif ($exitCode -eq 10) {
         # 준비 실행(화면 복귀만 수행, 던전 미실행): 회차로 세지 않고 곧바로 본 회차를 시작합니다.
         # 이렇게 해야 횟수 지정 모드에서 실제 던전 실행 횟수가 요청보다 적어지지 않습니다.
-        $script:preparedStreak++
-        Add-GuiLog '[안내] 화면 복귀(준비 실행)만 수행 - 회차로 세지 않고 이어서 시작합니다'
+        # 거점 부활 상한 퇴장(2026-09-25 사용자 확정 "계속 돌리는 게 맞아")도 같은 코드 10 이지만 화면 오판이 아니라 실제로 입장·전투한
+        # 판이라 '준비 실행 3회 연속' 상한을 소모하지 않고 몇 판이든 새 파티로 재입장합니다. 판별은 워커의 [완료] 사유 - 타이머 tail 과
+        # 종료 사이의 경쟁으로 마지막 줄을 못 봤을 수 있어 코드 4 상태줄과 같은 계약으로 잔여 로그를 먼저 수집합니다.
+        foreach ($tailLine in @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))) {
+          if ($null -eq $tailLine) { continue }
+          if ($tailLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
+          $displayLine = Convert-WorkerLogLineForGui -Line $tailLine -CustomActive $script:customActive
+          if ($null -ne $displayLine) { Add-ColoredLogLine ('  ' + $displayLine) }
+        }
+        if (Test-CheckpointLeaveReason -Reason $script:lastWorkerDoneReason) {
+          $script:preparedStreak = 0
+          Add-GuiLog '[안내] 거점 부활 상한으로 던전을 나왔습니다 - 회차로 세지 않고 새 파티로 재입장합니다'
+        } else {
+          $script:preparedStreak++
+          Add-GuiLog '[안내] 화면 복귀(준비 실행)만 수행 - 회차로 세지 않고 이어서 시작합니다'
+        }
         if ($script:customActive) {
           # 커스텀: 전진 없음(미계상) - 같은 항목을 다시 실행합니다. 준비 실행이 화면을 옵션/선택
           # 화면까지 정리했으므로 PREV 를 비워 다음 회차가 '다시 하기' 경로 대신 선택 화면 절차를 밟게 함

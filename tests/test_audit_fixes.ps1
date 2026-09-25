@@ -120,6 +120,12 @@ Assert-Case '워커: referenceResolution 1272x717 강제' `
   ($workerSource -match 'referenceWidth -ne 1272 -or \$referenceHeight -ne 717[\s\S]{0,400}?\$referenceWidth = 1272') $true
 
 # ── GUI ──────────────────────────────────────────────────────────────────────
+# 2026-09-25 사용자 확정: 거점 부활 상한 퇴장(코드 10, [완료] 사유 '거점 부활 상한으로 던전을 나왔')은 '준비 실행 3회 연속' 상한을 소모하지 않음
+Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Test-CheckpointLeaveReason')))
+Assert-Case 'GUI: 거점 퇴장 사유 판정 - 워커 실제 문구' (Test-CheckpointLeaveReason -Reason '거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)') $true
+Assert-Case 'GUI: 거점 퇴장 사유 판정 - 다른 코드 10 사유 3종·빈 값은 거짓' ((@('어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)', '안전 중지 예약 확인 - 수동 진행분 정리 중이라 판으로 계상하지 않고 마칩니다 (준비 실행)', '파티원: 거점 부활 상한으로 던전을 나왔습니다 - 파티원은 퇴장 뒤 자동 재입장 흐름이 없어 정지합니다', '') | ForEach-Object { Test-CheckpointLeaveReason -Reason $_ }) -join ',') 'False,False,True,False'
+Assert-Case 'GUI: 워커의 퇴장 [완료] 문구가 판정 조각을 포함' ($workerSource -match "Write-RunLog '\[완료\] 거점 부활 상한으로 던전을 나왔습니다") $true
+Assert-Case 'GUI: 코드 10 분기가 잔여 로그 수집 → 퇴장 사유면 streak 0 + 재입장 안내, 아니면 streak++ + 준비 실행 안내' ($guiSource -match '(?s)elseif \(\$exitCode -eq 10\) \{[\s\S]{0,1200}?Read-NewLogLines -Path \$workerLog[\s\S]{0,600}?if \(Test-CheckpointLeaveReason -Reason \$script:lastWorkerDoneReason\) \{\s*\r?\n\s*\$script:preparedStreak = 0\s*\r?\n\s*Add-GuiLog ''\[안내\] 거점 부활 상한으로[^\r\n]*''\s*\r?\n\s*\} else \{\s*\r?\n\s*\$script:preparedStreak\+\+') $true
 Assert-Case 'GUI: preparedStreak 은 코드 10 외 전부 초기화' `
   ($guiSource -match 'if \(\$exitCode -ne 10\) \{ \$script:preparedStreak = 0 \}') $true
 # v2.1.4: 워커 스폰이 임베디드 호스트/기존 powershell 2분기가 되어 try 와 스폰 사이에
@@ -266,8 +272,8 @@ Assert-Case '3차: 런처 powershell 이름 검색 fallback 제거' `
   ($launcherSource -notmatch 'psExe = "powershell\.exe"') $true
 
 # ── v1.2.1: 코드 4 상태줄에 실제 [완료] 사유 표시 (2026-08-02 오해 실사례) ──────────
-Assert-Case 'GUI: [완료] 사유 수집 3곳(기본/복구/최종 폴링)' `
-  ([regex]::Matches($guiSource, "match '\\\[완료\\\]\\s\*\(\.\+\)'").Count) 3
+Assert-Case 'GUI: [완료] 사유 수집 4곳(기본/복구/코드 10 잔여/최종 폴링) - 2026-09-25 거점 퇴장 판별용 잔여 수집 추가' `
+  ([regex]::Matches($guiSource, "match '\\\[완료\\\]\\s\*\(\.\+\)'").Count) 4
 Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백(생활 분기 선행)' `
   ($guiSource -match '\$code4Reason = "조건 정지: \$code4Reason"[\s\S]{0,400}elseif \(\$script:mainCategory -eq ''life''\)[\s\S]{0,400}elseif \(\$rbCatDeep\.Checked\)') $true
 # v2.1.4: 계약은 '사유 초기화가 워커 스폰보다 앞' - 스폰 앵커를 powershell 고정 문자열에서
