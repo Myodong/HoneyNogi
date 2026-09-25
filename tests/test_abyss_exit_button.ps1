@@ -99,15 +99,16 @@ function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY)
 function Test-AbyssSelectionScreen { param($Game) $script:successorChecks++
   if ($script:selectionFailOnce) { $script:selectionFailOnce = $false; $script:screenCaptureFailing = $true; $script:captureFailSerial++; return $false }   # 후속 판정 도중 캡처 실패
   $script:screenCaptureFailing = $false; return $script:selectionVisible }
-function Test-HomeEndEscHud { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:hudVisible }
+function Test-HomeEndEscHud { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return [bool](Next-Seq 'hud' $script:hudVisible) }   # 회전별 수열(HudSeq)이 있으면 그 값, 없으면 고정값
 function Test-AbyssMenu { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:menuVisible }
 function Test-AbyssMatchingPanel { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:matchingVisible }   # 재매칭 패널 (2026-09-21)
 function Test-InDungeonQuest { param($Game) $script:successorChecks++; $script:screenCaptureFailing = $false; return $script:questVisible }         # 추적기 던전명 (필드 부정 증거)
 function Reset-Case {
-  param($WordsSeq = @(), $ActiveSeq = @(), $SendSeq = @(), $DefaultWords = $null)
+  param($WordsSeq = @(), $ActiveSeq = @(), $SendSeq = @(), $DefaultWords = $null, $HudSeq = @())
   $script:wordsSeq = @($WordsSeq); $script:wordsIdx = 0
   $script:activeSeq = @($ActiveSeq); $script:activeIdx = 0
   $script:sendSeq = @($SendSeq); $script:sendIdx = 0
+  $script:hudSeq = @($HudSeq); $script:hudIdx = 0
   $script:defaultWords = $(if ($null -ne $DefaultWords) { $DefaultWords } else { $captureS3 })
   $script:vclock = [datetime]'2026-09-18 21:00:00'
   $script:logs = @(); $script:yieldWaits = 0; $script:yieldContexts = @(); $script:clicksSent = 0; $script:clickPoints = @()
@@ -202,6 +203,18 @@ Reset-Case -DefaultWords $noExit -ActiveSeq @($false, $true)
 $script:hudVisible = $true
 $r = Run-Click
 Check-Equal '양보 뒤 필드 연속 리셋: 판독 4회 뒤 gone (양보 1)' ("$($r.Result)/$($script:readCalls)/$($script:yieldWaits)") 'gone/4/1'
+#    2-7d. ★ 구현 리뷰 2차 P2(2026-09-21): 실패가 있던 회전의 필드 표본은 연속 수에 들어가지 않음 - 옛 코드는 HUD 판독 직후 올린 뒤
+#    일련번호 검사로 회전을 버려 '폐기 회전 1 + 정상 회전 1' 로 gone 이 났음. 선택 화면 판독 실패(→ 뒤 HUD 성공이 플래그 해제) →
+#    회전 폐기(연속 0 유지) → 필드(1) → 필드(2) → gone = 판독 3회 (옛 코드 2회 - 변이 검증 대상)
+Reset-Case -DefaultWords $noExit
+$script:hudVisible = $true; $script:selectionFailOnce = $true
+$r = Run-Click
+Check-Equal '실패 회전의 필드 표본 미계수: gone 은 판독 3회째, 재판독 로그 1' ("$($r.Result)/$($script:readCalls)/$((Count-Log '재판독'))") 'gone/3/1'
+#    2-7e. 같은 P2: 필드 표본이 아닌 유효 회전(HUD 없음 - 로딩·선택 화면·나가기 재출현)은 연속 수를 0 으로 - 떨어진 두 표본은 '2연속' 이 아님
+#    필드(1) → HUD 없음(0) → 필드(1) → 필드(2) → gone = 판독 4회 (옛 코드는 3회째 gone)
+Reset-Case -DefaultWords $noExit -HudSeq @($true, $false, $true, $true)
+$r = Run-Click
+Check-Equal '비증거 회전의 연속 리셋: gone 은 판독 4회째, 재판독 로그 3' ("$($r.Result)/$($script:readCalls)/$((Count-Log '재판독'))") 'gone/4/3'
 
 # 2-8. 후속 화면 확인 → gone (사용자가 이미 눌렀거나 전환), 클릭 0, 정지 없음. 증거 = 선택 화면 / 필드(HUD + 추적기 던전명 없음 2연속).
 #      ESC 메뉴는 2026-09-21 부터 증거가 아님 (상세 헤더 오탐 + 던전 안에서도 열리는 메뉴 - 09-20 실사고, 설계 합의 A4)
@@ -231,6 +244,12 @@ Reset-Case
 $script:matchingVisible = $true
 $r = Run-Click
 Check-Equal '재매칭 패널: matching 반환, 클릭 0, exit 없음, 안내 로그' ("$($r.Result)/$($script:clicksSent)/$($script:exitCode)/$((Count-Log '매칭 취소 버튼입니다'))") 'matching/0//1'
+#    2-8c. 구현 리뷰 2차 P2(2026-09-21): '나가기' 조각이 빠진 패널 프레임(09-18 실측 4/4 프레임 - 진리표 $panelExit2)도 matching -
+#    옛 코드는 위치가 있을 때만 패널을 봐서 미검출 3회·20초 뒤 코드 4 로 정지했음
+Reset-Case -DefaultWords $noExit
+$script:matchingVisible = $true
+$r = Run-Click
+Check-Equal "재매칭 패널('나가기' 없는 프레임): matching, 클릭 0, exit 없음, 판독 1회" ("$($r.Result)/$($script:clicksSent)/$($script:exitCode)/$($script:readCalls)") 'matching/0//1'
 
 # 2-9. 위치 선택 불가('나'+'가기')도 미검출과 같은 정지 경로 - '가기' 로 다른 던전 가기를 누르지 않음
 Reset-Case -DefaultWords $splitNa

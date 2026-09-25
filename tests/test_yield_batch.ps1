@@ -339,9 +339,10 @@ Assert-Case '탭 확인: 양보 시 재클릭 기회 미소모 + 경합 pending'
 # 계약(대기 후 $false)은 그대로라 그 한 줄만 허용. 결과 전달 자체는 test_event_overlay_yield.ps1 이 봄
 Assert-Case '이벤트 화면: Space 주입 전 양보 게이트(대기 후 재판독)' `
   ([bool]($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Wait-UserYieldEnd -Game \`$Game -Context '이벤트 화면 처리'\s+(?:if \(\`$Outcome[^\r\n]*\s+)?return \`$false")) 'True'
-# unknownSince 보정은 누적 변수 차분으로 (서두 게이트뿐 아니라 판독 헬퍼 안 커서 대피 양보까지 - Codex P2)
+# unknownSince 보정은 누적 변수 차분으로 (서두 게이트뿐 아니라 판독 헬퍼 안 커서 대피 양보까지 - 리뷰 P2)
+# 2026-09-21 구현 리뷰 3차 P1: 복귀 루프의 모든 양보 호출 직전에 필드 토큰 폐기 한 줄이 들어감 - 그 한 줄만 허용 (폐기 자체는 test_abyss_screen_signatures 가 봄)
 Assert-Case '어비스: 선택 화면 복귀 루프 서두 게이트 + 알 수 없는 화면 20초 판정에서 양보 제외' `
-  (($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀' -Deadline \(\[ref\]\`$deadline\) -SeenYieldMs \(\[ref\]\`$seenYieldMs\)\s+continue") -and
+  (($workerCode -match "if \(Test-UserRecentlyActive\) \{\s+(?:\`$fieldProven = \`$false[^\r\n]*\s+)?Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀' -Deadline \(\[ref\]\`$deadline\) -SeenYieldMs \(\[ref\]\`$seenYieldMs\)\s+continue") -and
    ($workerCode.Contains('if ($null -eq $unknownSince) { $unknownSince = Get-Date; $unknownSeenYieldMs = [double]$script:userYieldTotalMs }')) -and
    ($workerCode -match '\$unknownSince = \$unknownSince\.AddMilliseconds\(\[double\]\$script:userYieldTotalMs - \$unknownSeenYieldMs\)')) 'True'
 Assert-Case '어비스: X 후보 순환 - 조작 생략은 유지, 커서 미확인은 다음 후보로' `
