@@ -5,7 +5,7 @@
 #   ① 고치기 전 재현: 옛 영역(935,40,150,45)으로 읽으면 앞자리가 빠진 7자리 값
 #   ② 고친 후 통과: 소스의 현행 영역(910~)으로 읽으면 HUD 정수값 그대로 (아이콘 융합 회귀 캡처 포함)
 #   ③ 파서 강화: 중간 글자 '2,'가 '기'로 읽히는 프레임은 틀린 값 대신 -1 (호출부 재시도 경로)
-# 기대값은 HUD 전체 정수(프레임 육안·전수 비교 3영역 일치)로 고정 - 자료 던전이미지\실측기록\20260915_냥코인_골드_앞자리잘림_프레임\
+# 기대값은 HUD 전체 정수(프레임 육안·전수 비교 3영역 일치)로 고정 - 자료 던전이미지\고양이상인\20260915_냥코인_골드_앞자리잘림_프레임\
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -15,7 +15,7 @@ function Assert-Case {
   else { "FAIL {0}: 실제 [{1}] 기대 [{2}]" -f $Name, $Actual, $Expect; $script:fails++ }
 }
 
-$frameDir = Join-Path $projectRoot '던전이미지\실측기록\20260915_냥코인_골드_앞자리잘림_프레임'
+$frameDir = Join-Path $projectRoot '던전이미지\고양이상인\20260915_냥코인_골드_앞자리잘림_프레임'
 if (-not (Test-Path -LiteralPath $frameDir)) { "SKIP 보존 프레임 폴더가 없어 진리표를 건너뜁니다: $frameDir"; exit $fails }
 
 Add-Type -AssemblyName System.Drawing

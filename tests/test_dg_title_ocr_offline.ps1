@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
-$capturePath = Join-Path $projectRoot '던전이미지\실측기록\20260811_구역전환확인실패_1908창_옵션화면.png'
+$capturePath = Join-Path $projectRoot '던전이미지\던전\20260811_구역전환확인실패_1908창_옵션화면.png'
 if (-not (Test-Path -LiteralPath $capturePath)) {
   "SKIP 실측 캡처가 없어 오프라인 OCR 재현을 건너뜁니다: $capturePath"
   exit 0
@@ -144,7 +144,7 @@ try {
 #    재시작 회차 선택 화면 오판 정지): 옵션 화면이 열려 있는데 제목이 '패가고분=石'.
 #    재현: 좁 s3 '패가고분=石' / 넓 s3·s4 '구역' 소실 / **넓 s5 '제고분심증2증1구역' 복구**.
 #    어제 룬다 캡처는 s4 성공·s5 실패로 반대 - 사다리 순회(3→4→5)가 두 캡처를 모두 살린다.
-$deepCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260812_페카고분심층_다시하기복귀실패_1908창.png'
+$deepCapturePath = Join-Path $projectRoot '던전이미지\심층던전\20260812_페카고분심층_다시하기복귀실패_1908창.png'
 if (-not (Test-Path -LiteralPath $deepCapturePath)) {
   "SKIP 심층 실측 캡처가 없어 두 번째 재현을 건너뜁니다: $deepCapturePath"
 } else {
@@ -172,7 +172,7 @@ if (-not (Test-Path -LiteralPath $deepCapturePath)) {
 #    ③-1 새 영역에서 일반 사다리가 살림 + 조기 종료라 이진화 비용 0회
 #    ③-2 일반 판독 전멸 상황(제목 영역 비이진화 판독 강제 '')에서 이진화 단이 홀로 생환 -
 #        '입장하기' 게이트와 이진화 배선의 동적 가드 (단을 빼면 이 단언이 실패)
-$binCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_제목전배율사망_1908창_심층옵션.png'
+$binCapturePath = Join-Path $projectRoot '던전이미지\심층던전\20260813_제목전배율사망_1908창_심층옵션.png'
 if (-not (Test-Path -LiteralPath $binCapturePath)) {
   "SKIP 전배율 사망 캡처가 없어 이진화 단 재현을 건너뜁니다: $binCapturePath"
 } else {
@@ -209,7 +209,7 @@ if (-not (Test-Path -LiteralPath $binCapturePath)) {
 #    전 배율(4/3/5/2) 단어 0개로 3연속 정지. v8에서 위로 20 확장(30,145,200,70).
 #    실제 Find-DgDifficultyPoint 사다리를 캡처 위에서 실행해 "구영역 REJECT / 신영역 PICK"
 #    양쪽을 고정합니다 (신영역은 소스 대입식 캡처 - 영역을 되돌리면 이 단언이 실패).
-$pillCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_난이도알약이탈_네이티브1908_선택화면.png'
+$pillCapturePath = Join-Path $projectRoot '던전이미지\던전\20260813_난이도알약이탈_네이티브1908_선택화면.png'
 if (-not (Test-Path -LiteralPath $pillCapturePath)) {
   "SKIP 난이도 알약 이탈 캡처가 없어 네 번째 재현을 건너뜁니다: $pillCapturePath"
 } else {
@@ -283,7 +283,7 @@ if (-not (Test-Path -LiteralPath $pillCapturePath)) {
 # ── 2026-08-13 11:53 실사고 캡처 (네이티브 1908 옵션 화면 - 구역 2-2 전환이 실제 성공했는데
 #    구영역(상단 45)이 크게 그려지는 구역 숫자 윗부분(글자 상단 ref 42)을 잘라 확인 8회 전멸
 #    → fail-closed 정지). v9 영역(상단 34)의 존재 이유 - 영역을 되돌리면 아래 단언이 실패.
-$tailCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_제목꼬리소실_네이티브1908_옵션2층2구역.png'
+$tailCapturePath = Join-Path $projectRoot '던전이미지\던전\20260813_제목꼬리소실_네이티브1908_옵션2층2구역.png'
 if (-not (Test-Path -LiteralPath $tailCapturePath)) {
   "SKIP 제목 꼬리 소실 캡처가 없어 다섯 번째 재현을 건너뜁니다: $tailCapturePath"
 } else {
@@ -407,7 +407,7 @@ if (-not (Test-Path -LiteralPath $tailCapturePath)) {
 #    일반 판으로** 돌림(사용자 확인). 같은 화면에서 더블 루팅 '도전'도 상단(490) 잘림으로
 #    '(판독 없음)'. v13 = 두 영역 위로 확장 + 난이도 미탐색을 fail-closed 정지로 격상.
 #    은동전 카드는 같은 캡처에서 판독 성공 → 무변경(규칙 8)이며 그 사실도 함께 고정합니다.
-$huntCapturePath = Join-Path $projectRoot '던전이미지\실측기록\20260813_사냥터첫화면_네이티브1908_창백한산.png'
+$huntCapturePath = Join-Path $projectRoot '던전이미지\사냥터\20260813_사냥터첫화면_네이티브1908_창백한산.png'
 if (-not (Test-Path -LiteralPath $huntCapturePath)) {
   "SKIP 사냥터 첫 화면 캡처가 없어 재현을 건너뜁니다: $huntCapturePath"
 } elseif (-not (Get-Command Get-GameRegionOcrWords -ErrorAction SilentlyContinue)) {
@@ -467,7 +467,7 @@ if (-not (Test-Path -LiteralPath $huntCapturePath)) {
 #    (커스텀 자동 재시작 포함) 정지. 19:44 수동 재시작 뒤엔 같은 화면 정상 판독 = 프레임 특이 깨짐.
 #    보관 심층 옵션 22장은 전부 정상 PICK(배율 5 18·배율 4 4). 이형 '이己1움' 추가(07-29 선례)로 3장 전부
 #    PICK 이 계약 - 이형을 빼면 아래 단언이 실패. 위치 게이트(HardX 660±35)·짝 제외는 test_dg_layout_system.
-$pillBrokenDir = Join-Path $projectRoot '던전이미지/실측기록/20260916_심층옵션_어려움알약_이己1움_3연속미탐'
+$pillBrokenDir = Join-Path $projectRoot '던전이미지/심층던전/20260916_심층옵션_어려움알약_이己1움_3연속미탐'
 $pillBrokenFrames = @('error_20260916_h19m43s32.png', 'error_20260916_h19m43s40.png', 'error_20260916_h19m43s47.png') |
   ForEach-Object { Join-Path $pillBrokenDir $_ }
 if (@($pillBrokenFrames | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -gt 0) {

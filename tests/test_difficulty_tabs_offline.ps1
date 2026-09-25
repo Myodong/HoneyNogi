@@ -18,8 +18,8 @@ function Assert-Case {
   else { "FAIL {0}: 실제 [{1}] 기대 [{2}]" -f $Name, $Actual, $Expect; $script:fails++ }
 }
 
-$reportDir = Join-Path $projectRoot '던전이미지\실측기록\20260915_타PC_어비스_입장미감지_트래커상단잘림'
-$devDir = Join-Path $projectRoot '던전이미지\실측기록\20260916_어비스상세_제목판독_탭별'
+$reportDir = Join-Path $projectRoot '던전이미지\어비스\20260915_타PC_어비스_입장미감지_트래커상단잘림'
+$devDir = Join-Path $projectRoot '던전이미지\어비스\20260916_어비스상세_제목판독_탭별'
 $captures = [ordered]@{
   Report = Join-Path $reportDir 'error_20260915_h02m48s43.png'   # 제보: 상세 화면, 알약 y136~162 ('매우 어려움' 이미 선택)
   Dev1   = Join-Path $devDir '1_함께하기_토글끔.png'              # 개발 PC 배치: 알약 y163~195

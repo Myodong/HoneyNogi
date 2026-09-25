@@ -2,7 +2,7 @@
 # 워커 실기 프레임 24장(라벨 = 로그의 구매 순서로 계산한 '이 시점에 존재해야 하는 가격표 슬롯')을 워커와 같은
 # 영역·파서·중심 좌표 변환으로 판독해, 소스의 배율($nyanCardsScale)에서 슬롯별 검출률 ≥ 90% 를 단언하고
 # 배율 3 의 하단 좌우 검출률 < 70% 를 '고치기 전 재현'으로 함께 고정합니다 (규칙 9). 검출 = 슬롯 중심 ±30px.
-# 실측 근거: 던전이미지\실측기록\20260913_냥코인_카드존_배율실험\ (311장 실험 - 배율 3: 하좌 50%/하우 53%, 배율 5: 95~100%)
+# 실측 근거: 던전이미지\고양이상인\20260913_냥코인_카드존_배율실험\ (311장 실험 - 배율 3: 하좌 50%/하우 53%, 배율 5: 95~100%)
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -72,11 +72,11 @@ function Read-CardWords {
   } finally { $crop.Dispose(); $scaled.Dispose() }
 }
 
-# 슬롯 중심 (실기 프레임 군집 - 실측기록 세트의 make_labels 와 동일)
+# 슬롯 중심 (실기 프레임 군집 - 고양이상인 세트의 make_labels 와 동일)
 $slotCenters = [ordered]@{
   TL = @(587, 366); TR = @(694, 366); ML = @(480, 414); MR = @(793, 414); LL = @(474, 584); LR = @(798, 584); BT = @(636, 632)
 }
-$sampleDir = Join-Path $projectRoot '던전이미지\실측기록\20260913_냥코인_카드존_배율실험\frames'
+$sampleDir = Join-Path $projectRoot '던전이미지\고양이상인\20260913_냥코인_카드존_배율실험\frames'
 $labels = @(Import-Csv (Join-Path $sampleDir 'labels.csv'))
 Assert-Case '라벨 프레임 24장' $labels.Count 24
 

@@ -36,7 +36,7 @@ Assert-Case '가드: 다시 하기 탐색 - 일반 판독이 이진화보다 먼
 Assert-Case '가드: 다음 층 탐색은 이진화를 쓰지 않음(변경 근거 없음)' ($nextFloorCode -match 'BinaryWhiteText') $false
 
 # ── 2. 캡처 진리표 ──────────────────────────────────────────────────────────────
-$captureDir = Join-Path $projectRoot '던전이미지\실측기록\20260911_심층결과화면_다시하기_미탐지_1908'
+$captureDir = Join-Path $projectRoot '던전이미지\심층던전\20260911_심층결과화면_다시하기_미탐지_1908'
 if (-not (Test-Path -LiteralPath $captureDir)) {
   "SKIP 실측 캡처 폴더가 없어 오프라인 진리표를 건너뜁니다: $captureDir"
   exit $fails
@@ -182,7 +182,7 @@ Assert-Case '집계: 구제 로그 문구' ($script:fallbackLogs[0] -match "흰 
 # 리뷰 조건: 일반 우선이 보존하는 것은 일반 성공 경로뿐이라, 3버튼 배치에서도 일반이 실패했을 때
 # 새 경로(이진화)가 **가운데** '다시 하기'를 고르는지 확인해야 한다. 수정 exe 실기(15:10~15:16,
 # 2-1/2-2 결과 화면) 중 자동 수집한 프레임 7장 — r3 는 실제로 일반 s5 가 MISS 였던 살아있는 프레임.
-$threeButtonDir = Join-Path $projectRoot '던전이미지\실측기록\20260911_심층결과화면_3버튼_다시하기_1908'
+$threeButtonDir = Join-Path $projectRoot '던전이미지\심층던전\20260911_심층결과화면_3버튼_다시하기_1908'
 if (-not (Test-Path -LiteralPath $threeButtonDir)) {
   "SKIP 3버튼 프레임 폴더가 없어 건너뜁니다: $threeButtonDir"
 } else {
@@ -224,7 +224,7 @@ if (-not (Test-Path -LiteralPath $threeButtonDir)) {
 # 다시 하기 562~710 / 다음 구역으로 722~872, y 627~683. 두 회차 모두 일반 판독이 먼저 읽었고(구제 로그 0건),
 # 강제 이진화도 같은 버튼을 돌려줬다. 음성 프레임(엔딩 컷신·옵션 화면 '입장하기')은 세 경로 모두 null 이어야
 # 한다 - 탐색 영역 $rgDgRetryBtn 이 '입장하기'(x 683~1155) 를 오른쪽에서 잘라 '하기' 오탐이 없다는 증거.
-$nativeDir = Join-Path $projectRoot '던전이미지\실측기록\20260911_심층결과화면_3버튼_다시하기_1272'
+$nativeDir = Join-Path $projectRoot '던전이미지\심층던전\20260911_심층결과화면_3버튼_다시하기_1272'
 if (-not (Test-Path -LiteralPath $nativeDir)) {
   "SKIP 1272 네이티브 프레임 폴더가 없어 건너뜁니다: $nativeDir"
 } else {

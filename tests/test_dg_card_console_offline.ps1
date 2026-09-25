@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
-$consoleDir = Join-Path $projectRoot '던전이미지/실측기록/20260916_콘솔카드_선택됨깨짐_프레임12장'
+$consoleDir = Join-Path $projectRoot '던전이미지/던전/20260916_콘솔카드_선택됨깨짐_프레임12장'
 $consoleFrames = @(
   (Join-Path $consoleDir 'carddiag_20260914_h17m46s56_set-fail.png'),   # 배율 2 안이 살렸던 프레임
   (Join-Path $consoleDir 'carddiag_20260914_h22m17s14_set-fail.png'),   # 배율 2 안이 살렸던 프레임

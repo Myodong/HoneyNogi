@@ -14,12 +14,12 @@ function Assert-Case {
   else { "FAIL {0}: 실제 [{1}] 기대 [{2}]" -f $Name, $Actual, $Expect; $script:fails++ }
 }
 
-$reportDir = Join-Path $projectRoot '던전이미지\실측기록\20260915_타PC_어비스_입장미감지_트래커상단잘림'
+$reportDir = Join-Path $projectRoot '던전이미지\어비스\20260915_타PC_어비스_입장미감지_트래커상단잘림'
 $captures = @{
   Report  = Join-Path $reportDir 'error_20260915_h03m24s43.png'                                   # 제보: 던전 안, 제목 줄 y≈190
   Inside  = Join-Path $projectRoot '던전이미지\던전\20260817_파티재입장_던전내부_1272.png'          # 개발 PC 배치: 던전 안 '심층 2층 1구역'
   Revive  = Join-Path $projectRoot '던전이미지\사망부활\1_제한형_개인_남은부활3-3_여신상+여기서.png' # 개발 PC 배치: 어비스 안 (던전명 키워드)
-  Field   = Join-Path $projectRoot '던전이미지\실측기록\20260913_마지막판_필드복귀_물약팝업가림.png' # 필드 (키워드 없음)
+  Field   = Join-Path $projectRoot '던전이미지\던전\20260913_마지막판_필드복귀_물약팝업가림.png' # 필드 (키워드 없음)
 }
 foreach ($key in $captures.Keys) {
   if (-not (Test-Path -LiteralPath $captures[$key])) { "SKIP 보존 캡처가 없어 진리표를 건너뜁니다: $($captures[$key])"; exit $fails }
