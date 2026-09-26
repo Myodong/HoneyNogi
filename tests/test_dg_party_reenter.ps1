@@ -1,7 +1,7 @@
 ﻿# 파티 재입장 대응 (v2.1.2 - 2026-08-17 신설) 진리표 + 오류 캡처 재현 + 배선 가드
 # 실사고: 월요일 06:00 주간 리셋 회차 - '다시 하기' 직후 우연한 만남 파티의 재입장이 진입
 # 옵션 화면을 생략하고 곧장 입장 → '옵션 화면 대기' 40초 초과 exit 1 → 복구 회차도 완료
-# 마커+던전 내부 조합으로 안전 중단. 오류 캡처(보존: 던전이미지\던전\20260817_파티재입장_
+# 마커+던전 내부 조합으로 안전 중단. 오류 캡처(보존: 던전이미지\공통\20260817_파티재입장_
 # 던전내부_1272.png)가 던전 내부(트래커 '심층 2층 1구역')를 실측.
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -68,13 +68,13 @@ function Read-CaptureRegionText {
     return [string]$ocr.Text
   } finally { $crop.Dispose(); $scaled.Dispose() }
 }
-$capturePath = Join-Path $projectRoot '던전이미지\던전\20260817_파티재입장_던전내부_1272.png'
+$capturePath = Join-Path $projectRoot '던전이미지\공통\20260817_파티재입장_던전내부_1272.png'
 $captureSrc = [System.Drawing.Bitmap]::FromFile($capturePath)
 $trackerText = (Read-CaptureRegionText -Src $captureSrc -Region $rgQuestTracker -Scale 3) -replace '\s', ''
 $captureSrc.Dispose()
 # 타 PC 동일 연쇄 제보(같은 날 06:02)의 '새로운 한 주' 주간 리셋 팝업 캡처 - 입장 로딩
 # 대기를 덮은 그 화면. 스윕 게이트(하단 문구 '협동'+'참여')가 실측 화면에서 발화하는지.
-$weeklyCapPath = Join-Path $projectRoot '던전이미지\던전\20260817_주간리셋팝업_입장대기_1272.png'
+$weeklyCapPath = Join-Path $projectRoot '던전이미지\공통\20260817_주간리셋팝업_입장대기_1272.png'
 $weeklyCapSrc = [System.Drawing.Bitmap]::FromFile($weeklyCapPath)
 $rgClearExitDefault = @(430, 570, 420, 125)   # config ocrRegions.clearAndExitText 기본값
 $weeklyBottomText = (Read-CaptureRegionText -Src $weeklyCapSrc -Region $rgClearExitDefault -Scale 3) -replace '\s', ''

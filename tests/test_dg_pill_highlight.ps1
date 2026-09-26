@@ -35,7 +35,7 @@ Assert-Case '진단: 분모 63 (실제 표본 수와 일치 - 상세는 test_cur
 # ── 실사고 캡처 재현: 소스 그물 그대로 재샘플링 ──
 $refW = 1272.0; $refH = 717.0
 $refX = 80; $refY = 195   # 실사고 로그의 기준점 (클릭 지점의 1272 환산)
-$capPath = Join-Path $projectRoot '던전이미지\던전\20260820_심층선택_어려움알약선택됨_1908.png'
+$capPath = Join-Path $projectRoot '던전이미지\공통\20260820_심층선택_어려움알약선택됨_1908.png'
 $cap = [System.Drawing.Bitmap]::FromFile($capPath)
 $hits = 0
 foreach ($dy in $dyList) {

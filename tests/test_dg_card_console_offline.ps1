@@ -26,7 +26,7 @@ $consoleFrames = @(
   (Join-Path $projectRoot '던전이미지/던전/20260907_콘솔렌더깨짐_소탕선택됨_1024_setfail.png'),
   (Join-Path $projectRoot '던전이미지/던전/20260907_콘솔렌더깨짐_소탕선택됨_1024_fallbackbefore.png')
 )
-$rdpFrame = Join-Path $projectRoot '던전이미지/던전/20260907_심층옵션_소탕선택됨_1908.png'
+$rdpFrame = Join-Path $projectRoot '던전이미지/공통/20260907_심층옵션_소탕선택됨_1908.png'
 foreach ($framePath in ($consoleFrames + $rdpFrame)) {
   if (-not (Test-Path -LiteralPath $framePath)) {
     "SKIP 실측 캡처가 없어 오프라인 OCR 재현을 건너뜁니다: $framePath"

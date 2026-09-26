@@ -3,7 +3,7 @@
 #       Set-DgToggleCard UnknownWordPoint / Save-DgCardDiagnostics 배선)
 # 사고: 콘솔 전환 후 '선택됨'이 결정적으로 깨져(09-06 창 1024·09-07 창 1908 동일 문자열
 #       '人에E}1되', 40회 판독 전부) 판별 실패 → 해제 클릭 불가 → 코드 4 정지.
-# 실측 캡처 보존: 던전이미지\던전\20260907_심층옵션_소탕선택됨_1908.png
+# 실측 캡처 보존: 던전이미지\공통\20260907_심층옵션_소탕선택됨_1908.png
 $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
