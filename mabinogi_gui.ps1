@@ -413,8 +413,9 @@ function Test-CheckpointLeaveReason {
   # 워커 [완료] 사유가 '거점 부활 상한 퇴장' 인가 (순수부 - 진리표). 워커 문구: '[완료] 거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀
   # 완료 (준비 실행 - …)'. 조각 '거점 부활 상한으로 던전을 나왔' 하나 - 다른 코드 10 사유('안전 중지 예약 확인 - 수동 진행분 정리',
   # '어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)')와 겹치지 않음.
+  # 09-26: 부활 불가 화면 대기 초과 퇴장(파티 회차 실사고 보완)도 같은 코드 10 재입장 - 두 사유 모두 인정
   param([string]$Reason)
-  return [bool](([string]$Reason) -match '거점 부활 상한으로 던전을 나왔')
+  return [bool](([string]$Reason) -match '(거점 부활 상한으로|부활 불가 화면 대기 초과로) 던전을 나왔')
 }
 
 function Update-ConfigToLatest {
@@ -4562,6 +4563,30 @@ $chkRevive.Location = New-Object System.Drawing.Point(15, 52)
 $chkRevive.Size = New-Object System.Drawing.Size(185, 22)
 $grpSettings.Controls.Add($chkRevive)
 
+# 거점 부활 상한 (2026-09-26 사용자 요청: "캠프파이어·여신상 4번째면 나가기" 를 GUI 에서 조절 - 기본 3, 0 = 첫 거점 부활 필요 시 바로 퇴장).
+# config revive.checkpointReviveLimit(0~1000) 과 1:1. 자동부활 체크 해제 시 비활성이지만 값은 유지·항상 저장 (설계 리뷰 조건). 어비스만 적용 -
+# 던전·심층·사냥터는 상한 없음(워커 -LeaveOnLimit). 유휴 상태에서 시작하면 시작 직전 저장으로 첫 회차부터 적용. 실행 중에는 숫자만 바꿔선 반영되지
+# 않고(Start-NextCycle 은 config 를 저장하지 않음) '설정 저장' 을 눌러야 그 뒤에 시작하는 워커부터 적용 (구현 리뷰 P3).
+$lblCheckpointLimit = New-Object System.Windows.Forms.Label
+$lblCheckpointLimit.Text = '거점 부활 상한(회):'
+$lblCheckpointLimit.Location = New-Object System.Drawing.Point(15, 82)
+$lblCheckpointLimit.Size = New-Object System.Drawing.Size(118, 20)
+$grpSettings.Controls.Add($lblCheckpointLimit)
+$numCheckpointLimit = New-Object System.Windows.Forms.NumericUpDown
+$numCheckpointLimit.Location = New-Object System.Drawing.Point(135, 79)
+$numCheckpointLimit.Size = New-Object System.Drawing.Size(58, 24)
+$numCheckpointLimit.Minimum = 0
+$numCheckpointLimit.Maximum = 1000
+$numCheckpointLimit.Value = 3
+$grpSettings.Controls.Add($numCheckpointLimit)
+$lblCheckpointHint = New-Object System.Windows.Forms.Label
+$lblCheckpointHint.Text = '(어비스, 0=즉시 퇴장)'   # 폭 150 안에 들어가는 길이 - 캡처 확인 13:40 에서 '…0=바로 퇴' 로 잘렸음
+$lblCheckpointHint.Location = New-Object System.Drawing.Point(198, 82)
+$lblCheckpointHint.Size = New-Object System.Drawing.Size(150, 20)   # x198 + 150 = 348 - 우측 '저장됨(HH:mm:ss)' 라벨(x353~, y88~)과 겹치지 않게 (구현 리뷰 P3)
+$grpSettings.Controls.Add($lblCheckpointHint)
+# 체크 해제 시 숫자만 비활성 (값·저장은 유지) - 최상위 스코프의 이벤트 핸들러라 컨트롤 변수를 그대로 봄
+$chkRevive.Add_CheckedChanged({ $numCheckpointLimit.Enabled = $chkRevive.Checked })
+
 # 어시스트 자동 켜기 (2026-07-28 사용자 요청): 전투 중 우측 ASSIST 토글이 꺼져 있으면 H키로 켬.
 # 배치는 체크 가로 1줄의 3번째 열 (2026-08-13 시안 - 버튼 열과 같은 x 15/183/351 정렬)
 $chkAssist = New-Object System.Windows.Forms.CheckBox
@@ -4696,7 +4721,7 @@ $btnAlwaysOn.Add_Click({
     $lines.Add(" - 클리어 대기: $([int]$numClearWait.Value)초")
     if ($chkSpace.Checked) { $lines.Add(" - $($chkSpace.Text)") }
     if ($chkFood.Checked) { $lines.Add(" - $($chkFood.Text)") }
-    if ($chkRevive.Checked) { $lines.Add(" - $($chkRevive.Text)") }
+    if ($chkRevive.Checked) { $lines.Add(" - $($chkRevive.Text), 거점 부활 상한 $([int]$numCheckpointLimit.Value)회 (어비스)") }
     if ($chkAssist.Checked) { $lines.Add(" - $($chkAssist.Text)") }
     $lines.Add('')
     $lines.Add('[기본 설정 기능]')
@@ -4753,6 +4778,8 @@ $btnClearHelp.Add_Click({
 $toolTip = New-Object System.Windows.Forms.ToolTip
 $toolTip.SetToolTip($btnClearHelp, '클릭하면 자세한 설명이 나옵니다')
 $toolTip.SetToolTip($chkRevive, "전투 중 행동불능이 되면 남은 부활 횟수를 확인해 R키(여기서 부활)로 자동 부활합니다.`r`n남은 횟수가 없으면 거점(캠프파이어/여신상) 부활을 클릭해 이어갑니다. 전멸도 '여신상에서 부활'로 재도전합니다.`r`n어비스는 한 판에서 거점 부활이 설정 횟수(기본 3회, config revive.checkpointReviveLimit)에 닿은 뒤 다시 거점 부활이 필요하면`r`n부활하지 않고 던전을 나가 새 파티로 재입장합니다. 부활 입력을 3번 보내도 사망 화면이 그대로면 정지합니다.`r`n불사의 가루 등 부활 재화가 소모될 수 있으니 원치 않으면 꺼 두세요.")
+$toolTip.SetToolTip($numCheckpointLimit, "어비스에서 한 판에 거점 부활(캠프파이어/여신상/전멸 재도전)이 이 횟수에 닿은 뒤 다시 거점 부활이 필요하면`r`n부활하지 않고 던전을 나가 새 파티로 재입장합니다. 0 = 첫 거점 부활이 필요한 시점에 바로 퇴장.`r`n던전·심층·사냥터에는 적용되지 않습니다. 실행 중에는 바꾼 뒤 '설정 저장'을 눌러야 다음 회차부터 적용됩니다.")
+$toolTip.SetToolTip($lblCheckpointLimit, "어비스 거점 부활 상한 - 넘으면 던전을 나가 새 파티로 재입장 (0 = 첫 거점 부활 필요 시 바로 퇴장). 자동부활이 꺼져 있으면 무관.`r`n실행 중에는 바꾼 뒤 '설정 저장'을 눌러야 다음 회차부터 적용됩니다.")
 $toolTip.SetToolTip($chkAssist, "전투 중 화면 우측의 ASSIST(어시스트 모드) 토글이 꺼져 있으면 자동으로 H키를 눌러 켭니다.`r`n분홍(클래스 특화)/초록(일반) 어느 쪽이든 켜져 있으면 건드리지 않습니다.")
 $toolTip.SetToolTip($chkCrRandom, "켜면 매 바퀴 시작 때 리스트 순서를 무작위로 섞어 진행합니다 (항목 구성은 동일).`r`n1층·2층이 섞인 리스트에서는 사용할 수 없습니다.")
 $toolTip.SetToolTip($chkDcrRandom, "켜면 매 바퀴 시작 때 리스트 순서를 무작위로 섞어 진행합니다 (항목 구성은 동일).`r`n1층·2층이 섞인 리스트에서는 사용할 수 없습니다.")
@@ -7387,6 +7414,15 @@ function Load-SettingsToUi {
   } else {
     $chkRevive.Checked = $true
   }
+  # 거점 부활 상한 복원 - 0~1000 정수만 인정, 그 외(누락·문자열·범위 밖)는 3 (PS 5.1: 초기화한 정수 변수에 TryParse - 설계 리뷰 조건)
+  $checkpointLimitParsed = 0
+  if ($cfg.PSObject.Properties['revive'] -and $cfg.revive.PSObject.Properties['checkpointReviveLimit'] -and
+      [int]::TryParse([string]$cfg.revive.checkpointReviveLimit, [ref]$checkpointLimitParsed) -and $checkpointLimitParsed -ge 0 -and $checkpointLimitParsed -le 1000) {
+    $numCheckpointLimit.Value = $checkpointLimitParsed
+  } else {
+    $numCheckpointLimit.Value = 3
+  }
+  $numCheckpointLimit.Enabled = $chkRevive.Checked
   # 어시스트 자동 켜기 설정 복원 (assist 항목이 없던 예전 config 는 기본 켜짐)
   if ($cfg.PSObject.Properties['assist'] -and $cfg.assist.PSObject.Properties['autoEnable']) {
     $chkAssist.Checked = ConvertTo-StrictBoolean $cfg.assist.autoEnable $true
@@ -7751,12 +7787,15 @@ function Save-SettingsFromUi {
   if ($cfg.PSObject.Properties['revive']) {
     if ($cfg.revive.PSObject.Properties['enabled']) { $cfg.revive.enabled = [bool]$chkRevive.Checked }
     else { $cfg.revive | Add-Member -NotePropertyName 'enabled' -NotePropertyValue ([bool]$chkRevive.Checked) }
+    # 거점 부활 상한 - 속성만 갱신·추가 (revive 객체 교체 금지: key/resumeKey/설명 키 보존 - 설계 리뷰 조건). 체크 해제여도 값은 저장
+    if ($cfg.revive.PSObject.Properties['checkpointReviveLimit']) { $cfg.revive.checkpointReviveLimit = [int]$numCheckpointLimit.Value }
+    else { $cfg.revive | Add-Member -NotePropertyName 'checkpointReviveLimit' -NotePropertyValue ([int]$numCheckpointLimit.Value) }
   } else {
     $cfg | Add-Member -NotePropertyName 'revive' -NotePropertyValue ([pscustomobject]@{
       '_설명'  = '던전에서 캐릭터가 행동불능(사망)이 되면 자동으로 부활하는 기능입니다.'
       enabled  = [bool]$chkRevive.Checked
       key      = 82
-      checkpointReviveLimit = 3   # 거점 부활 상한 (2026-09-25 - 옛 전체 부활 상한 키는 제거, schema 10)
+      checkpointReviveLimit = [int]$numCheckpointLimit.Value   # 거점 부활 상한 - UI 값 (2026-09-25 키 신설, schema 10 / 09-26 GUI 노출)
     })
   }
   # 탭 토글(설정/로그 표시) 상태도 최종 병합 - 즉시 저장(Save-UiToggleState)과 별개로 시작 시
@@ -8461,7 +8500,7 @@ $timer.Add_Tick({
         }
         if (Test-CheckpointLeaveReason -Reason $script:lastWorkerDoneReason) {
           $script:preparedStreak = 0
-          Add-GuiLog '[안내] 거점 부활 상한으로 던전을 나왔습니다 - 회차로 세지 않고 새 파티로 재입장합니다'
+          Add-GuiLog '[안내] 사망 화면에서 던전을 나왔습니다(거점 부활 상한 또는 부활 불가 대기 초과) - 회차로 세지 않고 새 파티로 재입장합니다'
         } else {
           $script:preparedStreak++
           Add-GuiLog '[안내] 화면 복귀(준비 실행)만 수행 - 회차로 세지 않고 이어서 시작합니다'
@@ -9224,6 +9263,10 @@ $updateCategoryPanels = {
   $chkSpace.Visible = $isBattle
   $chkFood.Visible = $isBattle
   $chkRevive.Visible = $isBattle
+  # 거점 부활 상한 3종은 어비스 콘텐츠에서만 표시 (2026-09-26 사용자 요청 - 워커가 어비스에만 적용(-LeaveOnLimit)하므로 던전·심층·사냥터에선 숨김)
+  $lblCheckpointLimit.Visible = $isAbyss
+  $numCheckpointLimit.Visible = $isAbyss
+  $lblCheckpointHint.Visible = $isAbyss
   $chkAssist.Visible = $isBattle
   $btnClearHelp.Visible = $isBattle
   $lblClearWait.Visible = $isBattle

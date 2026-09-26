@@ -715,7 +715,7 @@ $ptStellaClose  = @(Get-ConfigValue $config @('clickPoints', 'stellaClose') @(12
 #   구 범위가 신 범위의 부분집합). 탭 줄('이벤트 퀘스트+')이 영역에 들어오지만 소비처 13곳이 전부 조각 매칭
 #   (구역/소탕/정찰/던전명, 층·구역 파서는 첫 쌍) - 보관 창 전체 캡처 173장 전수 재생에서 제보 캡처(False→True) 외
 #   판정이 바뀐 캡처 없음. 진리표 tests\test_quest_tracker_offline.ps1, 캡처 보관
-#   던전이미지\실측기록\20260915_타PC_어비스_입장미감지_트래커상단잘림\. 생활 전용 영역(아래)은 그대로.
+#   던전이미지\어비스\20260915_타PC_어비스_입장미감지_트래커상단잘림\. 생활 전용 영역(아래)은 그대로.
 $rgQuestTracker = @(Get-ConfigValue $config @('ocrRegions', 'questTracker') @(980, 150, 285, 117))
 # 생활(채집) 전용 추적기 영역 = v13까지의 구 영역 그대로 (2026-08-14 분리, 하드코딩).
 # 위 전투용 확장(190,77)을 생활에 그대로 쓰면 ①탭 행 유입으로 카운트('N/M') 판독이 깨지고
@@ -1762,6 +1762,16 @@ $reviveSettleSeconds = 5
 # 거점 부활 버튼(캠프파이어/여신상) 등장 정착(ms): 사망 화면이 뜬 직후의 첫 클릭은 버튼 위에 정확히 떨어져도 게임이 받지 않았음 - 2026-09-25 실기 2
 # 에서 3/3(19:57:31·20:03:52·20:06:27, 프레임 확인), 6초 뒤 재클릭이 먹음. 실기 1 에서 등장 2초 뒤 첫 클릭은 4/4 먹음. 이 시간 전에는 시도하지 않음.
 $reviveAnchorSettleMs = 1500
+# 부활 불가 화면 대기 상한(초) - 2026-09-26 03:13 실사고(어비스 파티 회차, 사용자 확정 설계): 부활 제한 구역에서 남은 부활 횟수 0 인데 파티가 살아
+# 있으면 거점 버튼(캠프파이어/여신상)이 없는 화면이 뜬다('여기서 부활' 비활성 + '성장 가이드' 만). 보낼 입력이 없으므로 파티 결과(클리어·전멸)를
+# 기다린다 - 전멸이면 여신상 버튼이 나와 기존 흐름. 옛 코드는 예비 좌표·R 을 3회 보내고 코드 4 로 멈춰 그 뒤의 전멸 화면을 40분 방치했다.
+# 이 상한을 넘으면 어비스는 던전 퇴장(새 파티 재입장), 던전·심층·사냥터는 코드 4. 게임 자체 제한 시간이 먼저 끝나는 게 보통이다.
+$reviveBlockedWaitSeconds = 600
+# 그 화면 우하단 안내 '남은 부활 횟수가 없어서 부활할 수 없습니다' 영역 (1272 기준). 실측: 09-26 진단 캡처 2장 + 실기 5 솔로 0회 프레임 2장 -
+# **솔로 0회 화면에도 같은 안내가 뜨고 거기엔 '여신상에서 부활' 버튼이 있다**. 따라서 안내만으로는 '부활 불가' 가 아니고 판정은 안내 + 거점 앵커
+# 미탐의 조합(Get-DeathScreenInfo.Blocked + Find-ReviveAnchorPoint 미탐). 스크립트 상수 - config 승격·coordsVersion 은 사후 리뷰 때 결정.
+$rgReviveBlockedNote = @(900, 585, 210, 55)
+$script:abyssLeaveCause = ''   # 사망 화면 퇴장의 원인 조각('거점 부활 상한으로' / '부활 불가 화면 대기 초과로') - 호출부 [완료] 문구용
 # 부활 완료 후 전투를 다시 시작하는 키: 부활하면 자동전투가 꺼진 상태라 자동출발(Space)을
 # 다시 눌러야 전투가 이어집니다. 0 을 넣으면 누르지 않습니다.
 $reviveResumeKey   = Get-ConfigInteger $config @('revive', 'resumeKey') 32 0 255   # 32 = Space
@@ -4642,9 +4652,42 @@ function Wait-ForDungeonClearScreen {
       if ($deathValid -and -not $death.Wiped) { $wipeButtonMisses = 0 }   # 전멸 상태가 풀리면 미발견 누적 초기화 (리뷰 조건)
       # 거점 부활이 필요한 사망인가 (남은 횟수 0·가루 부족 전환·전멸) - 상한 판정은 이 경우에만 (가루 R 부활은 게임이 남은 횟수로 제한)
       $checkpointNeeded = [bool]($death.Wiped -or $reviveState.StatueMode -or (($null -ne $death.Remaining) -and ($death.Remaining -le 0)))
+      # ★ 부활 불가 상태는 판정기보다 **먼저** 확정합니다 (09-26 실사고 핫픽스 구현 리뷰 P2 ×3): 개인 사망에서 우하단 안내가 있거나 이미 대기 중이면
+      #   거점 앵커를 먼저 찾아 ①미탐 → BlockedSince 확립(판정기는 대기를 예산 소진·상한 leave 보다 앞세움 — 옛 배선은 앵커 미탐 뒤에야 세워
+      #   전송 3회 뒤나 상한 도달·limit 0 에서 첫 회전에 stop/leave 가 먼저 확정됐음) ②적중 → 대기 해제 + 거점 필요=참으로 판정(상한이면 leave,
+      #   아니면 dispatch 로 클릭 — 판독 공백에서 상한을 우회하던 경로 차단) ③앵커 판독 도중 캡처 실패 → 이 표본 무효(규칙 15).
+      #   대기 중에는 이번 표본의 안내 판독이 빠져도 입력 금지($blockedNow — 생존·전멸·앵커 적중 전까지, 리뷰 P2: 안내 OCR 한 회전 공백에 R·예비 좌표가 샜음).
+      $blockedNow = $false
+      if ($deathValid -and $death.Dead -and -not $death.Wiped -and ($death.Blocked -or ($null -ne $reviveState.BlockedSince))) {
+        $preAnchorSerial = $script:captureFailSerial
+        $preAnchorHit = Find-ReviveAnchorPoint -Game $Game
+        $preAnchorValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $preAnchorSerial)
+        if (-not $preAnchorValid) {
+          $deathValid = $false   # 앵커 판독 도중 캡처 실패 - 이 표본은 성공도 실패도 아님 (판정기 'skip', 대기 상태 유지)
+        } elseif ($preAnchorHit) {
+          if ($null -ne $reviveState.BlockedSince) { Write-RunLog "$($script:contentTag) 거점 부활 버튼($($preAnchorHit.Name))이 다시 보여 부활 불가 대기를 해제합니다" }
+          $reviveState.BlockedSince = $null; $reviveState.BlockedLogged = $false
+          $reviveState.CheckpointSeen = $true   # 앵커 관측 - 이 에피소드의 개인 사망은 거점 경로로 (정착 전·양보로 못 눌러도 다음 회전에 R 로 빠지지 않게)
+          $checkpointNeeded = $true   # 안내 = 남은 횟수 없음 → 거점 부활 필요 (판독 공백이어도) - 상한이면 판정기가 leave
+        } else {
+          $blockedNow = $true
+          $reviveState.CheckpointSeen = $true
+          if ($null -eq $reviveState.BlockedSince) {
+            $reviveState.BlockedSince = Get-Date; $reviveState.BlockedFailMs = Get-CaptureFailTotalMs; $reviveState.BlockedYieldMs = [double]$script:userYieldTotalMs
+          }
+          if (-not $reviveState.BlockedLogged) {
+            $reviveState.BlockedLogged = $true
+            Write-RunLog "$($script:contentTag) 행동불능(남은 부활 횟수 없음) - 거점 부활 버튼이 없는 부활 불가 화면(부활 제한 구역, 파티 진행 중) - 입력 없이 파티 결과(클리어·전멸)를 기다립니다 (최대 ${reviveBlockedWaitSeconds}초)"
+          }
+        }
+      }
+      # 에피소드에서 거점 앵커·안내를 관측했으면(CheckpointSeen) 이번 표본의 남은 횟수·안내 판독이 비어도 거점 필요 - 상한 판정(leave)이 클릭 경로와
+      # 같은 근거를 보게 (구현 리뷰 3라운드 P2: 정착 중 관측 → 다음 공백 표본에서 leave 대신 dispatch 로 상한 우회하던 경로)
+      $checkpointNeeded = [bool]($checkpointNeeded -or $reviveState.CheckpointSeen)
       $reviveAction = Resolve-ReviveSample -State $reviveState -Valid $deathValid -Dead ([bool]$death.Dead) -Wiped ([bool]$death.Wiped) `
         -CheckpointNeeded $checkpointNeeded -CheckpointLimit $reviveCheckpointLimit -LeaveOnLimit (-not $DungeonMode) `
-        -Now (Get-Date) -DispatchBudget $reviveDispatchBudget
+        -Now (Get-Date) -DispatchBudget $reviveDispatchBudget `
+        -CaptureFailTotalMs (Get-CaptureFailTotalMs) -YieldTotalMs ([double]$script:userYieldTotalMs) -BlockedWaitSeconds $reviveBlockedWaitSeconds
       if ($reviveAction -eq 'confirmed') {
         # 성공 확인 시점에만 계상·완료 로그·클리어 마감 초기화 (전송 시점이 아님 - 무효 전송이 마감을 늘리던 것도 함께 막습니다)
         $reviveDoneKind = $(if ($reviveState.LastConfirmedKind) { "($($reviveState.LastConfirmedKind))" } else { '' })
@@ -4668,10 +4711,25 @@ function Wait-ForDungeonClearScreen {
         # 를 받아 선택 화면 복귀 뒤 코드 10(준비 실행, 회차 미계상)으로 끝내면 GUI 가 곧바로 다음 회차를 시작합니다. 옛 '상한 뒤 코드 4' 는
         # 이길 수 있는 판을 끊었음(09-25 실기 1). 'stay' = 나가기 전에 사망 화면이 사라짐(직접 부활 등) → 다음 회전이 새 표본으로 판정.
         $deathKindText = $(if ($death.Wiped) { '파티 전멸' } else { '행동불능' })
+        $script:abyssLeaveCause = '거점 부활 상한으로'
         Write-RunLog "$($script:contentTag) 거점 부활 ${reviveCheckpointLimit}회를 다 쓴 뒤 다시 ${deathKindText} - 부활하지 않고 던전을 나가 새 파티로 재입장합니다 (이번 회차 가루 $($reviveState.PowderConfirmed)회)"
         if ((Invoke-AbyssDeathExit -Game $Game) -eq 'left') { return 'left' }
         Write-RunLog "$($script:contentTag) 던전 퇴장 전에 사망 화면이 사라졌습니다 - 상태를 다시 판정합니다"
         continue
+      } elseif ($reviveAction -eq 'blocked-timeout') {
+        # 부활 불가 화면(부활 제한 구역·남은 횟수 0·거점 버튼 없음)이 상한을 넘김 - 09-26 실사고 설계 보완(사용자 확정): 어비스는 던전 퇴장 → 새 파티
+        # 재입장(코드 10 경로), 던전·심층·사냥터는 조건부 정지. 게임 자체 제한 시간이 먼저 끝나는 게 보통이라 실제로는 드문 경로.
+        if (-not $DungeonMode) {
+          Write-RunLog "$($script:contentTag) 부활 불가 화면이 ${reviveBlockedWaitSeconds}초 이어졌습니다 - 던전을 나가 새 파티로 재입장합니다"
+          $script:abyssLeaveCause = '부활 불가 화면 대기 초과로'
+          if ((Invoke-AbyssDeathExit -Game $Game) -eq 'left') { return 'left' }
+          Write-RunLog "$($script:contentTag) 던전 퇴장 전에 사망 화면이 사라졌습니다 - 상태를 다시 판정합니다"
+          $reviveState.BlockedSince = $null; $reviveState.BlockedLogged = $false
+          continue
+        }
+        Write-LifeDiagnostics -Game $Game -Context '부활 불가 화면 대기 초과' -CaptureOnly
+        Write-RunLog "[완료] 부활 불가 화면(부활 제한 구역·남은 부활 횟수 0·거점 버튼 없음)이 ${reviveBlockedWaitSeconds}초 이어져 정지합니다 (진단 캡처 시도, 이 판은 완료로 계상하지 않음)"
+        exit 4
       } elseif ($reviveAction -eq 'settling') {
         # 전송 뒤 정착 창 안의 사망 표본 - 사망 화면인 채로 아래 자동사냥·ASSIST·컷신 감시로 내려가지 않습니다 (옛 코드는 사망 표본에서 항상
         # continue 였음 - 자체 리뷰 지적). 무효 표본('skip')은 바닥의 캡처 실패 동결 블록에 닿아야 하므로 그대로 흘려보냅니다.
@@ -4736,8 +4794,13 @@ function Wait-ForDungeonClearScreen {
           }
           if ($dispatchKind) { Write-RunLog "$($script:contentTag) 전멸 감지 - ${wipeAnchorName}에서 부활 클릭 (세이브 지점부터 재도전)" }
         } elseif ($death.Dead) {
-          if ($reviveState.StatueMode -or ($null -ne $death.Remaining -and $death.Remaining -le 0)) {
+          # 판독 공백(Remaining=$null)이라도 우하단 '부활할 수 없습니다' 안내가 있으면 거점 경로 - R 헛전송 방지 (09-26 실사고: 공백 판독에 R 1회 소모)
+          # $checkpointNeeded(같은 회전의 사전 앵커 적중) · CheckpointSeen(이 에피소드에서 앵커/안내 관측)도 거점 경로 - 판독 공백 회전에 R 이 새지 않게 (구현 리뷰 2라운드 P2)
+          if ($reviveState.StatueMode -or ($null -ne $death.Remaining -and $death.Remaining -le 0) -or $death.Blocked -or $blockedNow -or $checkpointNeeded -or $reviveState.CheckpointSeen) {
             $statueReason = if ($reviveState.StatueMode) { '부활 재료 부족' } else { '남은 부활 횟수 없음' }
+            if ($blockedNow) {
+              # 부활 불가 대기 중 (판정기 앞에서 확정) - 예비 좌표도 R 도 보내지 않습니다. 시도 없는 회전(Register-ReviveNoAttempt) - 예산·생략 상한 미소모
+            } else {
             Focus-Game -Game $Game
             # 부활 버튼 배치는 남은 횟수 유무에 따라 달라지므로(0회면 버튼들이 한 줄로 재배치됨),
             # 고정 좌표 대신 글자를 OCR로 찾아 실제 버튼 위치를 클릭합니다.
@@ -4751,6 +4814,7 @@ function Wait-ForDungeonClearScreen {
             if (-not $anchorValid) {
               # 무효 회전 또는 정착 전 - 아무것도 세지 않음 (전멸 경로와 같은 계약)
             } elseif ($anchorHit) {
+              $reviveState.BlockedSince = $null; $reviveState.BlockedLogged = $false   # 거점 버튼이 보이면 부활 불가 대기 해제
               $dispatchAttempted = $true
               Click-ScreenPoint -X $anchorHit.Point.X -Y $anchorHit.Point.Y
               if ($script:lastClickPerformed) {
@@ -4765,7 +4829,16 @@ function Wait-ForDungeonClearScreen {
               $recheckSerial = $script:captureFailSerial
               $deadRecheck = Get-DeathScreenInfo -Game $Game
               $recheckValid = (-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $recheckSerial)
-              if ($recheckValid -and $deadRecheck.Dead -and -not $deadRecheck.Wiped) {
+              if ($recheckValid -and $deadRecheck.Dead -and -not $deadRecheck.Wiped -and $deadRecheck.Blocked) {
+                # 클릭 직전 최신 관측이 '안내 + 앵커 미탐' (사전 탐색은 적중이었으나 깜박임 등) - 예비 좌표 대신 부활 불가 대기 재확립, 입력 없음 (구현 리뷰 2라운드 P2)
+                if ($null -eq $reviveState.BlockedSince) {
+                  $reviveState.BlockedSince = Get-Date; $reviveState.BlockedFailMs = Get-CaptureFailTotalMs; $reviveState.BlockedYieldMs = [double]$script:userYieldTotalMs
+                }
+                if (-not $reviveState.BlockedLogged) {
+                  $reviveState.BlockedLogged = $true
+                  Write-RunLog "$($script:contentTag) 행동불능(남은 부활 횟수 없음) - 거점 부활 버튼이 없는 부활 불가 화면(부활 제한 구역, 파티 진행 중) - 입력 없이 파티 결과(클리어·전멸)를 기다립니다 (최대 ${reviveBlockedWaitSeconds}초)"
+                }
+              } elseif ($recheckValid -and $deadRecheck.Dead -and -not $deadRecheck.Wiped) {
                 Write-RunLog "[경고] 거점 부활 버튼 글자(캠프파이어/여신상)를 찾지 못해 예비 좌표를 클릭합니다"
                 # 진단(2026-09-22, 목록 1절 1번): 09-21 22:33 남은 부활 0회 화면에서 이 미탐이 7회 연속이었고 예비 좌표 클릭이 전부
                 # 무효였는데 그 화면 캡처가 없었다. 회차당 1회만 남긴다.
@@ -4775,6 +4848,7 @@ function Wait-ForDungeonClearScreen {
                 if ($script:lastClickPerformed) { $dispatchKind = '여신상 부활' } else { $dispatchSkipReason = $script:lastClickSkipReason }
               }
             }
+            }   # /if ($blockedNow) else - 대기 중이 아닐 때만 앵커 클릭·예비 좌표
           } else {
             # R키(여기서 부활)도 같은 계약 - 전면 확인 후 실제로 전송됐을 때만 '보냈다' (④와 결합)
             $remainText = if ($null -ne $death.Remaining) { "남은 부활 횟수 $($death.Remaining)회" } else { '남은 횟수 인식 불가' }
@@ -5089,14 +5163,33 @@ function Find-ReviveAnchorPoint {
   return $null
 }
 
+function Test-ReviveBlockedNoteText {
+  param([string]$Text)
+  # 사망 화면 우하단 안내 '남은 부활 횟수가 없어서 부활할 수 없습니다' 판정의 순수부 (진리표 tests\test_revive_state_machine.ps1 ⑬).
+  # 실측 판독(같은 영역·s3·ko): 09-26 03:13 파티 캡처 2장 '남은부활횟수가없어서부활한수없습니다.'('할'→'한' 깨짐) / 실기 5 솔로 0회 프레임
+  # '남은부활횟수가없어서부활한수없습니다.'·'남은부활횟수가없어서부활할수없습니다.'. 사망 아닌 프레임 3장은 '' / '0크로스+18' - 조각 미적중.
+  # 버튼 영역 판독 '여기서부활9성장가이드' 와 겹치지 않게 '여기서부활'·'성장가이드' 는 조각으로 쓰지 않는다.
+  $normalized = ([string]$Text) -replace '\s', ''
+  return [bool]($normalized.Contains('횟수가없어서') -or $normalized.Contains('부활할수없') -or $normalized.Contains('부활한수없'))
+}
+
 function Get-DeathScreenInfo {
   param([System.Diagnostics.Process]$Game)
 
   # 화면 중앙의 사망/전멸 안내 영역을 읽어 판정합니다 (판정 규칙은 Get-DeathInfoFromText 참고).
-  # 반환: @{ Dead = 개인 행동불능; Remaining = 남은 부활 횟수($null 가능); Wiped = 파티 전멸 }
+  # 반환: @{ Dead = 개인 행동불능; Remaining = 남은 부활 횟수($null 가능); Wiped = 파티 전멸; Blocked = 우하단 '부활할 수 없습니다' 안내 }
   $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgDeathStatus[0] -ReferenceY $rgDeathStatus[1] `
     -RegionWidth $rgDeathStatus[2] -RegionHeight $rgDeathStatus[3] -Scale 3 -Engine $ocrKoreanEngine
-  return Get-DeathInfoFromText -Text $ocrText
+  $info = Get-DeathInfoFromText -Text $ocrText
+  # 남은 횟수 0(또는 판독 공백)인 개인 사망에서만 우하단 안내를 한 번 더 읽습니다 - '부활 불가' 판정 재료 (거점 앵커 미탐과 조합, 09-26 실사고).
+  # 판독 공백(Remaining=$null)에 안내가 있으면 R 헛전송 대신 거점 경로로 갑니다.
+  $info.Blocked = $false
+  if ($info.Dead -and -not $info.Wiped -and (($null -eq $info.Remaining) -or ($info.Remaining -le 0))) {
+    $noteText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgReviveBlockedNote[0] -ReferenceY $rgReviveBlockedNote[1] `
+      -RegionWidth $rgReviveBlockedNote[2] -RegionHeight $rgReviveBlockedNote[3] -Scale 3 -Engine $ocrKoreanEngine
+    $info.Blocked = Test-ReviveBlockedNoteText -Text $noteText
+  }
+  return $info
 }
 
 function New-ReviveState {
@@ -5121,12 +5214,17 @@ function New-ReviveState {
   return @{
     PowderConfirmed = 0; CheckpointConfirmed = 0; Dispatched = 0; Pending = $false; PendingKind = ''; PendingNotBefore = $null; LastConfirmedKind = ''
     Episode = $false; EpisodeSince = $null; StatueMode = $false; SkipElapsedMs = [double]0; SkipLastAt = $null; SkipLastYieldMs = [double]0; SkipLoggedReason = ''
+    # 부활 불가 화면(안내 + 거점 앵커 미탐 - 09-26 실사고) 대기: 시작 시각 / 그때의 캡처 실패 누적·양보 누적(둘 다 대기 시간에서 뺌 - 규칙 4·15) / 안내 로그 1회
+    BlockedSince = $null; BlockedFailMs = [double]0; BlockedYieldMs = [double]0; BlockedLogged = $false
+    # 이 에피소드에서 거점 앵커 또는 '부활할 수 없습니다' 안내를 관측함 → 개인 사망은 거점 경로로 고정(R 금지). 생존 표본에서 해제 (구현 리뷰 2라운드 P2:
+    # 사전 적중이 정착 전·양보 생략으로 클릭 못 한 다음 회전에 안내 판독이 빠지면 R 이 새던 경로)
+    CheckpointSeen = $false
   }
 }
 
 function Resolve-ReviveSample {
   param([hashtable]$State, [bool]$Valid, [bool]$Dead, [bool]$Wiped, [bool]$CheckpointNeeded, [int]$CheckpointLimit, [bool]$LeaveOnLimit,
-    [datetime]$Now, [int]$DispatchBudget = 3)
+    [datetime]$Now, [int]$DispatchBudget = 3, [double]$CaptureFailTotalMs = 0, [double]$YieldTotalMs = 0, [int]$BlockedWaitSeconds = 600)
   # 사망 판독 표본 1개를 상태에 반영하고 호출부가 할 일을 돌려줍니다 (순수 함수 - tests\test_revive_state_machine.ps1 진리표).
   #   'skip'           : 무효 표본(캡처 실패 중 / 판독 도중 실패) - 성공도 실패도 아님. 카운터·pending 전부 유지 (규칙 15)
   #   'none'           : 유효 생존 표본, 에피소드 없음
@@ -5137,6 +5235,8 @@ function Resolve-ReviveSample {
   #   'leave'          : 유효 사망 표본이고 **거점 부활이 필요한데**(CheckpointNeeded: 남은 횟수 0·거점 전환·전멸) 거점 부활 성공 수가 상한 이상
   #                      → 부활하지 않고 던전을 나감 (어비스: LeaveOnLimit. 던전·심층·사냥터는 상한 없음 - 사용자 확정 09-25)
   #   'dispatch'       : 유효 사망 표본, 입력을 (다시) 보낼 차례. pending 이었다면 그 전송은 무효로 확정 (화면이 그대로)
+  #   'blocked-timeout': 부활 불가 화면(호출부가 BlockedSince 로 표시 - 안내 + 거점 앵커 미탐) 대기가 BlockedWaitSeconds 를 넘김 → 어비스는 퇴장, 던전류는 코드 4.
+  #                      대기 중에는 예산·상한 판정을 미루고 'dispatch' 로 돌려 호출부가 앵커를 다시 찾게 한다(앵커가 나오면 정상 클릭). 캡처 실패·양보 시간은 뺀다
   # 왜 성공 확인으로 세나: 2026-09-21 22:33 실사고 - 남은 부활 0회 화면에서 예비 좌표 클릭 7회가 전부 무효(화면 그대로)였는데
   # '전송됨' 만으로 옛 상한 10회를 소진했고, 그 뒤 파티 전멸 화면을 24분 방치했다. 전송 수는 에피소드 예산으로 따로 묶는다.
   # 왜 거점만 세나: 옛 '전체 부활 상한 10' 은 게임 규칙이 아니었다 - 캠프파이어 착석·여신상 부활로 횟수가 초기화돼 실질 상한이 없고(09-25 실기:
@@ -5147,6 +5247,7 @@ function Resolve-ReviveSample {
   }
   if (-not ($Dead -or $Wiped)) {
     $State.SkipElapsedMs = [double]0; $State.SkipLastAt = $null; $State.SkipLoggedReason = ''
+    $State.BlockedSince = $null; $State.BlockedLogged = $false; $State.CheckpointSeen = $false
     if ($State.Pending) {
       if ($State.PendingKind -eq '가루 부활') { $State.PowderConfirmed++ } else { $State.CheckpointConfirmed++ }
       $State.LastConfirmedKind = $State.PendingKind
@@ -5164,6 +5265,13 @@ function Resolve-ReviveSample {
   if (-not $State.Episode) { $State.EpisodeSince = $Now }
   $State.Episode = $true
   $State.Pending = $false; $State.PendingNotBefore = $null   # 보냈는데 정착 창이 지나도 사망 화면이 그대로 = 그 전송은 무효 (Dispatched 는 그대로 - 예산 소모)
+  if ($Wiped) { $State.BlockedSince = $null; $State.BlockedLogged = $false }   # 전멸 화면에는 여신상 버튼이 있다 - 부활 불가 대기 해제
+  if ($null -ne $State.BlockedSince) {
+    # 부활 불가 화면 대기 중 (09-26 실사고): 캡처 실패·양보 누적의 차분을 빼고 센다. 상한 전에는 'dispatch' 로 돌려 호출부가 앵커를 다시 찾는다
+    $blockedActiveSec = ($Now - $State.BlockedSince).TotalSeconds - (($CaptureFailTotalMs - [double]$State.BlockedFailMs) / 1000) - (($YieldTotalMs - [double]$State.BlockedYieldMs) / 1000)
+    if ($blockedActiveSec -ge $BlockedWaitSeconds) { return 'blocked-timeout' }
+    return 'dispatch'
+  }
   if ($State.Dispatched -ge $DispatchBudget) { return 'stop-exhausted' }
   if ($CheckpointNeeded -and $LeaveOnLimit -and ($State.CheckpointConfirmed -ge $CheckpointLimit)) { return 'leave' }
   return 'dispatch'
@@ -6388,7 +6496,7 @@ function Find-DgRetryButtonPoint {
   # 흰 글자 이진화는 10/10 ('하기' 조각이 전부 생존) → 일반 판독이 전부 실패했을 때만 같은
   # 어휘로 한 번 더 읽는다. 통과 경로는 그대로라 1272 창의 기존 동작은 불변.
   # 좌측 '나가기' 위치 게이트는 두지 않았다 - 10장 어느 모드에서도 '나가기' 조각이 관측되지 않음
-  # (진리표 tests\test_dg_retry_button_offline.ps1, 캡처 던전이미지\실측기록\20260911_심층결과화면_*).
+  # (진리표 tests\test_dg_retry_button_offline.ps1, 캡처 던전이미지\심층던전\20260911_심층결과화면_*).
   foreach ($searchWord in @('다시', '다셔', '하기')) {
     $point = Find-GameTextPoint -Game $Game -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
       -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5 -BinaryWhiteText
@@ -11023,7 +11131,8 @@ function Invoke-AbyssPartyMemberCycle {
     if ($clearOutcome -eq 'left') {
       # 거점 부활 상한으로 사망 화면에서 나옴 (2026-09-25): 파티원은 퇴장 뒤 자동 재입장 흐름이 없고(파티 유지 여부 미실측 - 코드 10 이면 다음 회차가
       # '준비 완료' 를 최대 30분 기다리다 코드 1 - 자체 리뷰 지적) 조건부 정지합니다. 새 파티 재입장은 파티장·우연한 만남 흐름의 몫.
-      Write-RunLog '[완료] 파티원: 거점 부활 상한으로 던전을 나왔습니다 - 파티원은 퇴장 뒤 자동 재입장 흐름이 없어 정지합니다'
+      $leaveCause = $(if ($script:abyssLeaveCause) { $script:abyssLeaveCause } else { '거점 부활 상한으로' })
+      Write-RunLog "[완료] 파티원: ${leaveCause} 던전을 나왔습니다 - 파티원은 퇴장 뒤 자동 재입장 흐름이 없어 정지합니다"
       exit 4
     }
   }
@@ -14458,7 +14567,7 @@ $rgNyanCoin   = @(1085, 40, 125, 45)   # 우상단 냥코인 잔량 (실측 '040
 #   전수 비교(워커 판독 경로 그대로): 935 오독 3,115/5,015 · 930 은 아이콘 반쪽이 '2'로 융합(25) · 910 오독 3(전부 아래
 #   '기' 유형) · 905 35 · 900 51. 아이콘(x≈915~933)을 통째로 넣고 글자 최소 경계에서 23px 여유 — 아이콘은 '@'/')' 접두로
 #   읽혀 파서가 떼어냅니다. 1908 창은 비율 환산(크롭 1402→1365px)에 다른 HUD 요소 없음(설계 리뷰 확인). 오른쪽 경계 1085 불변.
-#   진리표 tests\test_nyan_gold_offline.ps1, 자료 던전이미지\실측기록\20260915_냥코인_골드_앞자리잘림_프레임\.
+#   진리표 tests\test_nyan_gold_offline.ps1, 자료 던전이미지\고양이상인\20260915_냥코인_골드_앞자리잘림_프레임\.
 $rgNyanGold   = @(910, 40, 175, 45)    # 우상단 골드 잔량 (지출 = 시작-현재 차감)
 $rgNyanCards  = @(390, 330, 480, 340)  # 카드 존 (가격표 탐색 한정 ROI - HUD 재화 오인 방지)
 # 카드 존 판독 배율 (2026-09-14 실측: 워커 실기 프레임 311장 라벨 실험 - 배율 3 은 하단 좌우 50~53%·중우 81%,
@@ -16095,7 +16204,9 @@ try {
     # 거점 부활 상한으로 사망 화면에서 나온 판 (2026-09-25 사용자 확정): 클리어가 아니므로 마커 없이, 회차로 세지 않고 선택 화면으로
     # 복귀 → 코드 10 → GUI 가 곧바로 다음 회차(새 파티 매칭)를 시작합니다. 커스텀은 같은 항목 재실행. 준비 실행 3회 연속은 GUI 가 오류 정지.
     Return-ToAbyssSelection -Game $game -SafeStopExitCode 10
-    Write-RunLog '[완료] 거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)'
+    # 원인 조각은 사망 블록이 둔다 ('거점 부활 상한으로' / '부활 불가 화면 대기 초과로' - 09-26). GUI Test-CheckpointLeaveReason 이 두 사유를 모두 인정
+    $leaveCause = $(if ($script:abyssLeaveCause) { $script:abyssLeaveCause } else { '거점 부활 상한으로' })
+    Write-RunLog "[완료] ${leaveCause} 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)"
     exit 10
   }
 
