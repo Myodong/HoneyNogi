@@ -16,6 +16,24 @@ $ErrorActionPreference = 'Stop'
 $testDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $tests = @(Get-ChildItem -Path $testDir -Filter 'test_*.ps1' | Sort-Object Name)
 
+# ★ 2026-09-26 BOM 검사 (파티 모드 설계 v2 8절 관례): 한글 리터럴이 든 .ps1 은 UTF-8 BOM 이 없으면 Windows PowerShell 5.1 이
+#   cp949 로 읽어 판독문 픽스처의 조각이 깨진 채 비교되고, 그 결과가 '거짓 통과' 로 끝날 수 있습니다(규칙 2 — Write 도구는 BOM 없이
+#   저장). 테스트 파일과 공용 헬퍼의 첫 3바이트를 확인해 하나라도 EF BB BF 가 아니면 경고를 찍고 실패로 끝냅니다.
+$bomMissing = @()
+foreach ($f in (@($tests) + @(Get-ChildItem -Path $testDir -Filter 'source_test_helpers.ps1'))) {
+  $head = @()
+  try {
+    $fs = [IO.File]::OpenRead($f.FullName)
+    try { $buf = New-Object byte[] 3; $n = $fs.Read($buf, 0, 3); if ($n -eq 3) { $head = @($buf[0], $buf[1], $buf[2]) } } finally { $fs.Dispose() }
+  } catch { $head = @() }
+  if (-not ($head.Count -eq 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF)) { $bomMissing += $f.Name }
+}
+if ($bomMissing.Count -gt 0) {
+  "[경고] UTF-8 BOM 이 없는 테스트 파일 $($bomMissing.Count)개 - $($bomMissing -join ', ')"
+  '        (한글 픽스처가 깨진 채 비교돼 거짓 통과할 수 있습니다. 규칙 2 의 한 줄로 BOM 을 다시 입혀 주세요:'
+  '         [IO.File]::WriteAllText($p, [IO.File]::ReadAllText($p), [Text.UTF8Encoding]::new($true)))'
+}
+
 # 기대 테스트 개수 (추가/삭제 시 함께 갱신). 숫자가 어긋나면 실패로 끝냅니다.
 $expectedTestCount = 88   # 09-25 +1: test_revive_state_machine (부활 상태 머신 - 성공 확인 계상·에피소드 전송 예산·상한 즉시 정지·생략 3갈래, 목록 1절 1번) / 09-21 +1: test_abyss_return_loop (v2.1.12 구현 리뷰 2차 P1 - 복귀 루프 필드 토큰의 양보·캡처 실패 대조, 던전 안 시계 동결 - 행동 진리표) / 09-21 +1: test_abyss_screen_signatures (v2.1.12 던전 안 선택 화면 오판 핫픽스 - 보상 서명·재매칭 패널·fail-closed 배선) / 09-20 +1: test_difficulty_tabs_offline (v2.1.12 어비스 상세 난이도 알약 상단 확장 - 09-15 타 PC 제보 재현) / 09-18 +1: test_abyss_exit_button (v2.1.11 어비스 보상 화면 3버튼 - 나가기 글자 위치 클릭) / 09-16 +1: test_dg_card_console_offline (v2.1.10 콘솔 카드 '태되' 조각 재현) / 09-16 +1: test_abyss_chance_toggle_yield (v2.1.10 우연한 만남 켜기 양보·팝업 복구) / 09-15 +1: test_nyan_gold_offline (v2.1.10 골드 앞자리 소실 재현) / 09-15 +1: test_quest_tracker_offline (v2.1.9 타 PC 트래커 상단 잘림 재현) / 09-14 +1: test_nyan_cards_scale_offline (v2.1.9 카드 존 배율 라벨 재현) / 08-20 +1: test_dg_pill_highlight (v2.1.2) / 09-01 +1: test_embedded_host (v2.1.4) / 09-07 +1: test_dg_card_console (v2.1.6) / 09-08 +1: test_yield_batch (v2.1.7) / 09-09 +1: test_life_cycle_deadline (v2.1.8) / 09-09 +1: test_life_scroll_yield (v2.1.8 실기 실측) / 09-10 +1: test_party_find_yield (v2.1.8) / 09-10 +1: test_abyss_detail_back (v2.1.8) / 09-11 +1: test_event_overlay_yield (v2.1.8) / 09-11 +1: test_dg_retry_button_offline (v2.1.8 실사고 - 이진화 폴백) / 09-13 +1: test_life_close_yield (v2.1.9) / 09-13 +2: test_last_run_exit_yield, test_popup_helper_yield (v2.1.9) / 09-13 +1: test_entry_popup_yield (v2.1.9)
 
@@ -60,12 +78,13 @@ if ($countMismatch) {
   '        (테스트를 추가·삭제했다면 run_all_tests.ps1 의 $expectedTestCount 를 함께 고쳐 주세요.'
   '         고치지 않으면 파일이 사라져도 전부 통과로 끝납니다 - 9차 점검에서 막은 구멍입니다.)'
 }
-$badCount = $failedTests.Count + $erroredTests.Count
+$badCount = $failedTests.Count + $erroredTests.Count + $bomMissing.Count
 if ($badCount -gt 0 -or $countMismatch) {
   $parts = @()
   if ($failedTests.Count -gt 0) { $parts += "실패 $($failedTests.Count)개 - $($failedTests -join ', ')" }
   if ($erroredTests.Count -gt 0) { $parts += "실행 실패 $($erroredTests.Count)개 - $($erroredTests -join ', ')" }
   if ($countMismatch) { $parts += "개수 불일치($($tests.Count)/$expectedTestCount)" }
+  if ($bomMissing.Count -gt 0) { $parts += "BOM 없음 $($bomMissing.Count)개 - $($bomMissing -join ', ')" }
   "결과: $($tests.Count)개 중 $($parts -join ' / ')"
   exit 1
 }
