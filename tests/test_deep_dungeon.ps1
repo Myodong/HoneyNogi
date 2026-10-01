@@ -326,9 +326,12 @@ Assert-Case '배선(워커): 주간 구역 판독 3회 재시도' `
   ($workerSource -match '\$weeklyTry -le 3 -and -not \$weeklyStage') $true
 # 2026-07-28 실기 4차: 입장 직후 물약 팝업이 입장 완료 감지를 가림 → 입장/매칭 대기 6지점에
 # 팝업 스윕 추가 (Condition 안에서는 반환값을 소비해 대기 오판 방지 - PS 5.1 출력 오염)
-Assert-Case '배선(워커): 입장 대기 팝업 스윕 6지점(반환값 소비 계약)' `
+# 2026-09-30 ⑥e: `[void](Invoke-PurchasePopupSweep` 1곳은 옛 파티원 사이클의 입장 대기였고 관측 루프 D·퇴장 절차 P 로 바뀌며 사라졌습니다 -
+#   D·P·시작 패널 입장 대기 등 대기 루프는 스윕의 참을 받아 회전을 넘기는 continue 형(`if (Invoke-PurchasePopupSweep …) { … continue }`)이라
+#   반환값을 버리는 호출은 0곳이 계약입니다 (Condition 스크립트블록 안 5지점의 `return $false` 형은 그대로)
+Assert-Case '배선(워커): 입장 대기 팝업 스윕 5지점(+ 대기 루프는 continue 형) - 반환값 소비 계약' `
   ([regex]::Matches($workerSource, 'if \(Invoke-PurchasePopupSweep -Game \$[Gg]ame\) \{ return \$false \}').Count -eq 5 -and
-   [regex]::Matches($workerSource, '\[void\]\(Invoke-PurchasePopupSweep').Count -eq 1) $true
+   [regex]::Matches($workerSource, '\[void\]\(Invoke-PurchasePopupSweep').Count -eq 0) $true
 # 2026-07-28 22:40 실기: 입장 버튼 뿔 아이콘이 'V'/'7'로 오독돼 소모량 1이 7로 판독 →
 # deep 은 아이콘 제외 영역(978,636,152,44)으로 오버라이드 (캡처 19/19 첫 시도 정확 판독)
 Assert-Case '배선(워커): 심층 소모량 판독 영역 아이콘 제외 오버라이드' `

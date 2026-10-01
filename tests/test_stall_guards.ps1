@@ -47,15 +47,21 @@ foreach ($node in $stallAst.FindAll({
   # 꺼내야 합니다(인덱스로 접근하면 조용히 $null 이 되어 이 검사가 통째로 무력해집니다).
   $clause = $node.Clauses[0]
   if ($clause.Item1.Extent.Text -notmatch '^\(?\$script:screenCaptureFailing\)?$') { continue }
-  # '동결 지점' = 캡처 실패 때문에 **시간이 흐르지 않게 만드는** 자리입니다. 두 형태가 있습니다:
+  # '동결 지점' = 캡처 실패 때문에 **시간이 흐르지 않게 만드는** 자리입니다. 세 형태가 있습니다:
   #   ① 제자리 회전(continue)  ② 한도 되돌림(AddSeconds) - continue 없이 마감만 미루는 형태
+  #   ③ 대기(if-wait) - continue·AddSeconds 없이 본문(주석 제외)에서 Start-Sleep 으로 기다린 뒤 뒤 코드로 떨어지는 형태
   # ★ 11차 점검: ①만 세는 바람에 ②(클리어 대기 본문의 마감 되돌림)가 감시망 밖이었고,
   #   그 자리의 공통 진입점을 지워도 52종이 전부 통과했습니다. 거긴 클리어 대기의 유일한
   #   게임 사망 감지 지점이라, 빠지면 무인 운용이 캡처 실패 중 영원히 돕니다.
-  #   `return $false` 같은 즉시 이탈은 시간을 멈추지 않으므로 동결 지점이 아닙니다.
+  # ★ 2026-09-30 ⑥e 설계 2.13(리뷰 4차·5차): 마감 되돌림을 지운 동결 블록은 ①·② 어디에도 들지 않아 같은 이유로 감시망
+  #   밖이 됩니다 - 계수를 지키려고 되돌림 코드를 남기지 않고 정의를 코드에 맞춰 ③ 을 더합니다(리뷰 5차 P1-1). 지금 ③ 은
+  #   Clear-EventOverlay 의 서두 동결 한 곳입니다 (복귀 루프 동결 블록은 09-30 리뷰5 P2-1 로 ① continue 형).
+  #   `return $false` 같은 즉시 이탈은 시간을 멈추지 않으므로 동결 지점이 아닙니다 (공용 스윕의 첫 판독 가드 한 줄도 그래서 계수 밖).
   $clauseIsSpin = [bool]($clause.Item2.Extent.Text -match '(?m)^\s*continue\b')
   $clauseIsRenew = [bool]($clause.Item2.Extent.Text -match 'AddSeconds')
-  if (-not ($clauseIsSpin -or $clauseIsRenew)) { continue }
+  $clauseCode = (($clause.Item2.Extent.Text -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+  $clauseIsWait = (-not $clauseIsSpin) -and (-not $clauseIsRenew) -and [bool]($clauseCode -match 'Start-Sleep')
+  if (-not ($clauseIsSpin -or $clauseIsRenew -or $clauseIsWait)) { continue }
   # 이 회전에서 캡처를 한 번이라도 시도하는지 보려면 **감싼 반복문의 검사 이전 구간**도
   # 함께 봐야 합니다. 어떤 자리는 반복 첫 줄이 판독이라(4050·4944) 그것이 복구 탐침이 되고,
   # 어떤 자리는 첫 줄이 Start-Sleep 이라 continue 하면 캡처 시도가 0이 됩니다(자기 잠금).
@@ -75,21 +81,31 @@ foreach ($node in $stallAst.FindAll({
     if ($clauseIsSpin) {
       # continue 형은 블록 뒤가 **실행되지 않으므로** 검사 이전 구간만 봅니다
       $preCheck = $bodyExtent.Text.Substring(0, [Math]::Max(0, $node.Extent.StartOffset - $bodyExtent.StartOffset))
-    } else {
+    } elseif ($clauseIsRenew) {
       # 한도 되돌림 형은 블록을 지나 **반복 본문 나머지가 그대로 실행**되므로, 그 안 어디서든
-      # 캡처를 시도하면 복구를 감지할 수 있습니다 (예: 어비스 복귀 루프는 바로 아래 화면 판정).
+      # 캡처를 시도하면 복구를 감지할 수 있습니다 (예: 클리어 감시 본문은 되돌림 뒤 같은 회전의 화면 판정).
       $preCheck = $bodyExtent.Text
+    } else {
+      # 대기형은 블록을 담은 **if 문 전체(elseif·else 포함)가 끝난 뒤부터** 반복 본문 끝까지만 봅니다 (⑥e 설계 2.13 - 반영본 검증,
+      # 09-30 리뷰4). 캡처 실패 회전은 같은 if 문의 elseif·else 가지를 실행하지 않으므로, '반복 본문 전체' 로 보면 Clear-EventOverlay 의
+      # else 가지 판독에 걸려 이 검사가 늘 참이었습니다. 그 블록의 실제 탐침은 루프 끝 Test-KnownScreen 입니다 (아래 탐침 패턴에 포함)
+      $afterIfStart = $node.Extent.EndOffset - $bodyExtent.StartOffset
+      $preCheck = $(if ($afterIfStart -lt $bodyExtent.Text.Length) { $bodyExtent.Text.Substring($afterIfStart) } else { '' })
     }
   }
-  $freezeSpots += , @{ Kind = $(if ($clauseIsSpin) { 'if-continue' } else { 'if-renew' })
+  $freezeSpots += , @{ Kind = $(if ($clauseIsSpin) { 'if-continue' } elseif ($clauseIsRenew) { 'if-renew' } else { 'if-wait' })
     Line = $node.Extent.StartLineNumber
     Body = $clause.Item2.Extent.Text; PreCheck = $preCheck }
 }
-Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 40   # 2026-09-25 +1: Invoke-AbyssDeathExit(거점 부활 상한 뒤 던전 퇴장) 서두 동결 / 2026-09-21 던전 안 선택 화면 오판 핫픽스(설계 합의 A5 예상치 그대로): 시작 재매칭 입장 대기 루프 +1, 파티원 필드 복귀 루프 +1 (복귀 루프의 추적기 판독 뒤 if-continue 는 조건식이 플래그 단독이라 함께 계수 - 아래 if-continue 참고) / 2026-09-18 어비스 보상 화면 '나가기' 글자 클릭 헬퍼(Invoke-AbyssExitClick) 동결 +1 / 2026-09-16 어비스 '우연한 만남' 켜기 양보 후 제목 판독 동결 +1 / 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1 / 2026-09-13 냥코인 규칙 15: PURCHASE_WAIT 동결(if + 내부 while) +2, 냥코인·골드 판독 직후 가드 +2, REROLL_WAIT 판독 직후 가드 +1 / 2026-09-14 REROLL_WAIT 동결 블록 내부 복구 대기 while +1
+Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 42   # 2026-10-01 ⑥e 43 → 42: 옛 파티원 사이클 동결 4곳 삭제(-4), 파티원 관측 루프 D·퇴장 절차 P 동결 +2, 대기형 정의로 Clear-EventOverlay 서두 동결 +1 (어비스 복귀 루프 동결 블록은 되돌림 삭제로 한도 되돌림 형 → continue 형 - 개수 불변) / 2026-09-26 +3: ⑥a 파티원 클리어 S 터치 루프(Invoke-AbyssMemberClearTouch) 서두 동결 + 구현 리뷰 1차 P1 - 파티원 시작 판정·시작 패널 판정의 유효 표본 루프 동결 2 / 2026-09-25 +1: Invoke-AbyssDeathExit(거점 부활 상한 뒤 던전 퇴장) 서두 동결 / 2026-09-21 던전 안 선택 화면 오판 핫픽스(설계 합의 A5 예상치 그대로): 시작 재매칭 입장 대기 루프 +1, 파티원 필드 복귀 루프 +1 (복귀 루프의 추적기 판독 뒤 if-continue 는 조건식이 플래그 단독이라 함께 계수 - 아래 if-continue 참고) / 2026-09-18 어비스 보상 화면 '나가기' 글자 클릭 헬퍼(Invoke-AbyssExitClick) 동결 +1 / 2026-09-16 어비스 '우연한 만남' 켜기 양보 후 제목 판독 동결 +1 / 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1 / 2026-09-13 냥코인 규칙 15: PURCHASE_WAIT 동결(if + 내부 while) +2, 냥코인·골드 판독 직후 가드 +2, REROLL_WAIT 판독 직후 가드 +1 / 2026-09-14 REROLL_WAIT 동결 블록 내부 복구 대기 while +1
 Assert-Case '동결 지점: while 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'while' }).Count) 9   # 2026-09-13 PURCHASE_WAIT 내부 복구 대기 +1 / 2026-09-14 REROLL_WAIT 내부 복구 대기 +1
-# 한도 되돌림 형 3곳 (클리어 대기 본문 / 어비스 선택 화면 복귀 / 그 밖). 11차에서 감시망에
+# 한도 되돌림 형 2곳 (Wait-ForScreen / 클리어 대기 본문). 11차에서 감시망에
 # 새로 들어온 형태입니다 - 이 자리들이 캡처 실패 중 유일한 게임 사망 감지 지점입니다.
-Assert-Case '동결 지점: if-renew 형(한도 되돌림)' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-renew' }).Count) 3
+# 2026-10-01 ⑥e 3 → 2: 어비스 선택 화면 복귀 루프의 동결 블록이 마감 되돌림을 지우고(설계 2.13 - 되돌리면 실패 회전이 사이에 한 번씩 낄 때
+#   마감이 영영 오지 않음, 09-30 리뷰4 P1-1) 양보 게이트 앞 복구 탐침 + 단독 줄 continue 형이 됐습니다(09-30 리뷰5 P2-1) - 아래 if-continue 로 셈.
+#   되돌림을 되살리는 변이는 continue 가 있어 if-continue 로 남아 개수로는 못 잡습니다 - test_abyss_screen_signatures 의 '동결 블록 안
+#   $deadline 대입 0건' 과 test_abyss_return_loop RL2 가 잡습니다.
+Assert-Case '동결 지점: if-renew 형(한도 되돌림)' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-renew' }).Count) 2
 # if-continue 형이 9곳입니다 - 3차 점검이 while 7곳만 세는 바람에 이 9곳은 계약 밖에
 # 있었습니다(공통 진입점 호출 여부는 우연히 전부 지키고 있었지만, 복구 탐침은 4곳이
 # 빠져 무한 회전이었습니다 - 7차 점검에서 발견·수정).
@@ -98,7 +114,10 @@ Assert-Case '동결 지점: if-renew 형(한도 되돌림)' (@($freezeSpots | Wh
 #   Codex P1 - 판독만 건너뛰어 캡처 시도 0회 → 무조건 unknown → exit 4 였음) +
 #   어비스 **혼자하기** 이동하기 루프(함께하기 쪽과 비대칭이라 마감 되돌림·안전 중지가 빠져 있었음)
 # 2026-09-10 +2: 던전·사냥터 '파티 찾기'의 양보 후 재판독 앞 캡처 실패 동결
-Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 28   # 2026-09-25 +1 (사망 화면 퇴장 헬퍼) / 2026-09-21 핫픽스 +2 (시작 재매칭 대기·파티원 필드 복귀 루프의 서두 동결) / 2026-09-18 어비스 나가기 글자 클릭 헬퍼 +1 / 2026-09-16 어비스 우연한 만남 켜기 제목 판독 뒤 +1 / 2026-09-08 어비스 이동하기 +1 / 2026-09-13 냥코인 규칙 15 +4 (PURCHASE_WAIT·냥코인·골드·REROLL_WAIT 판독 직후)
+Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 30   # 2026-10-01 ⑥e 31 → 30: 옛 파티원 사이클 -4, D·P 서두 동결 +2 (여러 줄 블록 - 한 줄 `if (...) { continue }` 로 쓰면 본문 continue 가 줄 머리가 아니라 계수를 조용히 빠져나감, 설계 §3 단언이 막음), 어비스 복귀 루프 동결 블록 +1 (한도 되돌림 형에서 옮겨 옴) / 2026-09-26 +3 (⑥a 파티원 클리어 S 터치 루프 + 파티원 시작 판정·시작 패널 판정 유효 표본 루프) / 2026-09-25 +1 (사망 화면 퇴장 헬퍼) / 2026-09-21 핫픽스 +2 (시작 재매칭 대기·파티원 필드 복귀 루프의 서두 동결) / 2026-09-18 어비스 나가기 글자 클릭 헬퍼 +1 / 2026-09-16 어비스 우연한 만남 켜기 제목 판독 뒤 +1 / 2026-09-08 어비스 이동하기 +1 / 2026-09-13 냥코인 규칙 15 +4 (PURCHASE_WAIT·냥코인·골드·REROLL_WAIT 판독 직후)
+# 대기형 1곳 (2026-10-01 ⑥e 설계 2.13 - 09-30 리뷰4 정의, 09-30 리뷰5 로 1곳): Clear-EventOverlay 의 서두 동결(안전 확인 + 2초 대기 뒤 같은
+# 회전의 루프 끝 Test-KnownScreen 이 복구 탐침). 어비스 복귀 루프 동결 블록을 옛 대기형으로 되돌리는 변이는 이 값이 2·if-continue 29 가 되어 잡힙니다
+Assert-Case '동결 지점: if-wait 형(대기)' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-wait' }).Count) 1
 $loopMissing = @()
 foreach ($spot in $freezeSpots) {
   $bodyCode = (($spot.Body -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
@@ -118,7 +137,9 @@ $probePattern = 'Test-CaptureRecovered|Get-GameRegionCapture|Get-GameRegionOcrTe
   # 2026-09-10: Read-DgTitleText 는 내부에서 Get-GameRegionOcrText 를 부르는 판독 래퍼라
   # 캡처를 엽니다 (던전 '파티 찾기' 동결 분기의 복구 탐침)
   # 2026-09-18: Find-AbyssExitButtonPoint 는 Get-GameRegionOcrWords 로 캡처를 엽니다 (어비스 나가기 글자 클릭 헬퍼의 복구 탐침)
-  'Read-DgTitleText|Find-AbyssExitButtonPoint|Get-GameRegionOcrWords|& \$Condition'
+  # 2026-10-01 ⑥e 설계 2.13(반영본 검증, 09-30 리뷰4): Test-KnownScreen 은 여러 판독으로 캡처를 엽니다 (대기형 Clear-EventOverlay 의 루프 끝 복구 탐침 -
+  #   그 호출을 지우면 대기형 블록의 '이 if 문 뒤' 창에 탐침이 없어 아래 검사가 잡습니다)
+  'Read-DgTitleText|Find-AbyssExitButtonPoint|Get-GameRegionOcrWords|Test-KnownScreen|& \$Condition'
 $probeMissing = @()
 foreach ($spot in $freezeSpots) {
   $scan = [string]$spot.Body + "`n" + [string]$spot.PreCheck

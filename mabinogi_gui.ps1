@@ -1989,6 +1989,9 @@ $btnManual.Add_Click({
       [System.Windows.Forms.MessageBox]::Show($manualText, '심층던전 설명서',
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
     } else {
+      # 어비스 설명서. 파티원 문단은 파티원 상태 기계 D(⑥e)에 맞춘 문구입니다 (사용자 결정 09-30 D4 - D1 과 맞춤:
+      # 입장 요청마다(클리어 뒤 포함) '준비 완료'를 누르고 이어 가며, 정지 사유에서만 '나가기'로 필드에 나온 뒤 멈춤).
+      # 옛 문구는 클리어마다 보상 화면에서 나가던 옛 흐름의 설명이라 바꿨습니다. 파티장 문단은 그대로 둡니다.
       $manualText = $manualCommon +
       "[어비스 사용법]`n" +
       " 1) 게임을 창 모드로 변경합니다.`n" +
@@ -1998,9 +2001,12 @@ $btnManual.Add_Click({
       "※ 매칭 '파티(파티장)': 파티를 먼저 짠 상태에서 시작하세요.`n" +
       "   입장하기 후 파티원 전원이 준비되면 자동 입장됩니다.`n" +
       "   (인원이 부족해도 채우지 않고 확인 팝업을 넘겨 그대로 도전합니다)`n" +
-      "※ 매칭 '파티(파티원)': 파티를 짠 상태로 캐릭터를 필드에 두고 시작하세요.`n" +
-      "   파티장이 입장을 시작하면 자동으로 '준비 완료'를 누르고 따라갑니다.`n" +
-      "   (메뉴 이동 없이 대기 → 입장 → 클리어 → 나가기만 반복)"
+      "※ 매칭 '파티(파티원)': 파티를 짠 상태에서 시작하세요 (필드·보상 화면 어디서든).`n" +
+      "   파티장이 입장을 요청하면 '준비 완료'를 누르고 따라 들어가며, 클리어 뒤에는`n" +
+      "   보상 화면에서 다음 요청을 기다렸다가 '준비 완료'를 누르고 이어 갑니다`n" +
+      "   (준비 패널을 접어 두면 다시 펼침).`n" +
+      "   마지막 회차·안전 중지·지정 시간, 그리고 파티장 요청이 '클리어 대기(초)' 동안 없으면`n" +
+      "   '나가기'로 필드에 나온 뒤 멈춥니다 - 마지막 회차는 파티장 PC 를 먼저 멈추세요."
       [System.Windows.Forms.MessageBox]::Show($manualText, '어비스 설명서',
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
     }
@@ -4765,9 +4771,12 @@ $btnClearHelp.Region = New-Object System.Drawing.Region($helpCirclePath)
 $grpSettings.Controls.Add($btnClearHelp)
 
 $btnClearHelp.Add_Click({
+    # 파티원(⑥e)은 이 값을 파티장의 다음 입장 요청 대기 한도로도 씁니다(워커 M = 클리어 대기 설정 - 사용자
+    # 결정 09-29 ⑶). 넘기면 '나가기'로 필드에 나온 뒤 정지하므로 그 뜻을 도움말에 한 줄 더합니다.
     $helpText = "던전에 입장한 뒤 '던전 클리어!' 화면이 뜰 때까지 기다리는 최대 시간입니다.`n`n" +
     "- 클리어가 감지되면 즉시 다음 단계로 넘어갑니다 (설정한 시간을 다 기다리지 않음)`n" +
-    "- 이 시간을 넘겨도 클리어 화면이 안 나오면 문제가 생긴 것으로 판단하고 그 회차를 중단합니다`n`n" +
+    "- 이 시간을 넘겨도 클리어 화면이 안 나오면 문제가 생긴 것으로 판단하고 그 회차를 중단합니다`n" +
+    "- 매칭 '파티(파티원)'에서는 파티장의 다음 입장 요청을 기다리는 한도로도 씁니다 (넘기면 '나가기' 뒤 정지)`n`n" +
     "즉, '한 판이 아무리 길어도 이 시간 안에는 끝난다'는 안전 한도입니다.`n" +
     "보통 한 판에 3~4분 걸리므로 기본값 600초(10분)면 충분하고,`n" +
     "더 오래 걸리는 던전이라면 여유 있게 늘려 주세요."
@@ -8091,6 +8100,17 @@ function Test-TimeAllowsNextCycle {
   return ($estimatedEnd -le $script:targetTime)
 }
 
+function Test-AbyssMemberRunActive {
+  # 이번 실행이 어비스 '파티(파티원)' 실행(워커의 파티원 상태 기계 D - ⑥e)인지 GUI 쪽에서 판정합니다.
+  # 워커 디스패치 조건(비커스텀 + 어비스 + 함께하기 + 매칭 '파티(파티원)')과 같은 뜻을 라디오로 봅니다 -
+  # 시작 직전 Save-SettingsFromUi 가 이 라디오 값을 config 에 쓰고 워커는 그 config 로 판정합니다.
+  # 대분류를 따로 보는 이유: 생활·기타로 전환해도 전투 라디오의 Checked 는 복귀 대비로 보존됩니다.
+  # 실행 중에는 Set-UiRunning 이 대분류 버튼과 콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다.
+  # 쓰는 곳: Start-NextCycle 의 시간 지정 신호(파티원 분기), Invoke-StartAutomation 의 시작 안내 1줄.
+  # (컨트롤 속성 읽기뿐인 순수 판정이라 실패 경로가 없습니다 - 같은 자리의 Get-CycleWaitSecondsForEstimate 와 같음)
+  return (($script:mainCategory -eq 'battle') -and $rbCatAbyss.Checked -and $rbModeParty.Checked -and $rbAbyssPartyMember.Checked -and (-not $script:customActive))
+}
+
 function Move-WorkerLogToArchive {
   param(
     [string]$Path,
@@ -8214,11 +8234,28 @@ function Start-NextCycle {
   # 넘김. 사이클 길이는 이동 거리로 크게 흔들려 예측 불가가 실측됨 - 이슈 문서 참고).
   # 매 회차 **먼저 지우고** 조건(생활 + 시간 지정)일 때만 다시 설정합니다 - GUI 프로세스에
   # 남은 값이 다음 비시간/전투 회차 워커로 새는 것 방지 (커스텀 env 정리와 같은 이유).
-  # 전투는 전달하지 않습니다 - 판 중간 정지 불가 + 전투 초과는 미실측 (규칙 8).
+  # 전투는 전달하지 않습니다 - 판 중간 정지 불가 + 전투 초과는 미실측 (규칙 8). 예외는 아래
+  # 어비스 파티원(⑥e) 분기 하나뿐이고, 그쪽도 판 중간 정지용이 아닙니다 (그 분기 주석 참고).
   # 전체 타임스탬프인 이유는 자정 넘김(23:50 에 00:30 지정) 모호성 방지입니다.
   $env:HONEYNOGI_UNTIL_TIME = ''
+  # 사이클 추정치(파티원 전용)도 매 회차 먼저 지웁니다 - UNTIL 과 같은 이유입니다 (파티원 + 시간 지정으로
+  # 돌던 GUI 에서 다음 실행을 다른 모드로 시작해도 옛 값이 새 워커로 새지 않게. 빈 값 대입 = 변수 제거)
+  $env:HONEYNOGI_CYCLE_ESTIMATE_SEC = ''
   if (($null -ne $script:targetTime) -and ($script:mainCategory -eq 'life')) {
     $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm')
+  }
+  # 파티원(⑥e): 시간 지정의 마지막 회차를 워커가 클리어 뒤 경계에서 판단해 '나가기' 로 필드에 나온 뒤
+  # 멈추게 합니다 (사용자 결정 09-29 ⑶ - 보상 화면에 남긴 채 멈추지 않음).
+  # 워커는 이 값을 대기 루프의 마감으로 쓰지 않습니다 - 경계·입장 결정의 게이트(지금 + 추정치 + 여유 >
+  # 목표 시각)에만 씁니다. 추정치를 워커의 클리어 대기 설정이 아니라 GUI 값으로 넘기는 이유: 위
+  # Test-TimeAllowsNextCycle 과 **같은 값**(Get-CycleWaitSecondsForEstimate)이어야 워커의 '마지막 회차'
+  # 판단과 GUI 의 '다음 회차 시작' 판단이 같은 기준으로 맞물립니다 (실행 중 숫자만 바꾸고 저장하지 않은
+  # 경우에도 두 쪽이 같은 수를 봄).
+  # 생활 분기와 합치지 않는 이유: 뜻이 다르고(생활 = 사이클 중 즉시 정지, 파티원 = 경계 게이트만) 생활
+  # 배선 단언(test_life_gather 의 '생활 + 시간 지정일 때만 설정')을 그대로 지키기 위해서입니다.
+  if (($null -ne $script:targetTime) -and (Test-AbyssMemberRunActive)) {
+    $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm')
+    $env:HONEYNOGI_CYCLE_ESTIMATE_SEC = [string](Get-CycleWaitSecondsForEstimate)
   }
   # 이번 회차의 [완료] 사유 수집을 초기화합니다 (이전 회차 사유가 코드 4 상태줄에 오표시되는
   # 것 방지 - 리뷰 조건)
@@ -8950,6 +8987,12 @@ function Invoke-StartAutomation {
     }
     # 커스텀 반복은 상단 횟수/시간과 택일 관계 - 라디오가 비활성이라 실질 방어용 강제 해제
     if ($script:customActive) { $script:targetCycles = 0; $script:targetTime = $null }
+    # 파티원(⑥e) 시작 안내 1줄 (사용자 결정 09-30 D4). 문구는 D1 에 맞춥니다 - 입장 요청마다(클리어 뒤 포함)
+    # '준비 완료'를 누르고 이어 가며, 정지 사유에서만 '나가기'로 필드에 나온 뒤 멈춥니다. 팝업이 아니라 로그라
+    # 무인 운용과 무관합니다 (규칙 6). 이 자리(반복 설정 뒤)인 이유: 판정이 이번 실행의 customActive(위에서 확정)를
+    # 보고, 시간 지정 시작 게이트에서 막힌 시작에는 안내가 남지 않게 하기 위해서입니다.
+    # 대기 한도 N초 = 워커의 클리어 대기 설정(timeoutsSeconds.dungeonClear) - 이 함수 앞부분의 Save-SettingsFromUi 가 이 값을 저장했습니다.
+    if (Test-AbyssMemberRunActive) { Add-GuiLog "[안내] 파티원: 파티장의 입장 요청마다 '준비 완료'를 누르고 따라 들어갑니다(클리어 뒤 다음 요청도 같음). 마지막 회차·안전 중지·지정 시간·대기 한도(클리어 대기 $([int]$numClearWait.Value)초) 초과 때는 '나가기'로 필드에 나온 뒤 멈춥니다 - 파티장 PC 도 함께 정지해 주세요" }
     # 실행 중에는 화면 꺼짐/절전을 막습니다 (감지가 화면 렌더링에 의존)
     [Win32.PowerState]::SetThreadExecutionState($script:esKeepAwake) | Out-Null
     Set-UiRunning $true

@@ -52,7 +52,10 @@ $captureFailBranches = @([regex]::Matches($deadlineBlock.Groups[1].Value,
 # 2026-09-21 +1: 보상 전체 화면 닫기(Close-QuestRewardScreen) 판독 뒤 캡처 실패 가드 - 어비스 불명 종료 코드 4 분기 앞 (구현 리뷰 P2)
 # 2026-09-25 +1: 사망 표본 탐침(Test-DeathScreenValid) 뒤 플래그∨일련번호 가드 - 뒤 탐침의 캡처 성공이 플래그를 풀어 마감을 확정하던 경로 (구현 리뷰 2차 P2).
 #   elseif 4곳은 전부 일련번호($deadlineSerial)도 대조합니다 - 진입부 if 는 탐침 전이라 플래그만.
-Assert-Case '워커: 마감 처리의 캡처 실패 분기 5곳' $captureFailBranches.Count 5
+# 2026-09-30 +1 (⑥e 설계 3절 4): 파티원(-MemberMode) 마감 탐침(Test-AbyssMemberClearWaitProbe) 뒤 플래그∨일련번호 가드 - 그 탐침 도중 같은 회전
+#   실패 → 복구가 나면 종료를 확정하지 않고 동결에 맡깁니다(규칙 15, 기존 분기와 같은 모양). 비파티원에게는 탐침이 단락돼 무동작.
+#   elseif 5곳 전부 일련번호 대조·throw/exit 없음은 그대로입니다.
+Assert-Case '워커: 마감 처리의 캡처 실패 분기 6곳' $captureFailBranches.Count 6
 Assert-Case '워커: 마감 처리의 elseif 동결 분기는 전부 일련번호 대조' (@($captureFailBranches | Where-Object { $_.Value -like '} elseif*' -and $_.Value -notlike '*-ne $deadlineSerial*' })).Count 0
 $throwInCaptureFail = 0
 foreach ($m in $captureFailBranches) { if ($m.Groups[1].Value -match '\b(?:throw|exit)\b') { $throwInCaptureFail++ } }   # 09-25: exit 도 (구현 리뷰 2차 보강)
@@ -112,9 +115,20 @@ Assert-Case '워커: Wait-ForScreen 캡처 실패 게이트' `
 Assert-Case '워커: 어비스 커스텀 난이도 확인 실패 정지' `
   ([regex]::Matches($workerSource, '오난이도 판 방지를 위해 정지합니다').Count) 9   # 08-11 ③ 6곳 + 08-13 사냥터 미탐색 격상 1곳
 
-# ⑪ 파티원 준비 버튼은 '준비' 조각까지 요구
-Assert-Case "워커: 파티원 버튼 '준비'+'완료' 요구" `
-  ($workerSource -match "match '준비' -and \`$memberBtnText -match '완료'") $true
+# ⑪ 파티원 준비 버튼은 '준비' 조각까지 요구 (2026-09-26 ⑥a: 조건이 순수 판정 Get-AbyssReadyButtonState 로 옮겨감 - 판정은
+#    소스에서 추출해 값으로 확인하고, 파티원 두 루프(입장 대기·필드 복귀)가 이 판정의 'ready-available' 만 클릭하는지 배선으로 확인)
+Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Get-AbyssReadyButtonState')))
+Assert-Case "워커: 파티원 버튼 '준비'+'완료' 요구 - '완료' 만 있는 문구('협동미션완료')는 클릭 대상 아님" `
+  ((@('준비완료', '협동미션완료', '준비취소', '') | ForEach-Object { Get-AbyssReadyButtonState -Text $_ }) -join ',') 'ready-available,none,ready-done,none'
+# 2026-09-30 ⑥e: 옛 두 루프(입장 대기·필드 복귀)는 관측 루프 D·퇴장 절차 P 로 바뀌었습니다. 버튼 판독은 D·P 각 1곳(화면 분류의 입력)이고,
+#   '준비 완료' 클릭(버튼 자리 $ptPartyEnter)은 D 한 곳(START·CLEAR 경계 공용)에서 화면 분류가 'ready-available' 인 분기 안에서만 합니다 -
+#   P 는 누르지 않습니다(퇴장 절차). 주석 뺀 D·P 본문으로 셉니다 (파일 전체에는 파티장 입장하기의 같은 좌표 클릭이 따로 있음)
+$memberDpCode = Remove-SourceComments -Text ((Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-AbyssPartyMemberCycle', 'Invoke-AbyssMemberLeave')) -join "`n")
+Assert-Case "워커: 파티원 D·P 가 준비 버튼을 Get-AbyssReadyButtonState 로 판독 (2곳)" `
+  ([regex]::Matches($memberDpCode, '\$buttonState = Get-AbyssReadyButtonState -Text \$memberBtnText').Count) 2
+Assert-Case "워커: 파티원 '준비 완료' 클릭은 D·P 전체에 1곳이고 화면 분류 'ready-available' 분기 안에서만" `
+  (([regex]::Matches($memberDpCode, 'Click-GamePoint -Game \$Game -ReferenceX \$ptPartyEnter\[0\]').Count -eq 1) -and
+   ([bool]($memberDpCode -match "if \(\`$screen -eq 'ready-available' -and [^{]*\{\s*Focus-Game -Game \`$Game\s*Click-GamePoint -Game \`$Game -ReferenceX \`$ptPartyEnter\[0\]"))) $true
 
 # 설정부: 좌표 int 범위 검사 + 기준 좌표계 1272x717 고정
 Assert-Case '워커: 좌표 int 범위 검사' `
@@ -263,10 +277,12 @@ Assert-Case '3차: 카드 다중 스케일 1~2회전' `
 #   뒤** 종료한다' 인데, 소비 게이트(`Test-Path $safeStopFlagPath`)와 삭제가 패턴에 없어서
 #   게이트를 항상 거짓으로 만들어도 통과했습니다. 그러면 예약이 다음 실행으로 새어 나가
 #   헛 조기 종료가 됩니다(3차 점검이 고친 회귀 그대로). 코드 사본으로 3요소를 함께 봅니다.
+# 2026-09-30 ⑥e 설계 2.14(09-30 리뷰5 P1-1): 복귀 완료는 선택 화면 판독 자리가 아니라 회전 서두의 완료 블록 `if ($selectionConfirmed) {` 한 곳으로
+#   옮겼습니다(워커 자신의 '어비스' 클릭 출처가 살아 있는 판독이 예약 → 다음 회전 서두에서 소비·종료·완료 로그). 앵커만 그 블록으로 바꾸고 3요소는 그대로
 $abyssBackBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection'))
 $abyssBackCode = (($abyssBackBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '3차: 선택 화면 복귀 직전 안전 중지 소비(게이트+삭제+종료)' `
-  ([bool]($abyssBackCode -match '(?s)Test-AbyssSelectionScreen -Game \$Game\) \{.{0,600}?Test-Path -LiteralPath \$safeStopFlagPath.{0,400}?Remove-Item -LiteralPath \$safeStopFlagPath.{0,400}?exit \$SafeStopExitCode')) $true
+  ([bool]($abyssBackCode -match '(?s)if \(\$selectionConfirmed\) \{.{0,600}?Test-Path -LiteralPath \$safeStopFlagPath.{0,400}?Remove-Item -LiteralPath \$safeStopFlagPath.{0,400}?exit \$SafeStopExitCode')) $true
 # GUI: 혼합 잠금 이전 상태 저장/복원 왕복
 Assert-Case '3차: 혼합 잠금 진입 시 이전 상태 저장' `
   ($guiSource -match '\$mixState\.PrevInfinite = -not \[bool\]\$RbCount\.Checked[\s\S]{0,60}\$mixState\.PrevLaps') $true

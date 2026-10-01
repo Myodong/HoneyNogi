@@ -337,7 +337,9 @@ Check-Equal "⑩ 퇴장 헬퍼: 필드 2연속은 '나가기' 를 보낸 뒤에�
 # ⑫ 구현 리뷰 2차 반영 배선 (2026-09-25 밤)
 Check-Equal '⑫ 마감 블록: 진입 전 일련번호 기록' ($clearCode -match '(?s)\$deadlineSerial = \$script:captureFailSerial\s*\r?\n\s*if \(\(Get-Date\) -ge \$deadline\) \{') $true
 Check-Equal '⑫ 마감 블록: 사망 표본 탐침 뒤(전투 연장 앞)에 플래그∨일련번호 동결 분기' ($clearCode -match '(?s)\} elseif \(\$reviveEnabled -and \(\$reviveState\.Pending -or \(Test-DeathScreenValid -Game \$Game\)\)\) \{[\s\S]{0,600}?\} elseif \(\$script:screenCaptureFailing -or \(\$script:captureFailSerial -ne \$deadlineSerial\)\) \{\s*\r?\n\s*\} elseif \(\(Get-Date\) -lt \$extendLimit') $true
-Check-Equal '⑫ 마감 블록: 동결 분기 4곳 전부 일련번호 대조 (탐침 사이 실패를 뒤 성공이 가리지 못함)' ([regex]::Matches($clearCode, '\} elseif \(\$script:screenCaptureFailing -or \(\$script:captureFailSerial -ne \$deadlineSerial\)\) \{').Count) 4
+# 2026-09-30 ⑥e 설계 3절 4: 파티원(-MemberMode) 마감 탐침 뒤에 같은 모양의 동결 분기가 하나 더 붙어 4 → 5 (비파티원에게는 탐침이 단락돼 무동작 -
+#   탐침 도중 같은 회전 실패 → 복구면 종료를 확정하지 않고 동결에 맡김, 규칙 15). 개수는 test_audit_fixes 의 '캡처 실패 분기 6곳' 과 짝입니다
+Check-Equal '⑫ 마감 블록: 동결 분기 5곳 전부 일련번호 대조 (탐침 사이 실패를 뒤 성공이 가리지 못함)' ([regex]::Matches($clearCode, '\} elseif \(\$script:screenCaptureFailing -or \(\$script:captureFailSerial -ne \$deadlineSerial\)\) \{').Count) 5
 Check-Equal '⑫ 마감 블록: 플래그만 보는 elseif 는 남지 않음' ([regex]::Matches($clearCode, '\} elseif \(\$script:screenCaptureFailing\) \{').Count) 0
 Check-Equal '⑫ 퇴장 헬퍼: 회전 서두에서 생략 사유 비움 (규칙 4)' ($exitBody -match '(?s)\$turnSerial = \$script:captureFailSerial\s*\r?\n\s*\$script:lastClickSkipReason = ''''\s*\r?\n\s*if \(\$script:screenCaptureFailing\)') $true
 Check-Equal '⑫ 퇴장 헬퍼: 조작 양보가 마감 판정보다 앞' ($exitBody -match '(?s)if \(Test-UserRecentlyActive\) \{ \$fieldStreak = 0; \$insideStreak = 0; Wait-UserYieldEnd -Game \$Game -Context ''던전 퇴장''; continue \}\s*\r?\n\s*if \(\(Get-Date\) -ge \(Get-YieldAdjustedDeadline') $true

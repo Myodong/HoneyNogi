@@ -83,12 +83,26 @@ Check-Pattern '수동 진행분 정리 후 코드 10' `
   'Return-ToAbyssSelection -Game \$game[\s\S]{0,320}customCleanupOnly\) \{ exit 10 \}'
 Check-Pattern '안전 중지 종료 코드가 호출 문맥을 따름' `
   'Return-ToAbyssSelection -Game \$game -SafeStopExitCode 10[\s\S]{0,400}exit 10'
-Check-Pattern '완료 복구에서 선택 화면이면 재입장 없이 완료' `
-  'customRecoveryOnly -and \(Test-AbyssSelectionScreen[\s\S]{0,250}exit 0'
+# 2026-09-30 ⑥e 설계 2.14(09-30 리뷰5 P1-1, 사용자 결정 D7): 완료 항목 마무리 복구 워커는 새 워커라 선택 화면 출처(워커 자신의 '어비스' 클릭)가
+#   없습니다 - 선택 화면·상세 화면은 던전 안 오버레이로도 열려(09-20 실사고) 모양만으로는 던전 밖의 증거가 아닙니다. 옛 '재입장 없이 복구 완료'
+#   (코드 0 → GUI 가 다음 항목 시작)는 오버레이에서 다음 항목으로 넘어갈 수 있었습니다 → 진단 캡처 + 코드 4 (GUI 는 유효 마커로 계상·전진 뒤 정지).
+#   두 블록 안에 exit 0 은 0건이어야 합니다 (되돌림 변이 검출 - 블록은 앵커부터 그 블록의 exit 4 까지)
+function Check-RecoveryBlock {
+  param([string]$Name, [string]$Pattern)
+  $m = [regex]::Match($worker, $Pattern)
+  if ($m.Success -and ($m.Value -notmatch '(?m)^\s*exit 0\s*$')) { "OK   $Name" }
+  else { "FAIL $Name (일치=$($m.Success), 블록 안 exit 0=$([regex]::Matches($m.Value, '(?m)^\s*exit 0\s*$').Count))"; $script:fails++ }
+}
+Check-RecoveryBlock '완료 복구가 선택 화면에서 시작하면 출처 없음 코드 4(재입장·복구 완료 없음)' `
+  'customRecoveryOnly -and \(Test-AbyssSelectionScreen[\s\S]{0,400}Write-LifeDiagnostics[\s\S]{0,400}exit 4'
 # 2026-09-10: 이 분기의 뒤로가기가 상태 기반 재클릭 헬퍼로 바뀌면서 근거 주석이 붙어 구간이
 # 1200 → 1386자가 됐습니다(재클릭 허가·전면화 보존·재클릭 간격의 이유). 계약 자체는 그대로라
 # 상한만 넓힙니다 - 뒤로가기 동작의 세부 계약은 tests\test_abyss_detail_back.ps1 이 봅니다.
-Check-Pattern '완료 복구에서 상세 화면도 선택 화면으로 복귀' `
-  'customRecoveryOnly -and -not \$startInsideDetected[\s\S]{0,1600}완료 항목 재입장 없이 복구 완료[\s\S]{0,80}exit 0'
+# 2026-09-30 ⑥e: '<' 클릭(관측된 전이)은 그대로 두고 그 뒤 완료 대신 진단 + 코드 4 (구현 뒤 실측 창: 앵커 → 뒤로가기 1028자, 뒤로가기 →
+#   진단 522자, 진단 → exit 4 172자 - 창 1600/900/400 안)
+Check-RecoveryBlock '완료 복구가 상세 화면에서 시작하면 뒤로가기 뒤 출처 없음 코드 4' `
+  'customRecoveryOnly -and -not \$startInsideDetected[\s\S]{0,1600}Invoke-ClickUntil -Game \$game -Point \$ptDetailBack[\s\S]{0,900}Write-LifeDiagnostics[\s\S]{0,400}exit 4'
+Check-Pattern '완료 복구 두 블록의 옛 복구 완료 문구 0건 (어비스 선택·상세 경로)' `
+  '^(?![\s\S]*(어비스 선택 화면이 이미 준비돼 있습니다 - 완료 항목 재입장 없이 복구 완료|어비스 상세 화면에서 선택 화면으로 복귀 - 완료 항목 재입장 없이 복구 완료))'
 
 exit $fails
