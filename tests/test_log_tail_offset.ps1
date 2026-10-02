@@ -392,6 +392,16 @@ W1|게임 창 정보: |log|(최상위)|"[준비] 게임 창 정보: ${infoW}x${i
 W2|게임 창 정보: |log|(최상위)|'[준비] 게임 창 정보: 측정 불가 (GetWindowRect 실패)'
 W3|게임 창 정보: |log|(최상위)|"[준비] 게임 창 정보: 측정 불가 ($($_.Exception.Message))"
 W4|게임 창 정렬(|log|(최상위)|"[준비] 게임 창 정렬($windowMode): ${currentWidth}x${currentHeight}@($currentX,$currentY) -> ${targetWidth}x${targetHeight}@($targetX,$targetY)"
+A1|자동 입장)|log|(최상위)|'[어비스] 입장하기 클릭 - 파티원 대기 (모이면 자동 입장)'
+A2|자동 입장)|log|(최상위)|'[어비스] 파티원 준비 대기 중... (전원 준비되면 자동 입장)'
+A3|자동 입장)|log|(최상위)|'[어비스] 파티 매칭 대기 중... (끝나면 자동 입장)'
+P1|(입장 대기 중|log|Invoke-PurchasePopupSweep|'[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)'
+P2|(입장 대기 중|log|Invoke-PurchasePopupSweep|'[안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (입장 대기 중, 다음 감지에서 재시도)'
+K1|클리어 문구(화면을 터치)|log|Wait-ForDungeonClearScreen|"$($script:contentTag) 클리어 문구(화면을 터치) 감지"
+Y1|사용자 입력 감지(|log|Wait-UserYieldEnd|"[안내] 사용자 입력 감지($($script:lastUserInputKind)) - 조작이 끝날 때까지 ${Context}${particle} 멈추고 기다립니다"
+Y2|사용자 입력 감지(|log|Click-ScreenPoint|"[안내] 사용자 입력 감지($($script:lastUserInputKind)) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)"
+Y3|사용자 입력 감지(|log|Move-CursorOutsideGame|"[안내] 사용자 입력 감지($($script:lastUserInputKind)) - 조작이 끝날 때까지 자동화를 잠시 양보합니다"
+Y4|사용자 조작 종료 - |log|Wait-UserYieldEnd|"[안내] 사용자 조작 종료 - ${Context}${particle} 다시 진행합니다 ($([int]$yieldClock.Elapsed.TotalSeconds)초 양보)"
 '@
 $tidyById = [ordered]@{}
 foreach ($tidyRow in ($tidyFingerprintText -split "`r?`n" | Where-Object { $_ })) {
@@ -493,6 +503,121 @@ $tidyW3Raw = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = 'GetDpi
 Check-Equal '워커 템플릿 펼침(W3): 측정 불가 예외문' $tidyW3Raw '[준비] 게임 창 정보: 측정 불가 (GetDpiForWindow 진입점 없음)'
 Check-Equal 'GUI 정리(소스 템플릿 W3): 측정 불가 예외문은 그대로' `
   (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidyW3Raw) $false) ('12:00:00 [준비] 게임 창 정보: 측정 불가 (GetDpiForWindow 진입점 없음)')
+
+# ── 3차 정리 (2026-10-02 사용자 확정) - ⑥ 파티 입장 안내 '(… 자동 입장)' ⑦ 구매 팝업 '(입장 대기 중…)' ⑧ '클리어 문구(화면을 터치)' ──
+# 실로그 원문 → 기대 표시 (정확 일치). 마지막 줄은 [던전] 이라 기존 규칙대로 화면에서 숨김($null)이어야 합니다(숨김이 먼저).
+$tidy3RealCases = @(
+  @('11:19:26 [어비스] 입장하기 클릭 - 파티원 대기 (모이면 자동 입장)', '11:19:26 [어비스] 입장하기 클릭 - 파티원 대기'),
+  @('11:19:27 [어비스] 파티 매칭 대기 중... (끝나면 자동 입장)', '11:19:27 [어비스] 파티 매칭 대기 중...'),
+  @('21:56:03 [어비스] 파티원 준비 대기 중... (전원 준비되면 자동 입장)', '21:56:03 [어비스] 파티원 준비 대기 중...'),
+  @('11:19:42 [안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)', '11:19:42 [안내] 구매 팝업 감지 - 닫기 클릭'),
+  @('11:22:48 [어비스] 클리어 문구(화면을 터치) 감지', '11:22:48 [어비스] 클리어 문구 감지'),
+  @('15:08:11 [던전] 클리어 문구(화면을 터치) 감지', $null)
+)
+foreach ($tidy3Case in $tidy3RealCases) {
+  Check-Equal ('GUI 3차(실로그): {0}' -f $tidy3Case[0]) (Convert-WorkerLogLineForGui $tidy3Case[0] $false) $tidy3Case[1]
+}
+# 보존 근접 변형 - 그대로여야 함: 끝 앵커(뒤에 글이 더 붙음), 목록 밖 앞말, 구매 팝업 줄이 아님(가드), 다른 줄 안에 인용(태그 위치
+# 앵커), 쉼표형의 다른 안내
+$tidy3KeepCases = @(
+  '12:00:00 [어비스] 파티 매칭 대기 중... (끝나면 자동 입장) 후속문구',
+  '12:00:00 [안내] 예시 안내 (곧 자동 입장)',
+  '12:00:00 [안내] 다른 안내 (입장 대기 중)',
+  '12:00:00 [경고] 인용: [안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)',
+  '12:00:00 [안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중) 후속문구',
+  '12:00:00 [안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (입장 대기 중, 다음 감지에서 재시도) 후속문구',
+  '12:00:00 [안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (입장 대기 중, 다른 안내)',
+  '12:00:00 [어비스] 클리어 문구(화면을 터치) 감지 후속문구',
+  '12:00:00 [안내] 인용: [어비스] 클리어 문구(화면을 터치) 감지'
+)
+foreach ($tidy3Keep in $tidy3KeepCases) {
+  Check-Equal ('GUI 3차(보존 근접 변형): {0}' -f $tidy3Keep) (Convert-WorkerLogLineForGui $tidy3Keep $false) $tidy3Keep
+}
+# 소스 템플릿 펼침 - 실로그에 없는 모양(구매 팝업 건너뜀, [사냥터] 클리어 문구)과 리터럴 3줄. contentTag 는 스크립트 범위라
+# 펼친 뒤 지웁니다(뒤 단언 오염 방지).
+$tidy3RenderCases = @(
+  @{ Id = 'A1'; Raw = '[어비스] 입장하기 클릭 - 파티원 대기 (모이면 자동 입장)'; Shown = '[어비스] 입장하기 클릭 - 파티원 대기' }
+  @{ Id = 'A2'; Raw = '[어비스] 파티원 준비 대기 중... (전원 준비되면 자동 입장)'; Shown = '[어비스] 파티원 준비 대기 중...' }
+  @{ Id = 'A3'; Raw = '[어비스] 파티 매칭 대기 중... (끝나면 자동 입장)'; Shown = '[어비스] 파티 매칭 대기 중...' }
+  @{ Id = 'P1'; Raw = '[안내] 구매 팝업 감지 - 닫기 클릭 (입장 대기 중)'; Shown = '[안내] 구매 팝업 감지 - 닫기 클릭' }
+  @{ Id = 'P2'; Raw = '[안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (입장 대기 중, 다음 감지에서 재시도)'
+     Shown = '[안내] 구매 팝업 감지 - 커서 확인 실패로 닫기 클릭을 건너뜀 (다음 감지에서 재시도)' }
+  @{ Id = 'K1'; Tag = '[사냥터]'; Raw = '[사냥터] 클리어 문구(화면을 터치) 감지'; Shown = '[사냥터] 클리어 문구 감지' }
+  @{ Id = 'K1'; Tag = '[어비스]'; Raw = '[어비스] 클리어 문구(화면을 터치) 감지'; Shown = '[어비스] 클리어 문구 감지' }
+)
+foreach ($tidy3Render in $tidy3RenderCases) {
+  if ($tidy3Render.Tag) { $script:contentTag = $tidy3Render.Tag }
+  $tidy3Raw = Expand-TidyTemplate -Id $tidy3Render.Id -Vars @{}
+  Remove-Variable -Name contentTag -Scope Script -ErrorAction SilentlyContinue
+  Check-Equal ('워커 템플릿 펼침({0}): {1}' -f $tidy3Render.Id, $tidy3Render.Raw) $tidy3Raw $tidy3Render.Raw
+  Check-Equal ('GUI 3차(소스 템플릿 {0}): {1}' -f $tidy3Render.Id, $tidy3Render.Shown) `
+    (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidy3Raw) $false) ('12:00:00 ' + $tidy3Render.Shown)
+}
+
+# ── 4차 정리 (2026-10-02 사용자 확정) - ⑨ '사용자 입력 감지(입력 종류) - …' → '사용자 조작 감지 - …', 기다림 안내 2종 통일 ──
+# 실로그 원문 → 기대 표시 (정확 일치). 뒤 3줄(조작 종료·재개·계속 중)은 그대로여야 하는 실로그입니다.
+$tidy4RealCases = @(
+  @('13:29:01 [안내] 사용자 입력 감지(키/버튼 입력) - 조작이 끝날 때까지 어비스 선택 화면 복귀를 멈추고 기다립니다',
+    '13:29:01 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+  @('13:48:36 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 클리어 화면 터치(나가기 버튼 표시)을(를) 멈추고 기다립니다',
+    '13:48:36 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+  @("13:25:27 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 난이도 '매우 어려움' 확인을 멈추고 기다립니다",
+    '13:25:27 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+  @('15:09:46 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다',
+    '15:09:46 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+  @('13:27:57 [안내] 사용자 입력 감지(키/버튼 입력) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)',
+    '13:27:57 [안내] 사용자 조작 감지 - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'),
+  @('13:29:05 [안내] 사용자 조작 종료 - 어비스 선택 화면 복귀를 다시 진행합니다 (4초 양보)',
+    '13:29:05 [안내] 사용자 조작 종료 - 어비스 선택 화면 복귀를 다시 진행합니다 (4초 양보)'),
+  @('15:09:46 [안내] 사용자 조작이 끝나 자동화를 재개합니다 (양보 1초)',
+    '15:09:46 [안내] 사용자 조작이 끝나 자동화를 재개합니다 (양보 1초)'),
+  @('20:23:08 [안내] 사용자 조작이 계속되고 있어 이벤트 화면 넘기기 대기 중입니다 (60초 경과)',
+    '20:23:08 [안내] 사용자 조작이 계속되고 있어 이벤트 화면 넘기기 대기 중입니다 (60초 경과)')
+)
+foreach ($tidy4Case in $tidy4RealCases) {
+  Check-Equal ('GUI 4차(실로그): {0}' -f $tidy4Case[0]) (Convert-WorkerLogLineForGui $tidy4Case[0] $false) $tidy4Case[1]
+}
+# 근접 변형: 앞 2줄은 그대로(다른 줄 안에 인용 - 태그 위치 / [경고] 태그 - [안내] 고정), 뒤 2줄은 기다림 안내 뒤에 글이 더 붙은 줄이라
+# 접두만 바뀌고 본문은 그대로(두 통일식의 끝 앵커)
+$tidy4NearCases = @(
+  @('12:00:00 [경고] 인용: [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다',
+    '12:00:00 [경고] 인용: [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다'),
+  @('12:00:00 [경고] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다',
+    '12:00:00 [경고] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다'),
+  @('12:00:00 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다 후속문구',
+    '12:00:00 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 자동화를 잠시 양보합니다 후속문구'),
+  @('12:00:00 [안내] 사용자 입력 감지(키/버튼 입력) - 조작이 끝날 때까지 던전 퇴장을 멈추고 기다립니다 후속문구',
+    '12:00:00 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 던전 퇴장을 멈추고 기다립니다 후속문구')
+)
+foreach ($tidy4Near in $tidy4NearCases) {
+  Check-Equal ('GUI 4차(근접 변형): {0}' -f $tidy4Near[0]) (Convert-WorkerLogLineForGui $tidy4Near[0] $false) $tidy4Near[1]
+}
+# 소스 템플릿 펼침 - 입력 종류(마우스·키·빈 값)와 작업 이름·조사 표본. lastUserInputKind 는 스크립트 범위라 펼친 뒤 지웁니다.
+$tidy4RenderCases = @(
+  @{ Id = 'Y1'; Kind = '마우스 이동'; Vars = @{ Context = '던전 퇴장'; particle = '을' }
+     Raw = '[안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 던전 퇴장을 멈추고 기다립니다'
+     Shown = '[안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
+  @{ Id = 'Y1'; Kind = ''; Vars = @{ Context = "난이도 '어려움' 확인"; particle = '을' }
+     Raw = "[안내] 사용자 입력 감지() - 조작이 끝날 때까지 난이도 '어려움' 확인을 멈추고 기다립니다"
+     Shown = '[안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
+  @{ Id = 'Y2'; Kind = '키/버튼 입력'; Vars = @{}
+     Raw = '[안내] 사용자 입력 감지(키/버튼 입력) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
+     Shown = '[안내] 사용자 조작 감지 - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)' }
+  @{ Id = 'Y3'; Kind = '마우스 이동'; Vars = @{}
+     Raw = '[안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다'
+     Shown = '[안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
+  @{ Id = 'Y4'; Kind = '키/버튼 입력'; Vars = @{ Context = '어비스 선택 화면 복귀'; particle = '를'; yieldClock = @{ Elapsed = @{ TotalSeconds = 4 } } }
+     Raw = '[안내] 사용자 조작 종료 - 어비스 선택 화면 복귀를 다시 진행합니다 (4초 양보)'
+     Shown = '[안내] 사용자 조작 종료 - 어비스 선택 화면 복귀를 다시 진행합니다 (4초 양보)' }
+)
+foreach ($tidy4Render in $tidy4RenderCases) {
+  $script:lastUserInputKind = $tidy4Render.Kind
+  $tidy4Raw = Expand-TidyTemplate -Id $tidy4Render.Id -Vars $tidy4Render.Vars
+  Remove-Variable -Name lastUserInputKind -Scope Script -ErrorAction SilentlyContinue
+  Check-Equal ('워커 템플릿 펼침({0}): {1}' -f $tidy4Render.Id, $tidy4Render.Raw) $tidy4Raw $tidy4Render.Raw
+  Check-Equal ('GUI 4차(소스 템플릿 {0}): {1}' -f $tidy4Render.Id, $tidy4Render.Shown) `
+    (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidy4Raw) $false) ('12:00:00 ' + $tidy4Render.Shown)
+}
 
 Check-Equal 'GUI: 진단 아닌 끝 괄호는 보존 (사용자 안내 문구)' `
   (Convert-WorkerLogLineForGui '15:00:00 [완료] 채집 1사이클 완료 - 나무 베기 / 굵은 나무 10개 (이번 사이클은 회차로 세지 않음)' $false) `
