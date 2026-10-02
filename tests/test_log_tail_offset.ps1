@@ -228,6 +228,272 @@ Check-Equal 'GUI: 화면좌표 꼬리 제거' `
 Check-Equal 'GUI: 순서 추정(Y=) 꼬리 제거' `
   (Convert-WorkerLogLineForGui "12:00:13 [생활] '거미줄 뭉치' 행을 목록 순서로 추정했습니다 (Y=680 - 이름 판독 실패 보완)" $false) `
   "12:00:13 [생활] '거미줄 뭉치' 행을 목록 순서로 추정했습니다"
+
+# ── 클릭 지점 '기준좌표 (x,y)' 꼬리 제거 (2026-10-02 사용자 요청) - 파일 원본은 그대로, 화면에서만 지움 ──
+# 실사용/실기 로그 원문 (첫 줄 = 사용자 제보 원문)
+Check-Equal 'GUI: 글자 탐색 기준좌표 꼬리 제거 (어비스 나가기 - 사용자 제보 원문)' `
+  (Convert-WorkerLogLineForGui '09:24:25 [어비스] 나가기 클릭 - 글자 탐색 기준좌표 (491,662)' $false) `
+  '09:24:25 [어비스] 나가기 클릭'
+Check-Equal 'GUI: 글자 탐색 기준좌표 꼬리 제거 (파티원 나가기)' `
+  (Convert-WorkerLogLineForGui '21:05:20 [파티원] 나가기 클릭 - 글자 탐색 기준좌표 (515,654)' $false) `
+  '21:05:20 [파티원] 나가기 클릭'
+Check-Equal "GUI: 괄호 안 기준좌표만 제거하고 횟수는 보존 ('입장 대기 중' 다시 펼침)" `
+  (Convert-WorkerLogLineForGui "20:47:30 [파티원] 접힌 준비 패널 다시 펼침 - '입장 대기 중' 클릭 (1/2, 기준좌표 (743,654))" $false) `
+  "20:47:30 [파티원] 접힌 준비 패널 다시 펼침 - '입장 대기 중' 클릭 (1/2)"
+# 과잉 제거 방지: 좌표 숫자가 없는 '예비 좌표' 안내(실로그 원문)는 그대로, 줄 끝이 아닌 기준좌표(근접 변형 -
+# 끝 앵커·괄호 닫힘 조건을 지키는지)도 그대로
+Check-Equal 'GUI: 예비 좌표 안내는 보존' `
+  (Convert-WorkerLogLineForGui '15:08:27 [커스텀] 구역 1-1 카드 클릭 - 예비 좌표 (시도 1/3)' $false) `
+  '15:08:27 [커스텀] 구역 1-1 카드 클릭 - 예비 좌표 (시도 1/3)'
+Check-Equal 'GUI: 줄 끝이 아닌 기준좌표 꼬리는 보존 (근접 변형)' `
+  (Convert-WorkerLogLineForGui '12:00:00 [어비스] 나가기 클릭 - 글자 탐색 기준좌표 (1,2) 후속문구' $false) `
+  '12:00:00 [어비스] 나가기 클릭 - 글자 탐색 기준좌표 (1,2) 후속문구'
+Check-Equal 'GUI: 괄호가 줄 끝에서 닫히지 않는 기준좌표는 보존 (근접 변형)' `
+  (Convert-WorkerLogLineForGui '12:00:00 [파티원] 다시 펼침 (1/2, 기준좌표 (1,2)) 후속문구' $false) `
+  '12:00:00 [파티원] 다시 펼침 (1/2, 기준좌표 (1,2)) 후속문구'
+
+# 워커 소스 전수 가드: '기준좌표' 를 담은 워커 문자열을 AST 로 모두 찾아 정확히 아래 4곳의 Write-RunLog 첫 인자인지,
+# 소속 함수와 템플릿이 그대로인지 고정하고, 표본 값으로 펼친 원문(필터 전)과 화면 표시(필터 뒤)를 둘 다 정확
+# 일치로 단언합니다 - 실측이 없는 모양(퇴장 절차의 패널 다시 펼침)도 소스에서 잡고, 새 정적 '기준좌표' 문자열이
+# 생기거나 문구·따옴표·변수 이름이 바뀌면 여기서 실패합니다 (그때는 화면 표시를 다시 확인한 뒤 기대값을 갱신할 것).
+# 철자를 바꾸거나('기준 좌표') 문자열을 나눠 조립한 새 좌표 꼬리는 못 잡으니, 그런 문구를 새로 찍으면 이 목록과
+# GUI 필터를 함께 손볼 것.
+$workerParseErrors = $null
+$workerAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$workerParseErrors)
+Check-Equal '워커: 파서 오류 0건 (기준좌표 가드 전제)' (@($workerParseErrors).Count) 0
+$coordExpected = @(
+  @{ Function = 'Invoke-AbyssExitClick'
+     Template = '$LogPrefix $Context - 글자 탐색 기준좌표 ($($read.Point.X),$($read.Point.Y))' }
+  @{ Function = 'Invoke-AbyssMemberLeave'
+     Template = '[파티원] 나가기 클릭 - 글자 탐색 기준좌표 ($($leaveWord.X),$($leaveWord.Y))' }
+  @{ Function = 'Invoke-AbyssMemberLeave'
+     Template = '[파티원] 접힌 준비 패널 다시 펼침(퇴장 절차 - 준비 상태 확인, ${probeSends}/2) - 기준좌표 ($($probeAnchor.X),$($probeAnchor.Y))' }
+  @{ Function = 'Invoke-AbyssPartyMemberCycle'
+     Template = '[파티원] 접힌 준비 패널 다시 펼침 - ''입장 대기 중'' 클릭 (${reexpandSends}/2, 기준좌표 ($($reexpandAnchor.X),$($reexpandAnchor.Y)))' }
+)
+$coordNodes = @($workerAst.FindAll({ param($node)
+      ($node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+       $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and
+      $node.Value.Contains('기준좌표') }, $true))
+$coordActual = @(foreach ($coordNode in $coordNodes) {
+    $owner = $coordNode.Parent
+    $isFirstArg = ($owner -is [System.Management.Automation.Language.CommandAst] -and
+                   $owner.GetCommandName() -eq 'Write-RunLog' -and $owner.CommandElements.Count -ge 2 -and
+                   [object]::ReferenceEquals($owner.CommandElements[1], $coordNode))
+    $ownerFunction = $coordNode.Parent
+    while ($ownerFunction -and -not ($ownerFunction -is [System.Management.Automation.Language.FunctionDefinitionAst])) {
+      $ownerFunction = $ownerFunction.Parent
+    }
+    $ownerName = $(if ($ownerFunction) { $ownerFunction.Name } else { '(최상위)' })
+    '{0}|{1}|{2}' -f $isFirstArg, $ownerName, $coordNode.Extent.Text
+  })
+# 소스 토큰 원문(Extent.Text)으로 비교합니다 - .Value 는 바깥 따옴표("…"/'…')나 `$ 이스케이프가 달라도 같게 나와
+# 확장 여부가 바뀐 변이를 놓칩니다 (구현 리뷰 P2). 네 곳 모두 큰따옴표 확장 문자열입니다.
+$coordWant = @(foreach ($coordItem in $coordExpected) { 'True|{0}|"{1}"' -f $coordItem.Function, $coordItem.Template })
+Check-Equal "워커: '기준좌표' 문자열 = Write-RunLog 첫 인자 4곳 (소속 함수·템플릿 그대로)" `
+  ((@($coordActual) | Sort-Object) -join "`n") ((@($coordWant) | Sort-Object) -join "`n")
+$read = @{ Point = @{ X = 491; Y = 662 } }
+$leaveWord = @{ X = 515; Y = 654 }
+$probeSends = 1
+$probeAnchor = @{ X = 743; Y = 654 }
+$reexpandSends = 2
+$reexpandAnchor = @{ X = 0; Y = 0 }   # 좌표는 0 이상 정수 - (0,0) 도 지워져야 함
+$coordRenderCases = @(
+  @{ Index = 0; LogPrefix = '[어비스]'; Context = '나가기 클릭'
+     Raw = '[어비스] 나가기 클릭 - 글자 탐색 기준좌표 (491,662)'
+     Shown = '[어비스] 나가기 클릭' }
+  @{ Index = 0; LogPrefix = '[어비스]'; Context = '나가기 클릭 (복구 재시도)'
+     Raw = '[어비스] 나가기 클릭 (복구 재시도) - 글자 탐색 기준좌표 (491,662)'
+     Shown = '[어비스] 나가기 클릭 (복구 재시도)' }
+  @{ Index = 1; LogPrefix = ''; Context = ''
+     Raw = '[파티원] 나가기 클릭 - 글자 탐색 기준좌표 (515,654)'
+     Shown = '[파티원] 나가기 클릭' }
+  @{ Index = 2; LogPrefix = ''; Context = ''
+     Raw = '[파티원] 접힌 준비 패널 다시 펼침(퇴장 절차 - 준비 상태 확인, 1/2) - 기준좌표 (743,654)'
+     Shown = '[파티원] 접힌 준비 패널 다시 펼침(퇴장 절차 - 준비 상태 확인, 1/2)' }
+  @{ Index = 3; LogPrefix = ''; Context = ''
+     Raw = '[파티원] 접힌 준비 패널 다시 펼침 - ''입장 대기 중'' 클릭 (2/2, 기준좌표 (0,0))'
+     Shown = '[파티원] 접힌 준비 패널 다시 펼침 - ''입장 대기 중'' 클릭 (2/2)' }
+)
+foreach ($coordCase in $coordRenderCases) {
+  $LogPrefix = $coordCase.LogPrefix
+  $Context = $coordCase.Context
+  $coordRendered = $ExecutionContext.InvokeCommand.ExpandString($coordExpected[$coordCase.Index].Template)
+  Check-Equal ('워커 템플릿 펼침: {0}' -f $coordCase.Raw) $coordRendered $coordCase.Raw
+  Check-Equal ('GUI: 기준좌표 꼬리 제거 (소스 템플릿): {0}' -f $coordCase.Shown) `
+    (Convert-WorkerLogLineForGui ('12:00:00 ' + $coordRendered) $false) ('12:00:00 ' + $coordCase.Shown)
+}
+
+# ── 좌표·개발자 메모 정리 2차 (2026-10-02 사용자 확정) - 파일 원본은 그대로, 화면에서만 정리 ──
+# ① 닫기(X) 후보 좌표 ② '(호출부가 오류 처리…)' ③ 커서 대피 실패의 좌표·반복 안내(+ 클릭 보류·목록 스크롤 좌표)
+# ④ 게임 창 정보의 위치 ⑤ 게임 창 정렬 → 크기 조정/위치 조정. 전부 실사용·실기 로그 원문이고, 앞 11줄은 바뀌는 줄,
+# 뒤 3줄은 같은 낱말('목표'·'연속 실패 중에는 …'·'호출부')이 든 다른 문구라 그대로여야 하는 줄입니다.
+$tidyRealCases = @(
+  @('22:19:26 [안내] 알 수 없는 화면 - 닫기(X) 후보(1229,67) 클릭 시도 (15/20)',
+    '22:19:26 [안내] 알 수 없는 화면 - 닫기(X) 클릭 시도 (15/20)'),
+  @('22:17:50 [안내] 복귀 중 알 수 없는 화면 20초 지속 - 닫기(X) 후보(1229,67) 클릭',
+    '22:17:50 [안내] 복귀 중 알 수 없는 화면 20초 지속 - 닫기(X) 클릭'),
+  @("09:06:35 [경고] 난이도 '어려움' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리, 표본: 기준(80,195) 2/27 [-18:66/44 -14:95/66 -10:112/79 -6:221/160 0:82/56 6:123/86 10:20/15 14:19/13 18:16/11])",
+    "09:06:35 [경고] 난이도 '어려움' 선택 강조를 확인하지 못했습니다"),
+  @("19:43:32 [경고] 옵션 화면에서 난이도 '어려움' 글자를 3회 모두 찾지 못했습니다 (호출부가 오류 처리)",
+    "19:43:32 [경고] 옵션 화면에서 난이도 '어려움' 글자를 3회 모두 찾지 못했습니다"),
+  @('22:13:29 [경고] 커서 대피 실패: SetCursorPos 가 먹지 않음 - 커서가 이동 전 자리(1153,954)에 그대로입니다 - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)',
+    '22:13:29 [경고] 커서 대피 실패: SetCursorPos 가 먹지 않음 - 커서가 이동 전 자리에 그대로입니다 - 팝업 글자가 커서에 가려질 수 있습니다'),
+  @('11:19:29 [경고] 커서 대피 실패: GetCursorPos 실패 (커서 밑 창 확인 단계) - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)',
+    '11:19:29 [경고] 커서 대피 실패: GetCursorPos 실패 (커서 밑 창 확인 단계) - 팝업 글자가 커서에 가려질 수 있습니다'),
+  @('17:43:00 [준비] 게임 창 정보: 1272x717@(645,7), 클라이언트 1256x678, 제목줄·테두리 39px, 창 DPI 96, 모니터 DPI 96 (100%)',
+    '17:43:00 [준비] 게임 창 정보: 1272x717, 클라이언트 1256x678, 제목줄·테두리 39px, 창 DPI 96, 모니터 DPI 96 (100%)'),
+  @('23:15:36 [준비] 게임 창 정렬(nearest): 1243x702@(1326,706) -> 1272x717@(1288,675)',
+    '23:15:36 [준비] 게임 창 크기 조정: 1243x702 -> 1272x717'),
+  @('23:42:54 [준비] 게임 창 정렬(nearest): 1038x717@(-7,10) -> 1024x577@(0,10)',
+    '23:42:54 [준비] 게임 창 크기 조정: 1038x717 -> 1024x577'),
+  @('02:45:47 [준비] 게임 창 정렬(nearest): 1272x717@(-11,2) -> 1272x717@(0,2)',
+    '02:45:47 [준비] 게임 창 위치 조정: 1272x717'),
+  @('01:00:34 [준비] 게임 창 정렬(nearest): 1273x718@(648,15) -> 1273x718@(647,15)',
+    '01:00:34 [준비] 게임 창 위치 조정: 1273x718'),
+  @('21:27:08 [기타] 고양이 상인 - 냥코인 뽑기 시작 (목표 99,999,998개 / 골드 상한 20,000)',
+    '21:27:08 [기타] 고양이 상인 - 냥코인 뽑기 시작 (목표 99,999,998개 / 골드 상한 20,000)'),
+  @('15:15:45 [완료] 목표 냥코인 도달 - 잔량 10,089,217개 (목표 10,000,000개, 구매 110회)',
+    '15:15:45 [완료] 목표 냥코인 도달 - 잔량 10,089,217개 (목표 10,000,000개, 구매 110회)'),
+  @('09:44:30 [경고] 게임 창 전면화를 두 번 시도했지만 실제 전면 루트 창으로 확인되지 않았습니다 - 입력 여부는 호출부가 결정합니다 (검증 입력은 건너뛰고, 그 외에는 기존대로 진행. 연속 실패 중에는 이 경고를 반복하지 않습니다)',
+    '09:44:30 [경고] 게임 창 전면화를 두 번 시도했지만 실제 전면 루트 창으로 확인되지 않았습니다 - 입력 여부는 호출부가 결정합니다 (검증 입력은 건너뛰고, 그 외에는 기존대로 진행. 연속 실패 중에는 이 경고를 반복하지 않습니다)')
+)
+foreach ($tidyCase in $tidyRealCases) {
+  Check-Equal ('GUI 정리(실로그): {0}' -f $tidyCase[1]) (Convert-WorkerLogLineForGui $tidyCase[0] $false) $tidyCase[1]
+}
+# 근접 변형 - 그대로여야 함: ③ 의 세 안쪽 패턴이 다 들어 있지만 커서 대피 줄이 아닌 줄(태그 위치 가드), 다른 줄 안에 인용된
+# 커서 대피 문구, ③·② 의 끝 괄호 뒤에 글이 더 붙은 줄(끝 앵커)
+$tidyKeepCases = @(
+  '12:00:00 [경고] 다른 경고: 이동 전 자리(1,2)에 있음 - SetCursorPos 실패 (목표 3,4) (연속 실패 중에는 이 경고를 반복하지 않습니다)',
+  '12:00:00 [안내] 인용: [경고] 커서 대피 실패: SetCursorPos 실패 (목표 3,4) (연속 실패 중에는 이 경고를 반복하지 않습니다)',
+  '12:00:00 [경고] 커서 대피 실패: GetWindowRect 실패 - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다) 후속문구',
+  "12:00:00 [경고] 옵션 화면에서 난이도 '어려움' 글자를 3회 모두 찾지 못했습니다 (호출부가 오류 처리) 후속문구"
+)
+foreach ($tidyKeep in $tidyKeepCases) {
+  Check-Equal ('GUI 정리(보존 근접 변형): {0}' -f $tidyKeep) (Convert-WorkerLogLineForGui $tidyKeep $false) $tidyKeep
+}
+
+# 워커 소스 전수 가드 (기준좌표 가드와 같은 방식): 문구 열쇠별로 그 문구를 담은 워커 문자열 노드 집합 =
+# '역할|소속 함수|소스 토큰 원문' 기대 집합. 역할 = log(Write-RunLog 첫 인자) / throw(throw 문) / other.
+# 철자를 바꾸거나 나눠 조립한 새 문구는 못 잡으니, 그런 문구를 새로 찍으면 이 목록과 GUI 필터를 함께 손볼 것.
+$tidyFingerprintText = @'
+X1|닫기(X) 후보(|log|Clear-EventOverlay|"[안내] 알 수 없는 화면 - 닫기(X) 후보($($xPick[0]),$($xPick[1])) 클릭 시도 ($attempt/$maxAttempts)"
+X2|닫기(X) 후보(|log|Return-ToAbyssSelection|"[안내] 복귀 중 알 수 없는 화면 20초 지속 - 닫기(X) 후보($($xPick[0]),$($xPick[1])) 클릭"
+X3|닫기(X) 후보(|log|Return-ToAbyssSelection|"[안내] 복귀 중 닫기(X) 후보($($xPick[0]),$($xPick[1])) 클릭을 건너뜀 (커서 미확인) - 다음 후보로"
+H1|호출부가 오류 처리|log|Confirm-DifficultySelected|"[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리, 표본: $($script:lastPillProbe))"
+H2|호출부가 오류 처리|log|Set-DgOptionDifficulty|"[경고] 옵션 화면에서 난이도 '$Label' 글자를 3회 모두 찾지 못했습니다 (호출부가 오류 처리)"
+H3|호출부가 오류 처리|log|Set-DgOptionDifficulty|"[경고] 난이도 '$Label' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리, 표본: $($script:lastPillProbe))"
+C1|커서 대피 실패|log|Move-CursorOutsideGame|"[경고] 커서 대피 실패: $parkError - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)"
+C2|이동 전 자리(|throw|Move-CursorOutsideGame|"SetCursorPos 가 먹지 않음 - 커서가 이동 전 자리($($cursor.X),$($cursor.Y))에 그대로입니다"
+C3|SetCursorPos 실패 (목표 |throw|Move-CursorOutsideGame|"SetCursorPos 실패 (목표 $($park.X),$($park.Y))"
+C4|연속 실패해 목표(|log|Click-ScreenPoint|"[경고] 커서 위치 확인이 ${cursorStreakNow}회 연속 실패해 목표(${X},${Y}) 클릭을 계속 보류하고 있습니다 - 마우스를 조작 중이면 잠시 놓아 주세요 (이후 연속 실패는 기록을 생략합니다)"
+C5|커서를 시작 지점(|log|Invoke-LifeListScroll|"[생활] 목록 스크롤: 커서를 시작 지점($([int]$fromPoint.X),$([int]$fromPoint.Y))으로 확인하지 못해 건너뜀"
+W1|게임 창 정보: |log|(최상위)|"[준비] 게임 창 정보: ${infoW}x${infoH}@($($infoRect.Left),$($infoRect.Top)), 클라이언트 $infoClient, 제목줄·테두리 $infoTitleBar, 창 DPI $infoWindowDpi, 모니터 DPI $infoMonitorDpi"
+W2|게임 창 정보: |log|(최상위)|'[준비] 게임 창 정보: 측정 불가 (GetWindowRect 실패)'
+W3|게임 창 정보: |log|(최상위)|"[준비] 게임 창 정보: 측정 불가 ($($_.Exception.Message))"
+W4|게임 창 정렬(|log|(최상위)|"[준비] 게임 창 정렬($windowMode): ${currentWidth}x${currentHeight}@($currentX,$currentY) -> ${targetWidth}x${targetHeight}@($targetX,$targetY)"
+'@
+$tidyById = [ordered]@{}
+foreach ($tidyRow in ($tidyFingerprintText -split "`r?`n" | Where-Object { $_ })) {
+  $tidyParts = $tidyRow.Split([char[]]@('|'), 5)
+  $tidyById[$tidyParts[0]] = @{ Phrase = $tidyParts[1]; Role = $tidyParts[2]; Function = $tidyParts[3]; Extent = $tidyParts[4] }
+}
+function Get-TidyNodeFingerprint {
+  param($Node)
+  $owner = $Node.Parent
+  $role = 'other'
+  if ($owner -is [System.Management.Automation.Language.CommandAst] -and $owner.GetCommandName() -eq 'Write-RunLog' -and
+      $owner.CommandElements.Count -ge 2 -and [object]::ReferenceEquals($owner.CommandElements[1], $Node)) {
+    $role = 'log'
+  } elseif ($owner -is [System.Management.Automation.Language.CommandExpressionAst] -and
+            $owner.Parent -is [System.Management.Automation.Language.PipelineAst] -and
+            $owner.Parent.Parent -is [System.Management.Automation.Language.ThrowStatementAst]) {
+    $role = 'throw'
+  }
+  $ownerFunction = $Node.Parent
+  while ($ownerFunction -and -not ($ownerFunction -is [System.Management.Automation.Language.FunctionDefinitionAst])) {
+    $ownerFunction = $ownerFunction.Parent
+  }
+  $ownerName = $(if ($ownerFunction) { $ownerFunction.Name } else { '(최상위)' })
+  return ('{0}|{1}|{2}' -f $role, $ownerName, $Node.Extent.Text)
+}
+foreach ($tidyPhrase in @($tidyById.Values | ForEach-Object { $_.Phrase } | Select-Object -Unique)) {
+  $tidyNodes = @($workerAst.FindAll({ param($node)
+        ($node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+         $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and
+        $node.Value.Contains($tidyPhrase) }, $true))
+  $tidyActual = @(foreach ($tidyNode in $tidyNodes) { Get-TidyNodeFingerprint $tidyNode })
+  $tidyWant = @($tidyById.Values | Where-Object { $_.Phrase -eq $tidyPhrase } | ForEach-Object { '{0}|{1}|{2}' -f $_.Role, $_.Function, $_.Extent })
+  Check-Equal ("워커: '{0}' 문자열 = 역할·소속 함수·템플릿 그대로" -f $tidyPhrase) `
+    ((@($tidyActual) | Sort-Object) -join "`n") ((@($tidyWant) | Sort-Object) -join "`n")
+}
+
+# 소스 템플릿을 표본 값으로 펼친 원문(필터 전)과 화면 표시(필터 뒤)를 정확 일치로 고정합니다 - 실로그에 아직 없는 모양,
+# 화면 좌표 음수(보조 모니터), ⑤ 의 한 축만 바뀐 크기(크기/위치 판정이 '둘 다 같음' 인지)까지.
+function Expand-TidyTemplate {
+  param([string]$Id, [hashtable]$Vars)
+  foreach ($varName in $Vars.Keys) { Set-Variable -Name $varName -Value $Vars[$varName] }
+  $tidyExtent = [string]$tidyById[$Id].Extent
+  return $ExecutionContext.InvokeCommand.ExpandString($tidyExtent.Substring(1, $tidyExtent.Length - 2))
+}
+$script:lastPillProbe = '기준(721,121) 0/27 [-18:56/7]'
+$tidyParkTarget = Expand-TidyTemplate -Id 'C3' -Vars @{ park = @{ X = -20; Y = 300 } }
+$tidyParkStuck = Expand-TidyTemplate -Id 'C2' -Vars @{ cursor = @{ X = -1153; Y = 954 } }
+$tidyRenderCases = @(
+  @{ Id = 'X3'; Vars = @{ xPick = @(1229, 67) }
+     Raw = '[안내] 복귀 중 닫기(X) 후보(1229,67) 클릭을 건너뜀 (커서 미확인) - 다음 후보로'
+     Shown = '[안내] 복귀 중 닫기(X) 클릭을 건너뜀 (커서 미확인) - 다음 후보로' }
+  @{ Id = 'X1'; Vars = @{ xPick = @(959, 180); attempt = 8; maxAttempts = 20 }
+     Raw = '[안내] 알 수 없는 화면 - 닫기(X) 후보(959,180) 클릭 시도 (8/20)'
+     Shown = '[안내] 알 수 없는 화면 - 닫기(X) 클릭 시도 (8/20)' }
+  @{ Id = 'H1'; Vars = @{ Label = '일반' }
+     Raw = "[경고] 난이도 '일반' 선택 강조를 확인하지 못했습니다 (호출부가 오류 처리, 표본: 기준(721,121) 0/27 [-18:56/7])"
+     Shown = "[경고] 난이도 '일반' 선택 강조를 확인하지 못했습니다" }
+  @{ Id = 'H2'; Vars = @{ Label = '일반' }
+     Raw = "[경고] 옵션 화면에서 난이도 '일반' 글자를 3회 모두 찾지 못했습니다 (호출부가 오류 처리)"
+     Shown = "[경고] 옵션 화면에서 난이도 '일반' 글자를 3회 모두 찾지 못했습니다" }
+  @{ Id = 'C1'; Vars = @{ parkError = $tidyParkTarget }
+     Raw = '[경고] 커서 대피 실패: SetCursorPos 실패 (목표 -20,300) - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)'
+     Shown = '[경고] 커서 대피 실패: SetCursorPos 실패 - 팝업 글자가 커서에 가려질 수 있습니다' }
+  @{ Id = 'C1'; Vars = @{ parkError = $tidyParkStuck }
+     Raw = '[경고] 커서 대피 실패: SetCursorPos 가 먹지 않음 - 커서가 이동 전 자리(-1153,954)에 그대로입니다 - 팝업 글자가 커서에 가려질 수 있습니다 (연속 실패 중에는 이 경고를 반복하지 않습니다)'
+     Shown = '[경고] 커서 대피 실패: SetCursorPos 가 먹지 않음 - 커서가 이동 전 자리에 그대로입니다 - 팝업 글자가 커서에 가려질 수 있습니다' }
+  @{ Id = 'C4'; Vars = @{ cursorStreakNow = 3; X = -612; Y = 655 }
+     Raw = '[경고] 커서 위치 확인이 3회 연속 실패해 목표(-612,655) 클릭을 계속 보류하고 있습니다 - 마우스를 조작 중이면 잠시 놓아 주세요 (이후 연속 실패는 기록을 생략합니다)'
+     Shown = '[경고] 커서 위치 확인이 3회 연속 실패해 목표 클릭을 계속 보류하고 있습니다 - 마우스를 조작 중이면 잠시 놓아 주세요 (이후 연속 실패는 기록을 생략합니다)' }
+  @{ Id = 'C5'; Vars = @{ fromPoint = @{ X = -900; Y = 420 } }
+     Raw = '[생활] 목록 스크롤: 커서를 시작 지점(-900,420)으로 확인하지 못해 건너뜀'
+     Shown = '[생활] 목록 스크롤: 커서를 시작 지점으로 확인하지 못해 건너뜀' }
+  @{ Id = 'W1'; Vars = @{ infoW = 1038; infoH = 717; infoRect = @{ Left = -7; Top = 10 }; infoClient = '1022x678'; infoTitleBar = '39px'; infoWindowDpi = '96'; infoMonitorDpi = '96 (100%)' }
+     Raw = '[준비] 게임 창 정보: 1038x717@(-7,10), 클라이언트 1022x678, 제목줄·테두리 39px, 창 DPI 96, 모니터 DPI 96 (100%)'
+     Shown = '[준비] 게임 창 정보: 1038x717, 클라이언트 1022x678, 제목줄·테두리 39px, 창 DPI 96, 모니터 DPI 96 (100%)' }
+  @{ Id = 'W2'; Vars = @{}
+     Raw = '[준비] 게임 창 정보: 측정 불가 (GetWindowRect 실패)'
+     Shown = '[준비] 게임 창 정보: 측정 불가 (GetWindowRect 실패)' }
+  @{ Id = 'W4'; Vars = @{ windowMode = 'fixed'; currentWidth = 1272; currentHeight = 702; currentX = -11; currentY = 2; targetWidth = 1272; targetHeight = 717; targetX = 0; targetY = 2 }
+     Raw = '[준비] 게임 창 정렬(fixed): 1272x702@(-11,2) -> 1272x717@(0,2)'
+     Shown = '[준비] 게임 창 크기 조정: 1272x702 -> 1272x717' }
+  @{ Id = 'W4'; Vars = @{ windowMode = 'nearest'; currentWidth = 1908; currentHeight = 1076; currentX = -5; currentY = -3; targetWidth = 1908; targetHeight = 1076; targetX = 0; targetY = 0 }
+     Raw = '[준비] 게임 창 정렬(nearest): 1908x1076@(-5,-3) -> 1908x1076@(0,0)'
+     Shown = '[준비] 게임 창 위치 조정: 1908x1076' }
+  @{ Id = 'W4'; Vars = @{ windowMode = 'nearest'; currentWidth = 1270; currentHeight = 717; currentX = 644; currentY = 6; targetWidth = 1272; targetHeight = 717; targetX = 644; targetY = 6 }
+     Raw = '[준비] 게임 창 정렬(nearest): 1270x717@(644,6) -> 1272x717@(644,6)'
+     Shown = '[준비] 게임 창 크기 조정: 1270x717 -> 1272x717' }
+)
+foreach ($tidyRender in $tidyRenderCases) {
+  $tidyRaw = Expand-TidyTemplate -Id $tidyRender.Id -Vars $tidyRender.Vars
+  Check-Equal ('워커 템플릿 펼침({0}): {1}' -f $tidyRender.Id, $tidyRender.Raw) $tidyRaw $tidyRender.Raw
+  Check-Equal ('GUI 정리(소스 템플릿 {0}): {1}' -f $tidyRender.Id, $tidyRender.Shown) `
+    (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidyRaw) $false) ('12:00:00 ' + $tidyRender.Shown)
+}
+# 측정 불가 예외문(W3)은 $_ 를 쓰는 템플릿이라 파이프라인 안에서 펼칩니다 - 그대로 보여야 함
+$tidyW3Extent = [string]$tidyById['W3'].Extent
+$tidyW3Raw = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = 'GetDpiForWindow 진입점 없음' } } |
+  ForEach-Object { $ExecutionContext.InvokeCommand.ExpandString($tidyW3Extent.Substring(1, $tidyW3Extent.Length - 2)) }
+Check-Equal '워커 템플릿 펼침(W3): 측정 불가 예외문' $tidyW3Raw '[준비] 게임 창 정보: 측정 불가 (GetDpiForWindow 진입점 없음)'
+Check-Equal 'GUI 정리(소스 템플릿 W3): 측정 불가 예외문은 그대로' `
+  (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidyW3Raw) $false) ('12:00:00 [준비] 게임 창 정보: 측정 불가 (GetDpiForWindow 진입점 없음)')
+
 Check-Equal 'GUI: 진단 아닌 끝 괄호는 보존 (사용자 안내 문구)' `
   (Convert-WorkerLogLineForGui '15:00:00 [완료] 채집 1사이클 완료 - 나무 베기 / 굵은 나무 10개 (이번 사이클은 회차로 세지 않음)' $false) `
   '15:00:00 [완료] 채집 1사이클 완료 - 나무 베기 / 굵은 나무 10개 (이번 사이클은 회차로 세지 않음)'
