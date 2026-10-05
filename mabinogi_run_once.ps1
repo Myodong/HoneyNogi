@@ -12278,10 +12278,13 @@ function Invoke-AbyssPartyMemberCycle {
         } elseif ($screen -eq 'member-reward' -or $screen -eq 'field') {
           Resume-AbyssMemberClock -Clock $mClock
           if ($episodeActive) {
-            # M5 - 패널이 사라짐(파티장 취소): 준비 시계 폐기·에피소드 종료
+            # M5 - 패널이 사라짐(파티장 취소 또는 입장 시작): 준비 시계 폐기·에피소드 종료
             Suspend-AbyssMemberClock -Clock $rClock -Reset
             $episodeActive = $false
-            Write-RunLog '[파티원] 준비 패널이 사라졌습니다(파티장 취소) - 보상 화면에서 다음 요청을 기다립니다 (준비 뒤 한도 해제)'
+            # 문구는 원인을 단정하지 않습니다 - 2인 파티는 준비 즉시 입장이라 입장 로딩 직전 표본에서도 여기로 옵니다(실기 7 21:06:10 등,
+            # 그때 '파티장 취소' 로 적혔음). 자리도 판독한 화면대로(필드에서 '보상 화면' 으로 적히던 것 정정 - 2026-10-01 2인 실기 관측)
+            $panelGonePlace = $(if ($screen -eq 'field') { '필드' } else { '보상 화면' })
+            Write-RunLog "[파티원] 준비 패널이 사라졌습니다(입장 시작 또는 파티장 취소) - ${panelGonePlace}에서 다음 화면을 지켜봅니다 (준비 뒤 한도 해제)"
           }
         } else {
           # entry-waiting / matching / prompt / unknown / inside 표본 / reward3 - M 재개, 준비 시계는 계속

@@ -1574,7 +1574,7 @@ Reset-Member -Plan @((P 0 'readyAvail'), (P 20 'memberReward'), (P 40 'readyAvai
 $script:keepPlan = $true
 Run-Member
 Check-Equal "C7 파티장 취소(M5) → 준비 시계 폐기 → 재요청 새 에피소드 → 준비 2, M5 로그 1, 에피소드 로그 2, 준비 시계 P 는 재요청 + $memberReadyLimitSeconds 초" (
-  J @((Count-Click $readyPoint), (Count-Log '준비 패널이 사라졌습니다\(파티장 취소\)'), (Count-Log '준비 패널 감지 - '), $script:pCalls[0].Reason,
+  J @((Count-Click $readyPoint), (Count-Log '준비 패널이 사라졌습니다\(입장 시작 또는 파티장 취소\)'), (Count-Log '준비 패널 감지 - '), $script:pCalls[0].Reason,
     [int]([Math]::Abs($script:pCalls[0].At - (40 + $memberReadyLimitSeconds)) -le 1.5))) '2/1/2/ready-timeout/1'
 
 # C9 동결·양보 → 캡처 실패 30초 → +30, 양보 20초 → +20, 같은 회전 실패→복구 → +차분 (M 만료 = 600 + 누적 실패 + 누적 양보)
@@ -2785,7 +2785,7 @@ $script:failHook = { param($Name) if ($Name -eq 'prompt' -and (Elapsed) -ge 10 -
 $script:readHook = { param($Name) if ($Name -eq 'prompt' -and (Elapsed) -ge 260 -and $script:rc5F -lt 0) { $script:rc5F = (Get-CaptureFailTotalMs) / 1000.0 } }
 Run-Member
 Check-Equal "RC5 (미관측 — 시계 불변 확인) 준비 에피소드 중 복구 구간 → 그동안 P 0, M5 로그 1, P('member-timeout') 서두 = 260 + $mLimit ± 3 (실제 $($script:pCalls[0].At)), F ≈ 147 (실제 $([Math]::Round($script:rc5F, 1))), 조정 = 기대 − F, left → exit 4" (
-  J @(@($script:pCalls | Where-Object { $_.At -lt 260 }).Count, (Count-Log '준비 패널이 사라졌습니다\(파티장 취소\)'), $script:pCalls[0].Reason, [int]([Math]::Abs($script:pCalls[0].At - (260 + $mLimit)) -le 3),
+  J @(@($script:pCalls | Where-Object { $_.At -lt 260 }).Count, (Count-Log '준비 패널이 사라졌습니다\(입장 시작 또는 파티장 취소\)'), $script:pCalls[0].Reason, [int]([Math]::Abs($script:pCalls[0].At - (260 + $mLimit)) -le 3),
     [int](($script:rc5F -ge 140) -and ($script:rc5F -le 155)), [int]([Math]::Abs(($script:pCalls[0].At - $script:rc5F) - (260 + $mLimit - $script:rc5F)) -le 3), [int]($script:clicks.Count -ge 1), (Get-LeaveResults), $script:exitCode)) '0/1/member-timeout/1/1/1/1/left/4'
 
 # RC6 (미관측 — 종료 보장 확인) P 의 ④ 판독 도중 복구 영구: G@CLEAR(LAST_RUN) + 보상 → P(G) 첫 회전 유효(보상) → 나가기 1(무장) → 다음 회전부터 P 의 ④ 첫 판독 복구(영구) →
