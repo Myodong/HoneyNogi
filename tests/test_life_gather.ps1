@@ -1295,6 +1295,12 @@ Assert-Case '배선: 사이클 초입 생활 창 정리 → 이벤트 정리 순
 # 초기 확인 루프에도 팝업 방어를 넣었습니다 - 공지 게시판이 트래커를 가리면 진행 중인 채집을
 # absent 로 확정해 메뉴를 열어 버렸습니다 (2026-08-07 감사)
 Assert-Case '배선: 생활 공지 게시판 팝업 처리 3곳(초기 확인+메뉴 루프+대기 루프)' ([regex]::Matches($workerText, "\[생활\] 공지 게시판 팝업 감지").Count) '3'
+# 채집 대기 갈래의 'X로 닫기' 로그는 클릭이 실제로 전송됐을 때만 남깁니다 (2026-10-02 설계 검토 - 조작으로 취소돼도 닫았다고 적던 거짓 로그).
+# 주석을 뺀 사본으로 셉니다: 조건부 형태 1곳, 조건 없는 옛 형태 0곳 (조건을 지우면 1/0 → 0/1 로 실패)
+$lifeNoticeWorkerCode = ($workerText -split "\r?\n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+$lifeNoticeConditional = 'Write-RunLog $(if ($script:lastClickPerformed) { ''[생활] 공지 게시판 팝업 감지 - X로 닫기 (채집 대기 중)'' }'
+$lifeNoticeUnconditional = 'Write-RunLog ''[생활] 공지 게시판 팝업 감지 - X로 닫기 (채집 대기 중)'''
+Assert-Case '배선: 채집 대기 공지 X 로그는 전송된 클릭에만 (조건부 1 / 무조건 0)' ("{0}/{1}" -f [regex]::Matches($lifeNoticeWorkerCode, [regex]::Escape($lifeNoticeConditional)).Count, [regex]::Matches($lifeNoticeWorkerCode, [regex]::Escape($lifeNoticeUnconditional)).Count) '1/0'
 # 완료 로그에 무엇을 캤는지 남깁니다 (2026-08-08 사용자 요청 - 여러 대상을 번갈아 돌리면
 # 로그만 봐서는 구분이 안 됨). 수량은 '본 적 있는 최댓값'이라 마지막 판독 노이즈에 안 흔들림
 Assert-Case '배선: 완료 로그에 스킬·대상·수량 표기' `

@@ -16243,7 +16243,9 @@ function Invoke-LifeGatherCycle {
     if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
       Focus-Game -Game $Game
       Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
-      Write-RunLog '[생활] 공지 게시판 팝업 감지 - X로 닫기 (채집 대기 중)'
+      # 전송된 클릭에만 'X로 닫기' 를 씁니다 - 사용자 조작으로 클릭이 취소돼도 닫았다고 적던 거짓 로그 (2026-10-02 설계 검토,
+      # 초기 확인 루프의 같은 갈래와 같은 꼴). 동작(2초 뒤 재판독)은 그대로입니다 - 대기·회전 환원은 이슈 목록 4절의 B급 후속
+      Write-RunLog $(if ($script:lastClickPerformed) { '[생활] 공지 게시판 팝업 감지 - X로 닫기 (채집 대기 중)' } else { "[생활] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })
       Start-Sleep -Seconds 2
       continue
     }
