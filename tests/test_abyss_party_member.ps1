@@ -2,12 +2,15 @@
 #
 # 배경: ⑥a 의 파티원 '두 출구'(S 터치 헬퍼 + 보상 '나가기' 뒤 필드 복귀 루프)를 관측 루프 D(Invoke-AbyssPartyMemberCycle) 하나와
 # 퇴장 절차 P(Invoke-AbyssMemberLeave) 하나로 바꿨다. D 는 어느 화면에서 시작해도 화면을 분류해 이어받고, 클리어 뒤 첫 신호(회차 경계)에서
-# 다음 워커에게 인계(exit 0)하며, 정지 사유(마지막 회차·안전 중지·지정 시간·대기 한도 M·준비 시계)가 있을 때만 P('나가기' 로 필드를
+# 다음 워커에게 인계(exit 0 - 시간 지정이면 exit 11)하며, 정지 사유(마지막 회차·안전 중지·지정 시간·대기 한도 M·준비 시계)가 있을 때만 P('나가기' 로 필드를
 # 확인한 뒤 정지)를 탄다. 'left'(필드 확인)는 끊김 없이 관측된 퇴장 전이 계약(무장 → 떠남 → 도착, 사이에 끊김·커밋 없음)으로만 나온다 -
 # HUD + 추적기 던전명 없음은 던전 안 추적기 오독(09-21 7/10·09-25 4/9·09-29 2/6)과 입장 과도에서도 2초 넘게 이어져 필드 증거가 못 된다.
+# 시간 지정 '그 판까지' (2026-10-02, 그 설계 8.1·8.2): G 의 'time' = 지금 >= 지정 시각(추정치·여유 없음), 지정 시각 전의 경계 인계 12곳은 exit 11
+# (GUI 가 지정 시각을 보지 않고 이어받음). 체인 하니스는 GUI 소스의 다음 회차 판단 함수(GUI 모형)로 다음 워커를 띄울지 정한다.
 # 여기서 고정하는 계약 (설계 5.1 절 번호 그대로):
-#   §0 소스 값 캡처 - 스크립트 상수 7개·클릭 좌표·판독 영역·대기 한도를 AST 대입문에서 캡처한다(사본 금지). 여유 4.2 < 5 < 7, W 4.2 < 6 < 30,
+#   §0 소스 값 캡처 - 스크립트 상수 6개·클릭 좌표·판독 영역·대기 한도를 AST 대입문에서 캡처한다(사본 금지). W 4.2 < 6 < 30,
 #      스윕 연속 한도 3 범위 단언은 상수 변이를 잡는 유일한 자리다 (진리표·행동 케이스는 캡처값으로 기대를 다시 계산한다).
+#      시간 게이트 여유 상수·사이클 추정치 env 는 워커 전체(주석 뺀 사본) 0건이다 (시간 지정 '그 판까지' - ⑥e ㉰ 폐기).
 #   §1 순수 진리표 (항상 실행 - 판독문은 재생 실측 그대로): (a) 화면 분류 (a2) 보상 위 판별 (b) 재펼침 앵커 (c) 나가기 단어 (d) 정지 게이트 G
 #      (e) 시계 헬퍼 (f) 파티원 보상 게임 상태 (g) 클리어 감시 반환 (h) 클리어 감시 마감 탐침 (i) 퇴장 전이 표 36칸 + 사건 열 i1~i25
 #      (j) 스윕 참 회전 생략 사유 (k) 화면 라벨
@@ -41,6 +44,23 @@ function Check-True {
 $workerTokens = $null; $workerErrors = $null
 $workerAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$workerTokens, [ref]$workerErrors)
 if ($workerErrors.Count -gt 0) { throw "워커 파서 오류: $($workerErrors[0].Message)" }
+# 큰 소스(워커·GUI)의 '주석 뺀 사본'은 토큰으로 한 번에 만듭니다 (Remove-SourceComments 의 문자열 치환 반복은 1MB 에서 느림).
+# 정의를 §0 앞에 두는 이유 (시간 지정 '그 판까지' 설계 리뷰 1차 P3): §0 의 0건 단언이 이 사본을 쓰는데, 파일 머리가
+# $ErrorActionPreference = 'Stop' 이라 정의보다 앞에서 부르면 파일 전체가 거기서 멈춥니다 (옛 정의 자리는 §3 디스패치 앞이었음)
+function Remove-CommentsByTokens {
+  param([string]$Text, $Tokens)
+  $builder = New-Object System.Text.StringBuilder ($Text.Length)
+  $position = 0
+  foreach ($token in $Tokens) {
+    if ($token.Kind -ne [System.Management.Automation.Language.TokenKind]::Comment) { continue }
+    [void]$builder.Append($Text, $position, $token.Extent.StartOffset - $position)
+    [void]$builder.Append(($token.Text -replace '[^\r\n]', ' '))
+    $position = $token.Extent.EndOffset
+  }
+  [void]$builder.Append($Text, $position, $Text.Length - $position)
+  return $builder.ToString()
+}
+$workerCode = Remove-CommentsByTokens $workerAst.Extent.Text $workerTokens   # §0 0건 단언 · §3 디스패치 · §4 가 함께 씀
 function Test-AstInsideFunction {
   # 대입문이 함수 정의 안에 있는지 (같은 이름의 지역 변수 대입을 상수로 잘못 잡지 않게)
   param($Node)
@@ -67,7 +87,6 @@ function Get-SourceAssignmentValue {
 $memberReadyLimitSeconds = Get-SourceAssignmentValue 'memberReadyLimitSeconds'
 $memberLeaveLimitSeconds = Get-SourceAssignmentValue 'memberLeaveLimitSeconds'
 $memberUnknownOverlaySeconds = Get-SourceAssignmentValue 'memberUnknownOverlaySeconds'
-$memberTimeGateMarginSeconds = Get-SourceAssignmentValue 'memberTimeGateMarginSeconds'
 $memberFieldSettleSeconds = Get-SourceAssignmentValue 'memberFieldSettleSeconds'
 $memberSweepStreakLimit = Get-SourceAssignmentValue 'memberSweepStreakLimit'
 $ptMemberPanelCollapse = @(Get-SourceAssignmentValue 'ptMemberPanelCollapse')
@@ -81,10 +100,14 @@ $timeoutClear = Get-SourceAssignmentValue 'timeoutClear'                  # 486 
 $timeoutPartyMatch = Get-SourceAssignmentValue 'timeoutPartyMatch'        # 시작 패널 입장 대기·시작 패널 판정 한도 (SP·SJ)
 $capturedTimeoutClear = $timeoutClear                                        # C3·C14 가 잠시 바꾼 뒤 케이스마다 되돌리는 원본
 $ocrKoreanEngine = 'ko'
-"INFO 캡처: 준비 시계 $memberReadyLimitSeconds / P 한도 $memberLeaveLimitSeconds / 알 수 없음 $memberUnknownOverlaySeconds / 여유 $memberTimeGateMarginSeconds / W $memberFieldSettleSeconds / 스윕 한도 $memberSweepStreakLimit / 접기 $($ptMemberPanelCollapse -join ',') / 준비 $($ptPartyEnter -join ',') / 터치 $($ptClearCenter -join ',') / M $timeoutClear / 재매칭 $timeoutPartyMatch"
-# 여유 범위: ㉰ 경계 준비 클릭 인계 δ 코드 상한 약 4.2초 < 여유 < 나가기→필드 관측 최소 7초. (d)·B14 는 캡처값으로 기대를 다시 계산해
-# 상수가 0 이어도 통과하므로 여기가 유일한 범위 단언입니다 (test_guard_constants 방식). 실기 7·15 의 δ 최대가 4.2 보다 크면 하한을 올립니다
-Check-True "§0 여유 범위 4.2 < 여유 < 7 (캡처 $memberTimeGateMarginSeconds)" (([double]$memberTimeGateMarginSeconds -gt 4.2) -and ([double]$memberTimeGateMarginSeconds -lt 7)) "margin=$memberTimeGateMarginSeconds"
+"INFO 캡처: 준비 시계 $memberReadyLimitSeconds / P 한도 $memberLeaveLimitSeconds / 알 수 없음 $memberUnknownOverlaySeconds / W $memberFieldSettleSeconds / 스윕 한도 $memberSweepStreakLimit / 접기 $($ptMemberPanelCollapse -join ',') / 준비 $($ptPartyEnter -join ',') / 터치 $($ptClearCenter -join ',') / M $timeoutClear / 재매칭 $timeoutPartyMatch"
+# 시간 게이트에는 상수·추정치가 없습니다 (시간 지정 '그 판까지' 설계 4.1·4.2·8.1): G 의 'time' 은 '지금 >= 지정 시각' 하나이고, 지정 시각 전에
+# 이어 간 경계는 종료 코드 11 로 GUI 가 지정 시각을 다시 보지 않고 이어받습니다 - ⑥e ㉰ 의 여유 5초와 GUI 가 넘기던 사이클 추정치 env 는 폐기됐습니다.
+# 둘 중 하나라도 되살아나면 G 진리표((d))·B14 가 다시 '추정치 + 여유' 를 전제하게 되므로 워커 전체(주석 뺀 사본)에서 0건을 단언합니다
+# (주석에 옛 이름이 남아도 거짓 실패하지 않게 주석은 뺍니다 - 단언은 코드에 걸어야 함)
+$marginConstantRefs = [regex]::Matches($workerCode, 'memberTimeGateMarginSeconds').Count
+$estimateEnvRefs = [regex]::Matches($workerCode, 'HONEYNOGI_CYCLE_ESTIMATE_SEC').Count
+Check-Equal '§0 시간 게이트 여유 상수(memberTimeGateMarginSeconds)·사이클 추정치 env(HONEYNOGI_CYCLE_ESTIMATE_SEC) 0건 (워커 전체, 주석 뺀 사본)' "$marginConstantRefs/$estimateEnvRefs" '0/0'
 # W 범위: 관측 입장 과도 상한(09-21 185241_363 → 185245_580 inside, 4.2초 미만)보다 커야 'stayed-field' 가 입장 중인 파티원을 멈추지 않고,
 # 위쪽 30 은 P 마감 60초의 절반입니다. 실기 계측 s 최대 m 이 W 이상이면 이 단언도 W 도 고치지 않습니다(재설계 대상 - ㉷)
 Check-True "§0 W 범위 4.2 < W < 30 (캡처 $memberFieldSettleSeconds)" (([double]$memberFieldSettleSeconds -gt 4.2) -and ([double]$memberFieldSettleSeconds -lt 30)) "W=$memberFieldSettleSeconds"
@@ -259,18 +282,30 @@ Check-Equal '§1(c) 접힘 + Expect entry-waiting → (492,654)' (Get-Pick (Sele
 Check-Equal '§1(c) 가린 접힘 + Expect entry-waiting → null (현행 헬퍼는 이 프레임에서 492 = 퇴장을 누름 - D·P 가 헬퍼를 쓰지 않는 이유)' (Get-Pick (Select-AbyssMemberLeaveWord -Words $wOccluded -Expect 'entry-waiting')) 'null'
 Check-Equal '§1(c) 펼친 패널(나가기@492) + 두 Expect 모두 → null' ((@('member-reward', 'entry-waiting') | ForEach-Object { Get-Pick (Select-AbyssMemberLeaveWord -Words $wExpanded -Expect $_) }) -join '/') 'null/null'
 
-# (d) Get-AbyssMemberStopReason - 여유는 소스 캡처값. 시간 경계는 D = U − (Now + E) 로 적는다 (리뷰 C9)
-$gNow = [datetime]'2026-10-01 10:00:00'; $gEst = 600; $gM = [int]$memberTimeGateMarginSeconds
-function Get-GateWithD { param([int]$D, [string]$Phase = 'clear', [bool]$LastRun = $false, [bool]$SafeStop = $false)
-  return (Get-AbyssMemberStopReason -Phase $Phase -LastRun $LastRun -UntilTime ($gNow.AddSeconds($gEst + $D)) -EstimateSeconds $gEst -MarginSeconds $gM -SafeStopFlag $SafeStop -Now $gNow) }
-Check-Equal "§1(d) D = 여유+1 → '' " (Get-GateWithD ($gM + 1)) ''
-Check-Equal "§1(d) D = 여유 → '' (엄격한 >)" (Get-GateWithD $gM) ''
-Check-Equal "§1(d) D = 여유−1 → 'time'" (Get-GateWithD ($gM - 1)) 'time'
-Check-Equal "§1(d) UNTIL `$null → 무시('')" (Get-AbyssMemberStopReason -Phase 'clear' -LastRun $false -UntilTime $null -EstimateSeconds $gEst -MarginSeconds $gM -SafeStopFlag $false -Now $gNow) ''
-Check-Equal "§1(d) START 에서 LastRun → '' (이월 아님 - 이 워커는 판을 마치지 않음)" (Get-AbyssMemberStopReason -Phase 'start' -LastRun $true -UntilTime $null -EstimateSeconds $gEst -MarginSeconds $gM -SafeStopFlag $false -Now $gNow) ''
-Check-Equal "§1(d) CLEAR 에서 LastRun → 'last-run'" (Get-AbyssMemberStopReason -Phase 'clear' -LastRun $true -UntilTime $null -EstimateSeconds $gEst -MarginSeconds $gM -SafeStopFlag $false -Now $gNow) 'last-run'
-Check-Equal '§1(d) 우선순위 F9 > 시간 > 마지막 회차 (셋·둘 겹침)' ("$(Get-GateWithD 0 'clear' $true $true)/$(Get-GateWithD 0 'clear' $true $false)") 'safe-stop/time'
-Check-Equal "§1(d) SafeStopFlag 는 래치 입력 포함 (파일 없음 OR 래치 참 → 'safe-stop', START 에서도)" (Get-AbyssMemberStopReason -Phase 'start' -LastRun $false -UntilTime $null -EstimateSeconds $gEst -MarginSeconds $gM -SafeStopFlag ($false -or $true) -Now $gNow) 'safe-stop'
+# (d) Get-AbyssMemberStopReason - 시간 지정 '그 판까지' 설계 8.2 T1 (옛 표 'D = U − (Now + E)' 를 교체 - 추정치·여유 매개변수가 없어졌습니다).
+#     'time' = 지금 >= 지정 시각 (같은 시각 포함 - 생활 Test-LifeUntilReached·던전 Get-DgTimeVerdict 와 같은 -ge), Phase 와 무관 (START 에서는 새 판
+#     참가를 막고, 경계에서는 이어 가지 않음). 우선순위(안전 중지 > 시간 > 마지막 회차)와 'last-run' 의 경계(Phase 'clear') 한정은 그대로입니다
+$gU = [datetime]'2026-10-01 10:00:00'
+function Get-GateAt {
+  # T1 한 행 - 지정 시각 기본값은 U (-UntilTime $null 이면 시간 지정 아님)
+  param([string]$Phase = 'clear', [bool]$LastRun = $false, [bool]$SafeStop = $false, $UntilTime = $gU, [datetime]$Now)
+  return (Get-AbyssMemberStopReason -Phase $Phase -LastRun $LastRun -UntilTime $UntilTime -SafeStopFlag $SafeStop -Now $Now)
+}
+Check-Equal "§1(d) T1-1 경계 · 지정 시각 1초 전 → '' (이어 감)" (Get-GateAt -Now ($gU.AddSeconds(-1))) ''
+Check-Equal "§1(d) T1-2 경계 · 지정 시각과 같은 시각 → 'time' (같은 시각 포함)" (Get-GateAt -Now $gU) 'time'
+Check-Equal "§1(d) T1-3 경계 · 지정 시각 1초 뒤 → 'time'" (Get-GateAt -Now ($gU.AddSeconds(1))) 'time'
+Check-Equal "§1(d) T1-4 START · 같은 시각 → 'time' (Phase 무관 - 새 판 참가를 막음)" (Get-GateAt -Phase 'start' -Now $gU) 'time'
+Check-Equal "§1(d) T1-5 START · 1초 전 → ''" (Get-GateAt -Phase 'start' -Now ($gU.AddSeconds(-1))) ''
+Check-Equal "§1(d) T1-6 경계 · UNTIL `$null(시간 지정 아님) → '' (지정 시각 한참 뒤 시각이어도)" (Get-GateAt -UntilTime $null -Now ($gU.AddHours(1))) ''
+Check-Equal "§1(d) T1-7 LastRun · UNTIL `$null: START → '' (이월 아님 - 이 워커는 판을 마치지 않음) / 경계 → 'last-run'" ("$(Get-GateAt -Phase 'start' -LastRun $true -UntilTime $null -Now $gU)/$(Get-GateAt -LastRun $true -UntilTime $null -Now $gU)") '/last-run'
+Check-Equal '§1(d) T1-8 우선순위 F9 > 시간 > 마지막 회차 (경계 · 같은 시각 - 셋·둘 겹침)' ("$(Get-GateAt -LastRun $true -SafeStop $true -Now $gU)/$(Get-GateAt -LastRun $true -Now $gU)") 'safe-stop/time'
+Check-Equal "§1(d) T1-9 SafeStopFlag 는 래치 입력 포함 (파일 없음 OR 래치 참 → 'safe-stop', START 에서도)" (Get-GateAt -Phase 'start' -SafeStop ($false -or $true) -UntilTime $null -Now $gU) 'safe-stop'
+# T1-10 소스: 매개변수 목록 자체 (옛 호출 모양 -EstimateSeconds·-MarginSeconds 가 남으면 바인딩 오류로 파일이 멈추므로 위 행과 함께 서명도 못 박음)
+$gDefinition = $workerAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-AbyssMemberStopReason' }, $true)
+$gParamNames = @($gDefinition.Body.ParamBlock.Parameters | ForEach-Object { [string]$_.Name.VariablePath.UserPath })
+$gParamText = $gParamNames -join ','
+$gOldParamCount = @($gParamNames | Where-Object { $_ -eq 'EstimateSeconds' -or $_ -eq 'MarginSeconds' }).Count
+Check-Equal '§1(d) T1-10 G 매개변수(AST ParamBlock) = Phase·LastRun·UntilTime·SafeStopFlag·Now - 추정치·여유(EstimateSeconds·MarginSeconds) 없음' "$gParamText/$gOldParamCount" 'Phase,LastRun,UntilTime,SafeStopFlag,Now/0'
 
 # ── 가상 시계·캡처 계층 모의 (§1(e) 와 §2 공용) ──────────────────────────────────
 # 운영 계약 그대로: Register-CaptureFailure = 일련번호 +1·플래그·실패 시작 시각(첫 실패 때만), Register-CaptureSuccess = 끝난 구간을 복구 시각까지
@@ -920,6 +955,40 @@ function Remove-Item { param($LiteralPath, $Path, [switch]$Force, $ErrorAction)
   }
 }
 
+# ── GUI 모형 (시간 지정 '그 판까지' 설계 8.1 - 회귀 R-10) ──
+# 워커 체인(§2-K)에서 '다음 워커를 띄울지' 를 사본이 아니라 GUI 소스가 정하게 합니다. 옛 하니스는 'exit 0 이면 늘 이어 감' 이라 시간 지정의
+# 판단 주체 하나(조건 4 - 이어 간 판은 이어받고 마지막 뒤에는 멈춤)를 행동으로 보지 못했습니다. 다음 회차 판단 순수부·실행부와 그 둘이 부르는
+# 시간 판단·문구 함수는 GUI 소스에서 추출하고, 그 밖의 GUI 경계(정지·다음 회차 기동·로그 창·상태줄 색·숫자 상자)만 기록 모의로 둡니다.
+# 시각은 위 Get-Date 모의(가상 시계)를 그대로 씁니다 - GUI 의 '지금 < 지정 시각' 도 같은 가상 시계로 판단합니다
+$guiTokens = $null; $guiErrors = $null
+$guiAst = [System.Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$guiTokens, [ref]$guiErrors)   # §5 GUI 배선 단언도 이 AST·토큰을 씀
+if ($guiErrors.Count -gt 0) { throw "GUI 파서 오류: $($guiErrors[0].Message)" }
+Add-Type -AssemblyName System.Drawing   # Invoke-NextCycleDecision 의 준비 실행 3회 연속 갈래가 [System.Drawing.Color]::Firebrick 을 씀 (시간 지정 설계 S4)
+foreach ($definition in Get-SourceFunctionDefinitions -Path $guiPath -Names @('Get-NextCycleAction', 'Invoke-NextCycleDecision', 'Test-TimeAllowsNextCycle', 'Get-CycleWaitSecondsForEstimate', 'Get-TimeStopNotice')) {
+  Invoke-Expression $definition
+}
+function Stop-AllRun { param([string]$Reason, [switch]$IsError) $script:guiDecision = "stop:$Reason" }   # GUI 와 같은 서명 - 정지 사유만 기록
+function Start-NextCycle { $script:guiDecision = 'next' }                                                 # 다음 회차 기동 = 체인이 다음 워커를 돌림
+function Add-GuiLog { param([string]$Message) $script:guiLogs += $Message }                               # 로그 창 줄 (시간 정지 안내·11 안내)
+$lblStatus = [pscustomobject]@{ ForeColor = $null }
+$numGatherWait = [pscustomobject]@{ Value = 600 }   # 생활 '진행 없음 한도' 숫자 상자 (전투 케이스에서는 읽지 않음)
+$numClearWait = [pscustomobject]@{ Value = 600 }    # 전투 '클리어 대기' 숫자 상자 (전투 시간 판단은 이 값을 쓰지 않음 - 기타의 시작 거부 전용)
+# 전투 UNTIL 생산식 = GUI Start-NextCycle 의 '판 끝에서 스스로 판단하는 워커' 분기(Test-WorkerTimeJudgeActive) 대입문 우변 - 설계 리뷰 1차 P2 의
+# InvariantCulture 생산을 사본 없이 그대로 평가합니다. 케이스의 목표 시각 하나에서 GUI 모형의 $script:targetTime 과 워커가 읽는 UNTIL 을 함께 만들어
+# 두 값이 갈라지지 않게 합니다 (설계 8.1). 분기·대입이 정확히 1곳이 아니면 모형이 성립하지 않으므로 여기서 멈춥니다 (fail-closed)
+$guiNextCycleAst = $guiAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Start-NextCycle' }, $true)
+$battleUntilIfs = @($guiNextCycleAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text.Contains('Test-WorkerTimeJudgeActive') }, $true))
+$battleUntilAssigns = @(if ($battleUntilIfs.Count -eq 1) {
+    $battleUntilIfs[0].Clauses[0].Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$env:HONEYNOGI_UNTIL_TIME' }, $true) })
+if ($battleUntilAssigns.Count -ne 1) { throw "GUI 전투 UNTIL 생산식을 찾지 못했습니다 (판단 워커 분기 $($battleUntilIfs.Count)곳, UNTIL 대입 $($battleUntilAssigns.Count)곳)" }
+$battleUntilExpression = [string]$battleUntilAssigns[0].Right.Extent.Text
+function Set-MemberTimeTarget {
+  # 시간 지정 케이스의 목표 시각 ('yyyy-MM-dd HH:mm') - GUI 모형의 목표 시각을 정하고, 워커가 읽는 HONEYNOGI_UNTIL_TIME 은 그 값을 GUI 생산식으로 만듭니다
+  param([string]$Text)
+  $script:targetTime = [datetime]::ParseExact($Text, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+  $env:HONEYNOGI_UNTIL_TIME = [string](Invoke-Expression $battleUntilExpression)
+}
+
 # ── 케이스 초기화·실행·집계 ──
 $script:clearDefault = (Clear-Spec 'clear')
 function Reset-Member {
@@ -951,7 +1020,11 @@ function Reset-Member {
   $script:afterLeave = @((Step 1 'loading'), (Step 5 'arrival'), (Step 6 'field')); $script:leaveIgnored = $false; $script:clickHook = $null
   $script:logHooks = @()
   $script:dgLastRun = $false; $script:abyssLeaveCause = $null
-  $env:HONEYNOGI_UNTIL_TIME = ''; $env:HONEYNOGI_CYCLE_ESTIMATE_SEC = ''
+  # 시간 지정은 케이스가 Set-MemberTimeTarget 으로만 켭니다 (GUI 모형 목표 시각과 UNTIL 을 한 값에서). 사이클 추정치 env 는 워커가 읽지 않습니다 (§0)
+  $env:HONEYNOGI_UNTIL_TIME = ''
+  # GUI 모형 상태 (회귀 R-10 - 체인 하니스가 워커마다 이 상태로 GUI 판단을 돌림): 비시간·무한 반복·전투·비커스텀이 기본
+  $script:targetTime = $null; $script:mainCategory = 'battle'; $script:stopRequested = $false; $script:targetCycles = 0
+  $script:completedCycles = 0; $script:preparedStreak = 0; $script:customActive = $false; $script:guiDecision = ''; $script:guiLogs = @()
   $script:exitCode = $null; $script:threw = ''; $script:el = 0
   $script:keepPlan = $false; $script:afterReadyQueue = @(); $script:afterAnchorQueue = @(); $script:afterReadyQueueIdx = 0; $script:afterAnchorQueueIdx = 0; $script:sweepSpec = $null
   $script:turnId = 0; $script:transientSeq = @('transient', 'transient2'); $script:transientThen = 'inside'; $script:transientIdx = 0; $script:transientTurn = -1; $script:transientCur = ''
@@ -1329,24 +1402,61 @@ Run-Member
 Check-Equal 'B13′ (미관측 — 2인 파티로 관측 불가) START 접힘 + 숨은 준비됨 + F9: P 탐침 1 → committed(소비 0) → 완주 → 경계 P → 소비 1 → exit 0' (
   J @((Count-Click $anchorPoint), (Get-LeaveResults), ([bool]$script:pCalls[0].Result.Consumed), $script:removes, $script:keys, $script:exitCode)) '1/committed,left/False/1/1/0'
 
-# B14 시간(경계) — Now+E+여유 가 분 경계 ±1초에 오도록 가상 시계를 맞춘 두 케이스 (여유 = 소스 캡처값)
-#   U+1초 → 'time' → P → 나가기 → 로딩 → left → exit 0 / U−1초 → '' → 경계 인계(경계 신호가 준비 전 패널이면 준비 1 → exit 0 '준비 완료를 누르고')
+# B14 시간(경계) — 시간 지정 '그 판까지' 설계 8.2 T2. 지정 시각 U = 10:30 (케이스 시작 10:00 기준 1800초). 경계 판단 시각 = 클리어 감시 반환 시각 At
+#   (반환 뒤 첫 회전 ⑧ 이 대기 없이 같은 가상 시각에 G 를 봄). G 'time' = 지금 >= U. G 가 빈 경계 인계(지금 < U)는 이어 감 인계라 exit 11 입니다
 $untilText = '2026-10-01 10:30'
 $untilElapsed = 1800
-$estimate = 600
-foreach ($delta in @(1, -1)) {
+$leftTimeHandoff = '^\[완료\] 파티원 회차 완료 - 마지막 회차\(지정 시간 10:30\)라 나가기로 필드에 나와 마칩니다$'
+# B14(−1) 경계 신호 보상 위 준비 전 패널이 U − 1초 → G '' → 경계 준비 1 → 1초 → exit 11 '준비 완료를 누르고' (P 0).
+#         종료는 U 뒤(1초 대기)지만 판단은 ⑧ 의 U − 1초입니다 - GUI 는 11 이라 지정 시각을 보지 않고 이어받습니다 (K-T1 이 체인으로 확인)
+Reset-Member -Plan @((P 0 'inside'))
+Set-MemberTimeTarget $untilText
+$script:clearPlan = @(@{ Return = 'ready'; Steps = @((Step 0 'readyAvail')); At = $untilElapsed - 1 })
+Run-Member
+$b14ReadyAt = $(if ($script:clickTimes.Count) { $script:clickTimes[$script:clickTimes.Count - 1] } else { -1 })
+Check-Equal "B14(−1) U−1초 경계 보상 위 준비 전 패널 → G '' → 경계 준비 1 → 1초 → exit 11(이어 감 인계) '준비 완료를 누르고', P 0" (
+  J @($script:pCalls.Count, (Count-Click $readyPoint), $script:exitCode, (Test-LastDone $readyHandoff), [Math]::Round($script:el - $b14ReadyAt, 1))) '0/1/11/1/1'
+# B14(0)·(+1) 경계 신호 보상이 U · U + 1초 → G 'time'(같은 시각 포함) → P(G) → 나가기 1 → 로딩 → left → exit 0 '마지막 회차(지정 시간 10:30)라', 'left' 로딩 표본 n ≥ 1
+foreach ($delta in @(0, 1)) {
   Reset-Member -Plan @((P 0 'inside'))
-  $env:HONEYNOGI_UNTIL_TIME = $untilText; $env:HONEYNOGI_CYCLE_ESTIMATE_SEC = [string]$estimate
-  $boundaryAt = $untilElapsed - $estimate - [int]$memberTimeGateMarginSeconds + $delta   # 경계 판단 시각 T: T + E + 여유 = U + delta
-  $script:clearPlan = @(@{ Return = $(if ($delta -gt 0) { 'member-reward' } else { 'ready' }); Steps = @((Step 0 $(if ($delta -gt 0) { 'memberReward' } else { 'readyAvail' }))); At = $boundaryAt })
+  Set-MemberTimeTarget $untilText
+  $script:clearPlan = @(@{ Return = 'member-reward'; Steps = @((Step 0 'memberReward')); At = $untilElapsed + $delta })
   Run-Member
-  if ($delta -gt 0) {
-    Check-Equal "B14 U+1초(T=$boundaryAt) → G 'time' → P(G) → 나가기 1 → left → exit 0 '마지막 회차(지정 시간 10:30)라'" (
-      J @($script:pCalls[0].Reason, (Count-Click $leavePoint), (Get-LeaveResults), $script:exitCode, (Test-LastDone '마지막 회차\(지정 시간 10:30\)라 나가기로 필드에 나와 마칩니다$'))) 'time/1/left/0/1'
+  $b14Label = $(if ($delta -eq 0) { 'B14(0) 경계 보상이 U(같은 시각)' } else { 'B14(+1) 경계 보상이 U+1초' })
+  Check-Equal "$b14Label → G 'time' → P(G) → 나가기 1 → left → exit 0 '마지막 회차(지정 시간 10:30)라', left 로딩 n ≥ 1" (
+    J @($script:pCalls[0].Reason, (Count-Click $leavePoint), (Get-LeaveResults), $script:exitCode, (Test-LastDone $leftTimeHandoff), [int]((Get-LeftDepartSamples) -ge 1))) 'time/1/left/0/1/1'
+}
+# B14′ 경계 신호 보상이 U − 1초 → G '' → 보상 인계(누르지 않는 위임 인계 - 설계 4.5) exit 11, 클릭 0
+Reset-Member -Plan @((P 0 'inside'))
+Set-MemberTimeTarget $untilText
+$script:clearPlan = @(@{ Return = 'member-reward'; Steps = @((Step 0 'memberReward')); At = $untilElapsed - 1 })
+Run-Member
+Check-Equal "B14′ U−1초 경계 보상 → G '' → 보상 인계 exit 11 '보상 화면에서 다음 워커가', 클릭 0, P 0" (
+  J @($script:exitCode, $script:clicks.Count, $script:pCalls.Count, (Test-LastDone '보상 화면에서 다음 워커가 파티장의 입장을 이어받습니다$'))) '11/0/0/1'
+# B14″ 경계 신호 재매칭(커밋)이 U − 1초 → G '' → 커밋 화면 인계 exit 11 / U + 1초 → G 'time' 이지만 다음 판이 이미 커밋 → 이월 1 → 그 판 완주
+#      (입장 키 합 2 = 첫 판 1 + 이월 판 1) → 경계 보상 → P(G) → left → exit 0 (두 판에 1계상)
+$carrySteps = @((Step 0 'matching'), (Step 10 'entryLoading'), (Step 14 'inside'))   # 재매칭 → 입장 로딩 → 던전 안 (토글 ON 자동 준비 - 관측 4)
+foreach ($delta in @(-1, 1)) {
+  Reset-Member -Plan @((P 0 'inside'))
+  Set-MemberTimeTarget $untilText
+  $script:clearPlan = @(@{ Return = 'clear'; Steps = $carrySteps; At = $untilElapsed + $delta }, (Clear-Spec 'member-reward'))
+  Run-Member
+  if ($delta -lt 0) {
+    Check-Equal "B14″ U−1초 경계 재매칭 → G '' → exit 11 '재매칭 중인 다음 판', 이월 0, P 0, 키 1" (
+      J @($script:exitCode, (Count-Log '\(이월\)$'), $script:pCalls.Count, $script:keys, (Test-LastDone '재매칭 중인 다음 판을 다음 워커가 이어받습니다$'))) '11/0/0/1/1'
   } else {
-    Check-Equal "B14 U−1초(T=$boundaryAt) → G '' → 경계 준비 1 → exit 0 '준비 완료를 누르고', P 0" (J @($script:pCalls.Count, (Count-Click $readyPoint), $script:exitCode, (Test-LastDone $readyHandoff))) '0/1/0/1'
+    Check-Equal "B14″ U+1초 경계 재매칭 → 이월 1 → 다음 판 완주(키 합 2·-MemberMode 2) → 경계 보상 P(G 'time') 1 → left → exit 0 '마지막 회차(지정 시간 10:30)라'" (
+      J @((Count-Log '\(이월\)$'), $script:keys, $script:memberModeCalls, $script:pCalls.Count, $script:pCalls[0].Reason, (Get-LeaveResults), $script:exitCode, (Test-LastDone $leftTimeHandoff))) '1/2/2/1/time/left/0/1'
   }
 }
+# B14‴ (이월 반복 - 경합 P2-1. 설계가 받아들인 '판 수 상한 없음'(1.6 예외)을 진리표로 기록) 경계 재매칭이 U+1초 → 이월 → 이월 판의 경계도 재매칭(G 'time') →
+#      또 이월 → 세 번째 경계 보상 → P(G) 1 → left → exit 0 1회 (세 판에 1계상). 입장 키 합 3 = 첫 판 1 + 이월 판 2 ('이월에 횟수 상한' 변이면 이월 로그 1)
+Reset-Member -Plan @((P 0 'inside'))
+Set-MemberTimeTarget $untilText
+$script:clearPlan = @(@{ Return = 'clear'; Steps = $carrySteps; At = $untilElapsed + 1 }, (Clear-Spec 'clear' $carrySteps), (Clear-Spec 'member-reward'))
+Run-Member
+Check-Equal "B14‴ 경계 재매칭 U+1초 → 이월 → 이월 판 경계도 재매칭 → 이월 → 세 번째 경계 보상 P(G) 1 → left → exit 0 (이월 로그 2·키 합 3·-MemberMode 3 - 세 판에 exit 0 1회)" (
+  J @((Count-Log '\(이월\)$'), $script:keys, $script:memberModeCalls, $script:pCalls.Count, (Get-LeaveResults), $script:exitCode, (Test-LastDone $leftTimeHandoff))) '2/3/3/1/left/0/1'
 
 # B15 LAST_RUN + field 지속(CLEAR) → P → 필드 모양 W 이상 → 'stayed'(필드 모양, 클릭 0) → 진단 + exit 4 (필드 미확정, 회차 미계상), exit 0 0 (09-30 리뷰1 P1-1)
 Reset-Member -Plan @((P 0 'inside'))
@@ -1535,16 +1645,35 @@ $script:timeoutClear = $capturedTimeoutClear
 
 # ── §2-K. 키·체인·이월 ────────────────────────────────────────────────────────
 function Invoke-WorkerChain {
-  # 워커 체인: 각 워커는 새 D(지역 상태 새로), 가상 시계·화면 계획표·캡처 상태는 이어짐. exit 0 이면 GUI 가 다음 워커를 띄움(기동 지연 뒤)
+  # 워커 체인: 각 워커는 새 D(지역 상태 새로), 가상 시계·화면 계획표·캡처 상태는 이어짐. 워커가 끝날 때마다 GUI 모형이 다음 워커를 띄울지 정합니다
+  # (시간 지정 '그 판까지' 설계 8.1 - 회귀 R-10. 옛 하니스는 'exit 0 이면 늘 이어 감' 이라 GUI 판단을 흉내 내지 않았음).
+  # 바깥 분기는 GUI 타이머와 같습니다: 0·11 → 계상 뒤 Invoke-NextCycleDecision / 10 → 미계상 Invoke-NextCycleDecision / 그 밖(4·1·2·3·반환·예외) →
+  # 시간 판정과 무관하게 정지 (K-T4 가 지킴). 코드 10 앞부분(잔여 로그 수집·거점 퇴장 판별·준비 실행 연속 수)은 모형에 없습니다 - 파티원 D 는
+  # 코드 10 을 내지 않습니다 (§3 exit 모양). 'next' 일 때만 기동 지연 뒤 다음 워커
   param([int]$Workers, [double]$StartupDelay = 2)
   $results = @()
   for ($w = 1; $w -le $Workers; $w++) {
     $keysBefore = $script:keys; $modeBefore = $script:memberModeCalls; $clicksBefore = $script:clicks.Count; $logsBefore = $script:logs.Count; $startAt = Elapsed
+    $pBefore = $script:pCalls.Count; $guiLogsBefore = @($script:guiLogs).Count
     Run-Member
+    $endAt = Elapsed
     $workerClicks = @(for ($i = $clicksBefore; $i -lt $script:clicks.Count; $i++) { $script:clicks[$i] })
     $workerLogs = @(for ($i = $logsBefore; $i -lt $script:logs.Count; $i++) { $script:logs[$i] })
-    $results += , @{ Exit = $script:exitCode; Threw = $script:threw; Keys = $script:keys - $keysBefore; Mode = $script:memberModeCalls - $modeBefore; Clicks = $workerClicks; Logs = $workerLogs; StartAt = $startAt }
-    if ($script:exitCode -ne 0) { break }
+    # GUI 모형 - 타이머 바깥 분기 (판단은 GUI 소스에서 추출한 Invoke-NextCycleDecision 이 Stop-AllRun·Start-NextCycle 모의로 기록)
+    $workerExit = $script:exitCode
+    $script:guiDecision = ''
+    if (($workerExit -eq 0) -or ($workerExit -eq 11)) {
+      $script:completedCycles++
+      Invoke-NextCycleDecision -ExitCode $workerExit
+    } elseif ($workerExit -eq 10) {
+      Invoke-NextCycleDecision -ExitCode 10
+    } else {
+      $script:guiDecision = "stop:code $workerExit"
+    }
+    $workerGuiLogs = @(@($script:guiLogs) | Select-Object -Skip $guiLogsBefore)
+    $results += , @{ Exit = $script:exitCode; Threw = $script:threw; Keys = $script:keys - $keysBefore; Mode = $script:memberModeCalls - $modeBefore; Clicks = $workerClicks; Logs = $workerLogs; StartAt = $startAt
+      EndAt = $endAt; P = $script:pCalls.Count - $pBefore; Decision = $script:guiDecision; GuiLogs = $workerGuiLogs }
+    if ($script:guiDecision -ne 'next') { break }
     Tick $StartupDelay
   }
   return , $results
@@ -1632,6 +1761,55 @@ $script:clearPlan = @((Clear-Spec 'entry-waiting'))
 Run-Member
 Check-Equal "K6 (미관측 — 2인 파티로 관측 불가) START 재펼침 2회 무반응 → 입장 → 경계 접힘: 카운터 리셋으로 경계 재펼침 1 → 준비 1 → exit 0 '준비 완료를 누르고', '다시 펼쳐지지 않아' 인계 0" (
   J @((Count-Click $anchorPoint), (Count-Click $readyPoint), $script:exitCode, (Test-LastDone $readyHandoff), (Count-Log '다시 펼쳐지지 않아 다음 워커가'), $script:keys)) '3/1/0/1/0/1'
+
+# ── 체인 + GUI 모형 - 시간 지정 '그 판까지' (설계 8.2 T2 의 K-T1~K-T4). U = 10:30 (1800초 - B14 와 같은 값) ──
+# 판단 주체 하나(조건 4)를 워커 → GUI 이어받기로 봅니다: 워커가 지정 시각 전에 이어 가기로 정하고 낸 11 은 GUI 가 지정 시각을 보지 않고 이어받고,
+# 지정 시각 뒤의 '마지막'(left - exit 0)과 START 비참가(exit 4) 뒤에는 GUI 가 멈춥니다
+$timeNoticeHead = '[안내] 지정 시간(10:30) 전에 워커가 다음 판으로 이어 가기로 정했습니다'   # GUI 11 안내 (지정 시각 뒤에 11 을 받은 드문 경우 1줄)
+$timeStopNotice = '지정 시간(10:30) 이후라 새 판을 시작하지 않습니다.'                          # GUI 전투 정지 안내 (Get-TimeStopNotice 전투 갈래)
+$timeStopDecision = 'stop:지정 시간(10:30) 도달'
+
+# K-T1 (조건 4 핵심) 워커 1: 경계 보상 위 준비 전 패널이 U − 0.5초 → G '' → 준비 → 1초 → exit 11 이 U 뒤 → GUI 모형: 11 이라 지정 시각을 보지 않고
+#      다음 워커 + 11 안내 1줄 → 워커 2 START 입장 로딩 → 던전 안 → 입장 키 1·준비 0 → 판 → 경계 보상 P(G) → left → exit 0 → GUI 모형 시간 정지(전투 안내).
+#      ('11 이면 시간 판단 생략' 이 빠지거나 GUI 가 -ExitCode 를 넘기지 않으면 워커 1 뒤에 멈춥니다 - 준비된 파티원이 워커 없이 끌려 들어가는 사고)
+Reset-Member -Plan @((P 0 'inside'))
+Set-MemberTimeTarget $untilText
+$script:clearPlan = @(@{ Return = 'ready'; Steps = @((Step 0 'readyAvail')); At = $untilElapsed - 0.5 }, (Clear-Spec 'member-reward'))
+$script:afterReady = @((Step 0.5 'readyDone'), (Step 1.8 'entryLoading'), (Step 8.8 'inside'))   # 2인 이동 (K4′ 기본 변형과 같은 시각표)
+$chain = Invoke-WorkerChain -Workers 3
+Check-Equal "K-T1 워커 1 경계 준비(U−0.5초) → exit 11 이 U 뒤 → GUI 모형 'next' + 11 안내 1 → 워커 2 입장 키 1·준비 0 → 경계 P(G) 1 → left → exit 0 → GUI 모형 '$timeStopDecision' + 전투 정지 안내 1 (체인 11,0·계상 2)" (
+  J @((($chain | ForEach-Object { $_.Exit }) -join ','), $script:completedCycles, [int]($chain[0].EndAt -gt $untilElapsed), $chain[0].Decision,
+    @($chain[0].GuiLogs | Where-Object { $_.StartsWith($timeNoticeHead) }).Count, $chain[1].Keys, @($chain[1].Clicks | Where-Object { $_ -eq $readyPoint }).Count,
+    $chain[1].P, $chain[1].Decision, @($chain[1].GuiLogs | Where-Object { $_ -eq $timeStopNotice }).Count, (Test-LastDone $leftTimeHandoff))) "11,0/2/1/next/1/1/0/1/$timeStopDecision/1/1"
+
+# K-T2 워커 1: 경계 보상이 U − 1초 → G '' → 보상 인계 exit 11 → GUI 모형 'next'(지정 시각 전이라 안내 없음) → 워커 2 START 보상(U + 1초) → G 'time' →
+#      준비 0 → P(G) → left → exit 4 (새 판에 참가하지 않음 - 회차 미완료) → GUI 모형 'stop:code 4' (시간 판정 없음). 계상 1 (워커 1 의 11 만)
+Reset-Member -Plan @((P 0 'inside'))
+Set-MemberTimeTarget $untilText
+$script:clearPlan = @(@{ Return = 'member-reward'; Steps = @((Step 0 'memberReward')); At = $untilElapsed - 1 })
+$chain = Invoke-WorkerChain -Workers 3
+Check-Equal "K-T2 워커 1 보상 인계(U−1초) exit 11 → GUI 모형 'next'·안내 0 → 워커 2 START 보상(U+1초) G 'time' → 준비 0 → P(G) left → exit 4 '지정 시간 10:30 도달 - 다음 판에 참가하지 않고 …' → 'stop:code 4' (체인 11,4·계상 1)" (
+  J @((($chain | ForEach-Object { $_.Exit }) -join ','), $script:completedCycles, $chain[0].Decision, @($chain[0].GuiLogs).Count, @($chain[1].Clicks | Where-Object { $_ -eq $readyPoint }).Count,
+    $chain[1].P, (Get-LeaveResults), $chain[1].Decision, (Test-LastDone '^\[완료\] 파티원: 지정 시간 10:30 도달 - 다음 판에 참가하지 않고 나가기로 필드에 나와 마칩니다$'))) '11,4/1/next/0/0/1/left/stop:code 4/1'
+
+# K-T3 (회귀 R-15) 워커 1: 경계 재매칭이 U − 1초 → exit 11 → 워커 2 START 재매칭(U + 1초 - G 'time' 이지만 커밋 화면이라 P 없이 그 판을 진행) → 입장 → 판 →
+#      경계 보상 P(G) 1 → left → exit 0 → GUI 모형 시간 정지. 워커 2 의 P 는 경계 1회뿐 - START 0 ('START 비커밋 목록에 재매칭 추가' 변이면 2)
+Reset-Member -Plan @((P 0 'inside'))
+Set-MemberTimeTarget $untilText
+$script:clearPlan = @(@{ Return = 'clear'; Steps = @((Step 0 'matching'), (Step 12 'entryLoading'), (Step 16 'inside')); At = $untilElapsed - 1 }, (Clear-Spec 'member-reward'))
+$chain = Invoke-WorkerChain -Workers 3
+$kt3BoundaryAt = $(if ($script:clearReturnTimes.Count -ge 2) { $script:clearReturnTimes[1] } else { -1 })   # 워커 2 의 클리어 감시 반환 = 그 판의 경계
+Check-Equal "K-T3 워커 1 재매칭 인계(U−1초) exit 11 → 워커 2 START 재매칭(U+1초)은 P 없이 대기·입장 → 판 → 경계 P(G) 1(START 0) → left → exit 0 → '$timeStopDecision' (체인 11,0)" (
+  J @((($chain | ForEach-Object { $_.Exit }) -join ','), $chain[0].Decision, $chain[1].P, [int](($kt3BoundaryAt -gt 0) -and ($script:pCalls[0].At -ge $kt3BoundaryAt)), $chain[1].Keys,
+    @($chain[1].Logs | Where-Object { $_ -match '재매칭 패널 감지 - 누를 것이 없어 입장을 기다립니다' }).Count, $chain[1].Decision)) "11,0/next/1/1/1/1/$timeStopDecision"
+
+# K-T4 (회귀 R-10 - GUI 모형 자체의 단언) 워커 1 START 3버튼 보상(역할 오설정) → 즉시 exit 4, 지정 시각은 먼 미래(시간 허용) → 체인 길이 1, 'stop:code 4' -
+#      모형의 바깥 분기가 시간 판정과 무관하게 정지시킴 (코드 4 를 다음 회차 판단에 넘기는 모형이면 시간이 허용해 다음 워커를 띄움)
+Reset-Member -Plan @((P 0 'reward3'))
+Set-MemberTimeTarget '2026-10-02 10:00'
+$chain = Invoke-WorkerChain -Workers 3
+Check-Equal "K-T4 워커 1 START 3버튼 보상 → exit 4 → GUI 모형 'stop:code 4' (지정 시각이 먼 미래여도 - 체인 길이 1·계상 0·GUI 로그 0)" (
+  J @($chain.Count, $chain[0].Exit, $chain[0].Decision, $script:completedCycles, @($script:guiLogs).Count)) '1/4/stop:code 4/0/0'
 
 # ── §2-R. 회귀 (⑥a 4절 이전 + 규칙 4·15 경계) ───────────────────────────────────
 # R1 (⑥a 4-14) 필드 → readyAvail → 준비 1 → 던전 안 1표본(깜빡임) → 로딩 → 던전 안 지속 → INSIDE 전이는 지속 구간의 2연속에서만 — 키 1, 키 시각 ≥ 깜빡임 + 4초
@@ -2027,6 +2205,19 @@ Run-Member
 Check-Equal "X-U 나가기 뒤 필드 위 준비 패널(HUD 가림) → P 60초 unconfirmed(전송 1) → [경고] + exit 4 '나가기 뒤 필드를 확인하지 못해 마칩니다 (회차 미계상)'" (
   J @((Get-FirstLeave).Result, (Get-FirstLeave).ExitSends, @(Get-WarningLines).Count, $script:exitCode, (Test-LastDone '^\[완료\] 파티원: 마지막 회차\(횟수 지정\) - 나가기 뒤 필드를 확인하지 못해 마칩니다 \(회차 미계상\)$'), $script:misclicks.Count)) 'unconfirmed/1/1/4/1/0'
 
+# X-UT (X-U 의 시간 지정 쌍둥이 - 계약 P2-1, 2인 실기에서 두 번 관측된 끝 모양: 순서표 104~116·146~157) 경계 보상 위 준비 전 패널이 U(10:30) + 1초 →
+#      P(G 'time'): 접기 → 접힘 → 나가기(단어 492) → 로딩 1초 → 필드 위 준비 패널(파티장이 '다시 하기' 를 먼저 눌러 요청이 따라옴) → 무장 해제 1('준비 패널') →
+#      P 60초 unconfirmed → [경고] + exit 4 (마지막 판 미계상 - 결정 D2 그대로, 설계 4.3·R13). 헛클릭 0: 필드 위 패널의 준비·접기는 누르지 않음
+Reset-Member -Plan @((P 0 'inside'))
+Set-MemberTimeTarget $untilText
+$script:clearPlan = @(@{ Return = 'ready'; Steps = @((Step 0 'readyAvail')); At = $untilElapsed + 1 })
+$script:afterLeave = @((Step 1 'loading'), (Step 2 'readyField'))
+Run-Member
+Check-Equal "X-UT 경계 보상 위 준비 전 패널(U+1초) → P(G 'time') 접기 1·나가기 1(=(492,654) 2)·준비 0 → 로딩 → 필드 위 준비 패널 → 무장 해제 1('준비 패널') → unconfirmed → [경고] 1 + exit 4 '마지막 회차(지정 시간 10:30) - 나가기 뒤 필드를 확인하지 못해 마칩니다 (회차 미계상)', 헛클릭 0" (
+  J @($script:pCalls[0].Reason, (Count-Log '준비 패널 접기 - 패널 밖'), @($script:leaveSendTimes).Count, (Count-Click $collapsePoint), (Count-Click $readyPoint),
+    (Count-Log '나가기 뒤 화면 전이가 끊겼습니다\(준비 패널\)'), (Get-FirstLeave).Result, @(Get-WarningLines).Count, $script:exitCode,
+    (Test-LastDone '^\[완료\] 파티원: 마지막 회차\(지정 시간 10:30\) - 나가기 뒤 필드를 확인하지 못해 마칩니다 \(회차 미계상\)$'), $script:misclicks.Count)) 'time/1/1/2/0/1/unconfirmed/1/4/1/0'
+
 # X-CR 이월 + 준비 시계 만료(readyDone) → ⑨ 서두 $pendingCount 로 P(G) → committed → 진단 + exit 4 '준비 상태 그대로, 회차 미계상' (리뷰 B3 → 09-30 결정 D2)
 Reset-Member -Plan @((P 0 'inside'))
 $script:dgLastRun = $true
@@ -2042,29 +2233,84 @@ Check-Equal "X-FC 경계 필드 위 준비 패널 + 마지막 회차 → 클릭 
   J @($script:clicks.Count, $script:misclicks.Count, (Get-FirstLeave).Result, [int](([Math]::Abs(($script:pCalls[0].EndAt - $script:pCalls[0].At) - $memberLeaveLimitSeconds)) -le 1), $script:exitCode,
     (Test-LastDone '마지막 회차\(횟수 지정\)지만 필드 위 준비 패널이라 준비를 누르지 않고 마칩니다 \(회차 미계상\)$'))) '0/0/stayed/1/4/1'
 
-# X-T START 보상 + Now+E+여유 = U+1초(시간) → P(G) → 나가기 1 → 로딩 → left → exit 4 '지정 시간 HH:mm 까지 한 판을 마칠 시간이 없어 …'(계상 0)
+# ── START 의 시간 판단 (시간 지정 '그 판까지' 설계 8.2 T2 - X-T 계열). START 의 G 'time' = 새 판 참가를 막음: 비커밋 화면(보상·필드 위 준비 패널·
+#    접힌 패널·필드)이면 P → 코드 4 (회차 미완료). 옛 X-T·X-T′ 는 U 가 M 만료 시각과 같아 M 만료 회전에서 우연히 통과했으므로(map_tests 0-1)
+#    U 를 케이스 시작(10:00 - 이미 지남)으로 두고 P 서두 시각을 함께 봅니다. START 시간 문구 5종은 아래 5개 케이스가 행동으로 하나씩 지킵니다 (회귀 R-11)
+# X-T START 보상 + 지정 시각 지남 → 첫 회전 G 'time' → P(G) → 나가기 1 → 로딩 → left → exit 4 '지정 시간 10:00 도달 - 다음 판에 참가하지 않고 …'(계상 0)
 Reset-Member -Plan @((P 0 'memberReward'))
-$env:HONEYNOGI_UNTIL_TIME = '2026-10-01 10:10'
-$env:HONEYNOGI_CYCLE_ESTIMATE_SEC = [string](600 - [int]$memberTimeGateMarginSeconds + 1)   # 시작 시각 10:00:00 + E + 여유 = 10:10:01 (U + 1초)
+Set-MemberTimeTarget '2026-10-01 10:00'
 Run-Member
-Check-Equal "X-T START 보상 + 시간 게이트(U+1초) → P(G 'time') → 나가기 1 → left → exit 4 '지정 시간 10:10 까지 한 판을 마칠 시간이 없어 나가기로 필드에 나와 마칩니다'" (
-  J @($script:pCalls[0].Reason, (Count-Click $leavePoint), (Get-LeaveResults), $script:exitCode, (Test-LastDone '^\[완료\] 파티원: 지정 시간 10:10 까지 한 판을 마칠 시간이 없어 나가기로 필드에 나와 마칩니다$'))) 'time/1/left/4/1'
+Check-Equal "X-T START 보상 + 지정 시각 지남 → 첫 회전 P(G 'time')(서두 ≤ 0.5초) → 나가기 1 → left → exit 4 '지정 시간 10:00 도달 - 다음 판에 참가하지 않고 나가기로 필드에 나와 마칩니다'" (
+  J @($script:pCalls[0].Reason, [int]($script:pCalls.Count -ge 1 -and $script:pCalls[0].At -le 0.5), (Count-Click $leavePoint), (Get-LeaveResults), $script:exitCode,
+    (Test-LastDone '^\[완료\] 파티원: 지정 시간 10:00 도달 - 다음 판에 참가하지 않고 나가기로 필드에 나와 마칩니다$'))) 'time/1/1/left/4/1'
 
-# X-T′ (빠른 PC 여분 워커 — 미관측) START field + Now+E+여유 = U+1초 → field 2연속 → P(G) → 필드 모양 W 이상 → 'stayed' → 진단 + exit 4 '…(필드 미확정) - 지정 시간 …', 클릭 0
+# X-TP START 필드 + 지정 시각 지남 → 필드 2연속 → P(G 'time') → 필드 모양 W 이상 → 'stayed'(필드 모양, 누를 것 없음) → 진단 + exit 4, 클릭 0
+#      (옛 X-T′ '빠른 PC 여분 워커' 는 ⑥e ㉰ 의 여유가 만든 창이라 사라졌습니다 - 'left' 뒤 GUI 는 반드시 멈춤, 설계 4.7)
 Reset-Member -Plan @((P 0 'field'))
-$env:HONEYNOGI_UNTIL_TIME = '2026-10-01 10:10'
-$env:HONEYNOGI_CYCLE_ESTIMATE_SEC = [string](600 - [int]$memberTimeGateMarginSeconds + 1)
+Set-MemberTimeTarget '2026-10-01 10:00'
 Run-Member
-Check-Equal "X-T′ (빠른 PC 여분 워커 — 미관측) START 필드 + 시간 게이트 → P(G) stayed(field) → exit 4 '필드로 보이는 화면이라 누르지 않고 마칩니다 (필드 미확정) - 지정 시간 10:10 …', 클릭 0" (
-  J @($script:pCalls[0].Reason, (Get-FirstLeave).Result, $script:clicks.Count, $script:exitCode, (Test-LastDone '^\[완료\] 파티원: 필드로 보이는 화면이라 누르지 않고 마칩니다 \(필드 미확정\) - 지정 시간 10:10 까지'))) 'time/stayed/0/4/1'
+Check-Equal "X-TP START 필드 + 지정 시각 지남 → P(G 'time') stayed(field) → exit 4 '필드로 보이는 화면이라 누르지 않고 마칩니다 (필드 미확정) - 지정 시간 10:00 도달', 클릭 0" (
+  J @($script:pCalls[0].Reason, (Get-FirstLeave).Result, (Get-FirstLeave).Screen, $script:clicks.Count, $script:exitCode,
+    (Test-LastDone '^\[완료\] 파티원: 필드로 보이는 화면이라 누르지 않고 마칩니다 \(필드 미확정\) - 지정 시간 10:00 도달$'))) 'time/stayed/field/0/4/1'
 
-# X-TF START 시간 + readyField 로 시작 → 클릭 0 → P 60초 → stayed → 진단 + exit 4 '…필드 위 준비 패널이라 준비를 누르지 않고 마칩니다'
+# X-TF START 필드 위 준비 패널 + 지정 시각 지남 → 첫 회전 G 'time'(⑩ 준비보다 먼저) → P(G) 는 필드 위 패널에서 누르지 않음 → P 60초 stayed → exit 4.
+#      기대는 전체 원문입니다 (회귀 R-11 - 옛 기대는 꼬리만 봐서 사유 앞부분이 바뀌어도 통과했음)
 Reset-Member -Plan @((P 0 'readyField'))
-$env:HONEYNOGI_UNTIL_TIME = '2026-10-01 10:10'
-$env:HONEYNOGI_CYCLE_ESTIMATE_SEC = [string](600 - [int]$memberTimeGateMarginSeconds + 1)
+Set-MemberTimeTarget '2026-10-01 10:00'
 Run-Member
-Check-Equal "X-TF START 시간 게이트 + 필드 위 준비 패널 → 클릭 0 → P 60초 stayed → exit 4 '…필드 위 준비 패널이라 준비를 누르지 않고 마칩니다'" (
-  J @($script:clicks.Count, (Get-FirstLeave).Result, $script:exitCode, (Test-LastDone '필드 위 준비 패널이라 준비를 누르지 않고 마칩니다$'))) '0/stayed/4/1'
+Check-Equal "X-TF START 필드 위 준비 패널 + 지정 시각 지남 → 클릭 0 → P(G 'time') 60초 stayed → exit 4 '지정 시간 10:00 도달 - 필드 위 준비 패널이라 준비를 누르지 않고 마칩니다'" (
+  J @($script:clicks.Count, $script:misclicks.Count, $script:pCalls[0].Reason, (Get-FirstLeave).Result, $script:exitCode,
+    (Test-LastDone '^\[완료\] 파티원: 지정 시간 10:00 도달 - 필드 위 준비 패널이라 준비를 누르지 않고 마칩니다$'))) '0/0/time/stayed/4/1'
+
+# X-TU (회귀 R-11) START 보상 + 지정 시각 지남 → P(G) 나가기 1 → 로딩 1초 → 필드 위 준비 패널(파티장 요청이 따라옴) → 무장 해제 → P 60초 unconfirmed → [경고] + exit 4
+Reset-Member -Plan @((P 0 'memberReward'))
+Set-MemberTimeTarget '2026-10-01 10:00'
+$script:afterLeave = @((Step 1 'loading'), (Step 2 'readyField'))
+Run-Member
+Check-Equal "X-TU START 보상 + 지정 시각 지남 → P(G 'time') 나가기 1 → 로딩 → 필드 위 준비 패널 → unconfirmed → [경고] 1 + exit 4 '지정 시간 10:00 도달 - 나갔지만 나가기 뒤 필드를 확인하지 못해 마칩니다'" (
+  J @($script:pCalls[0].Reason, (Count-Click $leavePoint), (Get-FirstLeave).Result, @(Get-WarningLines).Count, $script:exitCode,
+    (Test-LastDone '^\[완료\] 파티원: 지정 시간 10:00 도달 - 나갔지만 나가기 뒤 필드를 확인하지 못해 마칩니다$'))) 'time/1/unconfirmed/1/4/1'
+
+# X-TN START 접힌 패널 + 지정 시각 지남 → P(G) 재펼침 탐침 2회 무반응 → P 60초 stayed(접힌 패널) → exit 4 '…도달 - 나갈 수 없는 화면이라(접힌 준비 패널) …'
+#      (START 시간 문구 5종의 다섯째 - 설계 표의 선택 케이스지만 문구 5종을 모두 행동으로 지키려고 둡니다)
+Reset-Member -Plan @((P 0 'entryWaiting'))
+Set-MemberTimeTarget '2026-10-01 10:00'
+$script:afterAnchor = $null
+Run-Member
+$xtnLabel = [regex]::Escape((Get-Label 'entry-waiting'))
+Check-Equal "X-TN START 접힌 패널 + 지정 시각 지남 → P(G 'time') 탐침 2(무반응) → stayed(entry-waiting) → exit 4 '지정 시간 10:00 도달 - 나갈 수 없는 화면이라(접힌 준비 패널) 누르지 않고 마칩니다'" (
+  J @($script:pCalls[0].Reason, (Count-Click $anchorPoint), (Get-FirstLeave).Result, (Get-FirstLeave).Screen, $script:exitCode,
+    (Test-LastDone ('^\[완료\] 파티원: 지정 시간 10:00 도달 - 나갈 수 없는 화면이라\(' + $xtnLabel + '\) 누르지 않고 마칩니다$')))) 'time/2/stayed/entry-waiting/4/1'
+
+# X-TS(a) (회귀 R-2) START 보상 유지 + 지정 시각 = 케이스 시작 + 60초(M 600초보다 훨씬 앞 - M 만료가 원인일 수 없음) → G 를 매 회전 다시 계산하므로
+#         지정 시각을 넘긴 첫 회전(회전 격자 0.7초 - 60.2초)에 P(G 'time') → 나가기(515,654) 1 → left → exit 4, 준비 0
+#         ('G 를 루프 앞에서 한 번만 계산' 변이면 P 가 M 만료(600초)의 'member-timeout' 이 됨)
+Reset-Member -Plan @((P 0 'memberReward'))
+Set-MemberTimeTarget '2026-10-01 10:01'
+Run-Member
+$xtsPAt = @($script:pCalls | ForEach-Object { $_.At }) -join ','
+Check-Equal "X-TS(a) START 보상 유지 + 지정 시각 +60초 → P(G 'time') 서두 ∈ [60, 60.7] (실제 $xtsPAt) → 나가기 1·준비 0 → left → exit 4 '지정 시간 10:01 도달 - 다음 판에 참가하지 않고 …'" (
+  J @([int]($script:pCalls.Count -ge 1 -and $script:pCalls[0].At -ge 60 -and $script:pCalls[0].At -le 60.7), $script:pCalls[0].Reason, (Count-Click $leavePoint), (Count-Click $readyPoint),
+    (Get-LeaveResults), $script:exitCode, (Test-LastDone '^\[완료\] 파티원: 지정 시간 10:01 도달 - 다음 판에 참가하지 않고 나가기로 필드에 나와 마칩니다$'))) '1/time/1/0/left/4/1'
+
+# X-TS(b) START 보상 → 준비 전 패널(보상 위)이 계획 At = 60초 - 지정 시각을 넘긴 첫 회전(60.2초)에 처음 보임 (회전 격자 U−0.7 < At ≤ U) → 그 회전 ⑧ 의
+#         G 'time' 이 ⑩ 준비보다 먼저 → 준비 0, P(G) 접기 1 → 접힘 → 나가기(단어 492) 1 → left → exit 4
+Reset-Member -Plan @((P 0 'memberReward'), (P 60 'readyAvail'))
+Set-MemberTimeTarget '2026-10-01 10:01'
+Run-Member
+Check-Equal "X-TS(b) 준비 전 패널이 지정 시각과 같은 회전에 처음 보임 → 준비 0 → P(G 'time') 접기 1 → 나가기 1 (=(492,654) 2) → left → exit 4" (
+  J @((Count-Click $readyPoint), (Count-Log '준비 패널 접기 - 패널 밖'), @($script:leaveSendTimes).Count, (Count-Click $collapsePoint), $script:pCalls[0].Reason, (Get-LeaveResults), $script:exitCode)) '0/1/1/2/time/left/4'
+
+# X-TC (조건 1 - 지정 시각 전에 시작한 판은 끝까지) START 보상 → 준비 전 패널이 U − 5초 → G '' → 준비 1 → 입장 → 키 1 → 판(지정 시각을 넘겨 끝남) →
+#      경계 보상 P(G 'time') 1 → left → exit 0 '마지막 회차(지정 시간 10:01)라' (START 의 준비됨·입장 로딩 구간은 지정 시각을 넘겨도 G 와 무관하게 진행)
+Reset-Member -Plan @((P 0 'memberReward'), (P 55 'readyAvail'))
+Set-MemberTimeTarget '2026-10-01 10:01'
+$script:afterReady = @((Step 0.5 'readyDone'), (Step 5 'entryLoading'), (Step 9 'inside'))
+$script:clearPlan = @((Clear-Spec 'member-reward'))
+Run-Member
+Check-Equal "X-TC 지정 시각 5초 전 준비 1 → 입장(지정 시각 뒤) → 키 1 → 판 → 경계 P(G 'time') 1(서두 > 60초) → left → exit 0 '마지막 회차(지정 시간 10:01)라 나가기로 필드에 나와 마칩니다'" (
+  J @((Count-Click $readyPoint), [int]($script:clickTimes.Count -ge 1 -and $script:clickTimes[0] -lt 60), $script:keys, $script:pCalls.Count, $script:pCalls[0].Reason, [int]($script:pCalls.Count -ge 1 -and $script:pCalls[0].At -gt 60),
+    (Get-LeaveResults), $script:exitCode, (Test-LastDone '^\[완료\] 파티원 회차 완료 - 마지막 회차\(지정 시간 10:01\)라 나가기로 필드에 나와 마칩니다$'))) '1/1/1/1/time/1/left/0/1'
 
 # ── §2-X-M. 'left' = 끊김 없이 관측된 퇴장 전이 계약 (09-30 리뷰1 P1-1 이후) ─────────────
 # 모든 'left' 기대 케이스는 'left' 로그의 로딩 표본 n ≥ 1 을, 무장 해제가 끼는 케이스는 무장 해제 로그 1(사유 포함)을 함께 단언합니다 (설계 5.1 끝 단락)
@@ -3212,27 +3458,37 @@ $removeNodes = @(@(Get-CommandNodes $dAst 'Remove-Item') + @(Get-CommandNodes $p
 $removeOk = @($removeNodes | Where-Object { $_.Extent.Text -eq 'Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue' -and
     (@(Get-ClauseChain $_ | Where-Object { (-not $_.IsElse) -and $_.Cond.Contains('Test-Path -LiteralPath $safeStopFlagPath') }).Count -gt 0) })
 Check-Equal '§3 안전 중지 소비: Remove-Item 은 P 3곳(D 0) 모두 -ErrorAction SilentlyContinue 형태이고 Test-Path 참 분기 안' (J @(@(Get-CommandNodes $dAst 'Remove-Item').Count, $removeNodes.Count, $removeOk.Count)) '0/3/3'
+# 시간 지정 입력 (시간 지정 '그 판까지' 설계 4.2·8.1): UNTIL 은 D 서두 1곳(루프 앞), 사이클 추정치 env 는 0곳. $memberUntil 은 대입·G 인자·로그 서식과
+# 경계 인계 12곳의 종료 코드 11 분기('if ($null -ne $memberUntil) {' 다음 줄 exit 11)에만 씁니다 - 그 밖에서 쓰면 넷째 값이 실패합니다.
+# 셋째 값은 UNTIL 만 봅니다 (옛 단언은 사이클 추정치 위치도 함께 봤는데, 참조가 없으면 IndexOf 가 -1 이라 '루프 앞' 이 빈 참이 됨)
 $untilUses = [regex]::Matches($dCode, '\$memberUntil\b')
-$untilAllowed = [regex]::Matches($dCode, '\$memberUntil = Get-LifeUntilDeadline|\$null -ne \$memberUntil\) \{ Write-RunLog|-UntilTime \$memberUntil|\$memberUntil\.ToString\(''HH:mm''\)')
-Check-Equal '§3 UNTIL·CYCLE_ESTIMATE 환경 변수 참조는 D 서두 1곳씩(루프 앞), $memberUntil 은 대입·G 인자·로그 서식에만' (
-  J @((Get-TextCount $dCode 'HONEYNOGI_UNTIL_TIME'), (Get-TextCount $dCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC'), [int]($dCode.IndexOf('HONEYNOGI_UNTIL_TIME') -lt $dLoopStart -and $dCode.IndexOf('HONEYNOGI_CYCLE_ESTIMATE_SEC') -lt $dLoopStart),
-    [int]($untilUses.Count -eq $untilAllowed.Count), (Get-TextCount $dCode '-UntilTime $memberUntil'))) '1/1/1/1/2'
+$untilAllowed = [regex]::Matches($dCode, '\$memberUntil = Get-LifeUntilDeadline|\$null -ne \$memberUntil\) \{ Write-RunLog|-UntilTime \$memberUntil|\$memberUntil\.ToString\(''HH:mm''\)|\$null -ne \$memberUntil\) \{\s*exit 11')
+$untilEnvAt = $dCode.IndexOf('HONEYNOGI_UNTIL_TIME')
+Check-Equal '§3 UNTIL 환경 변수 참조는 D 서두 1곳(루프 앞)·사이클 추정치 env 0곳, $memberUntil 은 대입·G 인자·로그 서식·경계 인계의 11 분기에만' (
+  J @((Get-TextCount $dCode 'HONEYNOGI_UNTIL_TIME'), (Get-TextCount $dCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC'), [int](($untilEnvAt -ge 0) -and ($untilEnvAt -lt $dLoopStart)),
+    [int]($untilUses.Count -eq $untilAllowed.Count), (Get-TextCount $dCode '-UntilTime $memberUntil'))) '1/0/1/1/2'
+# 경계 인계 → 시간 지정이면 exit 11 (설계 4.4): D 의 exit 0 13곳 가운데 'left'(마지막 - P 뒤)를 뺀 12곳 바로 앞에 줄 단독 11 블록이 있습니다. 블록 안에는
+# 로그·주석을 두지 않습니다 - 위 exit 0 문구 분류가 exit 0 앞의 마지막 Write-RunLog 를 사유로 보고, 하니스 센티널은 줄 단독 exit 만 바꿉니다
+# (한 줄 'if (…) { exit 11 }' 이면 센티널 3중 단언이 막음). 'left' 의 exit 0 은 [완료] 로그 바로 다음 줄이어야 합니다 - 앞에 11 블록이 끼면 마지막 판 뒤에도
+# GUI 가 지정 시각을 보지 않고 다음 워커를 띄웁니다
+$exit11Lines = [regex]::Matches($dCode, '(?m)^\s*exit 11\s*$').Count
+$exit11Blocks = [regex]::Matches($dCode, 'if \(\$null -ne \$memberUntil\) \{\s*\r?\n\s*exit 11\s*\r?\n\s*\}\s*\r?\n\s*exit 0\b').Count
+$exit0Lines = [regex]::Matches($dCode, '(?m)^\s*exit 0\s*$').Count
+$leftExitDirect = [regex]::Matches($dCode, '라 나가기로 필드에 나와 마칩니다"\s*\r?\n\s*exit 0\b').Count
+Check-Equal "§3 exit 11: 줄 단독 12곳 = '11 블록 + 다음 줄 exit 0' 모양 12곳, exit 0 은 13곳 그대로, 'left' 의 exit 0 은 [완료] 로그 바로 다음 줄 1곳 (앞에 11 블록 없음)" (
+  J @($exit11Lines, $exit11Blocks, $exit0Lines, $leftExitDirect)) '12/12/13/1'
+# START 시간 문구 5종 (설계 4.6 - 'start-g' 의 비안전중지 갈래라 시간 사유에서만 나옴): 새 원문이 각 1곳, 옛 '한 판을 마칠 시간' 은 0곳 (회귀 R-11).
+# 행동은 X-T·X-TU·X-TP·X-TF·X-TN 이 하나씩 지킵니다 (원문은 소스 그대로의 큰따옴표 문자열 - ${…} 는 확장하지 않은 글자)
+$startTimePhrases = @(
+  '"[완료] 파티원: ${reasonLabel} 도달 - 다음 판에 참가하지 않고 나가기로 필드에 나와 마칩니다"',
+  '"[완료] 파티원: ${reasonLabel} 도달 - 나갔지만 나가기 뒤 필드를 확인하지 못해 마칩니다"',
+  '"[완료] 파티원: 필드로 보이는 화면이라 누르지 않고 마칩니다 (필드 미확정) - ${reasonLabel} 도달"',
+  '"[완료] 파티원: ${reasonLabel} 도달 - 필드 위 준비 패널이라 준비를 누르지 않고 마칩니다"',
+  '"[완료] 파티원: ${reasonLabel} 도달 - 나갈 수 없는 화면이라(${leaveLabel}) 누르지 않고 마칩니다"')
+Check-Equal "§3 START 시간 문구 5종 각 1곳(소스 원문) · 옛 '한 판을 마칠 시간' 0곳" (J @((@($startTimePhrases | ForEach-Object { Get-TextCount $dCode $_ }) -join ','), (Get-TextCount $dCode '한 판을 마칠 시간'))) '1,1,1,1,1/0'
 
-# 디스패치 (2.11) - 워커 본문은 크기 때문에 토큰으로 한 번에 주석을 뺍니다 (Remove-SourceComments 의 문자열 치환 반복은 1MB 에서 느림)
-function Remove-CommentsByTokens {
-  param([string]$Text, $Tokens)
-  $builder = New-Object System.Text.StringBuilder ($Text.Length)
-  $position = 0
-  foreach ($token in $Tokens) {
-    if ($token.Kind -ne [System.Management.Automation.Language.TokenKind]::Comment) { continue }
-    [void]$builder.Append($Text, $position, $token.Extent.StartOffset - $position)
-    [void]$builder.Append(($token.Text -replace '[^\r\n]', ' '))
-    $position = $token.Extent.EndOffset
-  }
-  [void]$builder.Append($Text, $position, $Text.Length - $position)
-  return $builder.ToString()
-}
-$workerCode = Remove-CommentsByTokens $workerAst.Extent.Text $workerTokens
+# 디스패치 (2.11) - 워커 본문은 크기 때문에 토큰으로 한 번에 주석을 뺀 사본($workerCode)을 씁니다. 그 사본과 Remove-CommentsByTokens 정의는 §0 앞에서 만듭니다
+# (§0 의 0건 단언이 먼저 쓰기 때문 - 시간 지정 '그 판까지' 설계 리뷰 1차 P3)
 Check-True '§3 디스패치: 기타 분기 뒤·이벤트 정리 앞, 조건에 -not customSpecInvalid, 호출 뒤 throw (옛 디스패치·옛 S 터치 헬퍼·시작 패널 대기의 파티원 제외 항 0건)' (
   ($workerCode.IndexOf('Invoke-NyanMerchantRun -Game $game') -lt $workerCode.IndexOf('Invoke-AbyssPartyMemberCycle -Game $game')) -and
   ($workerCode.IndexOf('Invoke-AbyssPartyMemberCycle -Game $game') -lt $workerCode.IndexOf('if (Clear-EventOverlay -Game $game) {')) -and
@@ -3255,15 +3511,18 @@ Check-True '§4 마감 블록: 최종 탐침의 동결 가드 바로 뒤 파티�
   $clearWaitCode -match '\(\(-not \$DungeonMode\) -and \(Test-ExitButton -Game \$Game\) -and -not \(Test-HomeEndEscHud -Game \$Game\)\)\) \{\s*\} elseif \(\$script:screenCaptureFailing -or \(\$script:captureFailSerial -ne \$deadlineSerial\)\) \{\s*\} elseif \(\$MemberMode -and \(Test-AbyssMemberClearWaitProbe -Game \$Game -BottomText \$script:lastClearPromptText\)\) \{\s*\} elseif \(\$script:screenCaptureFailing -or \(\$script:captureFailSerial -ne \$deadlineSerial\)\) \{\s*\} elseif \(Close-QuestRewardScreen') ''
 
 # ── §5 GUI 배선 (설계 4절) ──────────────────────────────────────────────────────
-$guiTokens = $null; $guiErrors = $null
-$guiAst = [System.Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$guiTokens, [ref]$guiErrors)
+# GUI AST·토큰은 §2 의 GUI 모형 준비에서 이미 파싱했습니다 (같은 것을 씀 - 한 번만 파싱)
 $guiCode = Remove-CommentsByTokens $guiAst.Extent.Text $guiTokens
 function Get-GuiFunctionCode { param([string]$Name) $fn = $guiAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Name }, $true); if ($null -eq $fn) { return '' }; return (Remove-SourceComments ([string]$fn.Extent.Text)) }
 $nextCycleCode = Get-GuiFunctionCode 'Start-NextCycle'
 $startAutomationCode = Get-GuiFunctionCode 'Invoke-StartAutomation'
 $memberActiveCode = Get-GuiFunctionCode 'Test-AbyssMemberRunActive'
-Check-True '§5 Start-NextCycle: UNTIL·CYCLE_ESTIMATE 를 매 회차 먼저 지우고, 생활 분기와 따로 파티원 분기(시간 지정 + 파티원 실행)가 두 값을 넘김' (
-  $nextCycleCode -match '\$env:HONEYNOGI_UNTIL_TIME = ''''\s*\$env:HONEYNOGI_CYCLE_ESTIMATE_SEC = ''''\s*if \(\(\$null -ne \$script:targetTime\) -and \(\$script:mainCategory -eq ''life''\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm''\)\s*\}\s*if \(\(\$null -ne \$script:targetTime\) -and \(Test-AbyssMemberRunActive\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm''\)\s*\$env:HONEYNOGI_CYCLE_ESTIMATE_SEC = \[string\]\(Get-CycleWaitSecondsForEstimate\)\s*\}') ''
+# Start-NextCycle 의 UNTIL 배선 (시간 지정 '그 판까지' 설계 2.5·8.1 + 설계 리뷰 1차 P2): 매 회차 먼저 지우고 → 생활 분기(글자 그대로 - 조건 5) →
+# 전투 분기(판 끝에서 스스로 판단하는 워커 - 던전·심층·어비스 파티원, Test-WorkerTimeJudgeActive)가 InvariantCulture 'yyyy-MM-dd HH:mm' 으로 넘깁니다.
+# 두 분기 사이에는 주석만 있습니다(주석 뺀 사본에서 공백). 사이클 추정치 env 는 GUI 전체(주석 뺀 사본)에서 0건 - 워커가 더 읽지 않습니다
+Check-True '§5 Start-NextCycle: UNTIL 을 매 회차 먼저 지우고, 생활 분기(원문)와 따로 전투 분기(시간 지정 + 판 끝 판단 워커)가 InvariantCulture 로 넘김 · 사이클 추정치 env 0건(GUI 전체)' (
+  ($nextCycleCode -match '\$env:HONEYNOGI_UNTIL_TIME = ''''\s*if \(\(\$null -ne \$script:targetTime\) -and \(\$script:mainCategory -eq ''life''\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm''\)\s*\}\s*if \(\(\$null -ne \$script:targetTime\) -and \(Test-WorkerTimeJudgeActive\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm'', \[Globalization\.CultureInfo\]::InvariantCulture\)\s*\}') -and
+  ((Get-TextCount $guiCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC') -eq 0)) "사이클 추정치 env 참조 $(Get-TextCount $guiCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC')곳"
 Check-True '§5 Test-AbyssMemberRunActive = 전투 대분류 + 어비스 + 함께하기 + 매칭 파티원 + 비커스텀' (
   $memberActiveCode -match 'return \(\(\$script:mainCategory -eq ''battle''\) -and \$rbCatAbyss\.Checked -and \$rbModeParty\.Checked -and \$rbAbyssPartyMember\.Checked -and \(-not \$script:customActive\)\)') ''
 $leaderLines = @('"※ 매칭 ''파티(파티장)'': 파티를 먼저 짠 상태에서 시작하세요.`n" +', '"   입장하기 후 파티원 전원이 준비되면 자동 입장됩니다.`n" +', '"   (인원이 부족해도 채우지 않고 확인 팝업을 넘겨 그대로 도전합니다)`n" +')

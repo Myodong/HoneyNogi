@@ -2007,7 +2007,11 @@ $btnManual.Add_Click({
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
       return
     }
-    # 모든 설명서 공통 머리말 (콘텐츠와 무관하게 동일)
+    # 모든 설명서 공통 머리말 (콘텐츠와 무관하게 동일 - 사냥터·던전·심층·어비스 설명서가 함께 씀)
+    # 끝의 '[반복 - 시간 지정]' 문단은 전투의 시간 지정 규칙 설명입니다 (시간 지정 '그 판까지' 설계 2.6). 생활·기타 설명서는
+    # 위에서 따로 반환해 이 문단이 들어가지 않습니다 - 생활은 시간 지정 동작이 그대로이기 때문입니다 (조건 5).
+    # '넘침은 최대 한 판' 같은 표현은 쓰지 않습니다 - 파티원은 파티장이 계속 시작하면 그 판들까지 따라가는 예외가 있음
+    # (사용자 결정 10-02 Q1: 그 예외는 수용, '두 PC 지정 시각 차이' 안내는 넣지 않음)
     $manualCommon = "이 매크로는 게임 화면을 캡처해 글자를 읽는(OCR) 방식으로 동작합니다.`n" +
     "화면 비율/크기가 기준과 다르면 OCR 인식이 어긋나 오류가 발생할 수 있으니,`n" +
     "게임을 16:9 비율의 창 모드로 실행해 주세요.`n`n" +
@@ -2016,7 +2020,15 @@ $btnManual.Add_Click({
     " - OCR이 없으면 최초 [시작] 시 자동 설치합니다`n" +
     "   (영어는 백그라운드 설치, 10~15분 소요될 수 있음)`n" +
     " - 단축키: F9 = 시작 / 안전 중지, F10 = 즉시 중지`n" +
-    "   (게임 화면에서도 동작합니다)`n`n"
+    "   (게임 화면에서도 동작합니다)`n`n" +
+    "[반복 - 시간 지정]`n" +
+    " - 지정한 시각이 지나면 새 판을 시작하지 않습니다. 그 전에 시작한 판은`n" +
+    "   끝까지 하고 멈추므로 지정 시각보다 늦게 끝납니다.`n" +
+    " - 멈추는 모습은 횟수 지정의 마지막 판과 같습니다: 던전·심층·파티원은`n" +
+    "   '나가기'로 필드에 나와 멈추고, 어비스 혼자하기·파티장은 선택 화면,`n" +
+    "   사냥터는 첫 화면에서 멈춥니다.`n" +
+    " - 파티원은 파티장이 다음 판을 이미 시작했으면 그 판까지 따라간 뒤 나옵니다.`n" +
+    " - 오늘 그 시각이 이미 지났으면 내일 그 시각으로 잡습니다.`n`n"
     if ($rbCatHunting.Checked) {
       $manualText = $manualCommon +
       "[사냥터 자동화 사용법]`n" +
@@ -8156,16 +8168,25 @@ function Set-UiRunning {
 }
 
 function Get-CycleWaitSecondsForEstimate {
-  # 시간 지정 판단에 쓸 '한 사이클 예상 상한' - 대분류별 설정을 따릅니다
+  # 생활·기타의 시간 지정 판단(시작 거부·다음 사이클)에 쓸 '한 사이클 예상 상한' - 대분류별 설정을 따릅니다.
+  # 전투는 이 상한을 쓰지 않고 '지금 < 목표 시각' 하나로 판단합니다 (시간 지정 '그 판까지' 설계 2.1). 그래서 아래
+  # 클리어 대기 반환은 이제 기타(반복 설정이 숨겨진 채 시간 지정이 남은 경우)의 시작 거부·문구에만 쓰입니다 -
+  # 기타는 '해당 없음'이라 그 식·문구를 지금과 글자까지 같게 둡니다 (설계 6절)
   # (생활에서 숨겨진 전투 클리어 대기값을 참조하면 목표 시각을 크게 넘기거나 잘못 거부 - 리뷰)
   if ($script:mainCategory -eq 'life') { return [int]$numGatherWait.Value }
   return [int]$numClearWait.Value
 }
 
 function Test-TimeAllowsNextCycle {
-  # 시간 지정 모드에서 "지금 시작하면 목표 시각 안에 끝날 수 있는지" 판단합니다.
-  # 판단 기준: 현재 시각 + 대분류별 사이클 상한(전투=클리어 대기/생활=진행 없음 한도) <= 목표 시각
+  # 시간 지정의 '새 판 시작' 판단 (시간 지정 '그 판까지' 설계 2.1). 목표 시각이 없으면(시간 지정 아님) 늘 허용합니다.
+  #  - 전투: 지금 < 목표 시각 - 그 전에 시작한 판은 끝까지 합니다 (조건 1. 같은 시각이면 새 판을 시작하지 않음).
+  #          워커가 지정 시각 전에 다음 판으로 이어 간 판은 종료 코드 11 로 받아 이 판단을 건너뜁니다 (조건 4 - Get-NextCycleAction)
+  #  - 생활·기타: 지금 + 사이클 상한 <= 목표 시각 - 기존 그대로 (조건 5. 생활은 사이클 중 도달을 워커가 스스로 멈춤 - 워커 Test-LifeUntilReached)
+  # 전투를 '-eq battle' 로 가르는 이유: '-ne life' 로 가르면 기타가 전투 식을 타서 기타의 시작 거부가 사라집니다
+  # (기타는 해당 없음 - 지금 그대로 둠, 설계 검토 반영). 대분류는 battle/life/etc 셋으로 정규화돼 있습니다 (Set-MainCategory)
+  # 시각은 반드시 Get-Date 로 읽습니다 - 진리표가 Get-Date 를 모의해 경계(지정 시각 -1초/같은 시각/+1초)를 만듭니다
   if ($null -eq $script:targetTime) { return $true }
+  if ($script:mainCategory -eq 'battle') { return ((Get-Date) -lt $script:targetTime) }
   $estimatedEnd = (Get-Date).AddSeconds((Get-CycleWaitSecondsForEstimate))
   return ($estimatedEnd -le $script:targetTime)
 }
@@ -8176,9 +8197,108 @@ function Test-AbyssMemberRunActive {
   # 시작 직전 Save-SettingsFromUi 가 이 라디오 값을 config 에 쓰고 워커는 그 config 로 판정합니다.
   # 대분류를 따로 보는 이유: 생활·기타로 전환해도 전투 라디오의 Checked 는 복귀 대비로 보존됩니다.
   # 실행 중에는 Set-UiRunning 이 대분류 버튼과 콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다.
-  # 쓰는 곳: Start-NextCycle 의 시간 지정 신호(파티원 분기), Invoke-StartAutomation 의 시작 안내 1줄.
+  # 쓰는 곳: Test-WorkerTimeJudgeActive(시간 지정 신호 - Start-NextCycle), Invoke-StartAutomation 의 시작 안내 1줄.
   # (컨트롤 속성 읽기뿐인 순수 판정이라 실패 경로가 없습니다 - 같은 자리의 Get-CycleWaitSecondsForEstimate 와 같음)
   return (($script:mainCategory -eq 'battle') -and $rbCatAbyss.Checked -and $rbModeParty.Checked -and $rbAbyssPartyMember.Checked -and (-not $script:customActive))
+}
+
+function Test-WorkerTimeJudgeActive {
+  # 이번 실행의 워커가 판 끝에서 지정 시각을 스스로 판단하는지 (시간 지정 '그 판까지' 설계 1.1·2.5).
+  # 던전·심층(결과 화면 - 결정 ① A)과 어비스 파티원(경계·시작 G)만 그렇습니다 - 이 워커들만 HONEYNOGI_UNTIL_TIME 을 받습니다.
+  # 어비스 혼자하기·파티장·사냥터는 판 끝에 다음 판을 확정하는 입력이 없어 GUI 의 '지금 < 지정 시각' 하나로 정합니다 (설계 5절).
+  # 대분류를 따로 보는 이유: 생활·기타로 전환해도 전투 라디오의 Checked 는 보존됩니다 - 기타 워커는 UNTIL 을 받으면 그 시각에 뽑기를 마칩니다.
+  # 실행 중에는 Set-UiRunning 이 대분류·콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다 (Test-AbyssMemberRunActive 와 같음)
+  # (컨트롤 속성 읽기뿐인 순수 판정이라 실패 경로가 없습니다)
+  return (($script:mainCategory -eq 'battle') -and (-not $script:customActive) -and
+    ($rbCatDungeon.Checked -or $rbCatDeep.Checked -or (Test-AbyssMemberRunActive)))
+}
+
+function Get-TimeStartNotice {
+  # 시간 지정 시작 로그 1줄 (시간 지정 '그 판까지' 설계 2.6) - 전투만 새 규칙 문구, 생활·기타는 기존 문구 그대로 (조건 5)
+  # 시작 게이트를 통과해 목표 시각이 정해진 뒤에만 불리므로 $TargetTime 에 $null 이 오지 않습니다 (그래서 [datetime] 으로 받음)
+  param([datetime]$TargetTime, [string]$MainCategory)
+  $targetText = $TargetTime.ToString('MM-dd HH:mm')
+  if ($MainCategory -eq 'battle') { return "시간 지정 모드: $targetText 지나면 새 판을 시작하지 않습니다 - 그 전에 시작한 판은 끝까지 하고 멈춥니다." }
+  return "시간 지정 모드: $targetText 까지 반복합니다."
+}
+
+function Get-TimeStatusSuffix {
+  # 상태줄의 시간 지정 꼬리 (설계 2.6) - 회차 시작(Start-NextCycle)과 안전 중지 취소 두 곳 공용. 전투만 새 문구이고,
+  # 생활·기타 출력은 옛 꼬리와 글자가 같습니다 (조건 5). 시간 지정이 아니면(목표 시각 없음) 빈 문자열입니다.
+  # 문구에 숫자 바로 뒤 조사(이/가)를 붙이지 않습니다 - HH:mm 끝자리에 따라 조사가 바뀌므로 '지나면'·'까지' 꼴로 씁니다
+  param($TargetTime = $null, [string]$MainCategory)   # 타입 없이 받습니다 - [datetime] 이면 $null 인자가 변환 실패로 죽음 (PS 5.1, 워커 G 의 UntilTime 과 같은 이유)
+  if ($null -eq $TargetTime) { return '' }
+  $untilText = ([datetime]$TargetTime).ToString('HH:mm')
+  if ($MainCategory -eq 'battle') { return " ($untilText 지나면 그 판까지)" }
+  return " ($untilText 까지)"
+}
+
+function Get-TimeStopNotice {
+  # 시간으로 다음 회차를 시작하지 않을 때의 안내 1줄 (설계 2.6) - 전투만 새 문구, 생활(·기타)은 기존 문구 그대로 (조건 5)
+  # 전투는 '그 전에 시작한 판은 끝까지' 규칙이라 '남은 시간이 부족' 이 아니라 '지정 시각 이후' 가 사실입니다.
+  # 기타 워커는 코드 0·10·11 을 내지 않아 실제로 기타 갈래에 닿지 않지만, 대분류 갈래는 다른 문구 함수와 같게 둡니다
+  param([string]$TargetText, [string]$MainCategory)
+  if ($MainCategory -eq 'battle') { return "지정 시간($TargetText) 이후라 새 판을 시작하지 않습니다." }
+  return "지정 시간($TargetText)까지 남은 시간이 부족해 다음 회차를 시작하지 않습니다."
+}
+
+function Get-NextCycleAction {
+  # 비커스텀 회차 종료 뒤 다음 단계 (순수 - 진리표 tests\test_time_until_mode.ps1 T4-a). 코드 0·11(계상 뒤)·10(미계상) 공용.
+  # 우선순위: 안전 중지 > (지정 횟수 완료 | 준비 실행 3회 연속) > 지정 시간 > 다음 회차 - 옛 타이머 if/elseif 사슬 순서 그대로입니다.
+  #  - 코드 10(준비 실행)은 회차로 세지 않으므로 지정 횟수를 보지 않고 준비 실행 3회 연속만 봅니다 (옛 코드 10 사슬과 같음)
+  #  - 코드 11 = 워커가 지정 시각 전에 다음 판으로 이어 가기로 정함 - 지정 시각을 보지 않습니다 (조건 4: 이어 간 판은 반드시 이어받음).
+  #    안전 중지는 11 이어도 이깁니다 (횟수·무한 반복과 같은 F9 동작 - 사용자 결정 10-02 Q4)
+  # 지정 횟수와 지정 시각은 같은 그룹의 배타 라디오라 'count' 와 'time' 이 함께 의미를 갖는 일은 없습니다 - 순서는 표를 완결하려고 정합니다
+  # 반환: 'safe-stop' / 'count' / 'prepared-streak' / 'time' / 'next'
+  param([int]$ExitCode, [bool]$StopRequested, [bool]$ReachedTarget, [int]$PreparedStreak, [bool]$TimeAllows)
+  if ($StopRequested) { return 'safe-stop' }
+  if ($ExitCode -eq 10) {
+    if ($PreparedStreak -ge 3) { return 'prepared-streak' }
+  } elseif ($ReachedTarget) {
+    return 'count'
+  }
+  if (($ExitCode -ne 11) -and (-not $TimeAllows)) { return 'time' }
+  return 'next'
+}
+
+function Invoke-NextCycleDecision {
+  # 비커스텀 회차 종료 뒤 다음 단계를 실행합니다 (시간 지정 '그 판까지' 설계 2.2). 코드 0·11 은 계상 뒤, 코드 10 은 미계상으로 부릅니다.
+  # 타이머 스크립트블록은 이름으로 추출할 수 없어, 판단에 넘기는 인자와 결과 → 동작 매핑을 이 함수에 모아 행동 진리표(T4-f)로 지킵니다
+  # (판단은 순수부 Get-NextCycleAction, 실행은 여기 - 타이머에는 호출 한 줄씩만 남습니다).
+  # 비교·호출뿐이라 예외 경로가 없습니다 - 타이머 코드 0 분기는 $script:worker = $null 뒤라 여기서 예외가 나면
+  # 다음 워커 없이 실행 상태로 남으므로(즉시 중지로만 복구) 이 성질이 계약입니다. 판독·파일 접근을 여기에 더하지 마세요.
+  param([int]$ExitCode)
+  # 코드 10 에서도 계산하지만 Get-NextCycleAction 이 코드 10 에서는 보지 않습니다. 준비 실행 연속 수는 코드 10 이 아니면
+  # 타이머가 이미 0 으로 되돌려 둡니다
+  $reachedTarget = ($script:targetCycles -gt 0 -and $script:completedCycles -ge $script:targetCycles)
+  $timeAllows = Test-TimeAllowsNextCycle
+  # 호출은 한 줄로 둡니다 - 배선 진리표가 이 호출의 인자 원문(공백 정규화)을 그대로 대조합니다
+  $nextAction = Get-NextCycleAction -ExitCode $ExitCode -StopRequested $script:stopRequested -ReachedTarget $reachedTarget -PreparedStreak $script:preparedStreak -TimeAllows $timeAllows
+  if ($nextAction -eq 'safe-stop') {
+    Stop-AllRun '안전 중지'
+  } elseif ($nextAction -eq 'count') {
+    Stop-AllRun '지정 횟수 완료'
+  } elseif ($nextAction -eq 'prepared-streak') {
+    # 화면 오판 등으로 준비 실행만 반복되는 무한 루프 방지 (레거시 컨트롤러와 동일한 상한)
+    Stop-AllRun -IsError '준비 실행(화면 복귀)이 3회 연속 반복 - 게임 화면 상태를 확인해 주세요'
+    $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+  } elseif ($nextAction -eq 'time') {
+    # $timeAllows 가 거짓이면 $script:targetTime 은 반드시 값이 있습니다 (Test-TimeAllowsNextCycle 첫 줄) - ToString 이 안전합니다.
+    # 목표 시각 문구는 Stop-AllRun 이 $script:targetTime 을 지우기 전에 만듭니다. 코드 10 의 시간 정지에도 같은 안내 1줄을 남깁니다
+    # (코드 10 은 전투 전용이라 늘 전투 문구 - 옛 코드 10 사슬에는 안내 줄이 없었음)
+    $targetText = $script:targetTime.ToString('HH:mm')
+    Add-GuiLog (Get-TimeStopNotice -TargetText $targetText -MainCategory $script:mainCategory)
+    Stop-AllRun "지정 시간($targetText) 도달"
+  } else {
+    if (($ExitCode -eq 11) -and (-not $timeAllows)) {
+      # 지정 시각 직전에 워커가 이어 가기로 정하고 끝냈는데 GUI 가 판단하는 지금은 지정 시각이 지났음 - 그래도 이어받습니다 (조건 4).
+      # 다음 워커는 이미 커밋된 판이면 끝까지 마치고, 아니면 참가하지 않고 멈춥니다 - 그래서 문구는 결과에 중립으로 씁니다.
+      # 지정 시각 뒤에는 워커가 늘 '마지막'으로 판단해 11 이 다시 나오지 않으므로 한 실행에 많아야 1회입니다
+      $targetText = $script:targetTime.ToString('HH:mm')
+      Add-GuiLog "[안내] 지정 시간($targetText) 전에 워커가 다음 판으로 이어 가기로 정했습니다 - 다음 워커가 이어받아 마무리합니다."
+    }
+    Start-NextCycle
+  }
 }
 
 function Move-WorkerLogToArchive {
@@ -8294,38 +8414,34 @@ function Start-NextCycle {
     } elseif ($script:targetCycles -gt 0) {
       "횟수 지정(${cycleNumber}/$($script:targetCycles)회차)"
     } else { '무한 반복' }
-    # 마지막 판 신호: 횟수 지정의 마지막 회차만. 시간 지정/무한은 마지막을 사전에 알 수 없어
-    # 기존(옵션 화면 잔류) 그대로입니다. (Clear-CustomEnv 가 이전 값을 지웠으므로 명시 설정)
+    # 마지막 판 신호: 횟수 지정의 마지막 회차만. 시간 지정은 마지막 판을 미리 알 수 없어 이 신호를 쓰지 않고
+    # 판 끝에서 정합니다 - 던전·심층·어비스 파티원은 워커가 지정 시각을 보고(아래 UNTIL), 그 밖의 전투는 GUI 가
+    # 회차 종료 때(Invoke-NextCycleDecision). 무한은 마지막이 없습니다. (Clear-CustomEnv 가 이전 값을 지웠으므로 명시 설정)
     $env:HONEYNOGI_LAST_RUN = $(if (($null -eq $script:targetTime) -and ($script:targetCycles -gt 0) -and
         ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
   }
-  # 시간 지정 모드(생활): 목표 시각을 워커에 전달합니다 - 워커가 사이클 **중에도** 도달 시
-  # 스스로 멈춥니다 (2026-08-11 실측 ①: GUI 는 사이클이 끝나야 시간을 봐서 목표를 2분 24초
-  # 넘김. 사이클 길이는 이동 거리로 크게 흔들려 예측 불가가 실측됨 - 이슈 문서 참고).
-  # 매 회차 **먼저 지우고** 조건(생활 + 시간 지정)일 때만 다시 설정합니다 - GUI 프로세스에
-  # 남은 값이 다음 비시간/전투 회차 워커로 새는 것 방지 (커스텀 env 정리와 같은 이유).
-  # 전투는 전달하지 않습니다 - 판 중간 정지 불가 + 전투 초과는 미실측 (규칙 8). 예외는 아래
-  # 어비스 파티원(⑥e) 분기 하나뿐이고, 그쪽도 판 중간 정지용이 아닙니다 (그 분기 주석 참고).
+  # 시간 지정의 목표 시각을 워커에 전달합니다 (HONEYNOGI_UNTIL_TIME). 매 회차 **먼저 지우고** 아래 조건일 때만 다시
+  # 설정합니다 - GUI 프로세스에 남은 값이 다음 비시간 회차·다른 대분류 워커로 새는 것 방지 (커스텀 env 정리와 같은 이유).
   # 전체 타임스탬프인 이유는 자정 넘김(23:50 에 00:30 지정) 모호성 방지입니다.
+  #  ① 생활: 워커가 사이클 **중에도** 도달 시 스스로 멈춥니다 (2026-08-11 실측 ①: GUI 는 사이클이 끝나야 시간을 봐서
+  #     목표를 2분 24초 넘김. 사이클 길이는 이동 거리로 크게 흔들려 예측 불가가 실측됨 - 이슈 문서 참고).
+  #  ② 전투: 판 끝에서 지정 시각을 스스로 판단하는 워커(던전·심층·어비스 파티원 - Test-WorkerTimeJudgeActive)에만 넘깁니다
+  #     (시간 지정 '그 판까지' 설계 2.5). 판 중간 정지용이 아니라 결과 화면·판 경계에서 '다음 판으로 이어 갈지'를 정하는 데 씁니다 -
+  #     이어 가면 워커가 종료 코드 11 로 알리고 GUI 는 시각을 다시 보지 않고 이어받습니다 (판단 주체 하나 - 조건 4).
+  #     어비스 혼자하기·파티장·사냥터는 넘기지 않습니다 (GUI 가 회차 종료 때 판단 - 설계 5절).
   $env:HONEYNOGI_UNTIL_TIME = ''
-  # 사이클 추정치(파티원 전용)도 매 회차 먼저 지웁니다 - UNTIL 과 같은 이유입니다 (파티원 + 시간 지정으로
-  # 돌던 GUI 에서 다음 실행을 다른 모드로 시작해도 옛 값이 새 워커로 새지 않게. 빈 값 대입 = 변수 제거)
-  $env:HONEYNOGI_CYCLE_ESTIMATE_SEC = ''
   if (($null -ne $script:targetTime) -and ($script:mainCategory -eq 'life')) {
     $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm')
   }
-  # 파티원(⑥e): 시간 지정의 마지막 회차를 워커가 클리어 뒤 경계에서 판단해 '나가기' 로 필드에 나온 뒤
-  # 멈추게 합니다 (사용자 결정 09-29 ⑶ - 보상 화면에 남긴 채 멈추지 않음).
-  # 워커는 이 값을 대기 루프의 마감으로 쓰지 않습니다 - 경계·입장 결정의 게이트(지금 + 추정치 + 여유 >
-  # 목표 시각)에만 씁니다. 추정치를 워커의 클리어 대기 설정이 아니라 GUI 값으로 넘기는 이유: 위
-  # Test-TimeAllowsNextCycle 과 **같은 값**(Get-CycleWaitSecondsForEstimate)이어야 워커의 '마지막 회차'
-  # 판단과 GUI 의 '다음 회차 시작' 판단이 같은 기준으로 맞물립니다 (실행 중 숫자만 바꾸고 저장하지 않은
-  # 경우에도 두 쪽이 같은 수를 봄).
-  # 생활 분기와 합치지 않는 이유: 뜻이 다르고(생활 = 사이클 중 즉시 정지, 파티원 = 경계 게이트만) 생활
-  # 배선 단언(test_life_gather 의 '생활 + 시간 지정일 때만 설정')을 그대로 지키기 위해서입니다.
-  if (($null -ne $script:targetTime) -and (Test-AbyssMemberRunActive)) {
-    $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm')
-    $env:HONEYNOGI_CYCLE_ESTIMATE_SEC = [string](Get-CycleWaitSecondsForEstimate)
+  # 생활 분기와 합치지 않는 이유: 뜻이 다르고(생활 = 사이클 중 즉시 정지, 전투 = 판 끝 판단) 생산 형식도 다르며(아래),
+  # 생활 배선 단언(test_life_gather 의 '생활 + 시간 지정일 때만 설정')을 그대로 지키기 위해서입니다.
+  # 전투는 문자열을 InvariantCulture 로 만듭니다 (설계 리뷰 1차 P2): 워커 Get-LifeUntilDeadline 은 InvariantCulture 고정 형식으로
+  # 해석하는데, 현재 문화권으로 만들면 th-TH 에서는 불기 연도('2569-10-02 21:20')가 경고 없이 '정상' 해석돼 지정 시각이 수백 년
+  # 뒤가 되고(워커는 늘 '이어 감' → 코드 11 → GUI 도 시각을 다시 안 봄 = 시간으로 영영 안 멈춤), fi-FI 는 시간 구분자가 '.' 라
+  # 해석 실패(경고 뒤 시간 판단 없음)가 됩니다 (2026-10-02 PS 5.1 재현). ko-KR 출력은 바이트 단위로 같습니다.
+  # 생활 분기는 조건 5(생활 그대로)에 따라 기존 식을 글자 그대로 둡니다.
+  if (($null -ne $script:targetTime) -and (Test-WorkerTimeJudgeActive)) {
+    $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
   }
   # 이번 회차의 [완료] 사유 수집을 초기화합니다 (이전 회차 사유가 코드 4 상태줄에 오표시되는
   # 것 방지 - 리뷰 조건)
@@ -8352,8 +8468,8 @@ function Start-NextCycle {
   if ($customContext) {
     $lblStatus.Text = "커스텀: $($customContext.Position) 실행 중"
   } else {
-    $statusSuffix = ''
-    if ($null -ne $script:targetTime) { $statusSuffix = " ($($script:targetTime.ToString('HH:mm')) 까지)" }
+    # 시간 지정 꼬리는 대분류별 문구입니다 (전투 = '지나면 그 판까지', 생활·기타 = 기존 문구) - 안전 중지 취소 상태줄과 같은 함수 (설계 2.7)
+    $statusSuffix = Get-TimeStatusSuffix -TargetTime $script:targetTime -MainCategory $script:mainCategory
     $lblStatus.Text = "${cycleNumber}회차 실행 중...$statusSuffix"
   }
   $lblStatus.ForeColor = [System.Drawing.Color]::ForestGreen
@@ -8515,7 +8631,11 @@ $timer.Add_Tick({
       # '연속 준비 실행' 카운터는 코드 10 이 아닌 모든 종료에서 초기화합니다 (2026-08-01 전수
       # 점검: 기존에는 코드 0 에서만 초기화해 10→1(재시작)→10→1→10 교차도 '3회 연속'으로 오판)
       if ($exitCode -ne 10) { $script:preparedStreak = 0 }
-      if ($exitCode -eq 0) {
+      if (($exitCode -eq 0) -or ($exitCode -eq 11)) {
+        # 코드 11 = 이어 감 인계 (시간 지정 '그 판까지' 설계 1.3): 시간 지정에서 워커가 지정 시각 전에 다음 판으로 이어 가기로
+        # 정하고 끝냈다는 뜻입니다. 계상·커스텀 처리는 코드 0 과 같고, 다음 회차 판단에서 지정 시각만 보지 않습니다.
+        # 커스텀은 시작 때 지정 시각이 해제돼(워커에 UNTIL 도 안 넘김) 11 이 나오지 않습니다 - 나와도 '판 완료 + 이어 감' 이라
+        # 코드 0 과 같게 계상·전진합니다 (오류 정지로 보내면 끝난 판의 계상·전진을 잃음 - 설계 검토 반영)
         $script:completedCycles++
         $finishedContext = $null
         if ($script:customActive) {
@@ -8526,7 +8646,11 @@ $timer.Add_Tick({
             else { Add-GuiLog "=== $($script:completedCycles)회차 완료 ===" }
           }
         } else {
-          Add-GuiLog "=== $($script:completedCycles)회차 완료 ==="
+          # 코드 11 이면 완료 줄에 '(다음 판으로 이어 감)' 을 붙입니다 - 실기에서 워커 11 → 호스트 → GUI 수신을 이 줄로 확인합니다
+          # (설계 9.1·9.2). 비시간 모드에서는 11 이 나오지 않아 완료 줄이 지금 글자 그대로입니다.
+          # 꼬리를 변수에 먼저 담는 이유: 큰따옴표 안 $( ) 에 괄호 든 따옴표 문자열을 넣으면 PS 5.1 파서가 하위식 끝을 못 찾습니다
+          $cycleDoneSuffix = $(if ($exitCode -eq 11) { ' (다음 판으로 이어 감)' } else { '' })
+          Add-GuiLog "=== $($script:completedCycles)회차 완료$cycleDoneSuffix ==="
         }
         if ($script:customActive) {
           # 커스텀 반복: 정상 판 또는 완료 후 마무리 복구가 코드 0에 도달한 시점에만 한 번 계상합니다.
@@ -8576,19 +8700,8 @@ $timer.Add_Tick({
             Start-NextCycle
           }
         } else {
-          $reachedTarget = ($script:targetCycles -gt 0 -and $script:completedCycles -ge $script:targetCycles)
-          if ($script:stopRequested) {
-            Stop-AllRun '안전 중지'
-          } elseif ($reachedTarget) {
-            Stop-AllRun '지정 횟수 완료'
-          } elseif (-not (Test-TimeAllowsNextCycle)) {
-            # 남은 시간이 클리어 대기 시간보다 짧으면 다음 회차를 시작하지 않습니다
-            $targetText = $script:targetTime.ToString('HH:mm')
-            Add-GuiLog "지정 시간($targetText)까지 남은 시간이 부족해 다음 회차를 시작하지 않습니다."
-            Stop-AllRun "지정 시간($targetText) 도달"
-          } else {
-            Start-NextCycle
-          }
+          # 비커스텀: 안전 중지 > 지정 횟수 > 지정 시간(코드 11 이면 건너뜀) > 다음 회차 - 판단·실행은 Invoke-NextCycleDecision (설계 2.2)
+          Invoke-NextCycleDecision -ExitCode $exitCode
         }
       } elseif ($exitCode -eq 10) {
         # 준비 실행(화면 복귀만 수행, 던전 미실행): 회차로 세지 않고 곧바로 본 회차를 시작합니다.
@@ -8618,18 +8731,8 @@ $timer.Add_Tick({
           $script:customPrevItem = ''
           $script:customRestart = $false
         }
-        if ($script:stopRequested) {
-          Stop-AllRun '안전 중지'
-        } elseif ($script:preparedStreak -ge 3) {
-          # 화면 오판 등으로 준비 실행만 반복되는 무한 루프 방지 (레거시 컨트롤러와 동일한 상한)
-          Stop-AllRun -IsError '준비 실행(화면 복귀)이 3회 연속 반복 - 게임 화면 상태를 확인해 주세요'
-          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
-        } elseif (-not (Test-TimeAllowsNextCycle)) {
-          $targetText = $script:targetTime.ToString('HH:mm')
-          Stop-AllRun "지정 시간($targetText) 도달"
-        } else {
-          Start-NextCycle
-        }
+        # 안전 중지 > 준비 실행 3회 연속 > 지정 시간 > 다음 회차 (미계상이라 지정 횟수는 보지 않음) - 코드 0·11 과 같은 실행 함수 (설계 2.2)
+        Invoke-NextCycleDecision -ExitCode $exitCode
       } elseif ($exitCode -eq 2) {
         # 다른 인스턴스가 이미 실행 중(뮤텍스 충돌): 이중 조작을 피하기 위해 이 GUI는 멈춥니다
         Stop-AllRun -IsError '다른 자동화 인스턴스가 이미 실행 중 (중복 실행 방지) - 작업 관리자에서 powershell.exe(또는 꿀비노기)를 종료한 뒤 다시 시작해 주세요'
@@ -9047,20 +9150,27 @@ function Invoke-StartAutomation {
       $candidate = (Get-Date).Date.AddHours($untilTod.Hours).AddMinutes($untilTod.Minutes)
       if ($candidate -le (Get-Date)) { $candidate = $candidate.AddDays(1) }
       $script:targetTime = $candidate
-      if (-not (Test-TimeAllowsNextCycle)) {
+      # 시작 거부는 생활·기타에만 남습니다 (조건 5 - 기존 그대로, 거부 문구도 글자 그대로). 전투는 지정 시각이 미래면 시작합니다
+      # (조건 2 - 위 계산이 목표를 늘 '지금보다 뒤'로 잡음, 시간 지정 '그 판까지' 설계 2.4).
+      # 전투가 이 게이트를 아예 타지 않는 이유: 지정 시각 정각 직전에 [시작]하면 두 번의 Get-Date 사이에 분이 바뀌어
+      # '지금 < 목표' 가 거짓이 될 수 있는데, 그때 옛 '클리어 대기' 거부 문구가 전투에 다시 찍히지 않게 하려는 것입니다
+      # (그 경우 첫 워커는 지정 시각 정각에 시작해 그 판을 마치고 멈춥니다 - 넘침 한 판)
+      if (($script:mainCategory -ne 'battle') -and (-not (Test-TimeAllowsNextCycle))) {
         $estimateLabel = $(if ($script:mainCategory -eq 'life') { '진행 없음 한도' } else { '클리어 대기' })
         Add-GuiLog "[안내] 지정 시간($($script:targetTime.ToString('HH:mm')))까지 남은 시간이 ${estimateLabel}($(Get-CycleWaitSecondsForEstimate)초)보다 짧아 시작할 수 없습니다."
         $script:targetTime = $null
         return
       }
-      Add-GuiLog "시간 지정 모드: $($script:targetTime.ToString('MM-dd HH:mm')) 까지 반복합니다."
+      # 시작 로그 1줄 - 전투만 새 규칙 문구, 생활·기타는 기존 문구 그대로 (Get-TimeStartNotice)
+      Add-GuiLog (Get-TimeStartNotice -TargetTime $script:targetTime -MainCategory $script:mainCategory)
     }
     # 커스텀 반복은 상단 횟수/시간과 택일 관계 - 라디오가 비활성이라 실질 방어용 강제 해제
     if ($script:customActive) { $script:targetCycles = 0; $script:targetTime = $null }
     # 파티원(⑥e) 시작 안내 1줄 (사용자 결정 09-30 D4). 문구는 D1 에 맞춥니다 - 입장 요청마다(클리어 뒤 포함)
     # '준비 완료'를 누르고 이어 가며, 정지 사유에서만 '나가기'로 필드에 나온 뒤 멈춥니다. 팝업이 아니라 로그라
     # 무인 운용과 무관합니다 (규칙 6). 이 자리(반복 설정 뒤)인 이유: 판정이 이번 실행의 customActive(위에서 확정)를
-    # 보고, 시간 지정 시작 게이트에서 막힌 시작에는 안내가 남지 않게 하기 위해서입니다.
+    # 보기 때문입니다. (시간 지정 시작 게이트는 이제 생활·기타만 막으므로 전투 전용인 이 안내와 겹치지 않습니다 -
+    # 시간 지정 '그 판까지' 설계 2.4)
     # 대기 한도 N초 = 워커의 클리어 대기 설정(timeoutsSeconds.dungeonClear) - 이 함수 앞부분의 Save-SettingsFromUi 가 이 값을 저장했습니다.
     if (Test-AbyssMemberRunActive) { Add-GuiLog "[안내] 파티원: 파티장의 입장 요청마다 '준비 완료'를 누르고 따라 들어갑니다(클리어 뒤 다음 요청도 같음). 마지막 회차·안전 중지·지정 시간·대기 한도(클리어 대기 $([int]$numClearWait.Value)초) 초과 때는 '나가기'로 필드에 나온 뒤 멈춥니다 - 파티장 PC 도 함께 정지해 주세요" }
     # 실행 중에는 화면 꺼짐/절전을 막습니다 (감지가 화면 렌더링에 의존)
@@ -9110,8 +9220,8 @@ $btnSafeStop.Add_Click({
         } catch { }
         $lblStatus.Text = "커스텀: $positionNow 실행 중 (안전 중지 취소됨)"
       } else {
-        $statusSuffix = ''
-        if ($null -ne $script:targetTime) { $statusSuffix = " ($($script:targetTime.ToString('HH:mm')) 까지)" }
+        # 시간 지정 꼬리는 회차 시작 상태줄과 같은 함수로 만듭니다 (대분류별 문구 - 설계 2.7)
+        $statusSuffix = Get-TimeStatusSuffix -TargetTime $script:targetTime -MainCategory $script:mainCategory
         $lblStatus.Text = "$($script:completedCycles + 1)회차 실행 중...$statusSuffix (안전 중지 취소됨)"
       }
       $lblStatus.ForeColor = [System.Drawing.Color]::ForestGreen

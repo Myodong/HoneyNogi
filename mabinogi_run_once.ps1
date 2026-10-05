@@ -646,11 +646,12 @@ $rgPartyEnterBtn     = @(Get-ConfigValue $config @('ocrRegions', 'partyEnterButt
 
 # 어비스 '파티(파티원)' 관측 루프 D·퇴장 절차 P 전용 스크립트 상수 (⑥e 설계 2.1, 2026-10-01). config 가 아닌 스크립트 상수라 coordsVersion·
 # configSchemaVersion 은 그대로입니다. M(파티장 다음 입장 대기 한도)은 클리어 대기 설정($timeoutClear)을 루프 안에서 읽습니다 (사용자 결정 09-29 ⑶).
-# 회귀 tests\test_abyss_party_member.ps1 §0 이 이 대입문을 소스에서 캡처해 범위(여유 4.2 < 5 < 7, W 4.2 < 6 < 30, 스윕 한도 3)를 단언합니다.
+# 회귀 tests\test_abyss_party_member.ps1 §0 이 이 대입문을 소스에서 캡처해 범위(W 4.2 < 6 < 30, 스윕 한도 3)를 단언합니다.
+# 시간 지정 게이트에는 상수가 없습니다 - G 의 'time' 은 '지금 >= 지정 시각' 하나이고, 지정 시각 전에 이어 간 경계는 종료 코드 11 로
+# GUI 가 지정 시각을 다시 보지 않고 이어받습니다 (시간 지정 '그 판까지' 설계 4.1·4.7 - ⑥e ㉰ 의 여유는 폐기).
 $memberReadyLimitSeconds     = 300         # 준비 시계 - 준비 패널 첫 관측부터 입장까지 한도 (설계 3.6)
 $memberLeaveLimitSeconds     = 60          # P 필드 확인 한도 (관측: 나가기 → 필드 확인 7초 - 09-29 1·2·6판(로딩 3.1~4.2초 포함), 09-21 4인 로딩 5.2초, 퇴장 로딩 최장 10초 - 09-21 관측 6 21:20:31→41)
 $memberUnknownOverlaySeconds = 30          # 알 수 없는 화면이 이만큼 이어지면 이벤트 화면 정리 1회 (순위 9)
-$memberTimeGateMarginSeconds = 5           # 시간 게이트 여유 (㉰) - 인계 지연(무클릭 실측 약 1초, 경계 준비 클릭 코드 상한 약 4.2초) < 5 < 나가기→필드 관측 최소 7초. 승인 조건: 실기 7·15 실측
 $memberFieldSettleSeconds    = 6           # 나가기 없는 필드 모양의 'stayed' 확정 폭 W - 입장 과도 오독(09-21 185241~185243 2.1초 이상 4.2초 미만, 09-29 211242 1프레임)·보스 이펙트 오독(inside 와 교대)이 이 안에 끝나 committed 로 이어지게. 잠정 - 실기 7·15 의 입장 과도 계측 s 최대 < 6 이 승인 조건(㉷). 어비스 복귀 루프의 필드 확정(2.14)도 같은 값 - 같은 오독이 근거라 값·승인 조건을 함께 움직임
 $memberSweepStreakLimit      = 3           # 스윕 참 연속 한도 - 유효 표본 없이 전송·커서 미확인 스윕이 3회째면 굶김 회전(판독 없이 마감만, ㉺). 관측된 겹친 팝업 2개(2026-08-01 - 시작부 스윕 2회 예산의 근거)를 넘는 연속만
 $ptMemberPanelCollapse       = @(492, 654) # 보상 위 펼친 준비 패널 밖 '나가기' 자리 = 접기 (09-26 파티장 L4·파티원 23:16:39 관측 - 펼친 패널 아래 '나가기' 판독 4/8 프레임이 정확히 이 자리). 필드 위 펼친 패널에서는 누르지 않음(미관측)
@@ -843,7 +844,9 @@ if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
   }
 }
 # 마지막 판 신호 (GUI가 사전 판정: 커스텀 N바퀴의 마지막 바퀴 마지막 항목 / 횟수 지정 마지막 회차).
-# 던전 흐름만 사용합니다 - 결과 화면에서 '다시 하기' 대신 '나가기'로 필드에 나가며 마칩니다.
+# 던전 흐름은 결과 화면에서 '다시 하기' 대신 '나가기'로 필드에 나가며 마치고, 어비스 파티원은 판 경계 G 의 'last-run' 으로 씁니다.
+# 시간 지정에는 GUI 가 이 신호를 넘기지 않습니다 - 던전·심층은 결과 화면 14-T 가 지정 시각을 보고 이 플래그를 판 중간에 세우고,
+# 파티원은 G 의 'time' 이 같은 역할을 합니다 (시간 지정 '그 판까지' 설계 3.2·4.1).
 $script:dgLastRun = ([string]$env:HONEYNOGI_LAST_RUN -eq '1')
 # 던전 선택/옵션 화면의 OCR 영역들 (2026-07-15 실측 검증)
 # 좌상단 제목 (선택: '○○ 던전' / 옵션: 'N층 M구역') - 기본값은 config.json과 동일하게 유지.
@@ -3907,6 +3910,20 @@ function Get-DgLastRunExitStep {
   if ($RetryVisible) { return 'reclick' }
   if ($HudVisible -and -not ((([string]$QuestText) -replace '\s', '').Contains('구역'))) { return 'field-evidence' }
   return 'wait'
+}
+
+function Get-DgTimeVerdict {
+  param($UntilTime = $null, [datetime]$Now)
+
+  # 던전·심층 결과 화면의 시간 지정 판단 (순수 - 진리표 tests\test_last_run_exit.ps1 T3, 시간 지정 '그 판까지' 설계 3.2).
+  # 호출은 Invoke-NormalDungeonCycle 의 14-T 한 곳뿐이고, 그 결과를 14-0 진입과 함수 꼬리의 종료 코드가 그대로 씁니다.
+  # 반환: ''         = 시간 지정 아님(지정 시각을 못 받았거나 해석 실패 - 기존 흐름, 코드 0)
+  #       'last'     = 지정 시각 이후(같은 시각 포함 = -ge, 생활 Test-LifeUntilReached 와 같음) - 이 판이 마지막, 14-0 '나가기'
+  #       'continue' = 지정 시각 전 - '다시 하기'로 이어 가고 꼬리에서 종료 코드 11 (GUI 가 지정 시각을 보지 않고 이어받음)
+  # $UntilTime 은 타입 없이 받습니다 - [datetime] 로 두면 $null 이 변환 실패 (파티원 G 의 같은 인자와 같은 이유, 규칙 3)
+  if ($null -eq $UntilTime) { return '' }
+  if ($Now -ge [datetime]$UntilTime) { return 'last' }
+  return 'continue'
 }
 
 function Get-DgSelectionFocusFloor {
@@ -8480,8 +8497,10 @@ function Invoke-NormalDungeonCycle {
   # '던전' 자동화 - 현재 구현 범위:
   #   선택 화면(난이도/스테이지 선택·검증) → 진입 옵션(은동전 소탕/더블 루팅/매칭) → 입장
   #   → 던전 내부(어비스와 동일: 자동출발 → 클리어 대기 → 터치 → 나가기)까지.
-  # 클리어 후 결과 화면에서 '다시 하기'로 진입 옵션 화면까지 복귀하고 정상 종료(코드 0)하면,
+  # 클리어 후 결과 화면에서 '다시 하기'로 진입 옵션 화면까지 복귀하고 정상 종료(코드 0, 시간 지정에서 이어 가면 코드 11)하면,
   # GUI가 다음 회차 워커를 띄워 옵션 화면부터 이어가는 방식으로 반복됩니다.
+  # 시간 지정은 결과 화면의 14-T 가 한 번 판단합니다 - 지정 시각이 지났으면 14-0 '나가기'로 필드에 나와 마치고(코드 0),
+  # 전이면 '다시 하기'로 이어 간 뒤 코드 11 로 끝냅니다 (시간 지정 '그 판까지' 설계 3).
   $script:contentTag = $(if ($deepMode) { '[심층]' } else { '[던전]' })
 
   if ($script:customSpecInvalid) {
@@ -8978,6 +8997,17 @@ function Invoke-NormalDungeonCycle {
     -InsideAlready $insideAlready -OnResultScreen $onResultScreen
   if ($script:customCleanupOnly) {
     Write-RunLog '[커스텀] 새 시작인데 던전 안/결과 화면 감지 - 이 판은 계상하지 않고 화면 정리만 진행합니다'
+  }
+
+  # 시간 지정 '그 판까지' (설계 3.1): GUI 는 던전·심층 + 시간 지정 + 비커스텀일 때만 지정 시각을 넘깁니다 ('yyyy-MM-dd HH:mm' -
+  # 전투 분기는 InvariantCulture 로 만듦, 형식 오류는 경고 1줄 뒤 판단 없음 - 설계 1.5·12). 판단은 결과 화면 14-T 한 곳이고, 그 결과는
+  # 14-0 진입과 함수 꼬리의 종료 코드에만 씁니다. 커스텀은 GUI 가 지정 시각을 지우고 넘기지 않아 늘 $null 입니다 (워커 쪽 가드 없음 - 규칙 8).
+  # 시작부(아래 루프의 선택·옵션·입장 구간)에는 시간 판단이 없습니다 - 앞 워커가 지정 시각 전에 '다시 하기'로 이어 간 판은 반드시 이어받고,
+  # 첫 워커는 GUI 가 지정 시각 전에 띄웁니다 (조건 4, 설계 3.5)
+  $dgUntil = Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME)
+  $dgTimeVerdict = ''
+  if ($null -ne $dgUntil) {
+    Write-RunLog "$($script:contentTag) 이번 회차 종료 조건: 지정 시간 $($dgUntil.ToString('HH:mm')) - 결과 화면에서 그 시각이 지났으면 '나가기'로 필드에 나와 마치고, 전이면 '다시 하기'로 이어 갑니다"
   }
 
   # 재입장 루프 (2026-08-17 v2.1.2): '다시 하기' 직후 우연한 만남 파티의 재입장이 옵션
@@ -10195,11 +10225,24 @@ function Invoke-NormalDungeonCycle {
   # 14. 안전 중지가 예약돼 있으면 나가기로 마치고, 아니면 다시 하기로 곧장 재입장합니다.
   Invoke-SafeStopExitIfRequested -Game $Game
 
+  # 14-T. 시간 지정 (설계 3.2): 결과 화면에서 지정 시각을 한 번 봅니다 - 지났으면(같은 시각 포함) 이 판이 마지막(아래 14-0 재사용 -
+  #       끝 모양 = 횟수 지정 마지막 판), 전이면 '다시 하기'로 이어 가고 꼬리에서 종료 코드 11 로 GUI 에 이어받기를 요구합니다.
+  #       판단은 여기 한 번뿐이고 꼬리는 이 값을 그대로 씁니다 - 꼬리에서 시각을 다시 보면 '다시 하기' 뒤 지정 시각을 넘긴 파티
+  #       재입장 판에서 GUI 가 멈춰 던전 안에 남습니다 (조건 4, 설계 3.4).
+  #       순서의 이유: 안전 중지(14) 뒤 = F9 가 이깁니다(횟수 지정과 같음). 14-1 잔량 검사 앞 = 마지막 판에는 '다음 판' 잔량 판단이 무의미합니다.
+  #       캡처로 확정된 결과 화면 뒤의 벽시계 비교 1회라 새 대기·클릭이 없습니다 (규칙 4·15 - 설계 3.6)
+  $dgTimeVerdict = Get-DgTimeVerdict -UntilTime $dgUntil -Now (Get-Date)
+  if ($dgTimeVerdict -eq 'last') {
+    Write-RunLog "$($script:contentTag) 지정 시간 $($dgUntil.ToString('HH:mm')) 도달 - 이번 판을 마지막으로 '나가기'로 필드에 나와 마칩니다"
+    $script:dgLastRun = $true
+  }
+
   # 14-0. 마지막 판(GUI가 HONEYNOGI_LAST_RUN 으로 사전 판정: 커스텀 N바퀴의 마지막 바퀴
   #       마지막 항목 / 횟수 지정 마지막 회차 - 2026-07-25 사용자 요청)이면 '나가기'로 필드에
   #       나가며 마칩니다. 이후 회차가 없어 옵션 화면에 머물 이유가 없고, 나가기의 '자동 복귀
   #       불가' 문제(계약 v4에서 폐기된 이유)는 마지막 판에는 해당하지 않습니다.
-  #       시간 지정/무한/안전 중지는 마지막 판을 사전에 알 수 없어 기존 그대로이며,
+  #       시간 지정은 위 14-T 가 결과 화면에서 지정 시각을 보고 이 플래그를 세웁니다 (GUI 는 시간 지정에 신호를 넘기지 않음).
+  #       무한/안전 중지는 마지막 판을 사전에 알 수 없어 기존 그대로이며,
   #       수동 정리 모드(코드 10 - 같은 항목을 새로 시작)는 제외합니다.
   #       은동전 잔량 검사(14-1)보다 앞: 마지막 판에는 '다음 판' 잔량 판단이 무의미 (설계 합의).
   if ($script:dgLastRun -and -not $script:customCleanupOnly) {
@@ -10657,6 +10700,13 @@ function Invoke-NormalDungeonCycle {
   }
   if (-not $reenteredInside) {
     Write-RunLog "$($script:contentTag) 다시 하기 → 옵션 화면 복귀 - 회차 완료"
+  }
+  if ($dgTimeVerdict -eq 'continue') {
+    # 시간 지정의 이어 감 (설계 3.4): 14-T 가 지정 시각 전으로 판단해 '다시 하기'(옵션 복귀 또는 파티 재입장)로 이어 갔습니다.
+    # 종료 코드 11 = 판 완료 + 이어 감 - GUI 가 코드 0 과 같게 계상하고 지정 시각을 보지 않고 다음 워커를 띄웁니다.
+    # 여기서 시각을 다시 보지 않습니다 (판단은 14-T 한 번 - 조건 4). 정리 모드(exit 10)는 위에서 먼저 끝납니다
+    Write-RunLog "$($script:contentTag) 지정 시간 $($dgUntil.ToString('HH:mm')) 전에 다음 판으로 이어 갔습니다 - 다음 워커가 이어받습니다"
+    exit 11
   }
   exit 0
 }
@@ -11318,7 +11368,7 @@ function Invoke-HuntingGroundCycle {
 #  글자 영역($rgPartyEnterBtn)과 클릭 지점($ptPartyEnter)을 그대로 씁니다.
 #  옛 흐름(⑥a 의 두 출구 - S 터치 헬퍼 + 보상 '나가기' 뒤 필드 복귀 루프)은 매 판 필드로 나왔다가 요청을 기다렸습니다. ⑥e 는
 #  한 루프(D)가 어느 화면에서 시작하든 화면을 분류해 이어받고(설계 3.1), 클리어 뒤 첫 신호(회차 경계 - 설계 3.2)에서 다음 워커에게
-#  인계(exit 0)하며, 정지 사유(마지막 회차·안전 중지·지정 시간·대기 한도 M·준비 시계)가 있을 때만 퇴장 절차 P('나가기' 로 필드를
+#  인계(exit 0 - 시간 지정이면 exit 11)하며, 정지 사유(마지막 회차·안전 중지·지정 시간·대기 한도 M·준비 시계)가 있을 때만 퇴장 절차 P('나가기' 로 필드를
 #  확인한 뒤 정지)를 탑니다 (사용자 결정 09-29 ⑶ / 09-30 D1 - 경계는 준비 1클릭 인계 유지 / D2 - G 종료는 'left' 만 exit 0).
 #  순수 함수(판독 없음)는 진리표 tests\test_abyss_party_member.ps1 §1 이 값으로 고정합니다 (소스에서 추출해 실행).
 # ============================================================
@@ -11438,21 +11488,21 @@ function Get-AbyssMemberStopReason {
     [string]$Phase,
     [bool]$LastRun,
     $UntilTime = $null,         # 지정 시간(목표 시각) - 타입 없이 $null 허용 (시간 지정이 아니면 $null. [datetime] 로 두면 $null 이 변환 실패)
-    [int]$EstimateSeconds,
-    [int]$MarginSeconds,
     [bool]$SafeStopFlag,
     [datetime]$Now
   )
 
-  # 파티원 정지 게이트 G (순수 판정 - 진리표 대상, 설계 2.5·㉰). 반환: '' / 'safe-stop' / 'time' / 'last-run'. 사유가 겹치면 이 순서가 이깁니다.
+  # 파티원 정지 게이트 G (순수 판정 - 진리표 대상, 설계 2.5 · 시간 지정 '그 판까지' 설계 4.1). 반환: '' / 'safe-stop' / 'time' / 'last-run'.
+  # 사유가 겹치면 이 순서가 이깁니다.
   #  - 'safe-stop': F9 예약 파일 또는 P 가 소비한 뒤의 래치($safeStopLatched - 호출부가 합쳐 넘김)
-  #  - 'time'     : 지금 + 한 판 추정치 + 여유 > 목표 시각 (엄격한 > - 여유 5초의 근거는 ㉰: 인계 지연 δ(경계 준비 클릭 코드 상한 약 4.2초)
-  #                 < 여유 < 나가기 → 필드 확인 관측 최소 7초. GUI 는 '지금 + 클리어 대기 ≤ 목표' 일 때만 다음 회차를 띄움)
+  #  - 'time'     : 지금 >= 목표 시각 (같은 시각 포함 - 생활 Test-LifeUntilReached·던전 Get-DgTimeVerdict 와 같은 -ge). Phase 와 무관 -
+  #                 START 에서는 새 판 참가를 막고, 경계에서는 이어 가지 않고 나갑니다. 그 전에 이어 간 경계 인계는 종료 코드 11 이라
+  #                 GUI 가 지정 시각을 다시 보지 않고 반드시 이어받습니다 - 그래서 이 판정에는 추정치·여유가 없습니다 (조건 4)
   #  - 'last-run' : 횟수 지정의 마지막 회차 - **경계(Phase 'clear')에서만**. 시작(Phase 'start' - 이월 아님)에서는 이 워커가 판을 마치지 않았으므로
   #                 적용하지 않습니다 (설계 2.5). 이월 중은 호출부가 'clear' 로 넘깁니다
   if ($SafeStopFlag) { return 'safe-stop' }
   if ($null -ne $UntilTime) {
-    if ($Now.AddSeconds($EstimateSeconds + $MarginSeconds) -gt [datetime]$UntilTime) { return 'time' }
+    if ($Now -ge [datetime]$UntilTime) { return 'time' }
   }
   if ($Phase -eq 'clear' -and $LastRun) { return 'last-run' }
   return ''
@@ -12053,14 +12103,13 @@ function Invoke-AbyssPartyMemberCycle {
   # 다시 뜨는 팝업의 교대는 재무장 예산(㉺), 판독 도중 캡처가 끊겼다 돌아오는 회전은 복구 회전(㉻)이 M·준비 시계로 끝냅니다 (8절 1).
   # 클리어 감시(INSIDE 구간)는 Wait-ForDungeonClearScreen -MemberMode 에 맡깁니다 (그 함수의 기존 남는 경로는 ⑥e 범위 밖 - 8절 21).
 
-  # --- 시간 게이트 입력 (설계 2.2) - 이 두 값은 G 호출 인자와 로그 서식에만 씁니다. 대기 루프의 마감으로는 쓰지 않습니다 ---
+  # --- 시간 게이트 입력 (설계 2.2 · 시간 지정 '그 판까지' 설계 4.2) - M 은 대기 한도, $memberUntil 은 G 호출 인자·로그 서식·경계 인계의
+  #     종료 코드 11 분기에만 씁니다. 대기 루프의 마감으로는 쓰지 않습니다 ---
   $memberWaitLimit = $timeoutClear   # M = 클리어 대기 설정 (사용자 결정 09-29 ⑶ - 파티장의 다음 입장을 기다리는 한도)
-  $memberUntil = Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME)   # 파티원 + 시간 지정일 때만 GUI 가 넘김 ('yyyy-MM-dd HH:mm', 형식 오류는 경고 뒤 fail-open)
-  $memberEstimateSec = 0
-  if ((-not [int]::TryParse([string]$env:HONEYNOGI_CYCLE_ESTIMATE_SEC, [ref]$memberEstimateSec)) -or $memberEstimateSec -le 0) { $memberEstimateSec = $timeoutClear }
+  $memberUntil = Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME)   # 파티원 + 시간 지정일 때만 GUI 가 넘김 ('yyyy-MM-dd HH:mm' - InvariantCulture 생산, 형식 오류는 경고 뒤 fail-open)
   Write-RunLog "[파티원] 시작 - 어느 화면이든 이어받습니다 (파티장 다음 입장 대기 한도 ${memberWaitLimit}초 = 클리어 대기 설정 / 준비 뒤 입장 한도 ${memberReadyLimitSeconds}초)"
   if ($script:dgLastRun) { Write-RunLog '[파티원] 이번 회차 종료 조건: 횟수 지정 마지막 회차 - 클리어 뒤 나가기로 필드에 나와 마칩니다' }
-  if ($null -ne $memberUntil) { Write-RunLog "[파티원] 이번 회차 종료 조건: 지정 시간 $($memberUntil.ToString('HH:mm')) (클리어 대기 ${memberEstimateSec}초 + 여유 ${memberTimeGateMarginSeconds}초가 남지 않으면 나가기 뒤 정지)" }
+  if ($null -ne $memberUntil) { Write-RunLog "[파티원] 이번 회차 종료 조건: 지정 시간 $($memberUntil.ToString('HH:mm')) - 그 시각이 지나면 다음 판에 참가하지 않고 나가기로 필드에 나와 마칩니다 (이미 들어갔거나 준비된 판은 끝까지)" }
 
   # --- D 루프 지역 상태 (설계 2.2) ---
   $phase = 'start'                  # 'start'(새 워커·이월 전이 뒤) / 'inside'(클리어 감시 중 - 동기 호출 안) / 'clear'(클리어 뒤 = 회차 경계)
@@ -12242,8 +12291,7 @@ function Invoke-AbyssPartyMemberCycle {
         #    이월 중은 'clear' 의미(마지막 회차 포함)로 매 회전 다시 계산합니다 - GUI 에서 F9 를 취소하면 G 가 빠집니다 (래치는 빠지지 않음)
         $gatePending = ($phase -eq 'clear') -or $carry
         $stopReason = Get-AbyssMemberStopReason -Phase $(if ($gatePending) { 'clear' } else { 'start' }) -LastRun $script:dgLastRun `
-          -UntilTime $memberUntil -EstimateSeconds $memberEstimateSec -MarginSeconds $memberTimeGateMarginSeconds `
-          -SafeStopFlag ((Test-Path -LiteralPath $safeStopFlagPath) -or $safeStopLatched) -Now (Get-Date)
+          -UntilTime $memberUntil -SafeStopFlag ((Test-Path -LiteralPath $safeStopFlagPath) -or $safeStopLatched) -Now (Get-Date)
         if ($screen -eq 'reward3') {
           # 3버튼 보상('다시 하기')은 파티장 쪽 화면 - 역할 오설정. 누르지 않고 정지
           Write-LifeDiagnostics -Game $Game -Context '파티원 3버튼 보상 화면' -CaptureOnly
@@ -12251,14 +12299,20 @@ function Invoke-AbyssPartyMemberCycle {
           exit 4
         }
         if ($phase -eq 'clear') {
-          # CLEAR 열 - 클리어 뒤 첫 신호 = 회차 경계. G 가 없으면 인계(exit 0 - 다음 워커가 이어받음), G 가 있으면 P 또는 이월 (설계 3.2·㉱)
+          # CLEAR 열 - 클리어 뒤 첫 신호 = 회차 경계. G 가 없으면 인계(exit 0, 시간 지정이면 exit 11 - 다음 워커가 이어받음), G 가 있으면 P 또는 이월 (설계 3.2·㉱).
+          #   시간 지정의 인계가 11 인 이유: 이 회전 ⑧ 의 G 가 비었다 = 지금 < 지정 시각 = '이어 감' 이라, GUI 가 지정 시각을 다시 보지 않고 반드시
+          #   다음 워커를 띄워야 합니다 - 위임 인계(누르지 않음·보내지 못함)도 같습니다. GUI 가 멈추면 보상·패널 위에 남거나(결정 ⑶) 준비된 채
+          #   끌려 들어갑니다 (조건 4, 시간 지정 '그 판까지' 설계 4.4·4.5). 'left'(마지막 - P 뒤)는 exit 0 그대로 - GUI 가 '지금 >= 지정 시각' 으로 멈춥니다
           if ($screen -eq 'ready-available') {
             if ($stopReason) {
               $leaveRequest = @{ Source = 'gate'; StopReason = $stopReason }
             } elseif ($readyCursorMisses -lt 3) {
-              $boundaryClick = 'ready'   # ⑩ 경계 준비 클릭 → 전송 확인 → 1초 → exit 0 (09-30 결정 D1 - v10 3.2 유지)
+              $boundaryClick = 'ready'   # ⑩ 경계 준비 클릭 → 전송 확인 → 1초 → exit 0(시간 지정이면 11) (09-30 결정 D1 - v10 3.2 유지)
             } elseif ($readyCursorMisses -ge 3) {
               Write-RunLog "[완료] 파티원 회차 완료 - '준비 완료'를 보내지 못해(커서 미확인 3회) 다음 워커가 준비합니다"
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             }
           } elseif ($screen -eq 'ready-other') {
@@ -12266,6 +12320,9 @@ function Invoke-AbyssPartyMemberCycle {
               $leaveRequest = @{ Source = 'gate'; StopReason = $stopReason }
             } else {
               Write-RunLog '[완료] 파티원 회차 완료 - 준비 패널은 다음 워커가 확인해 준비합니다 (누르지 않고 인계)'
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             }
           } elseif ($screen -eq 'ready-done' -or $screen -eq 'matching' -or ($screen -eq 'inside' -and $insideStreak -ge 2)) {
@@ -12277,12 +12334,21 @@ function Invoke-AbyssPartyMemberCycle {
               $carryRequest = $stopReason
             } elseif ($screen -eq 'ready-done') {
               Write-RunLog '[완료] 파티원 회차 완료 - 이미 준비된 다음 판을 다음 워커가 이어받습니다'
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             } elseif ($screen -eq 'matching') {
               Write-RunLog '[완료] 파티원 회차 완료 - 재매칭 중인 다음 판을 다음 워커가 이어받습니다'
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             } else {
               Write-RunLog '[완료] 파티원 회차 완료 - 다음 판 입장을 확인했습니다 (다음 실행이 던전 안에서 이어받아 입장 키를 보냅니다)'
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             }
           } elseif ($screen -eq 'entry-waiting') {
@@ -12294,9 +12360,15 @@ function Invoke-AbyssPartyMemberCycle {
               $boundaryClick = 'reexpand'
             } elseif ($reexpandSends -ge 2 -or $reexpandCursorMisses -ge 3) {
               Write-RunLog '[완료] 파티원 회차 완료 - 접힌 준비 패널이 다시 펼쳐지지 않아 다음 워커가 이어받습니다'
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             } elseif ($reexpandCheckMisses -ge 3) {
               Write-RunLog "[완료] 파티원 회차 완료 - 접힌 준비 패널의 '입장 대기 중' 위치를 확인하지 못해(클릭 직전 판독 3회) 다음 워커가 이어받습니다"
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             }
           } elseif ($screen -eq 'member-reward') {
@@ -12304,6 +12376,9 @@ function Invoke-AbyssPartyMemberCycle {
               $leaveRequest = @{ Source = 'gate'; StopReason = $stopReason }
             } else {
               Write-RunLog '[완료] 파티원 회차 완료 - 보상 화면에서 다음 워커가 파티장의 입장을 이어받습니다'
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             }
           } elseif ($screen -eq 'field' -and $fieldStreak -ge 2) {
@@ -12381,8 +12456,7 @@ function Invoke-AbyssPartyMemberCycle {
     #    건너뜀은 ⑧ 이 예산이 남은 경계 클릭을 정했고 직전 회전의 경계 재펼침이 클릭 직전 판독의 캡처 실패로 멈추지 않았을 때뿐입니다 (C13·㉻)
     $pendingCount = ($phase -eq 'clear') -or $carry
     $deadlineReason = Get-AbyssMemberStopReason -Phase $(if ($pendingCount) { 'clear' } else { 'start' }) -LastRun $script:dgLastRun `
-      -UntilTime $memberUntil -EstimateSeconds $memberEstimateSec -MarginSeconds $memberTimeGateMarginSeconds `
-      -SafeStopFlag ((Test-Path -LiteralPath $safeStopFlagPath) -or $safeStopLatched) -Now (Get-Date)
+      -UntilTime $memberUntil -SafeStopFlag ((Test-Path -LiteralPath $safeStopFlagPath) -or $safeStopLatched) -Now (Get-Date)
     $skipDeadline = ($boundaryClick -ne '') -and (-not $boundaryReadFailed)
     $boundaryReadFailed = $false
     if ((-not $skipDeadline) -and ($null -eq $leaveRequest) -and (-not $carryRequest)) {
@@ -12501,7 +12575,7 @@ function Invoke-AbyssPartyMemberCycle {
         $isSafeStop = ($leaveStopReason -eq 'safe-stop')
         if ($leave.Result -eq 'left') {
           if ($isSafeStop) { Write-RunLog '[완료] 파티원: 안전 중지 예약 - 나가기로 필드에 나와 마칩니다 (회차 미완료)' }
-          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 까지 한 판을 마칠 시간이 없어 나가기로 필드에 나와 마칩니다" }
+          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 도달 - 다음 판에 참가하지 않고 나가기로 필드에 나와 마칩니다" }
           exit 4
         }
         if ($leave.Result -eq 'committed') {
@@ -12514,19 +12588,19 @@ function Invoke-AbyssPartyMemberCycle {
           Write-LifeDiagnostics -Game $Game -Context '파티원 나가기 뒤 필드 미확인' -CaptureOnly
           Write-RunLog "[경고] 파티원: 나가기 뒤 필드를 확인하지 못했습니다 (${leaveLabel}) - 화면을 확인해 주세요"
           if ($isSafeStop) { Write-RunLog '[완료] 파티원: 안전 중지 예약 - 나가기 뒤 필드를 확인하지 못해 마칩니다 (회차 미완료)' }
-          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 까지 한 판을 마칠 시간이 없어 나갔지만 나가기 뒤 필드를 확인하지 못해 마칩니다" }
+          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 도달 - 나갔지만 나가기 뒤 필드를 확인하지 못해 마칩니다" }
           exit 4
         }
         Write-LifeDiagnostics -Game $Game -Context '파티원 정지 사유 나갈 수 없는 화면' -CaptureOnly
         if ($leaveScreen -eq 'field') {
           if ($isSafeStop) { Write-RunLog '[완료] 파티원: 안전 중지 예약 - 필드로 보이는 화면이라 누르지 않고 마칩니다 (필드 미확정, 회차 미완료)' }
-          else { Write-RunLog "[완료] 파티원: 필드로 보이는 화면이라 누르지 않고 마칩니다 (필드 미확정) - ${reasonLabel} 까지 한 판을 마칠 시간이 없음" }
+          else { Write-RunLog "[완료] 파티원: 필드로 보이는 화면이라 누르지 않고 마칩니다 (필드 미확정) - ${reasonLabel} 도달" }
         } elseif ($leaveFieldPanel) {
           if ($isSafeStop) { Write-RunLog '[완료] 파티원: 안전 중지 예약 - 필드 위 준비 패널이라 준비를 누르지 않고 마칩니다 (회차 미완료)' }
-          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 까지 한 판을 마칠 시간이 없지만 필드 위 준비 패널이라 준비를 누르지 않고 마칩니다" }
+          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 도달 - 필드 위 준비 패널이라 준비를 누르지 않고 마칩니다" }
         } else {
           if ($isSafeStop) { Write-RunLog "[완료] 파티원: 안전 중지 예약 - 나갈 수 없는 화면이라(${leaveLabel}) 누르지 않고 마칩니다 (회차 미완료)" }
-          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 까지 한 판을 마칠 시간이 없지만 나갈 수 없는 화면이라(${leaveLabel}) 누르지 않고 마칩니다" }
+          else { Write-RunLog "[완료] 파티원: ${reasonLabel} 도달 - 나갈 수 없는 화면이라(${leaveLabel}) 누르지 않고 마칩니다" }
         }
         exit 4
       } elseif ($leaveKind -eq 'member-timeout') {
@@ -12617,10 +12691,15 @@ function Invoke-AbyssPartyMemberCycle {
       if ($script:lastClickPerformed) {
         $readySendAt = Get-Date
         if ($boundaryClick -eq 'ready') {
-          # 경계 준비 클릭 인계 - 전송 확인 → 로그 → 1초 → exit 0. 1초는 워커 사이에서도 '직전 전송에서 3초 이상' 간격을 지키기 위함입니다
-          # (다음 워커 기동 2~3초 - 09-29 인계 로그). 인계 직후 GUI 가 멈추면 준비된 파티원이 무인 입장할 수 있는 잔여 위험은 사용자 수용 (D1)
+          # 경계 준비 클릭 인계 - 전송 확인 → 로그 → 1초 → exit 0(시간 지정이면 exit 11). 1초는 워커 사이에서도 '직전 전송에서 3초 이상' 간격을
+          # 지키기 위함입니다 (다음 워커 기동 2~3초 - 09-29 인계 로그). 시간 지정이면 종료 코드 11 이라 GUI 가 지정 시각을 보지 않고 이어받습니다 -
+          # ⑧ 에서 지정 시각 전으로 정한 준비가 이 회전에 지정 시각 직후 전송돼도 같은 판단의 실행입니다 (설계 4.3). 인계 직후 F9 로 GUI 가
+          # 멈추면 준비된 파티원이 무인 입장할 수 있는 잔여 위험은 사용자 수용 (D1 - 10-02 결정 Q4 로 유지)
           Write-RunLog '[완료] 파티원 회차 완료 - 준비 완료를 누르고 다음 워커가 입장을 이어받습니다'
           Start-Sleep -Seconds 1
+          if ($null -ne $memberUntil) {
+            exit 11
+          }
           exit 0
         }
         Write-RunLog "[파티원] '준비 완료' 클릭 - 전원 준비되면 자동 입장"
@@ -12635,6 +12714,9 @@ function Invoke-AbyssPartyMemberCycle {
         if ($readyCursorMisses -ge 3) {
           if ($boundaryClick -eq 'ready') {
             Write-RunLog "[완료] 파티원 회차 완료 - '준비 완료'를 보내지 못해(커서 미확인 3회) 다음 워커가 준비합니다"
+            if ($null -ne $memberUntil) {
+              exit 11
+            }
             exit 0
           }
           # START: 관측 전환 - 더 누르지 않고 M 을 0 부터 다시 셉니다 (에피소드 중에도 M 이 흐름)
@@ -12668,6 +12750,9 @@ function Invoke-AbyssPartyMemberCycle {
           if ($reexpandCheckMisses -ge 3) {
             if ($boundaryClick -eq 'reexpand') {
               Write-RunLog "[완료] 파티원 회차 완료 - 접힌 준비 패널의 '입장 대기 중' 위치를 확인하지 못해(클릭 직전 판독 3회) 다음 워커가 이어받습니다"
+              if ($null -ne $memberUntil) {
+                exit 11
+              }
               exit 0
             }
             Write-RunLog "[안내] 파티원: 접힌 준비 패널의 '입장 대기 중' 위치를 클릭 직전 판독에서 3번 확인하지 못해 더 누르지 않고 관측합니다 (대기 한도는 그대로 흐름)"
@@ -12689,6 +12774,9 @@ function Invoke-AbyssPartyMemberCycle {
             if ($reexpandCursorMisses -ge 3) {
               if ($boundaryClick -eq 'reexpand') {
                 Write-RunLog '[완료] 파티원 회차 완료 - 접힌 준비 패널이 다시 펼쳐지지 않아 다음 워커가 이어받습니다'
+                if ($null -ne $memberUntil) {
+                  exit 11
+                }
                 exit 0
               }
               Write-RunLog '[안내] 파티원: 접힌 준비 패널 다시 펼침을 커서 미확인으로 3회 보내지 못해 더 누르지 않고 관측합니다'
@@ -15629,8 +15717,10 @@ function Invoke-LifeMenuSequence {
 
 function Get-LifeUntilDeadline {
   # 시간 지정 모드의 목표 시각 파싱 (진리표 대상 - 형식이 맞을 때만 DateTime).
-  # GUI 가 **생활 + 시간 지정**일 때만 HONEYNOGI_UNTIL_TIME 에 전체 타임스탬프
-  # (yyyy-MM-dd HH:mm)를 넣습니다 - HH:mm 만 주고받으면 자정 넘김(23:50 에 00:30 지정)이
+  # GUI 가 **시간 지정**이고 지정 시각을 워커가 스스로 판단하는 실행일 때만 HONEYNOGI_UNTIL_TIME 에 전체 타임스탬프
+  # (yyyy-MM-dd HH:mm)를 넣습니다 - 생활, 그리고 전투의 던전·심층·어비스 파티원(비커스텀 - GUI Test-WorkerTimeJudgeActive,
+  # 시간 지정 '그 판까지' 설계 2.5). 전투 분기는 GUI 가 InvariantCulture 로 만듭니다 - 현재 문화권으로 만들면 불기 달력 등에서
+  # 다른 연도가 '정상' 해석될 수 있습니다 (설계 12 - 생활 분기는 기존 그대로). HH:mm 만 주고받으면 자정 넘김(23:50 에 00:30 지정)이
   # 모호해집니다. 빈 값 = 제한 없음($null). 형식 오류는 fail-open($null = 현행 유지)하되
   # 1회 경고를 남깁니다 - 조용히 무시하면 "왜 안 끊겼지"를 추적할 수 없습니다 (설계 합의).
   param([string]$Raw)
@@ -15657,8 +15747,9 @@ function Test-LifeUntilReached {
   # 필요 없는 종료라 **캡처 실패 중이어도 즉시** 적용합니다 (벽시계 약속은 동결 계약의 대상이
   # 아님 - 설계 합의). 끊긴 채집은 다음 시작의 '진행 중 퀘스트 감지' 경로가 이어받습니다.
   # exit 4 = 조건부 정상 정지 - GUI 가 회차로 세지 않고 자동화를 멈춥니다 (기존 계약).
-  # ※ 전투에는 이 검사가 없습니다 - 판 중간 정지는 불가(재화 소모·복귀 경로 없음)하고
-  #   전투의 목표 초과는 미실측입니다 (이슈_개선점_목록.md ① 참고).
+  # ※ 전투에는 이 검사가 없습니다 - 판 중간 정지는 불가(재화 소모·복귀 경로 없음)합니다. 전투는 판 경계에서만 지정 시각을 봅니다 -
+  #   던전·심층은 결과 화면(14-T), 어비스 파티원은 판 경계·참가 판단(G), 어비스 혼자하기·파티장·사냥터는 GUI 가 다음 회차를 띄울 때
+  #   (시간 지정 '그 판까지' 설계 1.1·3·4·5).
   if ($null -eq $script:lifeUntilDeadline) { return }
   if ((Get-Date) -ge $script:lifeUntilDeadline) {
     Write-RunLog ("[완료] 지정 시간({0}) 도달 - 진행 중인 채집은 게임에 맡기고 자동화만 마칩니다 (이번 사이클은 회차로 세지 않음)" -f $script:lifeUntilDeadline.ToString('HH:mm'))

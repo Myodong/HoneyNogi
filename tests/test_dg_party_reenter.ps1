@@ -16,8 +16,10 @@ $asTaskMethod = [System.WindowsRuntimeSystemExtensions].GetMethods() |
   Select-Object -First 1
 $ocrKoreanEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language('ko')))
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
+# Get-DgTimeVerdict 는 T6(꼬리) 전용입니다 - 꼬리가 시각을 다시 판단하는 결함이 생기면 그 호출이 실제 판단 함수로 돌아 행 7·8 이 '판단값만 본다'
+# 계약 위반으로 실패하게 합니다 (함수가 없으면 명령 없음 예외로 실패해 원인이 흐려짐)
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
-    -Names @('Invoke-OcrOnBitmap', 'Await-WinRt', 'Test-DgQuestStageMatch')) {
+    -Names @('Invoke-OcrOnBitmap', 'Await-WinRt', 'Test-DgQuestStageMatch', 'Get-DgTimeVerdict')) {
   Invoke-Expression $definition
 }
 $workerText = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
@@ -137,5 +139,80 @@ Assert-Case '배선: 재입장 회차의 완료 로그는 옵션 복귀 문구�
 # 협동 전체 창 처리 뒤, 이미 읽은 하단 문구로 게이트 (평상시 추가 판독 없음)
 Assert-Case '배선: 팝업 스윕에 주간 리셋 팝업 처리 (전체 창 뒤 + 하단 문구 게이트)' `
   ([bool]($workerText -match "Close-CoopMissionBoardScreen -Game \`$Game\) \{ return \`$true \}[\s\S]{0,700}\`$bottomText\.Contains\('협동'\) -and \`$bottomText\.Contains\('참여'\) -and \(Close-WeeklyCoopResetPopup -Game \`$Game\)\) \{ return \`$true \}[\s\S]{0,300}Close-NetworkUnstablePopup")) 'True'
+
+# ── T6 던전 함수 꼬리 (시간 지정 '그 판까지' 설계 8.2 T6 - 회귀 R-5·경합 P2-2) ──
+# 파티 재입장(우연한 만남)도 옵션 복귀와 같은 꼬리를 지납니다 - 시간 지정에서 14-T 가 '이어 감'('continue')으로 정한 판은 두 경우 모두 종료 코드 11 로
+# 끝나야 GUI 가 지정 시각을 보지 않고 다음 워커를 띄웁니다 (재입장 판 뒤에 GUI 가 멈추면 파티와 함께 던전 안에 남음 - 조건 4). 꼬리는 판단값만 보고
+# 시각을 다시 보지 않습니다.
+# 꼬리 = Invoke-NormalDungeonCycle 본문에서 :dgClearCycle while 뒤의 형제 문장 전부 (정리 모드 exit 10 · 옵션 복귀 로그 · 시간 이어 감 exit 11 · exit 0).
+# 줄 단독 exit 는 대입이 아니라 throw 센티널로 바꿉니다 - 꼬리에는 exit 가 차례로 셋이라 대입이면 뒤 exit 가 앞 값을 덮습니다 (14-0 하니스는 exit 하나라
+# 대입). 실행 전 3중 단언(원본 ExitStatementAst 3 = 줄 단독 exit 3 = 치환 수 3, 치환 뒤 다시 파싱한 ExitStatementAst 0)이 하나라도 어긋나면 FAIL 을 찍고,
+# 치환이 안전하지 않으면(치환 안 된 exit 가 남음) 행을 실행하지 않습니다 - 치환 안 된 exit 가 이 테스트 프로세스를 끝내면 이 파일 끝(exit $fails)에
+# 닿지 않고 그 exit 값으로 끝나, 0 이면 러너가 '통과'로 셉니다 (러너는 FAIL 줄 없음 + 종료 코드 0 이면 통과). 행은 헬퍼 함수 안에서 점소싱합니다
+# (규칙 3 - 꼬리가 읽는 지역 변수를 그 함수에 둠)
+$tailFunction = $dgAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-NormalDungeonCycle' }, $true)
+$tailStatements = @()
+if ($null -ne $tailFunction) {
+  $bodyStatements = @($tailFunction.Body.EndBlock.Statements)
+  $loopIndex = -1
+  for ($i = 0; $i -lt $bodyStatements.Count; $i++) {
+    if ($bodyStatements[$i] -is [System.Management.Automation.Language.WhileStatementAst] -and $bodyStatements[$i].Label -eq 'dgClearCycle') { $loopIndex = $i }
+  }
+  if ($loopIndex -ge 0) { $tailStatements = @($bodyStatements | Select-Object -Skip ($loopIndex + 1)) }
+}
+$tailText = (@($tailStatements | ForEach-Object { [string]$_.Extent.Text }) -join "`n")
+$tailExitPattern = '(?m)^(\s*)exit (\d+)\s*$'
+$tailOriginalExits = @([System.Management.Automation.Language.Parser]::ParseInput($tailText, [ref]$null, [ref]$null).FindAll({ param($n) $n -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count
+$tailLineExits = [regex]::Matches($tailText, $tailExitPattern).Count
+$tailConverted = $tailText -replace $tailExitPattern, '$1throw "__EXIT__$2"'
+$tailReplaced = [regex]::Matches($tailConverted, 'throw "__EXIT__\d+"').Count
+$tailRemaining = @([System.Management.Automation.Language.Parser]::ParseInput($tailConverted, [ref]$null, [ref]$null).FindAll({ param($n) $n -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count
+$tailSentinel = "$tailOriginalExits/$tailLineExits/$tailReplaced/$tailRemaining"
+Assert-Case 'T6 센티널: 꼬리 원본 ExitStatementAst 3 = 줄 단독 exit 3 = 치환 수 3, 치환 뒤 ExitStatementAst 0' $tailSentinel '3/3/3/0'
+# 행 실행 조건은 '치환이 안전함'(원본 = 줄 단독 = 치환 수, 남은 exit 0) 입니다 - 개수가 3 이 아니어도(예: 이어 감 exit 11 블록이 빠짐) 안전하면 행을 돌려
+# 그 결함이 위 개수 단언과 함께 행동(1·2·7행)으로도 드러나게 합니다. 안전하지 않으면 실행하지 않습니다 (치환 안 된 exit 가 프로세스를 끝냄)
+$tailSafe = ($tailOriginalExits -gt 0) -and ($tailOriginalExits -eq $tailLineExits) -and ($tailLineExits -eq $tailReplaced) -and ($tailRemaining -eq 0)
+$tailBlock = $(if ($tailSafe) { [scriptblock]::Create($tailConverted) } else { $null })
+function Write-RunLog { param([string]$Message) $script:tailLogs += $Message }
+$script:contentTag = '[던전]'
+$script:tailRows = 0
+function Invoke-DgTail {
+  # 꼬리 한 행 - 꼬리가 읽는 지역 변수(재입장 여부·판단값·지정 시각)를 이 함수 안에 두고 꼬리를 점소싱합니다. 반환: 센티널의 종료 코드 또는 사유 문자열.
+  # $Until 은 타입 없이 받습니다 - 시간 지정이 아닌 행은 $null 이고 [datetime] 이면 변환 실패 (규칙 3)
+  param([bool]$CleanupOnly, [bool]$ReenteredInside, [string]$Verdict, $Until)
+  $script:customCleanupOnly = $CleanupOnly
+  $reenteredInside = $ReenteredInside
+  $dgTimeVerdict = $Verdict
+  $dgUntil = $Until
+  $script:tailLogs = @()
+  $script:tailRows++
+  try { . $tailBlock; return '(반환됨 - exit 없음)' }
+  catch {
+    if ($_.Exception.Message -match '^__EXIT__(\d+)$') { return [int]$Matches[1] }
+    return "예외: $($_.Exception.Message)"
+  }
+}
+$tailUntil = [datetime]'2026-10-01 10:00:00'
+$optionLog = '[던전] 다시 하기 → 옵션 화면 복귀 - 회차 완료'
+$continueLog = '[던전] 지정 시간 10:00 전에 다음 판으로 이어 갔습니다 - 다음 워커가 이어받습니다'
+# 행: 정리 모드 · 재입장 · 판단값 · 지정 시각 → 기대 종료 코드 (로그 L 이 있으면 순서대로 정확히). 7·8 행은 판단값과 시계를 일부러 어긋나게 둡니다
+$tailCases = @(
+  @{ I = 1; N = "'continue' · 옵션 복귀 → exit 11 (옵션 복귀 로그 → 이어 감 로그)"; C = $false; R = $false; V = 'continue'; U = $tailUntil; E = 11; L = @($optionLog, $continueLog) }
+  @{ I = 2; N = "'continue' · 파티 재입장 → exit 11 (옵션 복귀 로그 0)"; C = $false; R = $true; V = 'continue'; U = $tailUntil; E = 11; L = @($continueLog) }
+  @{ I = 3; N = "시간 지정 아님('') · 옵션 복귀 → exit 0"; C = $false; R = $false; V = ''; U = $null; E = 0; L = @($optionLog) }
+  @{ I = 4; N = "시간 지정 아님('') · 파티 재입장 → exit 0"; C = $false; R = $true; V = ''; U = $null; E = 0; L = @() }
+  @{ I = 5; N = "'last' → exit 0 (실제로는 14-0 이 먼저 끝내는 조합 - 꼬리 조건이 'continue' 하나만 보는지)"; C = $false; R = $false; V = 'last'; U = $tailUntil; E = 0; L = @($optionLog) }
+  @{ I = 6; N = '정리 모드 → exit 10'; C = $true; R = $false; V = ''; U = $null; E = 10; L = $null }
+  @{ I = 7; N = "'continue' + 지정 시각이 이미 지남(지금 − 1시간) → exit 11 (꼬리는 시각을 다시 보지 않음)"; C = $false; R = $false; V = 'continue'; U = (Get-Date).AddHours(-1); E = 11; L = $null }
+  @{ I = 8; N = "'' + 지정 시각이 아직 미래(지금 + 1시간) → exit 0 (판단값만 봄)"; C = $false; R = $false; V = ''; U = (Get-Date).AddHours(1); E = 0; L = $null }
+  @{ I = 9; N = "정리 모드 + 'continue' → exit 10 (정리 모드가 11 보다 먼저 - 꼬리 순서)"; C = $true; R = $false; V = 'continue'; U = $tailUntil; E = 10; L = $null }
+)
+foreach ($row in $tailCases) {
+  if ($null -eq $tailBlock) { break }   # 치환이 안전하지 않음 - 행을 실행하지 않음 (아래 개수 단언이 FAIL)
+  $tailExit = Invoke-DgTail -CleanupOnly $row.C -ReenteredInside $row.R -Verdict $row.V -Until $row.U
+  Assert-Case "T6 꼬리 $($row.I)행: $($row.N)" $tailExit $row.E
+  if ($null -ne $row.L) { Assert-Case "T6 꼬리 $($row.I)행 로그 (순서대로)" (@($script:tailLogs) -join ' / ') (@($row.L) -join ' / ') }
+}
+Assert-Case 'T6 꼬리: 9행 모두 실행됨 (치환이 안전하지 않으면 0)' $script:tailRows 9
 
 exit $fails
