@@ -554,17 +554,20 @@ foreach ($tidy3Render in $tidy3RenderCases) {
     (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidy3Raw) $false) ('12:00:00 ' + $tidy3Render.Shown)
 }
 
-# ── 4차 정리 (2026-10-02 사용자 확정) - ⑨ '사용자 입력 감지(입력 종류) - …' → '사용자 조작 감지 - …', 기다림 안내 2종 통일 ──
+# ── 4차 정리 (2026-10-02 사용자 확정) - ⑨ '사용자 입력 감지(입력 종류) - …' → '○○ 조작 감지 - …', 기다림 안내 2종 통일 ──
+# 접두의 ○○ 는 6차(2026-10-06 사용자 확정)부터 입력 종류별입니다: 마우스 이동 → 마우스, 키/버튼 입력 → 키보드·버튼, 그 밖 → 사용자.
 # 실로그 원문 → 기대 표시 (정확 일치). 뒤 3줄(조작 종료·재개·계속 중)은 그대로여야 하는 실로그입니다.
 $tidy4RealCases = @(
   @('13:29:01 [안내] 사용자 입력 감지(키/버튼 입력) - 조작이 끝날 때까지 어비스 선택 화면 복귀를 멈추고 기다립니다',
-    '13:29:01 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+    '13:29:01 [안내] 키보드·버튼 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
   @('13:48:36 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 클리어 화면 터치(나가기 버튼 표시)을(를) 멈추고 기다립니다',
-    '13:48:36 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+    '13:48:36 [안내] 마우스 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
   @("13:25:27 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 난이도 '매우 어려움' 확인을 멈추고 기다립니다",
-    '13:25:27 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+    '13:25:27 [안내] 마우스 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
   @('15:09:46 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다',
-    '15:09:46 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+    '15:09:46 [안내] 마우스 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
+  @('20:29:48 [안내] 사용자 입력 감지(키/버튼 입력) - 조작이 끝날 때까지 자동화를 잠시 양보합니다',
+    '20:29:48 [안내] 키보드·버튼 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'),
   # 클릭 공통 함수의 '이번 클릭은 건너뜁니다' 는 5차(아래)에서 화면 숨김으로 바뀜 - 접두 변환보다 숨김이 먼저
   @('13:27:57 [안내] 사용자 입력 감지(키/버튼 입력) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)',
     $null),
@@ -586,26 +589,41 @@ $tidy4NearCases = @(
   @('12:00:00 [경고] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다',
     '12:00:00 [경고] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다'),
   @('12:00:00 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다 후속문구',
-    '12:00:00 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 자동화를 잠시 양보합니다 후속문구'),
+    '12:00:00 [안내] 마우스 조작 감지 - 조작이 끝날 때까지 자동화를 잠시 양보합니다 후속문구'),
   @('12:00:00 [안내] 사용자 입력 감지(키/버튼 입력) - 조작이 끝날 때까지 던전 퇴장을 멈추고 기다립니다 후속문구',
-    '12:00:00 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 던전 퇴장을 멈추고 기다립니다 후속문구')
+    '12:00:00 [안내] 키보드·버튼 조작 감지 - 조작이 끝날 때까지 던전 퇴장을 멈추고 기다립니다 후속문구')
 )
 foreach ($tidy4Near in $tidy4NearCases) {
   Check-Equal ('GUI 4차(근접 변형): {0}' -f $tidy4Near[0]) (Convert-WorkerLogLineForGui $tidy4Near[0] $false) $tidy4Near[1]
 }
-# 소스 템플릿 펼침 - 입력 종류(마우스·키·빈 값)와 작업 이름·조사 표본. lastUserInputKind 는 스크립트 범위라 펼친 뒤 지웁니다.
+# 소스 템플릿 펼침 - 입력 종류(마우스·키·빈 값·모르는 값)와 작업 이름·조사 표본. lastUserInputKind 는 스크립트 범위라 펼친 뒤 지웁니다.
 $tidy4RenderCases = @(
   @{ Id = 'Y1'; Kind = '마우스 이동'; Vars = @{ Context = '던전 퇴장'; particle = '을' }
      Raw = '[안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 던전 퇴장을 멈추고 기다립니다'
-     Shown = '[안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
+     Shown = '[안내] 마우스 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
+  @{ Id = 'Y1'; Kind = '키/버튼 입력'; Vars = @{ Context = '입장하기 클릭 확인(상세 화면 종료)'; particle = '을(를)' }
+     Raw = '[안내] 사용자 입력 감지(키/버튼 입력) - 조작이 끝날 때까지 입장하기 클릭 확인(상세 화면 종료)을(를) 멈추고 기다립니다'
+     Shown = '[안내] 키보드·버튼 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
   @{ Id = 'Y1'; Kind = ''; Vars = @{ Context = "난이도 '어려움' 확인"; particle = '을' }
      Raw = "[안내] 사용자 입력 감지() - 조작이 끝날 때까지 난이도 '어려움' 확인을 멈추고 기다립니다"
      Shown = '[안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
   @{ Id = 'Y2'; Kind = ''; Vars = @{}
      Raw = '[안내] 사용자 입력 감지() - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
      Shown = $null }   # 5차: 화면 숨김 (빈 입력 종류도 숨겨야 함)
+  @{ Id = 'Y2'; Kind = '키/버튼 입력'; Vars = @{}
+     Raw = '[안내] 사용자 입력 감지(키/버튼 입력) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
+     Shown = $null }
+  @{ Id = 'Y2'; Kind = '터치'; Vars = @{}
+     Raw = '[안내] 사용자 입력 감지(터치) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
+     Shown = $null }   # 5차 숨김은 입력 종류를 가리지 않음 (모르는 값도 숨김)
   @{ Id = 'Y3'; Kind = '마우스 이동'; Vars = @{}
      Raw = '[안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 자동화를 잠시 양보합니다'
+     Shown = '[안내] 마우스 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
+  @{ Id = 'Y3'; Kind = '키/버튼 입력'; Vars = @{}
+     Raw = '[안내] 사용자 입력 감지(키/버튼 입력) - 조작이 끝날 때까지 자동화를 잠시 양보합니다'
+     Shown = '[안내] 키보드·버튼 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
+  @{ Id = 'Y3'; Kind = ''; Vars = @{}
+     Raw = '[안내] 사용자 입력 감지() - 조작이 끝날 때까지 자동화를 잠시 양보합니다'
      Shown = '[안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' }
   @{ Id = 'Y4'; Kind = '키/버튼 입력'; Vars = @{ Context = '어비스 선택 화면 복귀'; particle = '를'; yieldClock = @{ Elapsed = @{ TotalSeconds = 4 } } }
      Raw = '[안내] 사용자 조작 종료 - 어비스 선택 화면 복귀를 다시 진행합니다 (4초 양보)'
@@ -617,7 +635,8 @@ foreach ($tidy4Render in $tidy4RenderCases) {
   Remove-Variable -Name lastUserInputKind -Scope Script -ErrorAction SilentlyContinue
   Check-Equal ('워커 템플릿 펼침({0}): {1}' -f $tidy4Render.Id, $tidy4Render.Raw) $tidy4Raw $tidy4Render.Raw
   $tidy4Want = $(if ($null -eq $tidy4Render.Shown) { $null } else { '12:00:00 ' + $tidy4Render.Shown })
-  Check-Equal ('GUI 4차(소스 템플릿 {0}): {1}' -f $tidy4Render.Id, $tidy4Render.Shown) `
+  $tidy4ShownLabel = $(if ($null -eq $tidy4Render.Shown) { '(숨김)' } else { $tidy4Render.Shown })
+  Check-Equal ("GUI 4차(소스 템플릿 {0}, 종류 '{1}'): {2}" -f $tidy4Render.Id, $tidy4Render.Kind, $tidy4ShownLabel) `
     (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidy4Raw) $false) $tidy4Want
 }
 
@@ -631,13 +650,74 @@ Check-Equal 'GUI 5차: 부른 쪽 건너뜀 안내는 그대로 (사용자 지�
 # 근접 변형: 뒤에 글이 더 붙으면 숨기지 않고 4차 접두 변환만(끝 앵커), 다른 줄 안에 인용·[경고] 태그는 그대로(태그 위치·[안내] 고정)
 Check-Equal 'GUI 5차: 끝에 글이 더 붙으면 숨기지 않음 (접두만 변환)' `
   (Convert-WorkerLogLineForGui '12:00:00 [안내] 사용자 입력 감지(마우스 이동) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도) 후속문구' $false) `
-  '12:00:00 [안내] 사용자 조작 감지 - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도) 후속문구'
+  '12:00:00 [안내] 마우스 조작 감지 - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도) 후속문구'
 Check-Equal 'GUI 5차: 인용된 공통 안내는 숨기지 않음' `
   (Convert-WorkerLogLineForGui '12:00:00 [경고] 인용: [안내] 사용자 입력 감지(마우스 이동) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)' $false) `
   '12:00:00 [경고] 인용: [안내] 사용자 입력 감지(마우스 이동) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
 Check-Equal 'GUI 5차: [경고] 태그 줄은 숨기지 않음' `
   (Convert-WorkerLogLineForGui '12:00:00 [경고] 사용자 입력 감지(마우스 이동) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)' $false) `
   '12:00:00 [경고] 사용자 입력 감지(마우스 이동) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)'
+
+# ── 6차 (2026-10-06 사용자 확정) - 4차에서 지운 입력 종류를 접두로 되살림: 마우스 이동 → '마우스 조작 감지',
+#    키/버튼 입력 → '키보드·버튼 조작 감지', 그 밖 → '사용자 조작 감지' (키/버튼에는 제자리 클릭·휠·다른 장치 버튼도 들어가 '키보드'로 단정 안 함) ──
+# 사용자 지적 원문 쌍(같은 초, run_20261006_h13m11s12.log): 공통 클릭 건너뜀은 5차대로 숨기고, 기다림 안내는 그 줄의 종류로
+Check-Equal 'GUI 6차: 같은 초의 공통 클릭 건너뜀(키/버튼 입력)은 숨김 (사용자 지적 원문)' `
+  (Convert-WorkerLogLineForGui '13:04:44 [안내] 사용자 입력 감지(키/버튼 입력) - 이번 클릭은 건너뜁니다 (조작이 끝나면 다음 감지에서 다시 시도)' $false) $null
+Check-Equal 'GUI 6차: 기다림 안내는 그 줄의 입력 종류로 (사용자 지적 원문)' `
+  (Convert-WorkerLogLineForGui '13:04:44 [안내] 사용자 입력 감지(마우스 이동) - 조작이 끝날 때까지 입장하기 클릭 확인(상세 화면 종료)을(를) 멈추고 기다립니다' $false) `
+  '13:04:44 [안내] 마우스 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'
+# 워커 문자열과 정확히 같을 때만 라벨을 붙입니다 - 앞부분만 같음·앞뒤 공백·모르는 값은 '사용자'
+foreach ($tidy6Kind in @('키/버튼', ' 마우스 이동', '마우스 이동 ', '마우스', '터치')) {
+  Check-Equal ("GUI 6차: 워커와 다른 입력 종류 '{0}' 는 '사용자 조작 감지'" -f $tidy6Kind) `
+    (Convert-WorkerLogLineForGui ('12:00:00 [안내] 사용자 입력 감지({0}) - 조작이 끝날 때까지 자동화를 잠시 양보합니다' -f $tidy6Kind) $false) `
+    '12:00:00 [안내] 사용자 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다'
+}
+# 워커 입력 종류 전수 가드: lastUserInputKind 를 가리키는 변수 참조 전부를 '대입(= 연산, 오른쪽 상수 문자열)'·'읽기'로 나눠
+# 고정합니다 - 대입은 초기값('')·'마우스 이동'·'키/버튼 입력' 3곳, 읽기는 안내 템플릿 3곳(Y1~Y3). 종류 문구를 바꾸거나 새 종류·
+# 간접 대입(+=, [ref], Set-Variable 등)을 넣으면 실패하니, 그때 GUI ⑨ 의 라벨 매핑과 아래 라벨 표를 함께 손볼 것.
+$tidy6KindRefs = @($workerAst.FindAll({ param($node)
+      $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+      $node.VariablePath.UserPath -match '^(?:\w+:)?lastUserInputKind$' }, $true))
+$tidy6Assigned = New-Object System.Collections.Generic.List[string]
+$tidy6Reads = 0
+foreach ($tidy6Ref in $tidy6KindRefs) {
+  $tidy6Owner = $tidy6Ref.Parent
+  if ($tidy6Owner -is [System.Management.Automation.Language.AssignmentStatementAst] -and [object]::ReferenceEquals($tidy6Owner.Left, $tidy6Ref)) {
+    if ($tidy6Owner.Operator -eq [System.Management.Automation.Language.TokenKind]::Equals -and
+        $tidy6Owner.Right -is [System.Management.Automation.Language.CommandExpressionAst] -and
+        $tidy6Owner.Right.Expression -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+      $tidy6Assigned.Add($tidy6Owner.Right.Expression.Value)
+    } else {
+      $tidy6Assigned.Add('<상수 아닌 대입>')
+    }
+  } else {
+    $tidy6Reads++
+  }
+}
+Check-Equal '워커: 입력 종류 대입 = 초기값·마우스 이동·키/버튼 입력 3곳 (= 연산, 상수 문자열)' `
+  ((@($tidy6Assigned) | Sort-Object) -join '|') ((@('', '마우스 이동', '키/버튼 입력') | Sort-Object) -join '|')
+Check-Equal '워커: 입력 종류 읽기 = 안내 템플릿 3곳 (Y1~Y3)' $tidy6Reads 3
+# 변수 이름을 문자열로 다루는 간접 대입(Set-Variable -Name lastUserInputKind 등)도 없어야 합니다
+$tidy6NameStrings = @($workerAst.FindAll({ param($node)
+      $node -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+      $node.Value -match 'lastUserInputKind' }, $true))
+Check-Equal '워커: 입력 종류 변수 이름을 문자열로 쓰는 곳 없음' $tidy6NameStrings.Count 0
+# 워커에서 캡처한 종류마다 화면 라벨 = 사용자 확정 표 (워커가 새 종류를 넣으면 위 집합 단언과 이 표를 함께 손볼 것)
+$tidy6Labels = @{ '마우스 이동' = '마우스'; '키/버튼 입력' = '키보드·버튼'; '' = '사용자' }
+foreach ($tidy6Kind in @($tidy6Assigned | Select-Object -Unique)) {
+  if (-not $tidy6Labels.ContainsKey($tidy6Kind)) {
+    Check-Equal ("GUI 6차: 워커 입력 종류 '{0}' 의 화면 라벨이 정해져 있음" -f $tidy6Kind) $false $true
+    continue
+  }
+  foreach ($tidy6Id in @('Y1', 'Y3')) {
+    $script:lastUserInputKind = $tidy6Kind
+    $tidy6Raw = Expand-TidyTemplate -Id $tidy6Id -Vars @{ Context = '던전 퇴장'; particle = '을' }
+    Remove-Variable -Name lastUserInputKind -Scope Script -ErrorAction SilentlyContinue
+    Check-Equal ("GUI 6차(워커 종류 '{0}', {1}): '{2} 조작 감지'" -f $tidy6Kind, $tidy6Id, $tidy6Labels[$tidy6Kind]) `
+      (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidy6Raw) $false) `
+      ('12:00:00 [안내] {0} 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' -f $tidy6Labels[$tidy6Kind])
+  }
+}
 
 Check-Equal 'GUI: 진단 아닌 끝 괄호는 보존 (사용자 안내 문구)' `
   (Convert-WorkerLogLineForGui '15:00:00 [완료] 채집 1사이클 완료 - 나무 베기 / 굵은 나무 10개 (이번 사이클은 회차로 세지 않음)' $false) `
