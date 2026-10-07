@@ -31,30 +31,27 @@ function Assert-Case {
 # 전면화는 $false 를 돌려줘 P/Invoke 까지 가지 않고 반환하게 합니다 (단위 시험에서 실제 입력 금지).
 $script:userActive = $false
 $script:waitCalls = 0
-$script:untilCalls = 0
 $script:dragPathCalls = 0
 function Write-RunLog { param([string]$Message) }
 function Test-UserRecentlyActive { param([int]$IdleMs = 2500) return $script:userActive }
 function Wait-UserYieldEnd { param($Game, [string]$Context = '자동화') $script:waitCalls++ }
-function Test-LifeUntilReached { $script:untilCalls++ }
 function Wait-GameRestoredIfMinimized { param($Game) $script:dragPathCalls++ }
 function Test-GameForeground { param($Game) return $false }   # 드래그 전 반환 (실제 입력 방지)
 function Focus-Game { param($Game) }
 
 # ── ① 조작 중: 기다리고, 표시하고, 드래그 경로에 진입하지 않는다 ──
 $script:userActive = $true
-$script:waitCalls = 0; $script:untilCalls = 0; $script:dragPathCalls = 0
+$script:waitCalls = 0; $script:dragPathCalls = 0
 $script:lifeScrollYielded = $false
 $scrollResult = Invoke-LifeListScroll -Game $null -Steps -1
 Assert-Case '조작 중: 반환은 $false (드래그 미수행)' $scrollResult $false
 Assert-Case '조작 중: 조작이 끝날 때까지 기다린다 (건너뛰기 금지 - 실사고 본체)' $script:waitCalls 1
 Assert-Case '조작 중: 양보 표시를 세운다 (호출부의 예산 면제 근거)' $script:lifeScrollYielded $true
 Assert-Case '조작 중: 드래그 경로에 진입하지 않는다 (대기 뒤 재판독은 호출부 몫)' $script:dragPathCalls 0
-Assert-Case '조작 중: 양보 복귀 후 지정 종료 시각을 확인한다' $script:untilCalls 1
 
 # ── ② 조작 없음: 표시는 거짓, 대기 없음, 드래그 경로로 진입 ──
 $script:userActive = $false
-$script:waitCalls = 0; $script:untilCalls = 0; $script:dragPathCalls = 0
+$script:waitCalls = 0; $script:dragPathCalls = 0
 $scrollResult = Invoke-LifeListScroll -Game $null -Steps -1
 Assert-Case '조작 없음: 기다리지 않는다' $script:waitCalls 0
 Assert-Case '조작 없음: 양보 표시 없음' $script:lifeScrollYielded $false

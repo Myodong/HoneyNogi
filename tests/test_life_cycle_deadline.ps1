@@ -22,13 +22,12 @@ function Assert-Case {
   else { "FAIL {0}: 실제 [{1}] 기대 [{2}]" -f $Name, $Actual, $Expect; $script:fails++ }
 }
 
-# ── 진리표: 마감 = min(양보를 반영한 사이클 한도, 지정 종료 시각) ──
+# ── 진리표: 마감 = 양보를 반영한 사이클 한도 (생활 워커는 지정 시각을 보지 않음 - 2026-10-02 생활 확장) ──
 # 값은 소스 함수를 그대로 실행해 얻습니다 (사본 재구현 금지 - 진리표 계약)
 $base = [datetime]'2026-09-09T10:00:00'
 $script:lifeCycleDeadline = $base
 $script:lifeSeenYieldMs   = [double]0
 $script:userYieldTotalMs  = [double]0
-$script:lifeUntilDeadline = $null
 
 Assert-Case '양보 0 → 마감 불변' (Get-LifeCycleDeadline) $base
 
@@ -45,19 +44,14 @@ Assert-Case '재조회 3회째도 동일' (Get-LifeCycleDeadline) $base.AddSecon
 $script:userYieldTotalMs = [double]420000
 Assert-Case '추가 양보 120초 → 누적 +420초' (Get-LifeCycleDeadline) $base.AddSeconds(420)
 
-# 지정 종료 시각은 **사용자 약속이라 연장하지 않습니다** - 더 이르면 그 시각이 마감
+# 생활 워커는 지정 시각을 보지 않습니다 (2026-10-02 생활 확장). 옛 min(사이클 한도, 지정 시각) 을 되살리면 지정 시각 전에 시작한
+# 사이클이 '사이클 한도 초과'·'채집 시작 확정 실패' 같은 엉뚱한 사유로 끊깁니다 - 소스에서 사라진 옛 변수에 이른 시각을 넣어도
+# 마감이 그대로인지 봅니다 (위 누적 420초까지 반영된 상태)
 $script:lifeUntilDeadline = $base.AddSeconds(60)
-Assert-Case '지정 시각이 더 이르면 지정 시각이 마감' (Get-LifeCycleDeadline) $base.AddSeconds(60)
+Assert-Case '옛 지정 시각 변수에 이른 시각이 있어도 마감은 사이클 한도 (min 되살림 가드)' (Get-LifeCycleDeadline) $base.AddSeconds(420)
 $script:userYieldTotalMs = [double]900000
-Assert-Case '양보가 아무리 길어도 지정 시각은 밀리지 않음' (Get-LifeCycleDeadline) $base.AddSeconds(60)
-
-# 지정 시각이 더 늦으면 다시 사이클 한도가 마감 (위에서 누적 900초까지 반영된 값)
-$script:lifeUntilDeadline = $base.AddSeconds(5000)
-Assert-Case '지정 시각이 더 늦으면 사이클 한도가 마감' (Get-LifeCycleDeadline) $base.AddSeconds(900)
-
-# 지정 시각 미설정($null)이면 사이클 한도만
+Assert-Case '양보가 길면 그만큼 밀림 (지정 시각에 끊지 않음)' (Get-LifeCycleDeadline) $base.AddSeconds(900)
 $script:lifeUntilDeadline = $null
-Assert-Case '지정 시각 없음 → 사이클 한도' (Get-LifeCycleDeadline) $base.AddSeconds(900)
 
 # ── 배선 가드: 생활의 만료 판정이 전부 이 한 곳을 거치는가 ──
 # (raw 스냅숏 비교가 하나라도 남으면 그 지점에서 P1 이 그대로 재발합니다)

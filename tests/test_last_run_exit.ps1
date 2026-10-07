@@ -54,7 +54,7 @@ foreach ($case in $exitStepCases) {
 }
 
 # ── 결과 화면 시간 지정 판단 14-T (시간 지정 '그 판까지' 설계 8.2 T3) ──
-# Get-DgTimeVerdict: 지정 시각 없음 '' (기존 흐름) / 지금 >= 지정 시각 'last' (같은 시각 포함 - 생활 Test-LifeUntilReached·파티원 G 와 같은 -ge,
+# Get-DgTimeVerdict: 지정 시각 없음 '' (기존 흐름) / 지금 >= 지정 시각 'last' (같은 시각 포함 - 파티원 G 와 같은 -ge,
 # 조건 1 '새 판은 지금 < 지정 시각 일 때만') / 그 밖 'continue' ('다시 하기' 로 이어 가고 종료 코드 11). 자정 넘김은 전체 타임스탬프 비교라 그대로 '전'
 $timeVerdictUntil = [datetime]'2026-10-01 10:00:00'
 $timeVerdictCases = @(

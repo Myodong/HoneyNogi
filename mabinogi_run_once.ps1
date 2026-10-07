@@ -3918,7 +3918,7 @@ function Get-DgTimeVerdict {
   # 던전·심층 결과 화면의 시간 지정 판단 (순수 - 진리표 tests\test_last_run_exit.ps1 T3, 시간 지정 '그 판까지' 설계 3.2).
   # 호출은 Invoke-NormalDungeonCycle 의 14-T 한 곳뿐이고, 그 결과를 14-0 진입과 함수 꼬리의 종료 코드가 그대로 씁니다.
   # 반환: ''         = 시간 지정 아님(지정 시각을 못 받았거나 해석 실패 - 기존 흐름, 코드 0)
-  #       'last'     = 지정 시각 이후(같은 시각 포함 = -ge, 생활 Test-LifeUntilReached 와 같음) - 이 판이 마지막, 14-0 '나가기'
+  #       'last'     = 지정 시각 이후(같은 시각 포함 = -ge, 파티원 G 와 같음) - 이 판이 마지막, 14-0 '나가기'
   #       'continue' = 지정 시각 전 - '다시 하기'로 이어 가고 꼬리에서 종료 코드 11 (GUI 가 지정 시각을 보지 않고 이어받음)
   # $UntilTime 은 타입 없이 받습니다 - [datetime] 로 두면 $null 이 변환 실패 (파티원 G 의 같은 인자와 같은 이유, 규칙 3)
   if ($null -eq $UntilTime) { return '' }
@@ -11495,7 +11495,7 @@ function Get-AbyssMemberStopReason {
   # 파티원 정지 게이트 G (순수 판정 - 진리표 대상, 설계 2.5 · 시간 지정 '그 판까지' 설계 4.1). 반환: '' / 'safe-stop' / 'time' / 'last-run'.
   # 사유가 겹치면 이 순서가 이깁니다.
   #  - 'safe-stop': F9 예약 파일 또는 P 가 소비한 뒤의 래치($safeStopLatched - 호출부가 합쳐 넘김)
-  #  - 'time'     : 지금 >= 목표 시각 (같은 시각 포함 - 생활 Test-LifeUntilReached·던전 Get-DgTimeVerdict 와 같은 -ge). Phase 와 무관 -
+  #  - 'time'     : 지금 >= 목표 시각 (같은 시각 포함 - 던전 Get-DgTimeVerdict 와 같은 -ge). Phase 와 무관 -
   #                 START 에서는 새 판 참가를 막고, 경계에서는 이어 가지 않고 나갑니다. 그 전에 이어 간 경계 인계는 종료 코드 11 이라
   #                 GUI 가 지정 시각을 다시 보지 않고 반드시 이어받습니다 - 그래서 이 판정에는 추정치·여유가 없습니다 (조건 4)
   #  - 'last-run' : 횟수 지정의 마지막 회차 - **경계(Phase 'clear')에서만**. 시작(Phase 'start' - 이월 아님)에서는 이 워커가 판을 마치지 않았으므로
@@ -14397,7 +14397,6 @@ function Invoke-LifeListScroll {
   # 호출부가 현재 목록을 다시 읽고 다음 드래그를 정하게 합니다 (규칙 4 상태 기반, Codex 합의).
   if (Test-UserRecentlyActive) {
     Wait-UserYieldEnd -Game $Game -Context '채집 목록 스크롤'
-    Test-LifeUntilReached   # 양보 복귀 후 다음 입력 전에 지정 종료 시각 확인 (Codex 조건)
     $script:lifeScrollYielded = $true
     Write-RunLog '[생활] 목록 스크롤: 사용자 조작이 끝나기를 기다렸습니다 - 이 회전은 예산을 쓰지 않고 목록을 다시 읽습니다'
     return $false
@@ -15079,10 +15078,11 @@ function Close-LifeOpenWindows {
   return $closed
 }
 function Get-LifeCycleDeadline {
-  # 생활(채집) 사이클의 **실효 마감** = min(사용자 양보를 반영한 사이클 한도, 사용자 지정 종료 시각).
-  # 생활의 모든 만료 판정(호출부 루프·메뉴 시퀀스 내부 16곳·퀘스트 생성 확인)이 이 한 곳을 봅니다.
+  # 생활(채집) 사이클의 **실효 마감** = 사용자 양보를 반영한 사이클 한도.
+  # 생활 단계 1~2(메뉴·퀘스트 생성 확인)의 사이클 한도 판정(호출부 루프·메뉴 시퀀스 내부 16곳·퀘스트 생성 확인)이
+  # 이 한 곳을 봅니다 - 채집 대기 단계는 진행 마감·절대 상한($progressDeadline·$hardDeadline)을 따로 검사합니다.
   #
-  # ★ 2026-09-09 Codex 사후 리뷰 P1: 09-09 00:24 에 넣은 '화면 그대로면 이어서 진행' 경로
+  # ★ 2026-09-09 사후 리뷰 P1: 09-09 00:24 에 넣은 '화면 그대로면 이어서 진행' 경로
   #   (Test-LifeYieldBeforeInput 이 $false 반환)는 $script:lifeMenuYielded 를 세우지 않는데,
   #   마감 연장이 '접은 회전'(-not $menuSeqOk -and $lifeMenuYielded) 분기에만 있었습니다.
   #   그래서 그 경로의 양보는 마감에 전혀 반영되지 않고 사이클 한도를 그대로 먹었습니다 -
@@ -15092,9 +15092,9 @@ function Get-LifeCycleDeadline {
   # 차분만 반영하므로 어디서 몇 번 불러도 같은 양보가 두 번 더해지지 않습니다
   # (Get-YieldAdjustedDeadline 계약). 판독 직전 커서 대피(Move-CursorOutsideGame)가 만든 양보도
   # 같은 누적 변수($script:userYieldTotalMs)에 들어오므로 함께 반영됩니다.
-  # **지정 종료 시각은 연장하지 않습니다** - 사용자 약속이라 양보가 길어도 그 시각에 끊습니다.
+  # 시간 지정은 보지 않습니다 - 생활 워커는 지정 시각을 모르고, 다음 사이클을 띄울지는 GUI 가 사이클이 끝난 뒤
+  # '지금 < 지정 시각' 으로 정합니다 (2026-10-02 사용자 지시 - 진행 중인 사이클은 끝까지, 생활 확장 설계 v3).
   $adjusted = Get-YieldAdjustedDeadline -Deadline ([ref]$script:lifeCycleDeadline) -SeenYieldMs ([ref]$script:lifeSeenYieldMs)
-  if ($script:lifeUntilDeadline -and $script:lifeUntilDeadline -lt $adjusted) { return $script:lifeUntilDeadline }
   return $adjusted
 }
 
@@ -15701,9 +15701,6 @@ function Invoke-LifeMenuSequence {
       }) { return $false }
   # 양보가 있었고 재확인을 통과했으면 **그때 읽은 좌표**로 클릭합니다
   if ($null -ne $script:lifeYieldLinkPoint) { $linkWord = $script:lifeYieldLinkPoint }
-  # 양보가 길었으면 그 사이에 지정 종료 시각이 지났을 수 있습니다 - 입력 **직전**에 다시 확인합니다
-  # (2026-09-09 Codex 지적: 마감 검사가 양보 게이트 앞에만 있어, 종료 50초 뒤에도 클릭 1회가 나갔음)
-  Test-LifeUntilReached
   Write-RunLog "[생활] 대상 '$TargetName' 상세 확인 (제목 '$linkTitle') - '가까운 위치 찾기' 클릭 (링크 탐색 $([int]$linkWord.X),$([int]$linkWord.Y))"
   Click-GamePoint -Game $Game -ReferenceX ([int]$linkWord.X) -ReferenceY ([int]$linkWord.Y)
   # 클릭이 실제로 나갔는지 확인 - 생략됐으면 퀘스트 생성 확인으로 넘어가지 않고 사이클 실패 (Codex)
@@ -15720,12 +15717,13 @@ function Invoke-LifeMenuSequence {
 
 function Get-LifeUntilDeadline {
   # 시간 지정 모드의 목표 시각 파싱 (진리표 대상 - 형식이 맞을 때만 DateTime).
-  # GUI 가 **시간 지정**이고 지정 시각을 워커가 스스로 판단하는 실행일 때만 HONEYNOGI_UNTIL_TIME 에 전체 타임스탬프
-  # (yyyy-MM-dd HH:mm)를 넣습니다 - 생활, 그리고 전투의 던전·심층·어비스 파티원(비커스텀 - GUI Test-WorkerTimeJudgeActive,
-  # 시간 지정 '그 판까지' 설계 2.5). 전투 분기는 GUI 가 InvariantCulture 로 만듭니다 - 현재 문화권으로 만들면 불기 달력 등에서
-  # 다른 연도가 '정상' 해석될 수 있습니다 (설계 12 - 생활 분기는 기존 그대로). HH:mm 만 주고받으면 자정 넘김(23:50 에 00:30 지정)이
-  # 모호해집니다. 빈 값 = 제한 없음($null). 형식 오류는 fail-open($null = 현행 유지)하되
-  # 1회 경고를 남깁니다 - 조용히 무시하면 "왜 안 끊겼지"를 추적할 수 없습니다 (설계 합의).
+  # GUI 는 지정 시각을 판 끝에서 스스로 판단하는 전투 워커(던전·심층·어비스 파티원, 비커스텀 - GUI Test-WorkerTimeJudgeActive,
+  # 시간 지정 '그 판까지' 설계 2.5)에만 HONEYNOGI_UNTIL_TIME 에 전체 타임스탬프(yyyy-MM-dd HH:mm, InvariantCulture)를 넣습니다 -
+  # 현재 문화권으로 만들면 불기 달력 등에서 다른 연도가 '정상' 해석될 수 있습니다 (설계 12). 기타(냥코인)도 이 파서를 쓰지만 GUI 가
+  # 값을 넘기지 않아 실제로는 비어 있습니다. 이름의 'Life' 는 옛 이름입니다 - 생활은 2026-10-02 부터 지정 시각을 받지 않습니다
+  # (GUI 가 사이클이 끝난 뒤 판단 - 생활 확장 설계 v3). HH:mm 만 주고받으면 자정 넘김(23:50 에 00:30 지정)이 모호해집니다.
+  # 빈 값 = 제한 없음($null). 형식 오류는 fail-open($null = 현행 유지)하되 1회 경고를 남깁니다 - 조용히 무시하면
+  # "왜 안 멈췄지"를 추적할 수 없습니다 (설계 합의).
   param([string]$Raw)
   if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
   $parsedUntil = [datetime]::MinValue
@@ -15738,28 +15736,6 @@ function Get-LifeUntilDeadline {
   return $null
 }
 
-function Test-LifeUntilReached {
-  # 지정 시간 도달 검사 - 도달(같은 시각 포함 = -ge) 시 그 자리에서 조건부 정지 (exit 4).
-  #
-  # 2026-08-11 실측 ①: GUI 는 사이클이 **끝나야** 시간을 다시 봐서, 목표 10:46 을 2분 24초
-  # 넘긴 10:48:24 에야 정지했습니다 (사이클 길이는 이동 거리 때문에 예측 불가 - 같은 대상인데
-  # 이동이 95초/185초로 갈림). 그래서 워커가 목표 시각을 직접 알고 생활의 모든 장기 대기
-  # 루프에서 이 검사를 돌립니다.
-  #
-  # 채집은 게임이 스스로 계속하므로(자동 이동·자동 채집) 관찰만 멈추면 안전합니다 - 클릭이
-  # 필요 없는 종료라 **캡처 실패 중이어도 즉시** 적용합니다 (벽시계 약속은 동결 계약의 대상이
-  # 아님 - 설계 합의). 끊긴 채집은 다음 시작의 '진행 중 퀘스트 감지' 경로가 이어받습니다.
-  # exit 4 = 조건부 정상 정지 - GUI 가 회차로 세지 않고 자동화를 멈춥니다 (기존 계약).
-  # ※ 전투에는 이 검사가 없습니다 - 판 중간 정지는 불가(재화 소모·복귀 경로 없음)합니다. 전투는 판 경계에서만 지정 시각을 봅니다 -
-  #   던전·심층은 결과 화면(14-T), 어비스 파티원은 판 경계·참가 판단(G), 어비스 혼자하기·파티장·사냥터는 GUI 가 다음 회차를 띄울 때
-  #   (시간 지정 '그 판까지' 설계 1.1·3·4·5).
-  if ($null -eq $script:lifeUntilDeadline) { return }
-  if ((Get-Date) -ge $script:lifeUntilDeadline) {
-    Write-RunLog ("[완료] 지정 시간({0}) 도달 - 진행 중인 채집은 게임에 맡기고 자동화만 마칩니다 (이번 사이클은 회차로 세지 않음)" -f $script:lifeUntilDeadline.ToString('HH:mm'))
-    exit 4
-  }
-}
-
 function Invoke-LifeGatherCycle {
   # 생활(채집) 1사이클: 메뉴 사이클 → 퀘스트 생성 확인 → 존재 대기 → 소멸 = 완료 (exit 0).
   # 한도는 **단계마다 다릅니다** (2026-08-08 에 gatherWaitSeconds 의 의미가 '총 시간'에서
@@ -15769,6 +15745,8 @@ function Invoke-LifeGatherCycle {
   #                   + 절대 상한 $lifeGatherHardCapSeconds (3600초)
   # 즉 1사이클 최악 소요는 600초가 아니라 약 600+3600초입니다. '한 사이클 = 600초'로 가정하고
   # GUI 타이머·회차 계상·중지 대기를 설계하면 실제와 크게 어긋납니다 (2026-08-10 11차 점검).
+  # 시간 지정: 이 워커는 지정 시각을 모릅니다 - 한 번에 한 사이클이고, 다음 사이클은 GUI 가 사이클이 끝난 뒤(코드 0)
+  # '지금 < 지정 시각' 으로 정합니다. 지정 시각 전에 시작한 사이클은 지정 시각이 지나도 끝까지 합니다 (2026-10-02 사용자 지시).
   param([System.Diagnostics.Process]$Game)
   # 커스텀 항목 토큰이 깨진 채로는 시작하지 않습니다 - config 의 슬라이더 값으로 대신 돌면
   # 사용자가 리스트에 넣지 않은 대상을 캐게 되고, 그 사이 남의 채집을 밀어낼 수 있습니다
@@ -15804,19 +15782,9 @@ function Invoke-LifeGatherCycle {
   $script:lifeCycleDeadline = (Get-Date).AddSeconds($lifeGatherWait)
   # 사용자 양보 마감 연장 기준값 - 사이클 한도와 **같은 회계**를 씁니다 (Get-LifeCycleDeadline 이 차분만 반영)
   $script:lifeSeenYieldMs = [double]$script:userYieldTotalMs
-  # 시간 지정 모드: 목표 시각을 워커도 알고 사이클 **중에** 스스로 끊습니다 (실측 ① 대응 -
-  # Test-LifeUntilReached 주석 참고). 파싱 실패/빈 값 = 제한 없음.
-  $script:lifeUntilDeadline = Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME)
-  if ($script:lifeUntilDeadline) {
-    Write-RunLog ("[생활] 지정 시간 {0} 까지 - 도달하면 사이클 중에도 자동화를 마칩니다" -f $script:lifeUntilDeadline.ToString('HH:mm'))
-    Test-LifeUntilReached   # 시작 시점에 이미 지났으면(경계 상황) 클릭 없이 즉시 종료
-  }
-  # 메뉴 시퀀스가 보는 한도도 Get-LifeCycleDeadline 하나로 통일했습니다 (= 사이클 한도와
-  # 지정 시간 중 이른 쪽). 시퀀스 내부의 입력 직전 검사들이 그 값을 보므로, 지정 시간이
-  # 지나면 '가까운 위치 찾기' 등 새 입력이 나가지 않습니다 (시퀀스가 $false 로 나오면
-  # 호출부 루프 상단의 Test-LifeUntilReached 가 올바른 사유("지정 시간 도달")로 정지 -
-  # 사유 우선 순서 계약). 스냅숏 변수($lifeMenuDeadline)를 넘기던 방식은 시퀀스 **안에서**
-  # 일어난 양보를 반영하지 못해 정지를 만들었습니다 (2026-09-09 Codex 사후 리뷰 P1).
+  # 메뉴 시퀀스가 보는 한도도 Get-LifeCycleDeadline 하나로 통일했습니다 (= 양보를 반영한 사이클 한도).
+  # 스냅숏 변수($lifeMenuDeadline)를 넘기던 방식은 시퀀스 **안에서** 일어난 양보를 반영하지 못해
+  # 정지를 만들었습니다 (2026-09-09 사후 리뷰 P1).
   # 시작 시점에 서버 연결이 끊겨 있으면 무엇도 진행되지 않습니다 - 퀘스트 판정보다 먼저
   # 확인합니다 (리뷰 조건: 초기 present 면 메뉴 루프를 건너뛰어 감지를 놓침)
   if ((Close-LifeBlockingDialog -Game $Game) -eq 'disconnected') {
@@ -15843,7 +15811,6 @@ function Invoke-LifeGatherCycle {
   $initialPopupRounds = 0
   $initialPopupLastBranch = ''   # 가드 소진 계측용 - 마지막으로 처리한 팝업 분기명 (2026-09-20, 판정에 쓰지 않음)
   while ($initialProbes -lt 20) {
-    Test-LifeUntilReached   # 지정 시간은 사이클 한도보다 우선 (사유 정확성)
     if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
     if ($script:screenCaptureFailing) {
       # ★ 동결 구간의 **공통 진입점**을 반드시 거칩니다 (7차 점검에서 누락 적발).
@@ -15990,7 +15957,6 @@ function Invoke-LifeGatherCycle {
       $otherProgressMax = -1
       $otherWaitProbes = 0
       while ($otherWaitProbes -lt 60) {        # 3초 간격 - 상한은 약 3분 (사이클 한도 안에서)
-        Test-LifeUntilReached   # 지정 시간은 사이클 한도보다 우선 (사유 정확성)
         if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
         Start-Sleep -Seconds 3
         if ($script:screenCaptureFailing) {
@@ -16042,14 +16008,14 @@ function Invoke-LifeGatherCycle {
   if (-not $questSeen) {
     $menuOk = $false
     # foreach → while: 사용자 조작으로 접은 회전은 **재시도 횟수를 쓰지 않습니다**(양보 미계상).
-    # foreach 는 인덱스를 되돌릴 수 없어 구조를 바꿨습니다 (2026-09-08 Codex 지적).
+    # foreach 는 인덱스를 되돌릴 수 없어 구조를 바꿨습니다 (2026-09-08 리뷰 지적).
     # 무한 방지: while 조건이 사이클 한도를 봅니다. 단 그 한도는 **양보한 만큼 밀리므로**
     # 사용자가 계속 조작하면 그만큼 길어집니다 (의도된 계약 - 조작 중에는 기다린다).
-    # 진짜 상한은 시도 3회와 사용자 지정 종료 시각입니다 (Codex 확인, 2026-09-09).
+    # 진짜 상한은 시도 3회와 그 사이클 한도입니다 (2026-09-09 리뷰 확인). 시간 지정은 여기서 보지 않습니다 -
+    # 생활 워커는 지정 시각을 모르고, 다음 사이클은 GUI 가 사이클이 끝난 뒤 정합니다 (2026-10-02 생활 확장)
     $menuTry = 0
     while ($menuTry -lt 3 -and -not $menuOk -and (Get-Date) -le (Get-LifeCycleDeadline)) {
       $menuTry++
-      Test-LifeUntilReached   # 지정 시간 도달이면 이번 회전의 어떤 클릭도 시작하지 않음
       # 팝업 방어 (구매/보상/협동/네트워크 + 주간 리셋 + 공지 게시판)
       # 사용자 조작으로 취소된 팝업 닫기는 회전을 쓰지 않습니다 - 함수가 이미 기다렸으므로 회전을
       # 되돌리고 서두부터 재판독 (2026-09-13 설계 합의). 메타는 그 호출 **직후**에 읽습니다(다음 헬퍼가 덮어씀).
@@ -16090,7 +16056,6 @@ function Invoke-LifeGatherCycle {
         exit 4
       }
       while ($script:screenCaptureFailing) {
-        Test-LifeUntilReached   # 캡처 실패 중에도 지정 시간은 흐릅니다 (벽시계 약속 - 동결 제외)
         # 영구 캡처 실패도 사이클 한도를 넘기면 정지합니다 (deadline 계약 - 리뷰 지적)
         if ((Get-Date) -gt (Get-LifeCycleDeadline)) {
           Write-RunLog "[완료] 화면 캡처 실패가 지속돼 사이클 한도(${lifeGatherWait}초)를 넘겼습니다 - 조건부 정지"
@@ -16111,9 +16076,8 @@ function Invoke-LifeGatherCycle {
         # 여기서 기다린 시간은 다음 Get-LifeCycleDeadline 호출이 마감에 반영합니다.
         Wait-UserYieldEnd -Game $Game -Context '채집 메뉴 재시도'
         # 사용자 조작으로 접은 회전 - **재시도 횟수만** 미계상합니다.
-        # 사이클 한도 연장은 여기서 하지 않습니다: Get-LifeCycleDeadline 이 모든 만료 판정
-        # 직전에 양보 차분을 반영하므로 접든 이어가든 동일하게 연장됩니다 (지정 종료 시각은
-        # 사용자 약속이라 불변 - 헬퍼가 min 으로 지킵니다). 예전에는 연장이 이 분기에만
+        # 사이클 한도 연장은 여기서 하지 않습니다: Get-LifeCycleDeadline 이 단계 1~2 의 사이클 한도 판정
+        # 직전에 양보 차분을 반영하므로 접든 이어가든 동일하게 연장됩니다. 예전에는 연장이 이 분기에만
         # 있어서, '화면 그대로면 이어서 진행'(09-09 신설) 경로의 양보가 통째로 누락됐습니다.
         $menuTry--
         continue
@@ -16121,11 +16085,8 @@ function Invoke-LifeGatherCycle {
       if ($menuSeqOk) {
         # 퀘스트 생성 확인: 약 12초(1.5초 x 8회 + OCR 시간) 안에 present 2회 (리뷰 조건).
         # 사이클 한도는 이 확인 루프에도 우선합니다 (하드 상한 계약).
-        # 지정 시간 도달은 여기서도 즉시 종료 - 생성 확인을 기다리지 않습니다 (링크 클릭이
-        # 이미 나갔어도 다음 시작의 '진행 중 퀘스트 감지'가 이어받으므로 안전 - 설계 합의)
         $presentCount = 0
         foreach ($confirmTry in 1..8) {
-          Test-LifeUntilReached
           if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
           Start-Sleep -Milliseconds 1500
           if ((Get-LifeQuestState -Game $Game) -eq 'present') {
@@ -16174,13 +16135,6 @@ function Invoke-LifeGatherCycle {
       Start-Sleep -Seconds 2
       if ((Get-Date) -gt (Get-LifeCycleDeadline)) { break }
     }
-    # 루프를 빠져나온 사유가 '지정 시각 도달'이면 그 사유로 끝냅니다 (사유 우선 순서 계약).
-    # ★ 2026-09-09 Codex 구현 리뷰가 잡은 신규 회귀: 마감을 헬퍼로 통일하면서 while 조건이
-    #   지정 시각까지 보게 됐고, 그러자 지정 시각 도달로 루프를 나온 회차가 다음 회전 서두의
-    #   Test-LifeUntilReached 에 **도달하지 못한 채** '메뉴 사이클 3회 소진' + '채집 시작을
-    #   확정하지 못했습니다' 로 끝났습니다 (수정 전에는 while 이 raw 사이클 한도만 봐서 한 번
-    #   더 돌며 서두 검사에 걸렸음). 사유가 뒤바뀌면 사용자가 원인을 오진합니다.
-    Test-LifeUntilReached
     if (-not $menuOk) {
       Write-LifeDiagnostics -Game $Game -Context '메뉴 사이클 3회 소진'
       # 링크를 눌러도 퀘스트가 안 생기는 가장 흔한 원인은 '스킬 레벨 미달'입니다
@@ -16212,9 +16166,6 @@ function Invoke-LifeGatherCycle {
   $progressDeadline = (Get-Date).AddSeconds($lifeGatherWait)
   $hardDeadline = (Get-Date).AddSeconds($lifeGatherHardCapSeconds)
   while ($true) {
-    # 지정 시간을 절대 상한·진행 한도보다 **먼저** 봅니다 - 동시에 걸리면 사용자가 지정한
-    # 약속("HH:mm 까지")이 사유로 남아야 합니다 (설계 합의 - 사유 우선 순서)
-    Test-LifeUntilReached
     if ((Get-Date) -gt $hardDeadline) {
       Write-RunLog "[완료] 채집이 절대 상한(${lifeGatherHardCapSeconds}초)을 넘겼습니다 - 조건부 정지 (수량은 늘고 있었지만 끝나지 않았습니다)"
       exit 4

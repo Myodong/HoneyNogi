@@ -283,7 +283,7 @@ Check-Equal '§1(c) 가린 접힘 + Expect entry-waiting → null (현행 헬퍼
 Check-Equal '§1(c) 펼친 패널(나가기@492) + 두 Expect 모두 → null' ((@('member-reward', 'entry-waiting') | ForEach-Object { Get-Pick (Select-AbyssMemberLeaveWord -Words $wExpanded -Expect $_) }) -join '/') 'null/null'
 
 # (d) Get-AbyssMemberStopReason - 시간 지정 '그 판까지' 설계 8.2 T1 (옛 표 'D = U − (Now + E)' 를 교체 - 추정치·여유 매개변수가 없어졌습니다).
-#     'time' = 지금 >= 지정 시각 (같은 시각 포함 - 생활 Test-LifeUntilReached·던전 Get-DgTimeVerdict 와 같은 -ge), Phase 와 무관 (START 에서는 새 판
+#     'time' = 지금 >= 지정 시각 (같은 시각 포함 - 던전 Get-DgTimeVerdict 와 같은 -ge), Phase 와 무관 (START 에서는 새 판
 #     참가를 막고, 경계에서는 이어 가지 않음). 우선순위(안전 중지 > 시간 > 마지막 회차)와 'last-run' 의 경계(Phase 'clear') 한정은 그대로입니다
 $gU = [datetime]'2026-10-01 10:00:00'
 function Get-GateAt {
@@ -3517,11 +3517,11 @@ function Get-GuiFunctionCode { param([string]$Name) $fn = $guiAst.Find({ param($
 $nextCycleCode = Get-GuiFunctionCode 'Start-NextCycle'
 $startAutomationCode = Get-GuiFunctionCode 'Invoke-StartAutomation'
 $memberActiveCode = Get-GuiFunctionCode 'Test-AbyssMemberRunActive'
-# Start-NextCycle 의 UNTIL 배선 (시간 지정 '그 판까지' 설계 2.5·8.1 + 설계 리뷰 1차 P2): 매 회차 먼저 지우고 → 생활 분기(글자 그대로 - 조건 5) →
-# 전투 분기(판 끝에서 스스로 판단하는 워커 - 던전·심층·어비스 파티원, Test-WorkerTimeJudgeActive)가 InvariantCulture 'yyyy-MM-dd HH:mm' 으로 넘깁니다.
-# 두 분기 사이에는 주석만 있습니다(주석 뺀 사본에서 공백). 사이클 추정치 env 는 GUI 전체(주석 뺀 사본)에서 0건 - 워커가 더 읽지 않습니다
-Check-True '§5 Start-NextCycle: UNTIL 을 매 회차 먼저 지우고, 생활 분기(원문)와 따로 전투 분기(시간 지정 + 판 끝 판단 워커)가 InvariantCulture 로 넘김 · 사이클 추정치 env 0건(GUI 전체)' (
-  ($nextCycleCode -match '\$env:HONEYNOGI_UNTIL_TIME = ''''\s*if \(\(\$null -ne \$script:targetTime\) -and \(\$script:mainCategory -eq ''life''\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm''\)\s*\}\s*if \(\(\$null -ne \$script:targetTime\) -and \(Test-WorkerTimeJudgeActive\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm'', \[Globalization\.CultureInfo\]::InvariantCulture\)\s*\}') -and
+# Start-NextCycle 의 UNTIL 배선 (시간 지정 '그 판까지' 설계 2.5·8.1 + 설계 리뷰 1차 P2, 생활 확장 설계 v3 2.4): 매 회차 먼저 지우고 →
+# 전투 분기(판 끝에서 스스로 판단하는 워커 - 던전·심층·어비스 파티원, Test-WorkerTimeJudgeActive)만 InvariantCulture 'yyyy-MM-dd HH:mm' 으로 넘깁니다.
+# 생활에는 넘기지 않습니다(2026-10-02 생활 확장 A안 - GUI 가 사이클이 끝난 뒤 판단). 사이클 추정치 env 는 GUI 전체(주석 뺀 사본)에서 0건 - 워커가 더 읽지 않습니다
+Check-True '§5 Start-NextCycle: UNTIL 을 매 회차 먼저 지우고, 생활 분기 없이 전투 분기(시간 지정 + 판 끝 판단 워커)만 InvariantCulture 로 넘김 · 사이클 추정치 env 0건(GUI 전체)' (
+  ($nextCycleCode -match '\$env:HONEYNOGI_UNTIL_TIME = ''''\s*if \(\(\$null -ne \$script:targetTime\) -and \(Test-WorkerTimeJudgeActive\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm'', \[Globalization\.CultureInfo\]::InvariantCulture\)\s*\}') -and
   ((Get-TextCount $guiCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC') -eq 0)) "사이클 추정치 env 참조 $(Get-TextCount $guiCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC')곳"
 Check-True '§5 Test-AbyssMemberRunActive = 전투 대분류 + 어비스 + 함께하기 + 매칭 파티원 + 비커스텀' (
   $memberActiveCode -match 'return \(\(\$script:mainCategory -eq ''battle''\) -and \$rbCatAbyss\.Checked -and \$rbModeParty\.Checked -and \$rbAbyssPartyMember\.Checked -and \(-not \$script:customActive\)\)') ''

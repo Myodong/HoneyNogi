@@ -11,11 +11,10 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') `
     -Names @('Invoke-LifeGatherCycle', 'Get-LifeDetailLabelIndex', 'Test-LifeDetailHasLabel', 'Get-LifeRequiredLevel', 'Get-LifeNormalizedName',
       'Get-LifeRepairedTexts', 'Get-LifeQuestOwner', 'Get-LifeAllTargetNames', 'Test-LifeNameMatches', 'Test-LifeQuestFragments', 'Get-LifeQuestConceptHits', 'Get-LifeQuestCompactMatch', 'Get-LifeQuestOwnerText', 'Get-LifeProgressValue', 'Get-LifeQuestGoalValue', 'Get-LifeQuestGoalConsensus',
-      # 지정 시간(시간 지정 모드) 검사는 스텁이 아니라 **본체**를 씁니다 (2026-08-11 실측 ① 대응
-      # 수정) - 시나리오가 env 를 안 주면 파싱이 $null 이라 무동작 = 기존 시나리오 영향 없음.
-      # 시간 도달 시나리오는 HONEYNOGI_UNTIL_TIME 을 지난 시각으로 넣어 exit 4 를 확인합니다.
-      'Get-LifeUntilDeadline', 'Test-LifeUntilReached',
-      # 사이클 한도 x 사용자 양보 상호작용도 본체로 검증합니다 (2026-09-09 Codex 사후 리뷰 P1)
+      # 시간 지정은 생활 워커가 보지 않습니다 (2026-10-02 생활 확장 - 다음 사이클은 GUI 가 사이클이 끝난 뒤 판단). 지정 시각 해석·정지
+      # 함수는 일부러 올리지 않습니다: until-* 시나리오는 env 에 지난 시각을 넣고도 사이클을 끝까지 하는지 보는데, 사이클 함수가 지정 시각을
+      # 다시 읽으면 함수 없음 오류(exit 1 - 이 파일은 $ErrorActionPreference = 'Stop', 사이클 첫머리에서 읽으면 모든 시나리오)나 정지로 실패합니다.
+      # 사이클 한도 x 사용자 양보 상호작용도 본체로 검증합니다 (2026-09-09 사후 리뷰 P1)
       'Get-YieldAdjustedDeadline', 'Get-LifeCycleDeadline')) {
   Invoke-Expression $definition
 }
@@ -414,37 +413,43 @@ switch ($Scenario) {
     $lifeSkillMenuTable = @{ insect = @{ Name = '곤충 채집'; Cell = @(1143, 205); Sig = @('빛무리') } }
     $lifeTargetName = '일렁이는 빛 무리'
   }
-  'until-expired' {
-    # 지정 시간(시간 지정 모드)이 이미 지난 채 시작 - 클릭/메뉴 진입 없이 즉시 exit 4.
-    # (2026-08-11 실측 ① 대응. 파싱·검사 모두 본체 함수 - env 만 과거 시각으로)
+  'until-past-start' {
+    # 시간 지정 '그 사이클까지' (2026-10-02 생활 확장): 워커는 지정 시각을 보지 않습니다 - env 에 이미 지난 시각이 있어도
+    # 메뉴부터 사이클을 끝까지 합니다 (happy 와 같은 순서). 상태 순서(absent 3연속)로 끝나므로 가상 시계 없이도 공회전하지 않습니다
     $env:HONEYNOGI_UNTIL_TIME = '2020-01-01 00:00'
-    $script:stateSeq = @('present')
-    $script:stateTail = 'present'
+    $script:menuResults = @($true)
+    $script:stateSeq = @('absent', 'absent', 'absent') + @('present', 'present') + @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
   }
-  'until-mid-menu' {
-    # 2026-09-09 Codex 구현 리뷰가 잡은 신규 회귀 가드: **메뉴 루프 도중** 지정 시각이 지나면
-    # 사유가 '지정 시간 도달'이어야 합니다. 마감을 Get-LifeCycleDeadline 으로 통일하면서
-    # while 조건이 지정 시각까지 보게 됐고, 그러자 루프를 나온 회차가 다음 회전 서두의
-    # Test-LifeUntilReached 에 도달하지 못한 채 '메뉴 사이클 3회 소진'으로 끝났습니다.
-    # 가상 시계 시작이 00:00:00 이므로 목표를 00:01 로 두고, 1회전에서 120초 양보로 넘깁니다.
+  'until-past-other' {
+    # 다른 대상('우물')의 채집이 진행 중이고 지정 시각은 이미 지났습니다 - 그 채집이 끝나기를 기다렸다가 자기 퀘스트를 만들어 끝까지 합니다
+    # (resume-sibling 과 같은 순서). 옛 코드는 이 대기 루프 서두에서 지정 시각에 멈췄습니다 - 이 단계만 되살린 변이를 다른 세 시나리오가 못 잡음
+    $env:HONEYNOGI_UNTIL_TIME = '2020-01-01 00:00'
+    $lifeTargetName = '물'
+    $script:questTrackerText = '채집 장소 탐색 우물 채집 3/10'
+    $script:menuResults = @($true)
+    $script:stateSeq = @('present') + @('absent', 'absent', 'absent') + @('present', 'present') + @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
+  }
+  'until-pass-menu' {
+    # 메뉴 단계에서 지정 시각(00:01)이 지나도(1회전 양보 120초) 다음 회전이 이어 가 사이클을 끝까지 합니다.
+    # 옛 코드는 마감 min 으로 while 이 끊겨 '지정 시간 도달' 로 끝났습니다
     $script:useVirtualClock = $true
     $env:HONEYNOGI_UNTIL_TIME = '2026-08-07 00:01'
     $lifeGatherWait = 600
     $script:menuYieldSeconds = @(120)
-    $script:menuResults = @($false, $false, $false)
-    $script:stateSeq = @('absent', 'absent', 'absent')
+    $script:menuResults = @($false, $true)
+    $script:stateSeq = @('absent', 'absent') + @('present', 'present') + @('absent', 'absent', 'absent')
     $script:stateTail = 'absent'
   }
-  'until-mid-wait' {
-    # 채집 대기 **중에** 지정 시간 도달 - 진행 한도(600초)는 아직 멀었어도 지정 시간이
-    # 먼저 걸려야 하고, 사유도 '지정 시간 도달'이어야 합니다 (사유 우선 계약).
-    # 가상 시계 시작이 2026-08-07 00:00:00 이므로 목표를 1분 뒤로 두면 대기 몇 회전 안에
-    # 도달합니다 (회전당 가상 3초).
+  'until-pass-wait' {
+    # 채집 대기 중 지정 시각(00:01 - 회전당 가상 3초라 21회전째에 지남)이 지나도 소멸(absent 3연속)까지 합니다.
+    # 진행 마감(600초)·절대 상한(3600초)은 멀어 그 사유로 끝나지 않습니다
     $script:useVirtualClock = $true
     $env:HONEYNOGI_UNTIL_TIME = '2026-08-07 00:01'
     $lifeGatherWait = 600
-    $script:stateSeq = @('present')
-    $script:stateTail = 'present'
+    $script:stateSeq = @('present') + (@('present') * 25) + @('absent', 'absent', 'absent')
+    $script:stateTail = 'absent'
   }
   'deadline' {
     # 진행이 없는 채로 한도 초과 (exit 4). 수량 판독이 계속 빈 값이라 진행이 인정되지 않습니다.

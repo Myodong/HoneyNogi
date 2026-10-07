@@ -1,4 +1,5 @@
-﻿# 시간 지정 '지정 시각이 지나면 그 판까지' GUI 회귀 (2026-10-02 신설 - 시간 지정 '그 판까지' 설계_v2 8.2 T4·T5, 설계 리뷰 1차 12절 P2)
+﻿# 시간 지정 '지정 시각이 지나면 그 판까지' GUI 회귀 (2026-10-02 신설 - 시간 지정 '그 판까지' 설계_v2 8.2 T4·T5, 설계 리뷰 1차 12절 P2;
+# 2026-10-07 생활 '그 사이클까지' 확장 반영 - 생활 확장 설계 v3 6.1·6.2)
 #
 # 배경: 전투의 시간 지정 규칙을 '지금 + 클리어 대기 <= 지정 시각이면 다음 회차'에서 '지금 < 지정 시각이면 새 판 시작, 그 전에 시작한 판은
 # 끝까지'로 바꿨다. 워커가 지정 시각 전에 다음 판으로 이어 가기로 정하고 끝내면 새 종료 코드 11 을 내고, GUI 는 11 이면 지정 시각을 보지 않고
@@ -7,18 +8,19 @@
 # 그대로 추출해 돌리고(사본 금지), 타이머에 남은 호출 한 줄씩은 주석 뺀 사본에서 원문으로 고정한다.
 # 여기서 고정하는 계약 (설계 8.2 표 번호 그대로. T4-g·T4-h 는 설계 표 밖에서 더한 행동 확인 - 소스 블록을 그대로 실행):
 #   T4-a Get-NextCycleAction 진리표 - 안전 중지 > (지정 횟수 | 준비 실행 3회 연속) > 지정 시간 > 다음 회차, 코드 11 은 '지정 시간' 칸만 건너뜀
-#   T4-b Test-TimeAllowsNextCycle - 전투 '지금 < 목표', 생활·기타 '지금 + 사이클 상한 <= 목표'(옛 식 그대로)
+#   T4-b Test-TimeAllowsNextCycle - 전투·생활 '지금 < 목표', 기타 '지금 + 클리어 대기 <= 목표'(옛 식 그대로)
 #   T4-c Test-WorkerTimeJudgeActive - 던전·심층·어비스 파티원(전투·비커스텀)만. 생활·기타로 바꿔도 보존되는 전투 라디오를 모형화 (설계 회귀 R-3)
-#   T4-d 문구 보조 함수 - 전투만 새 문구, 생활·기타 출력은 옛 문구와 글자 그대로
+#   T4-d 문구 보조 함수 - 전투 '판'·생활 '사이클' 새 문구, 기타 출력은 옛 문구와 글자 그대로
 #   T4-e 배선 (주석 뺀 GUI 사본) - 타이머 바깥 조건·호출 두 곳·완료 줄·옛 사슬 리터럴 위치·판단 호출 인자·시작 게이트·UNTIL 분기·상태줄·설명서
 #   T4-f Invoke-NextCycleDecision 행동 - Stop-AllRun·Start-NextCycle·Add-GuiLog 를 모의로 바꿔 '무엇을 했는지'로 지킴 (인자 누락·고정값 변이를 잡는 곳)
-#   T4-g 시작 게이트 행동 - Invoke-StartAutomation 의 시간 지정 블록을 그대로 실행 (전투는 거부 없음 - 조건 2, 생활·기타는 거부 원문 - 조건 5)
-#   T4-h UNTIL 전달 범위 행동 - Start-NextCycle 의 UNTIL 구간을 그대로 실행 (설계 2.5 표 - 받는 워커는 생활·던전·심층·어비스 파티원뿐)
+#   T4-g 시작 게이트 행동 - Invoke-StartAutomation 의 시간 지정 블록을 그대로 실행 (전투·생활은 거부 없음 - 조건 2·생활 확장 조건 2, 기타는 거부 원문 - 해당 없음)
+#   T4-h UNTIL 전달 범위 행동 - Start-NextCycle 의 UNTIL 구간을 그대로 실행 (설계 2.5 표 - 받는 워커는 던전·심층·어비스 파티원뿐, 생활은 받지 않음 - 생활 확장 A안)
 #   P2   문화권 왕복 - GUI 목표 시각 계산·전투 생산식 → 워커 Get-LifeUntilDeadline → 던전·파티원 판단을 ko-KR·th-TH·fi-FI × (21:20 / 자정 넘김)
 #        으로 돌려 해석값이 원래 DateTime 과 같음을 단언한다 (현재 문화권으로 만들면 th-TH 는 불기 연도로 '정상' 해석, fi-FI 는 해석 실패)
-#   T5   생활 그대로 = T4-b 5~7 · T4-d 생활 열 · T4-f 13·14 · T4-g 생활 행 · T4-h 생활 행 (+ test_life_gather 의 생활 배선 원문 단언)
+#   T5   생활 새 규칙(2026-10-02 생활 확장 '그 사이클까지' - 설계_v3_생활) = T4-b 5~7 · T4-d 생활 열 · T4-e 4(생활 리터럴)·6·8·10 · T4-f 13·14 · T4-g g6·g7·g10 · T4-h h1
+#        (+ test_life_gather 의 워커 가드·GUI 부재 단언·시뮬레이터 until-* 4 시나리오)
 # 모의: 시각은 Get-Date($script:fakeNow), 라디오·숫자 칸·상태줄·시각 선택기는 속성 객체입니다. 정지·다음 회차·GUI 로그는 기록만 합니다.
-# 문화권: 문구의 시각 서식(HH:mm·MM-dd HH:mm)과 생활 분기 생산식이 현재 문화권을 따르므로 실사용 문화권 ko-KR 로 고정해 돌리고 끝에서 되돌립니다.
+# 문화권: 문구의 시각 서식(HH:mm·MM-dd HH:mm)이 현재 문화권을 따르므로 실사용 문화권 ko-KR 로 고정해 돌리고 끝에서 되돌립니다.
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 # Invoke-NextCycleDecision 의 준비 실행 3회 연속 갈래가 [System.Drawing.Color]::Firebrick 을 씁니다 (설계 S4)
@@ -237,9 +239,11 @@ $baseTarget = [datetime]::new(2026, 10, 1, 21, 20, 0)   # 지정 시각 T (설�
 $gatherLimit = [int]$numGatherWait.Value
 $clearLimit = [int]$numClearWait.Value
 $stopNoticeBattle = '지정 시간(21:20) 이후라 새 판을 시작하지 않습니다.'
-$stopNoticeLife = '지정 시간(21:20)까지 남은 시간이 부족해 다음 회차를 시작하지 않습니다.'
+$stopNoticeLife = '지정 시간(21:20) 이후라 새 사이클을 시작하지 않습니다.'
+$stopNoticeEtc = '지정 시간(21:20)까지 남은 시간이 부족해 다음 회차를 시작하지 않습니다.'
 $startNoticeBattle = '시간 지정 모드: 10-01 21:20 지나면 새 판을 시작하지 않습니다 - 그 전에 시작한 판은 끝까지 하고 멈춥니다.'
-$startNoticeLife = '시간 지정 모드: 10-01 21:20 까지 반복합니다.'
+$startNoticeLife = '시간 지정 모드: 10-01 21:20 지나면 새 사이클을 시작하지 않습니다 - 그 전에 시작한 사이클은 끝까지 하고 멈춥니다.'
+$startNoticeEtc = '시간 지정 모드: 10-01 21:20 까지 반복합니다.'
 
 # ── T4-a 다음 회차 판단 순수부 Get-NextCycleAction ────────────────────────────────
 $t4aRows = @(
@@ -272,11 +276,12 @@ $t4bRows = @(
   @{ N = '2'; D = '전투 · 지정 1초 전 (옛 식이면 거짓 - 클리어 대기 추정치를 다시 넣는 변이를 잡음)'; Cat = 'battle'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-1); X = $true }
   @{ N = '3'; D = '전투 · 지정 시각과 같음 (같은 시각 포함 - 새 판 없음)'; Cat = 'battle'; Target = $baseTarget; Now = $baseTarget; X = $false }
   @{ N = '4'; D = '전투 · 지정 1초 뒤'; Cat = 'battle'; Target = $baseTarget; Now = $baseTarget.AddSeconds(1); X = $false }
-  @{ N = '5'; D = "생활 · 지정 $($gatherLimit + 1)초 전 (T5)"; Cat = 'life'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-($gatherLimit + 1)); X = $true }
-  @{ N = '6'; D = "생활 · 지정 ${gatherLimit}초 전 (<= - T5)"; Cat = 'life'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-$gatherLimit); X = $true }
-  @{ N = '7'; D = "생활 · 지정 $($gatherLimit - 1)초 전 (T5)"; Cat = 'life'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-($gatherLimit - 1)); X = $false }
+  @{ N = '5'; D = '생활 · 지정 1초 전 (옛 식이면 거짓 - 진행 없음 한도 추정치를 다시 넣는 변이를 잡음, 생활 확장)'; Cat = 'life'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-1); X = $true }
+  @{ N = '6'; D = '생활 · 지정 시각과 같음 (같은 시각 포함 - 새 사이클 없음)'; Cat = 'life'; Target = $baseTarget; Now = $baseTarget; X = $false }
+  @{ N = '7'; D = '생활 · 지정 1초 뒤'; Cat = 'life'; Target = $baseTarget; Now = $baseTarget.AddSeconds(1); X = $false }
   @{ N = '8'; D = "기타 · 지정 $($clearLimit + 1)초 전 (클리어 대기 ${clearLimit} - 옛 식 그대로)"; Cat = 'etc'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-($clearLimit + 1)); X = $true }
-  @{ N = '9'; D = "기타 · 지정 $($clearLimit - 1)초 전 (해당 없음 - 옛 식 그대로 거짓)"; Cat = 'etc'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-($clearLimit - 1)); X = $false }
+  @{ N = '8b'; D = "기타 · 지정 ${clearLimit}초 전 (<= - 남은 시간 = 클리어 대기면 옛 식 그대로 참)"; Cat = 'etc'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-$clearLimit); X = $true }
+  @{ N = '9'; D ="기타 · 지정 $($clearLimit - 1)초 전 (해당 없음 - 옛 식 그대로 거짓)"; Cat = 'etc'; Target = $baseTarget; Now = $baseTarget.AddSeconds(-($clearLimit - 1)); X = $false }
 )
 $t4bRun = 0
 foreach ($row in $t4bRows) {
@@ -314,16 +319,16 @@ foreach ($row in $t4cRows) {
 
 # ── T4-d 문구 보조 함수 (지정 시각 2026-10-01 21:20) ──────────────────────────────
 Assert-Case 'T4-d 정지 안내 · battle' (Invoke-Guarded { Get-TimeStopNotice -TargetText '21:20' -MainCategory 'battle' }) $stopNoticeBattle
-Assert-Case 'T4-d 정지 안내 · life (옛 문구 그대로 - T5)' (Invoke-Guarded { Get-TimeStopNotice -TargetText '21:20' -MainCategory 'life' }) $stopNoticeLife
-Assert-Case 'T4-d 정지 안내 · etc (생활과 같음)' (Invoke-Guarded { Get-TimeStopNotice -TargetText '21:20' -MainCategory 'etc' }) $stopNoticeLife
+Assert-Case 'T4-d 정지 안내 · life (새 사이클 문구 - 생활 확장)' (Invoke-Guarded { Get-TimeStopNotice -TargetText '21:20' -MainCategory 'life' }) $stopNoticeLife
+Assert-Case 'T4-d 정지 안내 · etc (옛 문구 그대로 - 해당 없음)' (Invoke-Guarded { Get-TimeStopNotice -TargetText '21:20' -MainCategory 'etc' }) $stopNoticeEtc
 Assert-Case 'T4-d 상태줄 꼬리 · battle' (Invoke-Guarded { Get-TimeStatusSuffix -TargetTime $baseTarget -MainCategory 'battle' }) ' (21:20 지나면 그 판까지)'
-Assert-Case 'T4-d 상태줄 꼬리 · life (옛 꼬리 그대로 - T5)' (Invoke-Guarded { Get-TimeStatusSuffix -TargetTime $baseTarget -MainCategory 'life' }) ' (21:20 까지)'
-Assert-Case 'T4-d 상태줄 꼬리 · etc (생활과 같음)' (Invoke-Guarded { Get-TimeStatusSuffix -TargetTime $baseTarget -MainCategory 'etc' }) ' (21:20 까지)'
+Assert-Case 'T4-d 상태줄 꼬리 · life (그 사이클까지 - 생활 확장)' (Invoke-Guarded { Get-TimeStatusSuffix -TargetTime $baseTarget -MainCategory 'life' }) ' (21:20 지나면 그 사이클까지)'
+Assert-Case 'T4-d 상태줄 꼬리 · etc (옛 꼬리 그대로 - 해당 없음)' (Invoke-Guarded { Get-TimeStatusSuffix -TargetTime $baseTarget -MainCategory 'etc' }) ' (21:20 까지)'
 Assert-Case 'T4-d 상태줄 꼬리 · 지정 시각 $null (타입 없는 인자 - [datetime] 이면 변환 오류)' (Invoke-Guarded { Get-TimeStatusSuffix -TargetTime $null -MainCategory 'battle' }) ''
 Assert-Case 'T4-d 상태줄 꼬리 · 지정 시각 인자 생략' (Invoke-Guarded { Get-TimeStatusSuffix -MainCategory 'life' }) ''
 Assert-Case 'T4-d 시작 로그 · battle' (Invoke-Guarded { Get-TimeStartNotice -TargetTime $baseTarget -MainCategory 'battle' }) $startNoticeBattle
-Assert-Case 'T4-d 시작 로그 · life (옛 문구 그대로 - T5)' (Invoke-Guarded { Get-TimeStartNotice -TargetTime $baseTarget -MainCategory 'life' }) $startNoticeLife
-Assert-Case 'T4-d 시작 로그 · etc (생활과 같음)' (Invoke-Guarded { Get-TimeStartNotice -TargetTime $baseTarget -MainCategory 'etc' }) $startNoticeLife
+Assert-Case 'T4-d 시작 로그 · life (새 사이클 문구 - 생활 확장)' (Invoke-Guarded { Get-TimeStartNotice -TargetTime $baseTarget -MainCategory 'life' }) $startNoticeLife
+Assert-Case 'T4-d 시작 로그 · etc (옛 문구 그대로 - 해당 없음)' (Invoke-Guarded { Get-TimeStartNotice -TargetTime $baseTarget -MainCategory 'etc' }) $startNoticeEtc
 
 # ── T4-e 배선 (주석 뺀 GUI 사본) ──────────────────────────────────────────────────
 $decisionCode = Get-GuiFunctionCode 'Invoke-NextCycleDecision'
@@ -332,6 +337,7 @@ $startNoticeCode = Get-GuiFunctionCode 'Get-TimeStartNotice'
 $judgeActiveCode = Get-GuiFunctionCode 'Test-WorkerTimeJudgeActive'
 $nextCycleCode = Get-GuiFunctionCode 'Start-NextCycle'
 $startAutomationCode = Get-GuiFunctionCode 'Invoke-StartAutomation'
+$suffixCode = Get-GuiFunctionCode 'Get-TimeStatusSuffix'
 
 # 1. 바깥 조건 - 11 을 빼면 11 이 그 밖 코드 사슬(오류 정지)로 갑니다 (변이 G8)
 Assert-Case 'T4-e 1: 타이머 바깥 조건이 코드 0 과 11 을 같은 갈래로 받음' (Get-TextCount $guiCode 'if (($exitCode -eq 0) -or ($exitCode -eq 11)) {') 1
@@ -374,6 +380,9 @@ $chainLiterals = @(
   @{ L = 'Stop-AllRun "지정 시간($targetText) 도달"'; F = 'Invoke-NextCycleDecision'; C = $decisionCode }
   @{ L = '남은 시간이 부족해 다음 회차를 시작하지 않습니다'; F = 'Get-TimeStopNotice'; C = $stopNoticeCode }
   @{ L = '까지 반복합니다'; F = 'Get-TimeStartNotice'; C = $startNoticeCode }
+  @{ L = '지나면 새 사이클을 시작하지 않습니다 - 그 전에 시작한 사이클은 끝까지 하고 멈춥니다.'; F = 'Get-TimeStartNotice'; C = $startNoticeCode }
+  @{ L = '이후라 새 사이클을 시작하지 않습니다.'; F = 'Get-TimeStopNotice'; C = $stopNoticeCode }
+  @{ L = '지나면 그 사이클까지)'; F = 'Get-TimeStatusSuffix'; C = $suffixCode }
 )
 foreach ($item in $chainLiterals) {
   Assert-Case ('T4-e 4: 리터럴 [{0}] 은 GUI 전체 1곳이고 {1} 안' -f $item.L, $item.F) ('{0}/{1}' -f (Get-TextCount $guiCode $item.L), (Get-TextCount $item.C $item.L)) '1/1'
@@ -387,28 +396,25 @@ $actionCallText = $(if ($actionCalls.Count -ge 1) { ($actionCalls[0].Extent.Text
 $actionCallOwner = $(if ($actionCalls.Count -ge 1) { Get-EnclosingFunctionName $actionCalls[0] } else { '' })
 Assert-Case 'T4-e 5: 판단 함수 호출은 GUI 전체 1곳(실행 함수 안) · 인자 원문(공백 정규화)' ('{0}|{1}|{2}' -f $actionCalls.Count, $actionCallOwner, $actionCallText) '1|Invoke-NextCycleDecision|Get-NextCycleAction -ExitCode $ExitCode -StopRequested $script:stopRequested -ReachedTarget $reachedTarget -PreparedStreak $script:preparedStreak -TimeAllows $timeAllows'
 
-# 6. 시작 게이트 - 생활·기타만 거부(문구 원문 그대로), 전투는 게이트를 타지 않음 (변이 G6)
-$gateLine = 'if (($script:mainCategory -ne ''battle'') -and (-not (Test-TimeAllowsNextCycle))) {'
-$labelLine = '$estimateLabel = $(if ($script:mainCategory -eq ''life'') { ''진행 없음 한도'' } else { ''클리어 대기'' })'
-$refuseLine = 'Add-GuiLog "[안내] 지정 시간($($script:targetTime.ToString(''HH:mm'')))까지 남은 시간이 ${estimateLabel}($(Get-CycleWaitSecondsForEstimate)초)보다 짧아 시작할 수 없습니다."'
+# 6. 시작 게이트 - 기타만 거부(문구 원문 그대로), 전투·생활은 게이트를 타지 않음 (변이 G6 · 생활 확장 L2·L3)
+$gateLine = 'if (($script:mainCategory -eq ''etc'') -and (-not (Test-TimeAllowsNextCycle))) {'
+$oldGateLine = 'if (($script:mainCategory -ne ''battle'') -and (-not (Test-TimeAllowsNextCycle))) {'
+$refuseLine = 'Add-GuiLog "[안내] 지정 시간($($script:targetTime.ToString(''HH:mm'')))까지 남은 시간이 클리어 대기($(Get-CycleWaitSecondsForEstimate)초)보다 짧아 시작할 수 없습니다."'
 $startNoticeLine = 'Add-GuiLog (Get-TimeStartNotice -TargetTime $script:targetTime -MainCategory $script:mainCategory)'
-Assert-Case 'T4-e 6: 시작 게이트·거부 라벨·거부 문구(원문)·시작 로그 호출이 GUI 전체에 1곳씩' ('{0}/{1}/{2}/{3}' -f (Get-TextCount $guiCode $gateLine), (Get-TextCount $guiCode $labelLine), (Get-TextCount $guiCode $refuseLine), (Get-TextCount $guiCode $startNoticeLine)) '1/1/1/1'
-Assert-Case 'T4-e 6: 게이트 → 라벨 → 거부 → 목표 시각 해제 → return → 시작 로그 순서로 붙어 있음 (Invoke-StartAutomation 안)' (Get-PatternCount $startAutomationCode (New-SequencePattern @($gateLine, $labelLine, $refuseLine, '$script:targetTime = $null', 'return', '}', $startNoticeLine))) 1
+Assert-Case 'T4-e 6: 시작 게이트(기타 전용)·거부 문구(인라인 원문)·시작 로그 호출이 GUI 전체에 1곳씩 · 옛 게이트(-ne battle)·라벨 변수 0건' ('{0}/{1}/{2}/{3}/{4}' -f (Get-TextCount $guiCode $gateLine), (Get-TextCount $guiCode $refuseLine), (Get-TextCount $guiCode $startNoticeLine), (Get-TextCount $guiCode $oldGateLine), (Get-TextCount $guiCode '$estimateLabel')) '1/1/1/0/0'
+Assert-Case 'T4-e 6: 게이트 → 거부 → 목표 시각 해제 → return → 시작 로그 순서로 붙어 있음 (Invoke-StartAutomation 안)' (Get-PatternCount $startAutomationCode (New-SequencePattern @($gateLine, $refuseLine, '$script:targetTime = $null', 'return', '}', $startNoticeLine))) 1
 
 # 7. 시간 판단 호출 위치
 Assert-Case 'T4-e 7: 시간 판단 호출 2곳 = 실행 함수 · 시작 게이트' (Get-CallOwners $guiAst 'Test-TimeAllowsNextCycle') '2|Invoke-NextCycleDecision,Invoke-StartAutomation'
 
-# 8. UNTIL 전달 - 매 회차 먼저 비우고, 생활 분기는 원문 그대로, 전투 분기는 판단 워커만 + InvariantCulture 생산 (변이 G9·P2)
+# 8. UNTIL 전달 - 매 회차 먼저 비우고, 전투 분기(판단 워커만 + InvariantCulture 생산)만 남음 - 생활 분기 없음 (변이 G9·P2 · 생활 확장 L6)
 $envPattern = New-SequencePattern @(
   '$env:HONEYNOGI_UNTIL_TIME = ''''',
-  'if (($null -ne $script:targetTime) -and ($script:mainCategory -eq ''life'')) {',
-  '$env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString(''yyyy-MM-dd HH:mm'')',
-  '}',
   'if (($null -ne $script:targetTime) -and (Test-WorkerTimeJudgeActive)) {',
   '$env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString(''yyyy-MM-dd HH:mm'', [Globalization.CultureInfo]::InvariantCulture)',
   '}')
-Assert-Case 'T4-e 8: Start-NextCycle 의 UNTIL - 비움 → 생활 분기(원문) → 전투 분기(판단 워커만, InvariantCulture 생산 - 리뷰 P2)' (Get-PatternCount $nextCycleCode $envPattern) 1
-Assert-Case 'T4-e 8: UNTIL 대입은 GUI 전체에 이 세 곳뿐 · 사이클 추정치 env 0건 (설정·비움 모두 삭제)' ('{0}/{1}' -f (Get-TextCount $guiCode '$env:HONEYNOGI_UNTIL_TIME ='), (Get-TextCount $guiCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC')) '3/0'
+Assert-Case 'T4-e 8: Start-NextCycle 의 UNTIL - 비움 → 전투 분기(판단 워커만, InvariantCulture 생산 - 리뷰 P2), 생활 분기 없음 (생활 확장 A안)' (Get-PatternCount $nextCycleCode $envPattern) 1
+Assert-Case 'T4-e 8: UNTIL 대입은 GUI 전체에 비움·전투 두 곳뿐 · 사이클 추정치 env 0건 · 현재 문화권 생산식 0건' ('{0}/{1}/{2}' -f (Get-TextCount $guiCode '$env:HONEYNOGI_UNTIL_TIME ='), (Get-TextCount $guiCode 'HONEYNOGI_CYCLE_ESTIMATE_SEC'), (Get-TextCount $guiCode '.ToString(''yyyy-MM-dd HH:mm'')')) '2/0/0'
 Assert-Case 'T4-e 8: 판단 워커 판정 호출은 Start-NextCycle 1곳' (Get-CallOwners $guiAst 'Test-WorkerTimeJudgeActive') '1|Start-NextCycle'
 
 # 9. 상태줄 꼬리 - 두 곳 모두 대분류별 문구 함수 (옛 꼬리 코드가 남으면 전투에 옛 문구)
@@ -417,15 +423,36 @@ Assert-Case 'T4-e 9: 상태줄 꼬리 호출 원문 2곳 · 옛 꼬리 코드 0�
 Assert-Case 'T4-e 9: 회차 시작 상태줄이 꼬리 변수를 씀 (Start-NextCycle)' (Get-PatternCount $nextCycleCode (New-SequencePattern @($suffixCallLine, '$lblStatus.Text = "${cycleNumber}회차 실행 중...$statusSuffix"'))) 1
 Assert-Case 'T4-e 9: 안전 중지 취소 상태줄도 같은 함수 (버튼 처리기)' (Get-PatternCount $guiCode (New-SequencePattern @($suffixCallLine, '$lblStatus.Text = "$($script:completedCycles + 1)회차 실행 중...$statusSuffix (안전 중지 취소됨)"'))) 1
 
-# 10. 설명서 공통 머리말의 '[반복 - 시간 지정]' 문단 - 우변(문자열 결합)을 그대로 평가해 실제 글자로도 봅니다
-$manualAssigns = @($guiAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq '$manualCommon') }, $true))
-$manualRightText = ''
-$manualValue = ''
-if ($manualAssigns.Count -eq 1) {
-  $manualRightText = [string]$manualAssigns[0].Right.Extent.Text
-  $manualValue = [string](Invoke-Guarded { Invoke-Expression $manualRightText })
+# 10. 설명서의 '[반복 - 시간 지정]' 문단 - 전투는 공통 머리말, 생활은 생활 설명서 자기 문단('사이클' 말투 - 생활 확장 2.5), 기타는 없음.
+#     우변(문자열 결합)을 그대로 평가해 실제 글자로도 봅니다
+function Get-GuiAssignRight {
+  # 그 변수의 대입문이 정확히 1개면 우변 원문, 아니면 '' (개수는 따로 단언 - 이름이 바뀌어 0개가 되면 빈 참을 막기 위해)
+  param([string]$VariableText)
+  $found = @($guiAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq $VariableText) }, $true))
+  return [pscustomobject]@{ Count = $found.Count; Right = $(if ($found.Count -eq 1) { [string]$found[0].Right.Extent.Text } else { '' }) }
 }
-Assert-Case 'T4-e 10: 공통 머리말 대입 1곳 · 그 안에 문단 머리 1곳 · GUI 전체(주석 제외)에도 1곳 (생활·기타 설명서에는 없음)' ('{0}/{1}/{2}' -f $manualAssigns.Count, (Get-TextCount $manualRightText '"[반복 - 시간 지정]`n" +'), (Get-TextCount $guiCode '[반복 - 시간 지정]')) '1/1/1'
+$manualAssign = Get-GuiAssignRight '$manualCommon'
+$lifeManualAssign = Get-GuiAssignRight '$lifeManualText'
+$etcManualAssign = Get-GuiAssignRight '$etcManualText'
+$manualRightText = $manualAssign.Right
+$manualValue = $(if ($manualRightText) { [string](Invoke-Guarded { Invoke-Expression $manualRightText }) } else { '' })
+$lifeManualValue = $(if ($lifeManualAssign.Right) { [string](Invoke-Guarded { Invoke-Expression $lifeManualAssign.Right }) } else { '' })
+Assert-Case 'T4-e 10: 문단 머리 - 공통 머리말 대입 1·그 안 1 / 생활 설명서 대입 1·그 안 1 / 기타 설명서 대입 1·그 안 0 / GUI 전체(주석 제외) 2' ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $manualAssign.Count, (Get-TextCount $manualRightText '"[반복 - 시간 지정]`n" +'),
+    $lifeManualAssign.Count, (Get-TextCount $lifeManualAssign.Right '"[반복 - 시간 지정]`n" +'), $etcManualAssign.Count, (Get-TextCount $etcManualAssign.Right '[반복 - 시간 지정]'), (Get-TextCount $guiCode '[반복 - 시간 지정]')) '1/1/1/1/1/0/2'
+$lifeHeadAt = $lifeManualValue.IndexOf('[반복 - 시간 지정]')
+$lifeSettingsAt = $lifeManualValue.IndexOf('[설정]')
+$lifeCustomAt = $lifeManualValue.IndexOf('[커스텀 반복]')
+$lifeParagraph = $(if (($lifeHeadAt -ge 0) -and ($lifeCustomAt -gt $lifeHeadAt)) { $lifeManualValue.Substring($lifeHeadAt, $lifeCustomAt - $lifeHeadAt) } else { '' })
+Assert-Case "T4-e 10: 생활 문단 - [설정] 뒤·[커스텀 반복] 앞 · 규칙 첫 줄 · 내일 처리 줄 있음, 전투 말투('새 판'·'그 판')·상한 표현('최대 한 사이클') 없음, 완주·소요 조각 있음, 옛 [설정] '채집 대기'·'권장 1200초' 없음" ('{0}/{1}/{2}/{3}/{4}/{5}/{6}/{7}/{8}' -f
+    [int](($lifeSettingsAt -ge 0) -and ($lifeSettingsAt -lt $lifeHeadAt) -and ($lifeHeadAt -lt $lifeCustomAt)),
+    [int]$lifeParagraph.Contains("[반복 - 시간 지정]`n - 지정한 시각이 지나면 새 사이클을 시작하지 않습니다.`n"),
+    [int]$lifeParagraph.Contains(' - 오늘 그 시각이 이미 지났으면 내일 그 시각으로 잡습니다.'),
+    [int]($lifeParagraph.Contains('새 판') -or $lifeParagraph.Contains('그 판')),
+    [int]$lifeManualValue.Contains('최대 한 사이클'),
+    [int]$lifeParagraph.Contains('퀘스트가 사라질 때(1회 완료)까지'),
+    [int]$lifeParagraph.Contains('(대상·수량·이동 거리에 따라 수 분~수십 분).'),
+    [int]$lifeManualValue.Contains('채집 대기:'),
+    [int]$lifeManualValue.Contains('권장 1200초')) '1/1/1/0/0/1/1/0/0'
 Assert-Case 'T4-e 10: 문단은 단축키 줄 뒤 · 생활·기타 설명서는 공통 머리말보다 앞에서 반환' ('{0}/{1}' -f [int]($manualValue.IndexOf('(게임 화면에서도 동작합니다)') -ge 0 -and $manualValue.IndexOf('(게임 화면에서도 동작합니다)') -lt $manualValue.IndexOf('[반복 - 시간 지정]')),
     [int](($guiCode.IndexOf("'생활 설명서'") -ge 0) -and ($guiCode.IndexOf("'기타 설명서'") -ge 0) -and ($guiCode.IndexOf("'생활 설명서'") -lt $guiCode.IndexOf('$manualCommon = ')) -and ($guiCode.IndexOf("'기타 설명서'") -lt $guiCode.IndexOf('$manualCommon = ')))) '1/1'
 Assert-Case "T4-e 10: 문단 내용 - 규칙·끝 모양·파티원 따라감·내일 처리 줄 있음, '2분'(두 PC 안내 - 10-02 결정 Q1)·'최대 한 판'(이월 예외와 어긋남) 없음" ('{0}/{1}/{2}/{3}/{4}/{5}' -f
@@ -458,8 +485,8 @@ $t4fRows = @(
   @{ N = 10; D = '준비 실행 연속 3 → 오류 정지 + 빨강(정지 뒤에 칠해야 남음)'; Code = 10; Stop = $false; Cycles = 0; Done = 2; Streak = 3; Target = $baseTarget; Now = $baseTarget.AddSeconds(-60); Cat = 'battle'; Act = $stopStreak; Log = ''; Color = 'Firebrick' }
   @{ N = 11; D = '지정 시각 → 정지 + 전투 안내 (옛 코드 10 사슬엔 안내 없었음)'; Code = 10; Stop = $false; Cycles = 0; Done = 2; Streak = 0; Target = $baseTarget; Now = $baseTarget; Cat = 'battle'; Act = $stopTime; Log = $stopNoticeBattle; Color = 'DimGray' }
   @{ N = 12; D = '횟수 도달 → 다음 (미계상이라 횟수를 안 봄)'; Code = 10; Stop = $false; Cycles = 3; Done = 3; Streak = 0; Target = $null; Now = $baseTarget; Cat = 'battle'; Act = 'next'; Log = ''; Color = $colorKept }
-  @{ N = 13; D = "생활 · 지정 $($gatherLimit - 1)초 전(한도 ${gatherLimit}) → 정지 + 생활 옛 안내 (T5)"; Code = 0; Stop = $false; Cycles = 0; Done = 2; Streak = 0; Target = $baseTarget; Now = $baseTarget.AddSeconds(-($gatherLimit - 1)); Cat = 'life'; Act = $stopTime; Log = $stopNoticeLife; Color = 'DimGray' }
-  @{ N = 14; D = "생활 · 지정 ${gatherLimit}초 전 → 다음 (<= - T5)"; Code = 0; Stop = $false; Cycles = 0; Done = 2; Streak = 0; Target = $baseTarget; Now = $baseTarget.AddSeconds(-$gatherLimit); Cat = 'life'; Act = 'next'; Log = ''; Color = $colorKept }
+  @{ N = 13; D = '생활 · 지정 1초 전 → 다음 (진행 없음 한도 추정치 없음 - 생활 확장)'; Code = 0; Stop = $false; Cycles = 0; Done = 2; Streak = 0; Target = $baseTarget; Now = $baseTarget.AddSeconds(-1); Cat = 'life'; Act = 'next'; Log = ''; Color = $colorKept }
+  @{ N = 14; D = '생활 · 지정 시각 → 정지 + 생활 안내 (새 사이클)'; Code = 0; Stop = $false; Cycles = 0; Done = 2; Streak = 0; Target = $baseTarget; Now = $baseTarget; Cat = 'life'; Act = $stopTime; Log = $stopNoticeLife; Color = 'DimGray' }
   @{ N = 15; D = '횟수 도달 → 지정 횟수 완료 (순서 완결 - 실제로는 겹치지 않음)'; Code = 11; Stop = $false; Cycles = 3; Done = 3; Streak = 0; Target = $baseTarget; Now = $baseTarget.AddSeconds(1); Cat = 'battle'; Act = $stopCount; Log = ''; Color = 'DimGray' }
 )
 $t4fRun = 0
@@ -488,7 +515,7 @@ if ($timeIfs.Count -eq 1) {
   $timeBlock = [scriptblock]::Create((@($timeIfs[0].Clauses[0].Item2.Statements | ForEach-Object { $_.Extent.Text }) -join "`n"))
 }
 function Invoke-StartTimeBlock {
-  # 시간 지정 블록(목표 시각 계산 → 생활·기타 게이트 → 시작 로그)을 소스 그대로 실행합니다 - 점소싱(규칙 3).
+  # 시간 지정 블록(목표 시각 계산 → 기타 게이트 → 시작 로그)을 소스 그대로 실행합니다 - 점소싱(규칙 3).
   # 블록 안 return(시작 거부)은 블록만 끝냅니다 - 실제로는 Invoke-StartAutomation 을 끝내 시작하지 않습니다
   if ($null -eq $timeBlock) { throw '시간 지정 블록을 추출하지 못했습니다' }
   . $timeBlock
@@ -505,13 +532,16 @@ $t4gRows = @(
     XTarget = '2026-10-02 00:30:00.000'; XLog = '시간 지정 모드: 10-02 00:30 지나면 새 판을 시작하지 않습니다 - 그 전에 시작한 판은 끝까지 하고 멈춥니다.' }
   @{ N = 'g5'; D = '전투 · 시각 선택기의 숨은 초(21:20:37)는 잘라 분 단위로'; Cat = 'battle'; Queue = @(); Now = [datetime]::new(2026, 10, 1, 21, 0, 0); Until = [datetime]::new(2000, 1, 1, 21, 20, 37)
     XTarget = '2026-10-01 21:20:00.000'; XLog = $startNoticeBattle }
-  @{ N = 'g6'; D = '생활 · 남은 90초 < 진행 없음 한도 → 거부 문구 원문 + 목표 해제 (조건 5 - T5)'; Cat = 'life'; Queue = @(); Now = [datetime]::new(2026, 10, 1, 21, 18, 30); Until = [datetime]::new(2000, 1, 1, 21, 20, 0)
-    XTarget = '(없음)'; XLog = "[안내] 지정 시간(21:20)까지 남은 시간이 진행 없음 한도(${gatherLimit}초)보다 짧아 시작할 수 없습니다." }
-  @{ N = 'g7'; D = '생활 · 남은 1200초 → 시작 + 옛 시작 로그 (T5)'; Cat = 'life'; Queue = @(); Now = [datetime]::new(2026, 10, 1, 21, 0, 0); Until = [datetime]::new(2000, 1, 1, 21, 20, 0)
+  @{ N = 'g6'; D = "생활 · 남은 90초(진행 없음 한도 ${gatherLimit}초보다 짧음) → 거부 없이 시작 + 생활 시작 로그 (생활 확장 조건 2)"; Cat = 'life'; Queue = @(); Now = [datetime]::new(2026, 10, 1, 21, 18, 30); Until = [datetime]::new(2000, 1, 1, 21, 20, 0)
+    XTarget = '2026-10-01 21:20:00.000'; XLog = $startNoticeLife }
+  @{ N = 'g7'; D = '생활 · 남은 1200초 → 시작 + 생활 시작 로그'; Cat = 'life'; Queue = @(); Now = [datetime]::new(2026, 10, 1, 21, 0, 0); Until = [datetime]::new(2000, 1, 1, 21, 20, 0)
     XTarget = '2026-10-01 21:20:00.000'; XLog = $startNoticeLife }
   @{ N = 'g8'; D = '기타 · 남은 90초 < 클리어 대기 → 거부 문구 원문 (해당 없음 - 지금 그대로)'; Cat = 'etc'; Queue = @(); Now = [datetime]::new(2026, 10, 1, 21, 18, 30); Until = [datetime]::new(2000, 1, 1, 21, 20, 0)
     XTarget = '(없음)'; XLog = "[안내] 지정 시간(21:20)까지 남은 시간이 클리어 대기(${clearLimit}초)보다 짧아 시작할 수 없습니다." }
   @{ N = 'g9'; D = "기타 · 남은 1200초(클리어 대기 ${clearLimit} 이상) → 시작 + 옛 시작 로그"; Cat = 'etc'; Queue = @(); Now = [datetime]::new(2026, 10, 1, 21, 0, 0); Until = [datetime]::new(2000, 1, 1, 21, 20, 0)
+    XTarget = '2026-10-01 21:20:00.000'; XLog = $startNoticeEtc }
+  @{ N = 'g10'; D = '생활 · 정각 직전 [시작] - 목표 계산은 21:19:59.9, 그 뒤 판단 시각은 21:20:00.1 (생활이 게이트를 타면 거부 문구가 찍히고 목표가 지워짐)'; Cat = 'life'
+    Queue = @([datetime]::new(2026, 10, 1, 21, 19, 59, 900), [datetime]::new(2026, 10, 1, 21, 19, 59, 900)); Now = [datetime]::new(2026, 10, 1, 21, 20, 0, 100); Until = [datetime]::new(2000, 1, 1, 21, 20, 0)
     XTarget = '2026-10-01 21:20:00.000'; XLog = $startNoticeLife }
 )
 $t4gRun = 0
@@ -539,7 +569,7 @@ for ($statementIndex = 0; $statementIndex -lt $nextCycleStatements.Count; $state
 }
 $envSegment = @()
 if (($envClearIndex -ge 0) -and ($envEndIndex -gt $envClearIndex)) { $envSegment = @($nextCycleStatements[$envClearIndex..($envEndIndex - 1)]) }
-Assert-Case 'T4-h 추출: UNTIL 비움부터 [완료] 사유 초기화 앞까지 = 비움 1줄 + if 2개 (사이클 추정치 줄 없음)' (@($envSegment | ForEach-Object { $_.GetType().Name }) -join ',') 'AssignmentStatementAst,IfStatementAst,IfStatementAst'
+Assert-Case 'T4-h 추출: UNTIL 비움부터 [완료] 사유 초기화 앞까지 = 비움 1줄 + 전투 if 1개 (생활 분기·사이클 추정치 줄 없음)' (@($envSegment | ForEach-Object { $_.GetType().Name }) -join ',') 'AssignmentStatementAst,IfStatementAst'
 if ($envSegment.Count -gt 0) { $envBlock = [scriptblock]::Create((@($envSegment | ForEach-Object { $_.Extent.Text }) -join "`n")) }
 function Invoke-UntilEnvBlock {
   # UNTIL 구간을 소스 그대로 실행합니다 - 점소싱(규칙 3). 결과는 이 프로세스의 $env:HONEYNOGI_UNTIL_TIME
@@ -547,7 +577,7 @@ function Invoke-UntilEnvBlock {
   . $envBlock
 }
 $t4hRows = @(
-  @{ N = 'h1'; D = '생활 + 시간 지정 → UNTIL (생활 분기 원문 - ko-KR 현재 문화권 생산, T5)'; Cat = 'life'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
+  @{ N = 'h1'; D = '생활 + 시간 지정 → 없음 (GUI 가 사이클이 끝난 뒤 판단 - 생활 확장 A안)'; Cat = 'life'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '' }
   @{ N = 'h2'; D = '던전 + 시간 지정 → UNTIL (신설)'; Cat = 'battle'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
   @{ N = 'h3'; D = '심층 + 시간 지정 → UNTIL (신설)'; Cat = 'battle'; Content = 'deep'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
   @{ N = 'h4'; D = '어비스 함께하기 파티원 + 시간 지정 → UNTIL 만 (사이클 추정치 없음)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'member'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
@@ -634,7 +664,7 @@ foreach ($cultureName in @('ko-KR', 'th-TH', 'fi-FI')) {
 Assert-Case 'P2 문화권 원복 (기준 ko-KR 로 돌아옴)' ([Threading.Thread]::CurrentThread.CurrentCulture.Name) 'ko-KR'
 
 # ── 실행 행 수 (예외로 표가 중간에 끊기면 여기서 드러남) ─────────────────────────────
-Assert-Case '실행 행 수 T4-a/T4-b/T4-c/T4-f/T4-g/T4-h/P2' ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $t4aRun, $t4bRun, $t4cRun, $t4fRun, $t4gRun, $t4hRun, $p2Run) '13/11/11/15/9/12/12'
+Assert-Case '실행 행 수 T4-a/T4-b/T4-c/T4-f/T4-g/T4-h/P2' ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $t4aRun, $t4bRun, $t4cRun, $t4fRun, $t4gRun, $t4hRun, $p2Run) '13/12/11/15/10/12/12'
 
 [Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
 $env:HONEYNOGI_UNTIL_TIME = $originalUntilEnv

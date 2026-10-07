@@ -20,7 +20,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath `
 }
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $config = $null
-$sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
+$sourceTokens = $null; $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$sourceTokens, [ref]$null)
 foreach ($varName in @('lifeSkillMenuTable', 'lifeTargetVariants', 'lifeTitleVariants', 'lifeNameRepairPairs', 'lifeDetailLabelFragments', 'lifeDetailLabelMaxIndex', 'lifeDetailDescSignatures', 'rgLifeStats', 'rgLifeTargetList', 'rgLifeDetail', 'rgLifeQuestTracker', 'rgLifeQuestWide', 'lifeListRowGap', 'lifeListFirstRowY')) {
   $assign = $sourceAst.Find({
       param($node)
@@ -500,10 +500,11 @@ Assert-Case '배선: 진행 최댓값 초기값 -1' `
 Assert-Case '배선: 이전 채집 최댓값 초기값 -1' `
   ([bool]($workerRaw -match '(?m)^\s*\$otherProgressMax = -1\s*$')) 'True'
 
-# ── 시간 지정 모드: 워커가 목표 시각에 사이클 중에도 끊는다 (2026-08-11 실측 ① 대응) ──
-# 실측: GUI 는 사이클이 끝나야 시간을 봐서 목표 10:46 을 2분 24초 넘김(10:48:24 완료).
-# 수정: GUI 가 생활+시간 지정일 때만 HONEYNOGI_UNTIL_TIME(yyyy-MM-dd HH:mm)을 전달하고,
-# 워커의 생활 장기 대기 루프들이 Test-LifeUntilReached 로 도달 즉시 exit 4.
+# ── 시간 지정 모드: 생활 워커는 지정 시각을 보지 않는다 (2026-10-02 사용자 지시 - 생활 확장 설계 v3) ──
+# 진행 중인 사이클은 지정 시각이 지나도 끝까지 하고, 다음 사이클을 띄울지는 GUI 가 사이클이 끝난 뒤에만
+# '지금 < 지정 시각' 으로 정합니다 - 2026-08-11 실측 ① 대응(워커가 사이클 중에 exit 4)은 이 지시로 폐기했고
+# GUI 는 생활에 HONEYNOGI_UNTIL_TIME 을 넘기지 않습니다. GUI 판단 진리표는 tests\test_time_until_mode.ps1.
+# 아래 (a) 공유 파서는 던전·파티원·기타가 계속 쓰고, (b) 는 생활 워커에 지정 시각 경로가 되살아나지 않게 지킵니다.
 
 # (a) 파싱 진리표 - Get-LifeUntilDeadline 은 순수(경고 로그 제외)
 if (-not (Get-Command Write-RunLog -ErrorAction SilentlyContinue)) { function Write-RunLog { param($m) } }
@@ -523,54 +524,58 @@ Assert-Case '지정시간 파싱: 쓰레기 값도 fail-open' `
 Assert-Case '지정시간 파싱: 앞뒤 공백 허용' `
   ((Get-LifeUntilDeadline -Raw ' 2026-08-11 10:46 ').ToString('HH:mm')) '10:46'
 
-# (b) 워커 배선 - 검사 함수 계약과 호출 지점
-$untilBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-LifeUntilReached'))
-$untilCode = (($untilBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
-Assert-Case '배선(지정시간): 도달 판정은 -ge (같은 시각 포함)' `
-  ([bool]($untilCode -match '-ge \$script:lifeUntilDeadline')) 'True'
-Assert-Case '배선(지정시간): 도달 시 exit 4 (사이클 미계상)' `
-  ([bool]($untilCode -match 'exit 4')) 'True'
-Assert-Case '배선(지정시간): 사유 문구에 지정 시간 표기' `
-  ([bool]($untilCode -match '지정 시간\(\{0\}\) 도달')) 'True'
-# 호출 지점: 시작 직후 1 + 초기 확인 + 이전 채집 대기 + 메뉴 재시도 + 캡처 대기 + 생성 확인
-# + 메인 대기 = 7곳, **+ 메뉴 루프 탈출 직후 1곳 = 8곳** (2026-09-09 Codex 구현 리뷰 회귀 가드:
-# 마감을 Get-LifeCycleDeadline 으로 통일하면서 while 이 지정 시각까지 보게 됐고, 그러자 루프를
-# 나온 회차가 다음 회전 서두의 검사에 못 닿아 사유가 '채집 시작 실패'로 뒤바뀌었음).
-# 정확 개수 - 줄이면 그 대기에서 목표를 넘기거나 사유가 어긋납니다.
-# 2026-09-09 +1: '가까운 위치 찾기' **클릭 직전** (양보가 길면 그 사이 지정 시각이 지날 수 있는데
-#   마감 검사가 양보 게이트 앞에만 있어 종료 50초 뒤에도 클릭이 나갔음 - Codex 지적) → 9곳
-# 2026-09-09 +1: Invoke-LifeListScroll 의 양보 복귀 직후 (대기 중 지정 시각이 지날 수 있는데
-#   그대로 드래그로 이어지면 약속을 넘겨 입력하게 됨 - Codex 조건) → 10곳
-Assert-Case '배선(지정시간): 검사 호출 10곳' `
-  (@([regex]::Matches($workerRaw, '(?m)^\s*Test-LifeUntilReached')).Count) 10
-# 메인 대기 루프에서 until 검사가 절대 상한 검사보다 앞 (사유 우선 계약)
-Assert-Case '배선(지정시간): 메인 루프에서 지정 시간이 절대 상한보다 먼저' `
-  ([bool]($workerRaw -match '(?s)while \(\$true\) \{[^}]{0,400}Test-LifeUntilReached[^}]{0,400}-gt \$hardDeadline')) 'True'
-# 메뉴 시퀀스도 사이클 한도와 지정 시간 중 이른 쪽을 봅니다 - 스냅숏을 넘기는 대신
-# Get-LifeCycleDeadline 을 직접 부릅니다 (2026-09-09: 스냅숏은 시퀀스 안의 양보를 못 받음)
-Assert-Case '배선(지정시간): 헬퍼가 min(사이클, 지정시간) 을 계산' `
-  ([bool]($workerRaw -match '\$script:lifeUntilDeadline -lt \$adjusted\) \{ return \$script:lifeUntilDeadline \}')) 'True'
-Assert-Case '배선(지정시간): 메뉴 시퀀스 내부 검사가 헬퍼를 직접 호출' `
+# (b) 워커 배선 - 생활 워커는 지정 시각을 보지 않습니다 (2026-10-02 사용자 지시 - 시간 지정 생활 확장 설계 v3).
+#     지정 시각 전에 시작한 사이클은 끝까지 하고, 다음 사이클은 GUI 가 사이클이 끝난 뒤(코드 0) '지금 < 지정 시각' 으로 정합니다.
+#     2026-08-11 실측 ①로 넣었던 사이클 중 정지(정지 함수·호출 10곳·마감 합류·UNTIL 읽기)는 사용자 지시로 폐기했습니다 - 다시 넣지 않습니다.
+#     주석·문자열에 남은 옛 이름은 세지 않습니다 (AST). 행동은 아래 ⑤ 시뮬레이터 until-* 4 시나리오가 봅니다.
+$lifeUntilFunctions = @($sourceAst.FindAll({ param($n) ($n -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($n.Name -eq 'Test-LifeUntilReached') }, $true)).Count
+$lifeUntilCalls = @($sourceAst.FindAll({ param($n) ($n -is [System.Management.Automation.Language.CommandAst]) -and ($n.GetCommandName() -eq 'Test-LifeUntilReached') }, $true)).Count
+$lifeUntilVariables = @($sourceAst.FindAll({ param($n) ($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and ($n.VariablePath.UserPath -eq 'script:lifeUntilDeadline') }, $true)).Count
+Assert-Case '배선(지정시간): 생활 사이클 중 정지 없음 - 정지 함수 정의·호출·생활 지정 시각 변수 0' ('{0}/{1}/{2}' -f $lifeUntilFunctions, $lifeUntilCalls, $lifeUntilVariables) '0/0/0'
+# 읽는 쪽 고정 (워커 전체): 지정 시각(UNTIL)을 읽고 해석하는 곳은 던전·어비스 파티원·기타 셋뿐입니다. 생활의 어느 함수(새 도우미 포함)나
+# 스크립트 최상위에서 다시 읽으면 소유자가 달라집니다. 셋째 값은 주석이 아닌 토큰 가운데 이름이 든 것의 수 - [Environment] 호출·문자열로
+# 읽는 꼴도 셉니다 (생활 확장 검토 반영 - 사이클 함수 안만 보던 가드는 다른 함수에서 다시 읽는 것을 못 잡았음)
+function Get-LifeTestOwnerName {
+  # AST 노드를 감싼 함수 이름 ('(최상위)' = 함수 밖)
+  param($Node)
+  $parent = $Node.Parent
+  while ($null -ne $parent) {
+    if ($parent -is [System.Management.Automation.Language.FunctionDefinitionAst]) { return $parent.Name }
+    $parent = $parent.Parent
+  }
+  return '(최상위)'
+}
+[string[]]$untilEnvOwners = @($sourceAst.FindAll({ param($n) ($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and ($n.VariablePath.UserPath -eq 'env:HONEYNOGI_UNTIL_TIME') }, $true) | ForEach-Object { Get-LifeTestOwnerName $_ })
+[string[]]$untilParseOwners = @($sourceAst.FindAll({ param($n) ($n -is [System.Management.Automation.Language.CommandAst]) -and ($n.GetCommandName() -eq 'Get-LifeUntilDeadline') }, $true) | ForEach-Object { Get-LifeTestOwnerName $_ })
+[Array]::Sort($untilEnvOwners, [StringComparer]::Ordinal)
+[Array]::Sort($untilParseOwners, [StringComparer]::Ordinal)
+$untilTokenCount = @($sourceTokens | Where-Object { ($_.Kind -ne [System.Management.Automation.Language.TokenKind]::Comment) -and ($_.Text -match 'HONEYNOGI_UNTIL_TIME') }).Count
+Assert-Case '배선(지정시간): UNTIL 을 읽는 곳 = 던전·어비스 파티원·기타 3곳 (env 참조 소유자 | 해석 호출 소유자 | 주석 밖 토큰 수)' `
+  ('{0} | {1} | {2}' -f ($untilEnvOwners -join ','), ($untilParseOwners -join ','), $untilTokenCount) `
+  'Invoke-AbyssPartyMemberCycle,Invoke-NormalDungeonCycle,Invoke-NyanMerchantRun | Invoke-AbyssPartyMemberCycle,Invoke-NormalDungeonCycle,Invoke-NyanMerchantRun | 3'
+# 메뉴 시퀀스도 사이클 한도(양보 반영)를 Get-LifeCycleDeadline 으로 직접 봅니다 - 스냅숏은 시퀀스 안의 양보를 못 받음 (2026-09-09)
+Assert-Case '배선(사이클 한도): 메뉴 시퀀스 내부 검사가 헬퍼를 직접 호출' `
   ([bool]($workerRaw -match 'function Invoke-LifeMenuSequence \{[\s\S]{0,1500}?\(Get-Date\) -gt \(Get-LifeCycleDeadline\)')) 'True'
-Assert-Case '배선(지정시간): 한도 스냅숏 전달이 남아 있지 않다 (시퀀스 안의 양보 누락 원인)' `
+Assert-Case '배선(사이클 한도): 한도 스냅숏 전달이 남아 있지 않다 (시퀀스 안의 양보 누락 원인)' `
   ([bool]($workerRaw -match 'Invoke-LifeMenuSequence[^\r\n]+-Deadline')) 'False'
 # 메뉴 시퀀스 입력 직전 가드 (교차 리뷰 - C 입력/스킬 셀 클릭 앞)
 # v2.1.7: 한도 재검사와 입력 사이에 사용자 양보 게이트(Test-LifeYieldBeforeInput)가 들어감 - 둘 다 필수
-Assert-Case '배선(지정시간): C 입력 직전 한도 재검사' `
+Assert-Case '배선(사이클 한도): C 입력 직전 한도 재검사' `
   ([bool]($workerRaw -match '(?s)-gt \(Get-LifeCycleDeadline\)\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Press-LifeMenuKey')) 'True'
 # 2026-08-22 개정: 무조건 전면화가 Confirm-LifeGameFront 게이트로 교체됨 (전면이면 즉시
 # 통과 - 오버헤드 절감. 실패 시 클릭 차단이라 안전 강화)
-Assert-Case '배선(지정시간): 스킬 셀 클릭 직전 한도 재검사 + 양보 게이트 + 전면 게이트' `
+Assert-Case '배선(사이클 한도): 스킬 셀 클릭 직전 한도 재검사 + 양보 게이트 + 전면 게이트' `
   ([bool]($workerRaw -match '(?s)-gt \(Get-LifeCycleDeadline\)\) \{ Write-RunLog[^\r\n]+메뉴 진행 중단[^\r\n]+\}\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*if \(Test-LifeYieldBeforeInput[\s\S]{0,300}?if \(-not \(Confirm-LifeGameFront -Game \$Game\)\) \{ return \$false \}\r?\n\s*Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$SkillEntry\.Cell\[0\]\)')) 'True'
 
-# (c) GUI 배선 - env 전달 조건과 초 정규화
+# (c) GUI 배선 - UNTIL 비움·생활 미전달과 초 정규화
 $guiRaw = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
 Assert-Case '배선(지정시간 GUI): 매 회차 env 먼저 초기화' `
   ([bool]($guiRaw -match "(?m)^\s*\`$env:HONEYNOGI_UNTIL_TIME = ''")) 'True'
-Assert-Case '배선(지정시간 GUI): 생활 + 시간 지정일 때만 설정' `
-  ([bool]($guiRaw -match "targetTime\) -and \(\`$script:mainCategory -eq 'life'\)")) 'True'
-Assert-Case '배선(지정시간 GUI): 전체 타임스탬프 형식으로 전달' `
-  ([bool]($guiRaw -match "HONEYNOGI_UNTIL_TIME = \`$script:targetTime\.ToString\('yyyy-MM-dd HH:mm'\)")) 'True'
+# 생활에는 UNTIL 을 넘기지 않습니다 (2026-10-02 생활 확장 A안 - GUI 가 사이클이 끝난 뒤 판단). 주석 뺀 Start-NextCycle 사본으로 셉니다 -
+# 옛 줄이 주석에만 남아도 걸리지 않게. UNTIL 대입은 비움·전투 분기 두 곳이고, 현재 문화권 생산식(옛 생활 분기 꼴)은 없어야 합니다
+$nextCycleGuiCode = Remove-SourceComments ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Start-NextCycle')))
+Assert-Case '배선(지정시간 GUI): 생활에는 UNTIL 을 넘기지 않음 (Start-NextCycle 주석 뺀 사본 - UNTIL 대입 2곳 · 현재 문화권 생산식 0)' `
+  ('{0}/{1}' -f ([regex]::Matches($nextCycleGuiCode, '\$env:HONEYNOGI_UNTIL_TIME =')).Count, ([regex]::Matches($nextCycleGuiCode, "ToString\('yyyy-MM-dd HH:mm'\)")).Count) '2/0'
 Assert-Case '배선(지정시간 GUI): DateTimePicker 숨은 초 정규화' `
   ([bool]($guiRaw -match 'AddHours\(\$untilTod\.Hours\)\.AddMinutes\(\$untilTod\.Minutes\)')) 'True'
 Assert-Case '배선(지정시간 GUI): 옛 TimeOfDay 직접 덧셈이 남아 있지 않다' `
@@ -1003,14 +1008,6 @@ Assert-Case '사이클: 메뉴 3회 실패 → exit 4 (재시도 3회 소진)' (
 # 2026-09-09 Codex 사후 리뷰 P1: 메뉴 시퀀스 안에서 양보하고 '화면 그대로라 이어서 진행'한
 # 회전($script:lifeMenuYielded 미설정)의 양보가 사이클 한도에서 빠지지 않아, 사용자가 PC 를
 # 쓰기만 해도 조건부 정지했습니다. 한도 60초 + 양보 120초 - 연장되면 3회전(m3), 안 되면 m1.
-# 2026-09-09 Codex 구현 리뷰 회귀 가드: 메뉴 루프 도중 지정 시각이 지나면 사유는
-# '지정 시간 도달' 이어야 합니다 (마감 통일로 while 이 지정 시각까지 보게 되면서, 루프를
-# 나온 회차가 서두 검사에 못 닿아 '채집 시작 실패'로 오진되던 것을 잡습니다)
-$sim = Invoke-CycleSim 'until-mid-menu'
-Assert-Case '사이클: 메뉴 루프 도중 지정 시각 도달 → 사유는 "지정 시간 도달"' `
-  ([bool](@($sim.Out | Where-Object { "$_" -match '지정 시간\(00:01\) 도달' }).Count -ge 1)) 'True'
-Assert-Case '사이클: 그때 "채집 시작 확정 실패"로 오진하지 않음 (사유 우선 순서)' `
-  ([bool](@($sim.Out | Where-Object { "$_" -match '채집 시작\(가까운 위치 찾기\)을 확정하지 못했습니다' }).Count -ge 1)) 'False'
 # 2026-09-09 Codex 구현 리뷰 P2 가드: 조작으로 접은 회전은 재시도 미계상(MENU 4회) +
 # **재진입 전 대기**(YIELDWAIT 1회). 대기가 빠지면 다음 회전 서두의 잔존 창 X 닫기가
 # 조작 중에 취소돼 양보 표시 없이 재시도만 소모됩니다 (Codex 모의: 명시적 양보 0회, 3회 소진)
@@ -1134,15 +1131,21 @@ $sim = Invoke-CycleSim 'capture-recover'
 Assert-Case '사이클: 캡처 실패 후 복구되면 이어서 완료 → exit 0' $sim.Exit '0'
 Assert-Case '사이클: 복구까지 캡처 탐침 정확히 2회 (일회성 장애)' `
   (@($sim.Out | Where-Object { "$_" -match '^PROBE#' }).Count) '2'
-# 지정 시간(시간 지정 모드) 동작 시나리오 (2026-08-11 실측 ① 대응 - 배선 가드는 위 별도 섹션)
-$sim = Invoke-CycleSim 'until-expired'
-Assert-Case '사이클: 지정 시간이 이미 지나면 즉시 exit 4, 메뉴 미진입' ('{0}/m{1}' -f $sim.Exit, $sim.Menu) '4/m0'
-Assert-Case '사이클: 지정 시간 사유 로그 (시작 즉시)' `
-  ([bool](@($sim.Out | Where-Object { "$_" -match '지정 시간\(00:00\) 도달' }).Count -ge 1)) 'True'
-$sim = Invoke-CycleSim 'until-mid-wait'
-Assert-Case '사이클: 채집 대기 중 지정 시간 도달 → exit 4' ($sim.Exit) '4'
-Assert-Case '사이클: 대기 중 도달 사유가 한도가 아니라 지정 시간' `
-  ([bool](@($sim.Out | Where-Object { "$_" -match '지정 시간\(00:01\) 도달' }).Count -ge 1)) 'True'
+# 시간 지정 '그 사이클까지' (2026-10-02 생활 확장): 워커는 지정 시각을 모릅니다 - env 에 지난 시각을 넣어도 사이클을 끝까지 합니다.
+# 시작·다른 대상 대기·메뉴·채집 대기의 네 단계에서 지정 시각이 이미 지났거나 지나는 경우입니다. 종료 코드만 보지 않습니다
+# (진행 마감의 exit 4 와 구별) - 완료 줄과 '지정 시간' 줄 수를 함께 봅니다. 목록 스크롤 양보 복귀·'가까운 위치 찾기' 클릭 직전·
+# 메뉴 회전의 캡처 실패 대기 세 자리는 시뮬레이터 밖(추출 안 함·스텁·캡처 실패 미주입)이라 위 (b) 의 워커 가드가 지킵니다
+foreach ($untilCase in @(
+    @{ S = 'until-past-start'; X = '0/m1/s8'; D = '시작 때 이미 지남' },
+    @{ S = 'until-past-other'; X = '0/m1/s9'; D = '다른 대상 대기 중 이미 지남' },
+    @{ S = 'until-pass-menu'; X = '0/m2/s7'; D = '메뉴 단계에서 지남' },
+    @{ S = 'until-pass-wait'; X = '0/m0/s29'; D = '채집 대기 중 지남' })) {
+  $sim = Invoke-CycleSim $untilCase.S
+  $doneLines = @($sim.Out | Where-Object { "$_" -match '\[완료\] 채집 1사이클 완료' }).Count
+  $untilLines = @($sim.Out | Where-Object { "$_" -match '지정 시간' }).Count
+  Assert-Case "사이클(시간 지정 - $($untilCase.D)): 사이클을 끝까지 → exit 0 · 완료 줄 1 · 지정 시간 줄 0" `
+    ('{0}/m{1}/s{2} · 완료 {3} · 지정 {4}' -f $sim.Exit, $sim.Menu, $sim.State, $doneLines, $untilLines) ('{0} · 완료 1 · 지정 0' -f $untilCase.X)
+}
 
 # ── ⑥ 스킬 테이블/이형 데이터 가드 ──
 $expectedSkillKeys = @('daily', 'wood', 'mining', 'herb', 'wool', 'harvest', 'hoe', 'insect')
@@ -1416,7 +1419,7 @@ Assert-Case "배선: '생활 스킬' 클릭 후 화면 전환 확인 게이트" 
 Assert-Case '배선: 휠 전 게임 전면 확인' ($workerText -match 'function Invoke-LifeListScroll[\s\S]{0,2600}Test-GameForeground -Game \$Game') 'True'
 # 2차 리뷰 반영 계약 (리뷰): deadline 하드 상한 + 캡처 실패 판독 무효 + 휠 증거
 Assert-Case '배선: deadline 은 준비 정리(이벤트 스킵) 뒤에 생성' ($workerText -match '\[void\]\(Clear-EventOverlay -Game \$Game\)[\s\S]{0,500}\$script:lifeCycleDeadline = \(Get-Date\)\.AddSeconds') 'True'
-Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*Test-LifeUntilReached\s*\r?\n\s*if \(\(Get-Date\) -gt \(Get-LifeCycleDeadline\)\) \{ break \}') 'True'
+Assert-Case '배선: 생성 확인 루프에도 deadline 우선' ($workerText -match 'foreach \(\$confirmTry in 1\.\.8\) \{\s*\r?\n\s*if \(\(Get-Date\) -gt \(Get-LifeCycleDeadline\)\) \{ break \}') 'True'
 Assert-Case '배선: C 입력 전 판독 후 캡처 플래그 재확인' ($workerText -match '\$infoAlreadyOpen = Test-LifeInfoScreen -Game \$Game\s*\r?\n\s*if \(\$script:screenCaptureFailing\) \{ return \$false \}') 'True'
 Assert-Case '배선: 전환 확인 판독 후 캡처 플래그 재확인' ($workerText -match '\$infoStillVisible = Test-LifeInfoScreen -Game \$Game[\s\S]{0,400}if \(\$script:screenCaptureFailing\) \{ continue \}') 'True'
 Assert-Case '배선: 훑기 판독 1벌 공유(찾기+행 증거) + 목록 순서 전달' `
@@ -1498,11 +1501,10 @@ Assert-Case "배선: '가까운 위치 찾기' 링크는 글자 탐색으로만 
    (-not $workerText.Contains('ptLifeFindNearest'))) 'True'
 Assert-Case '배선: 링크 클릭 직전 deadline 재검사 (OCR/전면화 시간 반영)' `
   ($workerText -match 'Select-LifeFindNearestWord[\s\S]{0,6000}\(Get-Date\) -gt \(Get-LifeCycleDeadline\)[\s\S]{0,2600}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') 'True'
-# 2026-09-09: 그 사이에 양보 게이트가 들어가므로, **양보 뒤 갱신된 좌표**로 클릭하는지와
-# 입력 직전 지정 시각 재확인이 있는지를 따로 못 박습니다 (Codex P2 - 공통 라벨 게이트가
-# 다른 대상 팝업도 통과시켜 옛 좌표로 눌렀음)
-Assert-Case '배선: 양보 후 링크 좌표 갱신 + 입력 직전 지정 시각 재확인' `
-  (($workerText -match 'if \(\$null -ne \$script:lifeYieldLinkPoint\) \{ \$linkWord = \$script:lifeYieldLinkPoint \}[\s\S]{0,400}Test-LifeUntilReached[\s\S]{0,400}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') -and
+# 2026-09-09: 그 사이에 양보 게이트가 들어가므로, **양보 뒤 갱신된 좌표**로 클릭하는지를 따로 못 박습니다
+# (리뷰 P2 - 공통 라벨 게이트가 다른 대상 팝업도 통과시켜 옛 좌표로 눌렀음)
+Assert-Case '배선: 양보 후 링크 좌표 갱신 뒤 그 좌표로 클릭' `
+  (($workerText -match 'if \(\$null -ne \$script:lifeYieldLinkPoint\) \{ \$linkWord = \$script:lifeYieldLinkPoint \}[\s\S]{0,400}Click-GamePoint -Game \$Game -ReferenceX \(\[int\]\$linkWord\.X\)') -and
    ($workerText -match '\$script:lifeYieldLinkPoint = \$yieldLinkWord')) 'True'
 # 링크 클릭 후 고정 1500ms 는 제거 (2026-08-12): 생성 확인 루프가 첫 판독 전에 또 1500ms 를
 # 자는 이중 대기였음 - present 2회 계약과 판독 간격은 루프 쪽이 그대로 담당
@@ -1639,10 +1641,13 @@ Assert-Case 'GUI: 던전/심층 시작 안내에 생활 게이트 2곳' `
 Assert-Case 'GUI: 혼합 잠금 안내는 생활에서 억제 2곳(잠금/해제)' `
   ([regex]::Matches($guiText, "if \(\`$script:mainCategory -ne 'life'\) \{\s*\r?\n\s*Add-GuiLog").Count) '2'
 Assert-Case 'GUI: 생활 시작 전용 안내 존재' ($guiText.Contains('[안내] 채집 자동화: 캐릭터가 필드에 있으면')) 'True'
-# 시간 지정/사유 폴백의 전투 설정 누출 방지 (2차 교차 리뷰)
-Assert-Case 'GUI: 시간 지정 예상치가 대분류별 (생활=채집 대기)' `
-  (($guiText -match "if \(\`$script:mainCategory -eq 'life'\) \{ return \[int\]\`$numGatherWait\.Value \}") -and
-   ($guiText -match '\(Get-Date\)\.AddSeconds\(\(Get-CycleWaitSecondsForEstimate\)\)')) 'True'
+# 시간 지정 추정치는 기타 전용 클리어 대기입니다 (2026-10-02 생활 확장 - 생활은 진행 없음 한도로 미리 멈추거나 시작을 거부하지 않음).
+# 세 값 모두 주석 뺀 함수 사본에서 셉니다 - 옛 줄을 코드에서 지우고 주석에만 남겨도 통과하는 것을 막음 (생활 확장 검토 반영)
+$estimateGuiCode = Remove-SourceComments ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Get-CycleWaitSecondsForEstimate')))
+$timeAllowsGuiCode = Remove-SourceComments ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Test-TimeAllowsNextCycle')))
+Assert-Case 'GUI: 시간 지정 추정치는 기타 전용 클리어 대기 (진행 없음 한도 참조 0 · 클리어 대기 반환 1 · 기타 옛 식 1)' `
+  ('{0}/{1}/{2}' -f ([regex]::Matches($estimateGuiCode, 'numGatherWait')).Count, ([regex]::Matches($estimateGuiCode, 'return \[int\]\$numClearWait\.Value')).Count,
+    ([regex]::Matches($timeAllowsGuiCode, '\(Get-Date\)\.AddSeconds\(\(Get-CycleWaitSecondsForEstimate\)\)')).Count) '0/1/1'
 Assert-Case 'GUI: 코드 4 사유 폴백에 생활 분기 (숨겨진 전투 라디오 미참조)' `
   ($guiText.Contains('조건 충족으로 정지 - 채집 시간 초과/미지원 항목 등')) 'True'
 # 안전 중지 안내가 생활에서도 '던전에서 나오면'이라고 떴습니다 (2026-08-08 사용자 지적).

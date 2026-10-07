@@ -1979,10 +1979,14 @@ $btnManual.Add_Click({
       " 퀘스트 확인 → C(내 정보) → 생활 스킬 → 대상 선택 → 가까운 위치 찾기`n" +
       " → 자동 이동 → 채집 → 퀘스트 소멸 확인 = 1회 완료`n`n" +
       "[설정]`n" +
-      " - 채집 대기: 한 대상을 채집하는 데 기다릴 시간. 권장 1200초.`n" +
-      "   젖소·광맥·뾰족한 나무처럼 이동이 먼 대상은 900초로는 모자랍니다.`n" +
       " - 진행 없음 한도: 수량이 늘지 않는 채로 견디는 시간입니다.`n" +
       "   총 시간 제한이 아니므로, 먼 대상에서 멈추면 이 값을 늘리면 됩니다.`n`n" +
+      "[반복 - 시간 지정]`n" +
+      " - 지정한 시각이 지나면 새 사이클을 시작하지 않습니다.`n" +
+      "   그 전에 시작한 사이클은 퀘스트가 사라질 때(1회 완료)까지`n" +
+      "   하고 멈추므로 지정 시각보다 늦게 끝납니다`n" +
+      "   (대상·수량·이동 거리에 따라 수 분~수십 분).`n" +
+      " - 오늘 그 시각이 이미 지났으면 내일 그 시각으로 잡습니다.`n`n" +
       "[커스텀 반복]`n" +
       " 채집 스킬을 섞어 리스트를 짜고 항목마다 반복 횟수를 정할 수 있습니다.`n" +
       " 진행 위치는 저장되어 다시 켜도 이어집니다.`n`n" +
@@ -2018,8 +2022,8 @@ $btnManual.Add_Click({
       return
     }
     # 모든 설명서 공통 머리말 (콘텐츠와 무관하게 동일 - 사냥터·던전·심층·어비스 설명서가 함께 씀)
-    # 끝의 '[반복 - 시간 지정]' 문단은 전투의 시간 지정 규칙 설명입니다 (시간 지정 '그 판까지' 설계 2.6). 생활·기타 설명서는
-    # 위에서 따로 반환해 이 문단이 들어가지 않습니다 - 생활은 시간 지정 동작이 그대로이기 때문입니다 (조건 5).
+    # 끝의 '[반복 - 시간 지정]' 문단은 전투의 시간 지정 규칙 설명입니다 (시간 지정 '그 판까지' 설계 2.6). 생활 설명서는 같은 머리글의
+    # 생활 문단('사이클' 말투)을 자기 글에 따로 두고(생활 확장 설계 v3 2.5), 기타 설명서에는 없습니다(반복 설정 숨김 - 해당 없음).
     # '넘침은 최대 한 판' 같은 표현은 쓰지 않습니다 - 파티원은 파티장이 계속 시작하면 그 판들까지 따라가는 예외가 있음
     # (사용자 결정 10-02 Q1: 그 예외는 수용, '두 PC 지정 시각 차이' 안내는 넣지 않음)
     $manualCommon = "이 매크로는 게임 화면을 캡처해 글자를 읽는(OCR) 방식으로 동작합니다.`n" +
@@ -8178,25 +8182,24 @@ function Set-UiRunning {
 }
 
 function Get-CycleWaitSecondsForEstimate {
-  # 생활·기타의 시간 지정 판단(시작 거부·다음 사이클)에 쓸 '한 사이클 예상 상한' - 대분류별 설정을 따릅니다.
-  # 전투는 이 상한을 쓰지 않고 '지금 < 목표 시각' 하나로 판단합니다 (시간 지정 '그 판까지' 설계 2.1). 그래서 아래
-  # 클리어 대기 반환은 이제 기타(반복 설정이 숨겨진 채 시간 지정이 남은 경우)의 시작 거부·문구에만 쓰입니다 -
-  # 기타는 '해당 없음'이라 그 식·문구를 지금과 글자까지 같게 둡니다 (설계 6절)
-  # (생활에서 숨겨진 전투 클리어 대기값을 참조하면 목표 시각을 크게 넘기거나 잘못 거부 - 리뷰)
-  if ($script:mainCategory -eq 'life') { return [int]$numGatherWait.Value }
+  # 기타의 시간 지정 판단(시작 거부·다음 회차)에 쓰는 '한 회차 예상 상한' = 클리어 대기. 기타는 반복 설정이 숨겨진 채 시간 지정이
+  # 남은 경우만 닿고, '해당 없음' 이라 그 식·문구를 지금과 글자까지 같게 둡니다 (시간 지정 '그 판까지' 설계 6절).
+  # 전투·생활은 이 상한을 쓰지 않고 '지금 < 목표 시각' 하나로 판단합니다 - 생활은 진행 없음 한도로 미리 멈추거나 시작을 거부하지 않습니다
+  # (2026-10-02 사용자 지시 - 생활 확장 설계 v3 2.6)
   return [int]$numClearWait.Value
 }
 
 function Test-TimeAllowsNextCycle {
-  # 시간 지정의 '새 판 시작' 판단 (시간 지정 '그 판까지' 설계 2.1). 목표 시각이 없으면(시간 지정 아님) 늘 허용합니다.
-  #  - 전투: 지금 < 목표 시각 - 그 전에 시작한 판은 끝까지 합니다 (조건 1. 같은 시각이면 새 판을 시작하지 않음).
-  #          워커가 지정 시각 전에 다음 판으로 이어 간 판은 종료 코드 11 로 받아 이 판단을 건너뜁니다 (조건 4 - Get-NextCycleAction)
-  #  - 생활·기타: 지금 + 사이클 상한 <= 목표 시각 - 기존 그대로 (조건 5. 생활은 사이클 중 도달을 워커가 스스로 멈춤 - 워커 Test-LifeUntilReached)
-  # 전투를 '-eq battle' 로 가르는 이유: '-ne life' 로 가르면 기타가 전투 식을 타서 기타의 시작 거부가 사라집니다
-  # (기타는 해당 없음 - 지금 그대로 둠, 설계 검토 반영). 대분류는 battle/life/etc 셋으로 정규화돼 있습니다 (Set-MainCategory)
+  # 시간 지정의 '새 회차 시작' 판단 (시간 지정 '그 판까지' 설계 2.1 · 생활 확장 설계 v3 2.1). 목표 시각이 없으면(시간 지정 아님) 늘 허용합니다.
+  #  - 전투·생활: 지금 < 목표 시각 - 그 전에 시작한 판·사이클은 끝까지 합니다 (같은 시각이면 새 회차를 시작하지 않음).
+  #          전투 워커가 지정 시각 전에 다음 판으로 이어 간 판은 종료 코드 11 로 받아 이 판단을 건너뜁니다 (Get-NextCycleAction).
+  #          생활 워커는 한 번에 한 사이클이고 지정 시각을 모릅니다 - 사이클이 끝난 뒤(코드 0) 여기서 한 번 정합니다 (어비스 혼자하기와 같음)
+  #  - 기타: 지금 + 클리어 대기 <= 목표 시각 - 기존 그대로 (반복 설정이 숨겨져 해당 없음 - 숨은 시간 라디오가 남은 경우만 닿음)
+  # 기타만 예외로 두는 이유: 시간 지정은 '진행 중인 회차는 끝까지, 새 회차만 안 함' 이 기본입니다 (2026-10-02 사용자 지시).
+  # 대분류는 battle/life/etc 셋으로 정규화돼 있습니다 (Set-MainCategory)
   # 시각은 반드시 Get-Date 로 읽습니다 - 진리표가 Get-Date 를 모의해 경계(지정 시각 -1초/같은 시각/+1초)를 만듭니다
   if ($null -eq $script:targetTime) { return $true }
-  if ($script:mainCategory -eq 'battle') { return ((Get-Date) -lt $script:targetTime) }
+  if ($script:mainCategory -ne 'etc') { return ((Get-Date) -lt $script:targetTime) }
   $estimatedEnd = (Get-Date).AddSeconds((Get-CycleWaitSecondsForEstimate))
   return ($estimatedEnd -le $script:targetTime)
 }
@@ -8224,31 +8227,34 @@ function Test-WorkerTimeJudgeActive {
 }
 
 function Get-TimeStartNotice {
-  # 시간 지정 시작 로그 1줄 (시간 지정 '그 판까지' 설계 2.6) - 전투만 새 규칙 문구, 생활·기타는 기존 문구 그대로 (조건 5)
+  # 시간 지정 시작 로그 1줄 (시간 지정 '그 판까지' 설계 2.6 · 생활 확장 설계 v3 2.3) - 전투 '판'·생활 '사이클' 말투의 새 규칙 문구, 기타는 기존 문구 그대로 (해당 없음)
   # 시작 게이트를 통과해 목표 시각이 정해진 뒤에만 불리므로 $TargetTime 에 $null 이 오지 않습니다 (그래서 [datetime] 으로 받음)
   param([datetime]$TargetTime, [string]$MainCategory)
   $targetText = $TargetTime.ToString('MM-dd HH:mm')
   if ($MainCategory -eq 'battle') { return "시간 지정 모드: $targetText 지나면 새 판을 시작하지 않습니다 - 그 전에 시작한 판은 끝까지 하고 멈춥니다." }
+  if ($MainCategory -eq 'life') { return "시간 지정 모드: $targetText 지나면 새 사이클을 시작하지 않습니다 - 그 전에 시작한 사이클은 끝까지 하고 멈춥니다." }
   return "시간 지정 모드: $targetText 까지 반복합니다."
 }
 
 function Get-TimeStatusSuffix {
-  # 상태줄의 시간 지정 꼬리 (설계 2.6) - 회차 시작(Start-NextCycle)과 안전 중지 취소 두 곳 공용. 전투만 새 문구이고,
-  # 생활·기타 출력은 옛 꼬리와 글자가 같습니다 (조건 5). 시간 지정이 아니면(목표 시각 없음) 빈 문자열입니다.
+  # 상태줄의 시간 지정 꼬리 (설계 2.6 · 생활 확장 v3 2.3) - 회차 시작(Start-NextCycle)과 안전 중지 취소 두 곳 공용. 전투 '그 판까지'·생활
+  # '그 사이클까지' 새 문구이고, 기타 출력은 옛 꼬리와 글자가 같습니다 (해당 없음). 시간 지정이 아니면(목표 시각 없음) 빈 문자열입니다.
   # 문구에 숫자 바로 뒤 조사(이/가)를 붙이지 않습니다 - HH:mm 끝자리에 따라 조사가 바뀌므로 '지나면'·'까지' 꼴로 씁니다
   param($TargetTime = $null, [string]$MainCategory)   # 타입 없이 받습니다 - [datetime] 이면 $null 인자가 변환 실패로 죽음 (PS 5.1, 워커 G 의 UntilTime 과 같은 이유)
   if ($null -eq $TargetTime) { return '' }
   $untilText = ([datetime]$TargetTime).ToString('HH:mm')
   if ($MainCategory -eq 'battle') { return " ($untilText 지나면 그 판까지)" }
+  if ($MainCategory -eq 'life') { return " ($untilText 지나면 그 사이클까지)" }
   return " ($untilText 까지)"
 }
 
 function Get-TimeStopNotice {
-  # 시간으로 다음 회차를 시작하지 않을 때의 안내 1줄 (설계 2.6) - 전투만 새 문구, 생활(·기타)은 기존 문구 그대로 (조건 5)
-  # 전투는 '그 전에 시작한 판은 끝까지' 규칙이라 '남은 시간이 부족' 이 아니라 '지정 시각 이후' 가 사실입니다.
+  # 시간으로 다음 회차를 시작하지 않을 때의 안내 1줄 (설계 2.6 · 생활 확장 v3 2.3) - 전투 '판'·생활 '사이클' 새 문구, 기타는 기존 문구 그대로
+  # 전투·생활은 '그 전에 시작한 회차는 끝까지' 규칙이라 '남은 시간이 부족' 이 아니라 '지정 시각 이후' 가 사실입니다.
   # 기타 워커는 코드 0·10·11 을 내지 않아 실제로 기타 갈래에 닿지 않지만, 대분류 갈래는 다른 문구 함수와 같게 둡니다
   param([string]$TargetText, [string]$MainCategory)
   if ($MainCategory -eq 'battle') { return "지정 시간($TargetText) 이후라 새 판을 시작하지 않습니다." }
+  if ($MainCategory -eq 'life') { return "지정 시간($TargetText) 이후라 새 사이클을 시작하지 않습니다." }
   return "지정 시간($TargetText)까지 남은 시간이 부족해 다음 회차를 시작하지 않습니다."
 }
 
@@ -8433,23 +8439,16 @@ function Start-NextCycle {
   # 시간 지정의 목표 시각을 워커에 전달합니다 (HONEYNOGI_UNTIL_TIME). 매 회차 **먼저 지우고** 아래 조건일 때만 다시
   # 설정합니다 - GUI 프로세스에 남은 값이 다음 비시간 회차·다른 대분류 워커로 새는 것 방지 (커스텀 env 정리와 같은 이유).
   # 전체 타임스탬프인 이유는 자정 넘김(23:50 에 00:30 지정) 모호성 방지입니다.
-  #  ① 생활: 워커가 사이클 **중에도** 도달 시 스스로 멈춥니다 (2026-08-11 실측 ①: GUI 는 사이클이 끝나야 시간을 봐서
-  #     목표를 2분 24초 넘김. 사이클 길이는 이동 거리로 크게 흔들려 예측 불가가 실측됨 - 이슈 문서 참고).
-  #  ② 전투: 판 끝에서 지정 시각을 스스로 판단하는 워커(던전·심층·어비스 파티원 - Test-WorkerTimeJudgeActive)에만 넘깁니다
-  #     (시간 지정 '그 판까지' 설계 2.5). 판 중간 정지용이 아니라 결과 화면·판 경계에서 '다음 판으로 이어 갈지'를 정하는 데 씁니다 -
-  #     이어 가면 워커가 종료 코드 11 로 알리고 GUI 는 시각을 다시 보지 않고 이어받습니다 (판단 주체 하나 - 조건 4).
-  #     어비스 혼자하기·파티장·사냥터는 넘기지 않습니다 (GUI 가 회차 종료 때 판단 - 설계 5절).
-  $env:HONEYNOGI_UNTIL_TIME = ''
-  if (($null -ne $script:targetTime) -and ($script:mainCategory -eq 'life')) {
-    $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm')
-  }
-  # 생활 분기와 합치지 않는 이유: 뜻이 다르고(생활 = 사이클 중 즉시 정지, 전투 = 판 끝 판단) 생산 형식도 다르며(아래),
-  # 생활 배선 단언(test_life_gather 의 '생활 + 시간 지정일 때만 설정')을 그대로 지키기 위해서입니다.
-  # 전투는 문자열을 InvariantCulture 로 만듭니다 (설계 리뷰 1차 P2): 워커 Get-LifeUntilDeadline 은 InvariantCulture 고정 형식으로
+  # 받는 워커는 판 끝에서 지정 시각을 스스로 판단하는 전투 워커(던전·심층·어비스 파티원 - Test-WorkerTimeJudgeActive)뿐입니다
+  # (시간 지정 '그 판까지' 설계 2.5). 판 중간 정지용이 아니라 결과 화면·판 경계에서 '다음 판으로 이어 갈지'를 정하는 데 씁니다 -
+  # 이어 가면 워커가 종료 코드 11 로 알리고 GUI 는 시각을 다시 보지 않고 이어받습니다 (판단 주체 하나 - 조건 4).
+  # 생활·어비스 혼자하기·파티장·사냥터에는 넘기지 않습니다 - 워커가 다음 회차를 확정하지 않으므로 GUI 가 회차가 끝난 뒤 판단합니다
+  # (설계 5절. 생활은 2026-10-02 사용자 지시로 사이클 중 정지를 없앴습니다 - 생활 확장 설계 v3 1·2.4). 기타 워커도 받지 않습니다(반복 설정 숨김).
+  # 문자열은 InvariantCulture 로 만듭니다 (설계 리뷰 1차 P2): 워커 Get-LifeUntilDeadline 은 InvariantCulture 고정 형식으로
   # 해석하는데, 현재 문화권으로 만들면 th-TH 에서는 불기 연도('2569-10-02 21:20')가 경고 없이 '정상' 해석돼 지정 시각이 수백 년
   # 뒤가 되고(워커는 늘 '이어 감' → 코드 11 → GUI 도 시각을 다시 안 봄 = 시간으로 영영 안 멈춤), fi-FI 는 시간 구분자가 '.' 라
   # 해석 실패(경고 뒤 시간 판단 없음)가 됩니다 (2026-10-02 PS 5.1 재현). ko-KR 출력은 바이트 단위로 같습니다.
-  # 생활 분기는 조건 5(생활 그대로)에 따라 기존 식을 글자 그대로 둡니다.
+  $env:HONEYNOGI_UNTIL_TIME = ''
   if (($null -ne $script:targetTime) -and (Test-WorkerTimeJudgeActive)) {
     $env:HONEYNOGI_UNTIL_TIME = $script:targetTime.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
   }
@@ -8478,7 +8477,7 @@ function Start-NextCycle {
   if ($customContext) {
     $lblStatus.Text = "커스텀: $($customContext.Position) 실행 중"
   } else {
-    # 시간 지정 꼬리는 대분류별 문구입니다 (전투 = '지나면 그 판까지', 생활·기타 = 기존 문구) - 안전 중지 취소 상태줄과 같은 함수 (설계 2.7)
+    # 시간 지정 꼬리는 대분류별 문구입니다 (전투 '지나면 그 판까지' · 생활 '지나면 그 사이클까지' · 기타 기존 문구) - 안전 중지 취소 상태줄과 같은 함수 (설계 2.7 · 생활 확장 v3 2.3)
     $statusSuffix = Get-TimeStatusSuffix -TargetTime $script:targetTime -MainCategory $script:mainCategory
     $lblStatus.Text = "${cycleNumber}회차 실행 중...$statusSuffix"
   }
@@ -9160,18 +9159,17 @@ function Invoke-StartAutomation {
       $candidate = (Get-Date).Date.AddHours($untilTod.Hours).AddMinutes($untilTod.Minutes)
       if ($candidate -le (Get-Date)) { $candidate = $candidate.AddDays(1) }
       $script:targetTime = $candidate
-      # 시작 거부는 생활·기타에만 남습니다 (조건 5 - 기존 그대로, 거부 문구도 글자 그대로). 전투는 지정 시각이 미래면 시작합니다
-      # (조건 2 - 위 계산이 목표를 늘 '지금보다 뒤'로 잡음, 시간 지정 '그 판까지' 설계 2.4).
-      # 전투가 이 게이트를 아예 타지 않는 이유: 지정 시각 정각 직전에 [시작]하면 두 번의 Get-Date 사이에 분이 바뀌어
-      # '지금 < 목표' 가 거짓이 될 수 있는데, 그때 옛 '클리어 대기' 거부 문구가 전투에 다시 찍히지 않게 하려는 것입니다
-      # (그 경우 첫 워커는 지정 시각 정각에 시작해 그 판을 마치고 멈춥니다 - 넘침 한 판)
-      if (($script:mainCategory -ne 'battle') -and (-not (Test-TimeAllowsNextCycle))) {
-        $estimateLabel = $(if ($script:mainCategory -eq 'life') { '진행 없음 한도' } else { '클리어 대기' })
-        Add-GuiLog "[안내] 지정 시간($($script:targetTime.ToString('HH:mm')))까지 남은 시간이 ${estimateLabel}($(Get-CycleWaitSecondsForEstimate)초)보다 짧아 시작할 수 없습니다."
+      # 시작 거부는 기타에만 남습니다 (기타는 해당 없음 - 기존 그대로, 거부 문구 출력도 글자 그대로). 전투·생활은 지정 시각이 미래면
+      # 시작합니다 (위 계산이 목표를 늘 '계산 시각보다 뒤'로 잡음 - 시간 지정 '그 판까지' 설계 2.4 · 생활 확장 설계 v3 2.2).
+      # 전투·생활이 이 게이트를 아예 타지 않는 이유: 지정 시각 정각 직전에 [시작]하면 두 번의 Get-Date 사이에 분이 바뀌어
+      # '지금 < 목표' 가 거짓이 될 수 있는데, 그때 옛 거부 문구가 다시 찍히지 않게 하려는 것입니다
+      # (그 경우 첫 워커는 지정 시각 정각에 시작해 그 판·사이클을 마치고 멈춥니다 - 넘침 한 회차)
+      if (($script:mainCategory -eq 'etc') -and (-not (Test-TimeAllowsNextCycle))) {
+        Add-GuiLog "[안내] 지정 시간($($script:targetTime.ToString('HH:mm')))까지 남은 시간이 클리어 대기($(Get-CycleWaitSecondsForEstimate)초)보다 짧아 시작할 수 없습니다."
         $script:targetTime = $null
         return
       }
-      # 시작 로그 1줄 - 전투만 새 규칙 문구, 생활·기타는 기존 문구 그대로 (Get-TimeStartNotice)
+      # 시작 로그 1줄 - 대분류별 문구 (전투 '판' / 생활 '사이클' / 기타 기존 문구 - Get-TimeStartNotice)
       Add-GuiLog (Get-TimeStartNotice -TargetTime $script:targetTime -MainCategory $script:mainCategory)
     }
     # 커스텀 반복은 상단 횟수/시간과 택일 관계 - 라디오가 비활성이라 실질 방어용 강제 해제
@@ -9179,8 +9177,8 @@ function Invoke-StartAutomation {
     # 파티원(⑥e) 시작 안내 1줄 (사용자 결정 09-30 D4). 문구는 D1 에 맞춥니다 - 입장 요청마다(클리어 뒤 포함)
     # '준비 완료'를 누르고 이어 가며, 정지 사유에서만 '나가기'로 필드에 나온 뒤 멈춥니다. 팝업이 아니라 로그라
     # 무인 운용과 무관합니다 (규칙 6). 이 자리(반복 설정 뒤)인 이유: 판정이 이번 실행의 customActive(위에서 확정)를
-    # 보기 때문입니다. (시간 지정 시작 게이트는 이제 생활·기타만 막으므로 전투 전용인 이 안내와 겹치지 않습니다 -
-    # 시간 지정 '그 판까지' 설계 2.4)
+    # 보기 때문입니다. (시간 지정 시작 게이트는 이제 기타만 막으므로 전투 전용인 이 안내와 겹치지 않습니다 -
+    # 시간 지정 '그 판까지' 설계 2.4 · 생활 확장 설계 v3 2.2)
     # 대기 한도 N초 = 워커의 클리어 대기 설정(timeoutsSeconds.dungeonClear) - 이 함수 앞부분의 Save-SettingsFromUi 가 이 값을 저장했습니다.
     if (Test-AbyssMemberRunActive) { Add-GuiLog "[안내] 파티원: 파티장의 입장 요청마다 '준비 완료'를 누르고 따라 들어갑니다(클리어 뒤 다음 요청도 같음). 마지막 회차·안전 중지·지정 시간·대기 한도(클리어 대기 $([int]$numClearWait.Value)초) 초과 때는 '나가기'로 필드에 나온 뒤 멈춥니다 - 파티장 PC 도 함께 정지해 주세요" }
     # 실행 중에는 화면 꺼짐/절전을 막습니다 (감지가 화면 렌더링에 의존)
