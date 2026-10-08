@@ -77,6 +77,7 @@
 | `mabinogi_run_once.ps1` | 1회차 실행 본체 — 클릭·OCR·키 입력 (exe에 내장됨) |
 | `config.json` | 설정 파일 (좌표·대기시간·키 등, 한국어 설명 포함) |
 | `rdp_redirect_console.ps1` | RDP 자동 전환 내부 스크립트 |
+| `icons\` | 프로그램이 쓰는 아이콘의 원본 보관 폴더 — exe 아이콘(app.ico)은 빌드에 쓰이고, 나머지는 스크립트에 사본이 들어 있어 따로 복사할 필요 없음 |
 
 - exe는 실행 시 스크립트를 `%LOCALAPPDATA%\HoneyNogi`로 추출해 실행합니다. (구버전 `MabinogiAuto` 폴더의 설정은 최초 실행 때 자동으로 이어받습니다)
 - exe 업데이트 시 좌표/구조는 자동 최신화되고 사용자 설정은 유지됩니다.

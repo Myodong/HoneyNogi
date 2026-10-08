@@ -24,6 +24,9 @@
 #      살아 있는 판독에서만(RLP1~RLP7 - 출처 없는 선택 화면은 누르지 않고 조정 마감이면 진단 + 코드 4). 필드 모양은 W 초 확정 뒤에만 ESC(RLP8 -
 #      입장 직후·보스 오독이 같은 두 판독으로 필드 모양을 냄)
 #   ⑩ 리뷰 6차 조건: 정상 복귀 중 짧은 사용자 입력 두 가지(W 누적 도중 / 필드 ESC 뒤·메뉴 판독 전)는 입력 중 자동 클릭 0, 코드 1·4 없이 출처 있는 완료 1
+#   ⑪ ESC 메뉴 '어비스' 아이콘 폴백 (2026-10-07 설계 v2 10.3 - RLI0~RLI10): 글자 탐색이 유효 캡처에서 실패하고 그 회전의 메뉴 판정이 2차 신호('게임 종료')
+#      만으로 참일 때만 아이콘을 찾아 같은 클릭 블록으로 누름. 글자·아이콘 판독의 캡처 실패 회전(가드 두 줄)은 미발견·클릭 없이 끝내고, 토큰(출처) 없는
+#      메뉴·던전 안 메뉴에서는 부르지 않음. 클릭 무반응·오클릭·지속 필드 오독(수용 위험 R10)의 결말은 특성으로 고정
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
@@ -219,6 +222,9 @@ function Test-AbyssSelectionScreen { param($Game)
 }
 function Test-AbyssMenu { param($Game)
   $r = Read-Mock 'Test-AbyssMenu' ($script:screen -eq 'menu' -or $script:screen -eq 'menuInside'); if ($r) { $script:menuChecks++ }
+  # 메뉴 판정 신호 (설계 v2 10.3 ④ · D-R - 운영 Test-AbyssMenu 는 세 반환 갈래 모두 $script:lastAbyssMenuSignal 에 대입): 참이면 사례 값 menuSignalMode
+  # (기본 'exit-label' = 관측 4건의 '게임 종료' 만으로 메뉴인 모양), 거짓(캡처 실패 포함)이면 ''. 복귀 루프는 이 값이 'exit-label' 인 회전에서만 아이콘을 찾음
+  $script:lastAbyssMenuSignal = $(if ($r) { $script:menuSignalMode } else { '' })
   if ($script:armMisclick -and $script:screen -eq 'detail') {
     # RL7(c) 방아쇠: '어비스' 클릭 뒤 확인 루프의 6번째 메뉴 음성 **직후** 실패 창 30초를 엶 (오클릭 판정의 첫 판독부터 실패), 창 가운데(15초) 선택 화면으로
     $script:menuNegCount++
@@ -232,7 +238,15 @@ function Test-AbyssMenu { param($Game)
   return $r
 }
 function Test-HomeEndEscHud { param($Game) return (Read-Mock 'Test-HomeEndEscHud' ($script:screen -eq 'field' -or $script:screen -eq 'fieldMisread' -or $script:screen -eq 'inside')) }
-function Test-InDungeonQuest { param($Game) return (Read-Mock 'Test-InDungeonQuest' ($script:screen -eq 'inside')) }
+function Test-InDungeonQuest { param($Game)
+  # 추적기 판독문 진단 (설계 v2 10.3 ③ · 6.4 - 운영 Test-InDungeonQuest 는 판독마다 정규화 판독문을 $script:lastQuestTrackerText 에 남김, 판정에는 안 씀):
+  # 유효한 필드 판독 = 'FIELDMOCK'(복귀 루프가 토큰 발급 줄에서 떠 두어 아이콘 찾음 줄 꼬리에 남기는지 RLI1 이 봄 - 변이 V18), 던전 안 = 'INSIDEMOCK',
+  # 캡처 실패 = ''(운영은 빈 OCR 결과)
+  $questSerialBefore = $script:captureFailSerial
+  $questInside = Read-Mock 'Test-InDungeonQuest' ($script:screen -eq 'inside')
+  $script:lastQuestTrackerText = $(if ($script:captureFailSerial -ne $questSerialBefore) { '' } elseif ($questInside) { 'INSIDEMOCK' } else { 'FIELDMOCK' })
+  return $questInside
+}
 function Test-ExitButton { param($Game) return (Read-Mock 'Test-ExitButton' ($script:screen -eq 'reward')) }
 function Test-NoticeBoardPopup { param($Game)
   # 필드 표본 뒤의 판독 - N번째 호출에서 일시 캡처 실패 + 그 공백 중 화면 전이를 모의 (4차 리뷰 P1 '세탁')
@@ -261,8 +275,23 @@ function Find-GameTextPoint { param($Game, $ReferenceX, $ReferenceY, $RegionWidt
   $ok = Read-Mock ('Find-GameTextPoint:' + $SearchText) $true
   if (-not $ok) { return $null }
   if ($SearchText -eq 'ESC') { return @{ X = 1102; Y = 74 } }
-  if ($SearchText -eq '어비스') { return @{ X = 971; Y = 531 } }
+  # 메뉴 '어비스' 글자 (설계 v2 10.3 ①): textAbyssMode 'miss' = 유효 캡처에서 못 찾음(렌더 이상으로 글자가 깨진 메뉴). 캡처 실패는 기존 failOnceAt 장치
+  if ($SearchText -eq '어비스') { if ($script:textAbyssMode -eq 'miss') { return $null }; return @{ X = 971; Y = 531 } }
   return $null
+}
+# 메뉴 '어비스' 아이콘 탐색 모의 (설계 v2 10.3 ② - 운영 Find-AbyssMenuIconPoint 계약): 캡처 실패 중이면 캡처 없이 capture-failed / 캡처 1회(판독 모의 -
+# 실패 규칙에 걸리면 capture-failed) / 메뉴 화면('menu'·'menuInside')이고 iconMode 'found' 면 found + 라벨 상당점 (971,531)(Send-Mock 이 X=971 을 어비스
+# 클릭으로 봄), 아니면 not-found(수치는 설계 6.1 미발견 꼬리 표본). 호출 시각·화면을 남겨 '어느 화면에서 불렀나' 를 봅니다
+function Find-AbyssMenuIconPoint { param($Game)
+  $script:iconCalls++; [void]$script:iconTimes.Add((Elapsed)); [void]$script:iconScreens.Add($script:screen)
+  $iconResult = [pscustomobject]@{ Status = 'not-found'; Point = $null; Score = 0.612; Second = 0.590; Size = 28; CenterX = 971.0; CenterY = 503.0
+    ElapsedMs = 600; FirstUse = ($script:iconCalls -eq 1); Window = '1272x717·DPI 96' }
+  if ($script:screenCaptureFailing) { $iconResult.Status = 'capture-failed'; return $iconResult }
+  if (-not (Read-Mock 'Find-AbyssMenuIconPoint' $true)) { $iconResult.Status = 'capture-failed'; return $iconResult }
+  if ($script:iconMode -eq 'found' -and ($script:screen -eq 'menu' -or $script:screen -eq 'menuInside')) {
+    $iconResult.Status = 'found'; $iconResult.Point = @{ X = 971; Y = 531 }; $iconResult.Score = 0.913; $iconResult.Second = 0.500; $iconResult.Size = 30
+  }
+  return $iconResult
 }
 # 복구 탐침 모의 (⑥e 2.13 - 동결 블록의 입력 없는 복구 캡처): 판독 모의와 같은 등록을 하고 호출 시각을 남겨 '실패 창 안 캡처 시도 최대 간격' 을 봅니다
 function Test-CaptureRecovered { param($Game)
@@ -370,6 +399,11 @@ function Reset-Case {
   $script:helperBottomReads = 0; $script:rl3FailName = ''; $script:rl3WithPoint = $false
   $script:armMisclick = $false; $script:menuNegCount = 0; $script:variant = ''; $script:armYieldRead = $false
   $script:rl4Mode = $false; $script:rl4Queues = @{}; $script:rl4Trace = New-Object 'System.Collections.Generic.List[string]'
+  # 메뉴 '어비스' 아이콘 폴백 (설계 v2 10.3): 글자 결과 found / 아이콘 결과 found(출처 없는 메뉴 사례 전부 기본 found - not-found 면 아이콘을 잘못된 자리에서
+  # 불러도 누르지 않아 '클릭 0' 이 그대로 통과함) / 메뉴 판정 신호 'exit-label'(관측 4건 모양 - 'abyss-text' 가 기본이면 아이콘 사례가 전부 호출 0 이 됨)
+  $script:textAbyssMode = 'found'; $script:iconMode = 'found'; $script:menuSignalMode = 'exit-label'
+  $script:lastAbyssMenuSignal = ''; $script:lastQuestTrackerText = ''
+  $script:iconCalls = 0; $script:iconTimes = New-Object 'System.Collections.Generic.List[double]'; $script:iconScreens = New-Object 'System.Collections.Generic.List[string]'
 }
 function Run-Loop { param([int]$SafeStopExitCode = 0)
   try { Return-ToAbyssSelection -Game $null -SafeStopExitCode $SafeStopExitCode } catch { $script:threw = $_.Exception.Message }
@@ -798,6 +832,114 @@ Reset-Case -Screen 'reward'
 $script:helperResult = 'expired'
 Run-Loop
 Check-True "4) 헬퍼 'expired' → throw, 헬퍼 호출 1, 부모 마감 전달" ((ThrewTimeout) -eq 1 -and $script:helperCalls -eq 1 -and $null -ne $script:helperParent) "(헬퍼 $($script:helperCalls))"
+
+# ── 11. RLI ESC 메뉴 '어비스' 아이콘 폴백 (2026-10-07 설계 v2 10.3 - 설계 리뷰 ①·② 합의) ─────────────────────────────
+# 글자 탐색이 유효 캡처에서 못 찾은 회전에서만, 그리고 그 회전의 메뉴 판정이 2차 신호('게임 종료')만으로 참일 때만 아이콘을 찾아 같은 클릭 블록으로
+# 누릅니다(사용자 결정 2026-10-02 - 글자 먼저, 못 찾으면 아이콘). 실사고 4건(09-15 타 PC '어H|스' / 10-01·10-02 콘솔 전환 뒤 '어HI스')은 한 메뉴의
+# 글자가 끝까지 안 읽혀 60초 마감 → 코드 1 이었습니다. 모의(Reset-Case 기본값): 글자 결과 textAbyssMode · 아이콘 결과 iconMode · 메뉴 판정 신호
+# menuSignalMode · 추적기 판독문 'FIELDMOCK'. 시각은 하니스 가상 시계(판독 0초 + 대기만 흐름)라 실제보다 짧아 코드·횟수만 단언합니다
+function MissLogs { return (Count-Log "메뉴에서 '어비스' 글자를 찾지 못했습니다") }
+function IconFoundLogs { return (Count-Log '아이콘으로 찾았습니다') }
+function IconClickLogs { return (Count-Log '어비스 메뉴 클릭 \(아이콘 탐색 화면좌표') }
+function TextClickLogs { return (Count-Log '어비스 메뉴 클릭 \(글자 탐색 화면좌표') }
+function IconCallsOn { param([string]$Screen) return @($script:iconScreens | Where-Object { $_ -eq $Screen }).Count }
+# RLI0 글자 성공 (회귀 기준): 지금과 같은 경로 - 아이콘 코드 0회
+Reset-Case -Screen 'field'
+Run-Loop
+Check-Equal 'RLI0 글자 성공: 아이콘 호출 0, 글자 클릭 로그 1, 아이콘 찾음·클릭 로그 0, 어비스 1, 복귀 확인 1, 미발견 0, 코드·throw 없음' ("$($script:iconCalls)/$(TextClickLogs)/$(IconFoundLogs)/$(IconClickLogs)/$($script:abyssClicksSent)/$(Done)/$(MissLogs)/$($script:exitCode)/$($script:threw)") '0/1/0/0/1/1/0//'
+# RLI1 글자 유효 실패 + 아이콘 found → 같은 클릭 블록으로 누르고 출처 있는 완료 (결말 변화: 지금은 60초 → 코드 1). 찾음 줄 꼬리에 필드 확정 때 추적기
+#      판독문(토큰 발급 줄의 스냅숏 - 변이 V18)과 메뉴 판정 신호(설계 리뷰 ② P1-2)가 남고, 클릭 줄은 탐색 출처 '아이콘 탐색'(변이 V10)
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'
+Run-Loop
+Check-Equal 'RLI1 글자 실패 + 아이콘 found: 아이콘 호출 1, 찾음 로그 1, 아이콘 클릭 로그 1, 글자 클릭 로그 0, 어비스 1, 복귀 확인 1, 미발견 0, 던전 안 클릭 0, 코드·throw 없음' ("$($script:iconCalls)/$(IconFoundLogs)/$(IconClickLogs)/$(TextClickLogs)/$($script:abyssClicksSent)/$(Done)/$(MissLogs)/$($script:abyssClickedFromInside)/$($script:exitCode)/$($script:threw)") '1/1/1/0/1/1/0/0//'
+$rli1Found = [string](@($script:logs | Where-Object { $_ -match '아이콘으로 찾았습니다' }) | Select-Object -First 1)
+Check-True "RLI1 찾음 줄: 본문 바로 뒤 ' (판독: 일치도 …' 꼬리, 필드 확정 때 추적기 'FIELDMOCK', 끝이 '메뉴 판정 신호 exit-label)'" ($rli1Found -match '\[어비스\] 메뉴의 ''어비스'' 글자가 읽히지 않아 아이콘으로 찾았습니다 \(판독: 일치도 0\.913, 2등 0\.500, 크기 30, [^\r\n]*, 필드 확정 때 추적기 ''FIELDMOCK'', 메뉴 판정 신호 exit-label\)$') "($rli1Found)"
+$rli1Click = [string](@($script:logs | Where-Object { $_ -match '어비스 메뉴 클릭 \(' }) | Select-Object -First 1)
+Check-True "RLI1 클릭 줄 = '어비스 메뉴 클릭 (아이콘 탐색 화면좌표 971,531)' (아이콘 결과의 라벨 상당점 그대로)" ($rli1Click -match '\[어비스\] 어비스 메뉴 클릭 \(아이콘 탐색 화면좌표 971,531\)$') "($rli1Click)"
+# RLI2 글자 유효 실패 + 아이콘 not-found 지속: 누르지 않음(고정 좌표 폴백 금지 - 08-08 광고 배너 실사고), 미발견 줄은 전부 아이콘 판독 꼬리이고 아이콘을
+#      찾은 회전마다 한 번, 3회째 진단, 지금과 같은 마감 throw
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:iconMode = 'notfound'
+Run-Loop
+$rli2Untailed = @($script:logs | Where-Object { $_ -match '글자를 찾지 못했습니다' -and $_ -notmatch ' - 재시도 \(\d+\) \(판독: 아이콘 일치도 [0-9.]+, 2등 [0-9.]+, 크기 \d+ - 기준 미달, 창 [^\r\n]+\)$' }).Count
+Check-Equal 'RLI2 아이콘 not-found 지속: 어비스 0, 미발견 ≥ 1 이고 전부 아이콘 판독 꼬리, 미발견 수 = 아이콘 호출 수, 진단 문맥, 마감 throw, 코드 없음' ("$($script:abyssClicksSent)/$([int]((MissLogs) -ge 1))/$rli2Untailed/$([int]((MissLogs) -eq $script:iconCalls))/$($script:diagContext)/$(ThrewTimeout)/$($script:exitCode)") '0/1/0/1/어비스 메뉴 항목 미발견/1/'
+# RLI3 글자 탐색 캡처 실패 1회 (가드#1 - 규칙 15): 그 회전은 아이콘 0·미발견 0 → 다음 회전 동결(토큰 폐기) → 메뉴 닫기 → 필드 재증명 → 글자로 완료
+Reset-Case -Screen 'field'
+$script:failOnceAt = @{ 'Find-GameTextPoint:어비스' = 1 }
+Run-Loop
+Check-Equal 'RLI3 글자 캡처 실패: 아이콘 호출 0, 미발견 0, 안전 확인 1, 메뉴 닫기 1, ESC 2, 어비스 1, 복귀 확인 1' ("$($script:iconCalls)/$(MissLogs)/$($script:safeStopCalls)/$($script:keyVerified)/$($script:escClicksSent)/$($script:abyssClicksSent)/$(Done)") '0/0/1/1/2/1/1'
+# RLI4 글자 유효 실패 + 아이콘 캡처 실패 1회 (가드#2): 그 회전은 클릭 0·미발견 0 → 동결 → 닫기 → 재증명 → 새 메뉴의 두 번째 아이콘으로 완료
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:failOnceAt = @{ 'Find-AbyssMenuIconPoint' = 1 }
+Run-Loop
+Check-Equal 'RLI4 아이콘 캡처 실패: 아이콘 호출 2, 미발견 0, 메뉴 닫기 1, ESC 2, 어비스 1, 복귀 확인 1' ("$($script:iconCalls)/$(MissLogs)/$($script:keyVerified)/$($script:escClicksSent)/$($script:abyssClicksSent)/$(Done)") '2/0/1/2/1/1'
+# RLI5 아이콘 found + 클릭 생략(user-active) → 양보 중 던전 안 메뉴: 생략 자리의 토큰·출처 폐기가 그대로 막음 (2절 글자 경로 P1 과 같은 결과 - 규칙 4)
+Reset-Case -Screen 'field' -SendSeq @('sent', 'user-active')
+$script:textAbyssMode = 'miss'; $script:screenAfterYield = 'menuInside'
+Run-Loop
+$rli5SkipLogs = Count-Log '어비스 메뉴 클릭 건너뜀 \(사용자 조작\)'
+Check-Equal 'RLI5 아이콘 클릭 생략 → 양보 중 던전 안 메뉴: 어비스 0, 던전 안 클릭 0, 메뉴 닫기 1, 코드 4, 양보 1, 던전 안 메뉴에서 아이콘 호출 0, 생략 로그 1, 아이콘 클릭 로그 0' ("$($script:abyssClicksSent)/$($script:abyssClickedFromInside)/$($script:keyVerified)/$($script:exitCode)/$($script:yieldWaits)/$(IconCallsOn 'menuInside')/$rli5SkipLogs/$(IconClickLogs)") '0/0/1/4/1/0/1/0'
+# RLI6 (특성 - 설계 4.3) 아이콘 클릭 무반응 지속(메뉴 그대로): 클릭 전송 직후 토큰 소비 → 같은 메뉴를 다시 누르지 않고 닫기·필드 재증명 반복 →
+#      네 번째 닫기가 필요해지는 시점에 기존 코드 4 (문구는 기존 '(던전 안일 수 있음)' - 원인과 다른 문구는 범위 밖, 사용자 결정 Q8 이슈 목록 등재)
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:abyssLeadsTo = 'menu'
+Run-Loop
+$rli6StopLogs = Count-Log '필드를 확인하지 못한 채 메뉴가 계속 열려 있어[^\r\n]*\(던전 안일 수 있음\)'
+Check-Equal 'RLI6 아이콘 클릭 무반응 지속: 어비스 4, 메뉴 닫기 3, 코드 4, 정지 문구 1, throw 없음, 던전 안 클릭 0' ("$($script:abyssClicksSent)/$($script:keyVerified)/$($script:exitCode)/$rli6StopLogs/$($script:threw)/$($script:abyssClickedFromInside)") '4/3/4/1//0'
+# RLI6b (특성) 아이콘 오클릭 지속(매번 다른 화면 → 오클릭 ESC 로 메뉴): 오클릭 ESC → 토큰 없는 메뉴 닫기 → 재증명을 되풀이하다 60초 마감 throw(코드 1)가
+#       네 번째 닫기(코드 4)보다 먼저
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:abyssLeadsTo = 'detail'; $script:escDetailLeadsTo = 'menu'
+Run-Loop
+Check-Equal 'RLI6b 아이콘 오클릭 지속: 어비스 3, 오클릭 ESC 3, 메뉴 닫기 3, 마감 throw, 코드 없음, 던전 안 클릭 0' ("$($script:abyssClicksSent)/$($script:keyOnce)/$($script:keyVerified)/$(ThrewTimeout)/$($script:exitCode)/$($script:abyssClickedFromInside)") '3/3/3/1//0'
+# RLI6c (설계 리뷰 ① P3) 아이콘 클릭 첫 회 무반응(메뉴 그대로) → 토큰 소비 → 닫기·필드 재증명 → 새 메뉴에서 다시 아이콘 → 클릭 반응 → 출처 있는 완료
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:abyssLeadsTo = 'menu'
+$script:onAbyssClick = { $script:abyssLeadsTo = 'selection' }   # 첫 클릭은 메뉴 그대로, 다음 클릭부터 선택 화면
+Run-Loop
+Check-Equal 'RLI6c 아이콘 클릭 일시 무반응: 어비스 2, 메뉴 닫기 1, 복귀 확인 1, 코드 없음, throw 없음, 아이콘 호출 2' ("$($script:abyssClicksSent)/$($script:keyVerified)/$(Done)/$($script:exitCode)/$($script:threw)/$($script:iconCalls)") '2/1/1///2'
+# RLI6d (설계 리뷰 ① P3 · 09-15 경로) 아이콘 오클릭 → 오클릭 ESC 로 선택 화면: 클릭 전송 뒤 발급한 선택 화면 출처가 살아 있어(오클릭 경로는 출처를
+#       지우지 않음) 다음 회전 서두에서 완료 (호출부 코드 0/10)
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:abyssLeadsTo = 'detail'
+Run-Loop
+Check-Equal 'RLI6d 아이콘 오클릭 → ESC 로 선택 화면: 어비스 1, 오클릭 ESC 1, 메뉴 닫기 0, 복귀 확인 1, 코드 없음, throw 없음, 던전 안 클릭 0' ("$($script:abyssClicksSent)/$($script:keyOnce)/$($script:keyVerified)/$(Done)/$($script:exitCode)/$($script:threw)/$($script:abyssClickedFromInside)") '1/1/0/1///0'
+# RLI7 (C7) 출처 없는 메뉴(시작부터 열림) + 글자 실패 + 아이콘 found: 그 메뉴에서는 아이콘 호출 0·클릭 0 - 닫고 필드를 증명한 뒤 워커가 연 메뉴에서만 아이콘
+Reset-Case -Screen 'menu'
+$script:textAbyssMode = 'miss'
+Run-Loop
+$rli7FirstIcon = $(if ($script:iconTimes.Count -ge 1) { $script:iconTimes[0] } else { -1 })
+$rli7FirstEsc = $(if ($script:escTimes.Count -ge 1) { $script:escTimes[0] } else { 99999 })
+Check-Equal 'RLI7 출처 없는 메뉴: 첫 아이콘 호출은 워커 ESC 뒤, 메뉴 닫기 1, 어비스 1, 복귀 확인 1' ("$([int]($rli7FirstIcon -gt $rli7FirstEsc))/$($script:keyVerified)/$($script:abyssClicksSent)/$(Done)") '1/1/1/1'
+# RLI7b (C7) 출처 없는 던전 안 메뉴 + 글자 실패 + 아이콘 found: 아이콘 호출 0, 어비스 0, 던전 안 클릭 0, 닫기 1 → 던전 안 확인 코드 4
+Reset-Case -Screen 'menuInside'
+$script:textAbyssMode = 'miss'
+Run-Loop
+Check-Equal 'RLI7b 출처 없는 던전 안 메뉴: 아이콘 호출 0, 어비스 0, 던전 안 클릭 0, 메뉴 닫기 1, 코드 4' ("$($script:iconCalls)/$($script:abyssClicksSent)/$($script:abyssClickedFromInside)/$($script:keyVerified)/$($script:exitCode)") '0/0/0/1/4'
+# RLI8 (C7) 토큰 발급 뒤 캡처 공백 중 던전 안 메뉴(3절 3b 장치) + 아이콘 found: 메뉴 분기 입구의 토큰 대조가 폐기 → 아이콘 호출 0·클릭 0 → 닫기 → 코드 4
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:panelFailAfterEsc = $true; $script:screenAtPanelFail = 'menuInside'
+Run-Loop
+Check-Equal 'RLI8 발급 뒤 캡처 공백 + 던전 안 메뉴: 아이콘 호출 0, 어비스 0, 던전 안 클릭 0, 메뉴 닫기 1, 코드 4' ("$($script:iconCalls)/$($script:abyssClicksSent)/$($script:abyssClickedFromInside)/$($script:keyVerified)/$($script:exitCode)") '0/0/0/1/4'
+# RLI9 (특성 - 수용 위험 R10, 사용자 결정 Q7 (a)) 지속 필드 오독('fieldMisread' - 던전 안인데 추적기 던전명 없음이 W 를 넘게 이어짐) → ESC → 던전 안 메뉴:
+#      글자 경로(정상 렌더 - 글자 성공)·아이콘 경로(렌더 이상 - 글자 실패 + 아이콘 found) 모두 던전 안 클릭 1·완료 1. 폴백은 글자 경로의 기존 잔여 위험을
+#      렌더 이상 상태로 넓힐 뿐 새 경로가 아님 - 수용한 위험의 모양을 고정합니다 (동작이 바뀌면 이 사례가 알림)
+Reset-Case -Screen 'fieldMisread'
+Run-Loop
+$rli9Text = "$($script:abyssClickedFromInside)/$(Done)/$($script:iconCalls)"
+Reset-Case -Screen 'fieldMisread'
+$script:textAbyssMode = 'miss'
+Run-Loop
+$rli9Icon = "$($script:abyssClickedFromInside)/$(Done)/$($script:iconCalls)"
+Check-Equal 'RLI9 지속 필드 오독 → 던전 안 메뉴 (수용 위험 R10): 던전 안 클릭/완료/아이콘 호출 = 글자 경로 1/1/0 | 아이콘 경로 1/1/1' "$rli9Text|$rli9Icon" '1/1/0|1/1/1'
+# RLI10 (D-R - 설계 리뷰 ① P2) 메뉴 판정이 1차 신호('어비스'/'비스' 조각)로 참인 회전 + 글자 유효 실패 지속: 아이콘을 찾지 않음(아이콘 일치는 '그 그림이
+#       하나뿐' 만 보장 - '메뉴임' 은 '게임 종료' 로만 참인 회전이 따로 보증). 미발견 줄은 전부 '아이콘 탐색 안 함' 꼬리, 지금과 같은 마감 throw
+Reset-Case -Screen 'field'
+$script:textAbyssMode = 'miss'; $script:menuSignalMode = 'abyss-text'
+Run-Loop
+$rli10Untailed = @($script:logs | Where-Object { $_ -match '글자를 찾지 못했습니다' -and $_ -notmatch ' - 재시도 \(\d+\) \(판독: 아이콘 탐색 안 함 - [^\r\n]+\)$' }).Count
+Check-Equal "RLI10 1차 신호 메뉴 + 글자 실패 지속: 아이콘 호출 0, 어비스 0, 미발견 ≥ 1 이고 전부 '아이콘 탐색 안 함' 꼬리, 마감 throw, 코드 없음" ("$($script:iconCalls)/$($script:abyssClicksSent)/$([int]((MissLogs) -ge 1))/$rli10Untailed/$(ThrewTimeout)/$($script:exitCode)") '0/0/1/0/1/'
 
 if ($fails -gt 0) { "FAIL: $fails 건"; exit 1 }
 "OK: 전부 통과"

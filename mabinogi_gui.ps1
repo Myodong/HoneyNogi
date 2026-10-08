@@ -759,7 +759,7 @@ function Convert-WorkerLogLineForGui {
   # 요청 - "(Y=575, 근거 text)"·"(링크 탐색 530,390)" 은 쓰는 사람에게 의미가 없음).
   # 진단 키워드로 시작하는 **줄 끝 괄호 덩어리만** 지우므로 오류 사유 등 사용자에게 필요한
   # 괄호 문구는 그대로 남습니다. 워커 파일 원본은 무변경 - 제보 원격 진단은 무손실.
-  $Line = $Line -replace ' \((?:Y=|링크 탐색 |판독: |표본: |글자 탐색 |화면좌표 )[^\r\n]*\)\s*$', ''
+  $Line = $Line -replace ' \((?:Y=|링크 탐색 |판독: |표본: |글자 탐색 |아이콘 탐색 |화면좌표 )[^\r\n]*\)\s*$', ''
   # 클릭 지점의 '기준좌표 (x,y)' 꼬리도 같은 진단 꼬리입니다 (2026-10-02 사용자 요청 - "[어비스] 나가기 클릭
   # - 글자 탐색 기준좌표 (491,662)" 의 좌표는 쓰는 사람에게 의미가 없음). 위 규칙은 괄호로 '시작하는' 꼬리만
   # 지워 이 모양이 그대로 보이고 있었습니다. 워커가 찍는 모양은 두 가지뿐입니다 (워커 4곳 - 소스 전수는
@@ -1762,8 +1762,9 @@ $form.MinimumSize = New-Object System.Drawing.Size(560, 700)
 $form.MaximizeBox = $true
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
-# 창/작업표시줄 아이콘: 스크립트 폴더에 app.ico 가 있으면 사용합니다 (exe가 실행 시 추출)
+# 창/작업표시줄 아이콘: exe 실행은 추출된 app.ico, 저장소에서 직접 실행하면 icons\app.ico (2026-10 아이콘 폴더로 이동)
 $appIconPath = Join-Path $scriptRoot 'app.ico'
+if (-not (Test-Path -LiteralPath $appIconPath)) { $appIconPath = Join-Path $scriptRoot 'icons\app.ico' }
 if (Test-Path -LiteralPath $appIconPath) {
   try { $form.Icon = New-Object System.Drawing.Icon($appIconPath) } catch { }
 }
@@ -3986,7 +3987,7 @@ $script:lifeSkills = @(
   @{ Id = 'fishing'; Name = '낚시';      Targets = @('작은 낚시터', '남쪽 성벽 낚시터', '동쪽 성벽 낚시터', '동쪽 호수 낚시터', '해변 낚시터', '옛 낚시터', '하구 낚시터', '서쪽 호수 낚시터', '산속 낚시터', '미지의 낚시터') }
 )
 # 채집 스킬 아이콘 (게임 화면 캡처 원본 104px → 24px 축소, PNG base64 내장.
-# 원본: 던전이미지\생활\*.png - exe 는 이미지 파일을 추출하지 않으므로 스크립트에 내장.
+# 원본: icons\<키>.png(해독 바이트 그대로), 104px 캡처 원본은 던전이미지\생활\ - exe 는 이미지 파일을 추출하지 않으므로 스크립트에 내장.
 # 채집 대상 아이콘은 캡처 수급 후 같은 방식으로 추가 예정 - 지금은 글자 카드)
 $script:lifeSkillIconB64 = @{
   daily = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAQvSURBVEhLjVVNbFRVFL7tzHSm8/fOuT/vZ/oTWkit2I0x1KYRN2KkqW5QsVo1IUZTUYQYQuKCPxOILkBBN001xrSEykIoQReNoXEnNlLcmf6xQigbCrigJviZ+2Y6dN5U7JeczLx77/m+c8875zwh/gfZbKCZ/a2Kg32aC18oVRhSqnBcy+ADw01PCdFYH/VZE/L5/HpmfZIpWFBcgJENcFUjXPPAjCpAycI0kflISpmPcvwnpDTvM+vbSnpg9iEpgJJ+xDxo5cHoBrimAK39P5j9nihXFDVK6W+NLhKEArRSoLi2mmlZgFY+FJu9UdIyFLtfK+WD2a0wyW4VYYWxB8n2vw+tAih2B6LcgvL0ro2A2aZlbQJ2vT6VQyxWh2RdOny2HJrd+zIvO8vknCo0EZm/lKomX02AySARr0ddIo3u7s0YHBzE4UOHkbIijoErAxjyLgshYqGA4/gnpLR5riZfKUCOQaw2iXR9Fs/3voCzZ8ewtPQ3lvHO2wOI1SRh2IOnAjDr7cKWF7O5KcOKiZKX1koRZzOEl196FRcvTpRJV+L69QW0trQhn5VhqpjVuJDSfbaa3D7bHPtIJrOIx5LY+lwvJiZ+jnJW4Y3Xd4TB2BKWrO8KZrNPykjlkA8mD0LE0d7egZGRU1GeKkz+Oon3du5CU2MLyNGlHvEhmN0vKwXsS/QQj6fQ3/8mbty4GeWqwp07d9HSsgFCiBK5Dy09GBVAEJmhlQKSAwhRh23bXiwTXJn6HXt2f4ienl68sr0Po6PfVQgMDg4hHqurqDTNHowM7A3M8ZUC9SmC7zVhfn4+dB4ePoVDBz9GW1t7GKE1x2HMzxX3p6dn0NDQhGzWqeoTo/zwBruWBYhMGP1XQ9+EzmNj5zF6+kxYjgMDO5FIJEGORC7r4NKlyfDM/v0HQ1GtVmlGKyBz3pPMJhRIJFLo63stdJyZnsWxY5/h2rU/ce7ceRw4cAhC1CCfIwR+A+bnruL+/X/Q1dWNVDK9qoAtfyHEEwkiNWMFbMsPD49g8dYijh75BIu3bmN8/CdMTV3Bjh1vobY2jkw6h/ZHNoZBzM7O2WYCOao46CLRE5nTpU7mvVIaOI7CunXrw5wePfIp7t1bwonPT2J6ehatrRvC1NgUKWlw+bcp/HDhx7Dm7bALh1zFDQyIaHMo4HlehkheldJFLicRj9ejo+NxdHZ2Y+OjHdi0qQuZTD4cJdbsC21ubkF7+2PhecUBtB01/OA7way+Lw+74i2cLUS6WKrSQyZDSKVy5d+V3b68n0475XU7r5b3mM2ClLKhQqAoIvcUD0RHx9qsJHaPSD8d5S6DSO9mO8+r5tPDrVTqNvItUc4qMJtuIvcXJYNlx1WslJrSiCdpzjAHzVGuh6GW8m4/kzdO5N6xNyqaX0qFByK9QI467TjuM1HnZfwLbuEEPn8bWPEAAAAASUVORK5CYII='

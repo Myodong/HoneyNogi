@@ -19,6 +19,8 @@
 #      ⑥a 의 두 출구는 D·퇴장 절차 P 로 바뀜, 4절), 시작 패널 대기·판정 루프는 스윕 참·복구 회전·탐침 복구 뒤 회전도 조정 마감을 보고 서두 동결은
 #      마감을 되돌리지 않음(2.12·2.13). 복귀 루프는 만료 판정이 모두 Get-FreezeAdjustedDeadline(양보 + 캡처 실패 누적 차분), 동결 블록은 양보 게이트 앞
 #      복구 탐침 + continue 형, 선택 화면은 워커 자신의 '어비스' 클릭 출처가 살아 있을 때만 완료(회전 서두 한 곳), 필드 모양은 W 초 확정 뒤에만 ESC(2.14)
+#   ⑥ ESC 메뉴 '어비스' 아이콘 폴백 (2026-10-07 설계 v2 10.4): 클릭 로그의 탐색 출처는 변수 $abyssMenuFoundBy - '글자 탐색' 은 글자 탐색 바로 뒤,
+#      '아이콘 탐색' 은 아이콘 found 블록 안 각 1곳. 클릭 블록·토큰 소비·선택 화면 출처 발급은 그대로 하나 (행동은 test_abyss_return_loop RLI 사례)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
@@ -101,7 +103,19 @@ Check-Equal '배선: 복귀 루프 - 필드를 직접 확인(fieldProven)한 뒤
 Check-Equal '배선: 복귀 루프 - fieldProven 은 필드 확인 뒤 ESC 클릭이 실제 전송됐을 때만 발급' ([bool]($ret -match 'Write-RunLog ''\[어비스\] ESC 클릭''\s*\$fieldProven = \$true')) 'True'
 # 2026-09-30 ⑥e 설계 2.14: 양보 앞 폐기 줄 끝에 선택 화면 출처 폐기('; $selectionExpected = $false')가 같은 줄로 붙어 두 번째 조항의 줄 끝을 [^\r\n]* 로
 #   넓힙니다 - 토큰·연속 수 폐기가 양보 호출 바로 앞 줄에 있어야 한다는 뜻은 그대로이고, 출처 폐기는 아래 ③ 의 '양보 호출 수 = 출처 폐기 줄 수' 가 봅니다
-Check-Equal '배선: 복귀 루프 - 양보·캡처 실패·재매칭 패널·던전 안에서 토큰 폐기, 어비스 클릭에서 소비' (([regex]::Matches($ret, '\$fieldProven = \$false').Count -ge 5) -and ([bool]($ret -match '\$fieldProven = \$false; \$insideStreak = 0; \$insideSince = \$null[^\r\n]*\s*Invoke-UserYieldWithDeadline')) -and ([bool]($ret -match '어비스 메뉴 클릭 \(글자 탐색 화면좌표[^\r\n]*\r?\n\s*\$fieldProven = \$false'))) 'True'
+# 2026-10-07 ESC 메뉴 '어비스' 아이콘 폴백 (설계 v2 10.4): 클릭 로그의 탐색 출처가 고정 글자 '글자 탐색' 에서 변수 $abyssMenuFoundBy 로 바뀌어
+#   (글자 탐색 성공 = '글자 탐색' / 아이콘 found = '아이콘 탐색') 이 단언과 아래 출처 발급 단언의 접두를 '\(\$abyssMenuFoundBy 화면좌표' 로 바꿨습니다 -
+#   클릭 블록은 그대로 하나이고(복제 금지), 클릭 로그 바로 다음 줄이 토큰 소비라는 뜻은 같습니다
+Check-Equal '배선: 복귀 루프 - 양보·캡처 실패·재매칭 패널·던전 안에서 토큰 폐기, 어비스 클릭에서 소비' (([regex]::Matches($ret, '\$fieldProven = \$false').Count -ge 5) -and ([bool]($ret -match '\$fieldProven = \$false; \$insideStreak = 0; \$insideSince = \$null[^\r\n]*\s*Invoke-UserYieldWithDeadline')) -and ([bool]($ret -match '어비스 메뉴 클릭 \(\$abyssMenuFoundBy 화면좌표[^\r\n]*\r?\n\s*\$fieldProven = \$false'))) 'True'
+# 탐색 출처 대입 (설계 v2 10.4 · 7.4): '글자 탐색' 은 글자 탐색(Find-GameTextPoint '어비스') 바로 다음 문장 1곳 - 아이콘 found 가 아니면 클릭 로그는
+#   항상 '글자 탐색' 이어야 합니다. '아이콘 탐색' 은 아이콘 결과가 found 인 블록 안(중첩 블록 밖) 1곳 - 다른 자리에서 대입하면 글자로 찾은 클릭이
+#   '아이콘 탐색' 으로 찍히거나(로그 거짓) 아이콘 클릭이 '글자 탐색' 으로 남습니다 (워커 전체 기준 각 1곳, 주석 뺀 사본)
+Check-Equal "배선(설계 v2 10.4): 탐색 출처 '글자 탐색' 대입은 워커 전체 1곳이고 메뉴 '어비스' 글자 탐색 바로 다음 문장" (
+  ([regex]::Matches($src, "\`$abyssMenuFoundBy = '글자 탐색'").Count -eq 1) -and
+  ([bool]($ret -match "\`$abyssMenuPoint = Find-GameTextPoint -Game \`$Game -ReferenceX \`$rgAbyssMenu\[0\][^\r\n]*(?:\r?\n[^\r\n]*)?-SearchText '어비스' -ExactText '어비스' -Scale 4\s*\r?\n\s*\`$abyssMenuFoundBy = '글자 탐색'"))) 'True'
+Check-Equal "배선(설계 v2 10.4): 탐색 출처 '아이콘 탐색' 대입은 워커 전체 1곳이고 아이콘 결과 found 블록 안 (중첩 블록 밖)" (
+  ([regex]::Matches($src, "\`$abyssMenuFoundBy = '아이콘 탐색'").Count -eq 1) -and
+  ([bool]($ret -match "if \(\`$abyssMenuIcon\.Status -eq 'found'\) \{[^{}]*\`$abyssMenuFoundBy = '아이콘 탐색'"))) 'True'
 $retLoop = $ret.Substring($ret.IndexOf('while ($true) {'))
 # ⑥e 설계 2.13 (09-30 리뷰4·리뷰5 ②): 만료 판정은 5곳 모두 `(Get-Date) -ge (Get-FreezeAdjustedDeadline -Deadline ([ref]$deadline) …` 형입니다 - 표식 블록·
 #   패널 분기·출처 없는 선택 화면·복구 회전·일반. 플래그·일련번호 조건은 기존 둘(패널 분기·일반) 그대로이고, 순서(패널 판독 < 패널 분기 판정 / 선택 화면 판정
@@ -232,7 +246,7 @@ Check-Equal '배선(⑥e 2.14 ③): 1) 선택 화면 - 출처 유효(기준 = �
   (-not ($sb -match 'Click-|Press-Key|Focus-Game')) -and $retRecovered.Success -and ($retSel.Index -lt $retRecovered.Index)) 'True'
 Check-Equal '배선(⑥e 2.14 ③): 출처 발급 1곳 - 어비스 메뉴 클릭 전송 확인 로그·토큰 소비 뒤, 2초 대기 앞, 같은 줄에 기준값 둘(캡처 실패 일련번호·양보 누적)' (
   ([regex]::Matches($ret, '\$selectionExpected = \$true').Count -eq 1) -and
-  ([bool]($ret -match '어비스 메뉴 클릭 \(글자 탐색 화면좌표[^\r\n]*\r?\n\s*\$fieldProven = \$false\s*\$selectionExpected = \$true; \$selectionExpectedSerial = \$script:captureFailSerial; \$selectionExpectedYieldMs = \[double\]\$script:userYieldTotalMs\s*Start-Sleep -Seconds 2'))) 'True'
+  ([bool]($ret -match '어비스 메뉴 클릭 \(\$abyssMenuFoundBy 화면좌표[^\r\n]*\r?\n\s*\$fieldProven = \$false\s*\$selectionExpected = \$true; \$selectionExpectedSerial = \$script:captureFailSerial; \$selectionExpectedYieldMs = \[double\]\$script:userYieldTotalMs\s*Start-Sleep -Seconds 2'))) 'True'
 Check-Equal '배선(⑥e 2.14 ③): 확인 루프 - 그 시도의 판독 직전 일련번호로 출처를 보고 완료 예약 + break, 루프 뒤 완료 예약이면 오클릭 판정 없이 continue, 완료 예약 대입 = 초기화 1 + 확인 루프 1 + 1) 1' (
   ([bool]($ret -match '\$confirmSerial = \$script:captureFailSerial\s*if \(Test-AbyssSelectionScreen -Game \$Game\) \{\s*\$selectionConfirmed = Test-AbyssSelectionProvenance -Expected \$selectionExpected -ExpectedSerial \$selectionExpectedSerial\s*`?\s*-ExpectedYieldMs \$selectionExpectedYieldMs -ReferenceSerial \$confirmSerial -YieldMs \(\[double\]\$script:userYieldTotalMs\)\s*break\s*\}')) -and
   ($ret.IndexOf('if ($selectionConfirmed) { continue }') -gt 0) -and ($ret.IndexOf('if ($selectionConfirmed) { continue }') -lt $ret.IndexOf('-not (Test-AbyssSelectionScreen')) -and

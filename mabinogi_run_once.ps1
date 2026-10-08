@@ -2231,6 +2231,9 @@ if (-not $ocrEnglishEngine) {
   $ocrEnglishEngine = $ocrKoreanEngine
 }
 
+# P/Invoke(HoneyNogiInput)와 ESC 메뉴 '어비스' 아이콘 일치 계산(HoneyNogiIconMatch)을 한 번에 컴파일합니다. 아이콘 계산을 첫 폴백 때 따로(지연)
+# 컴파일하지 않는 이유: 지연 컴파일의 실패는 '사용 불가' 로 삼켜져 기능이 전 PC 에서 무동작인 채 남을 수 있고(2026-08-09 커서 대피 무동작과 같은 계열),
+# 여기서는 컴파일 오류가 모든 실행과 회귀(test_type_availability)에서 즉시 드러납니다. 매칭 형은 mscorlib 만 씁니다 (설계 v2 3.6)
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -2323,6 +2326,151 @@ public static class HoneyNogiInput {
 
   [DllImport("wtsapi32.dll")]
   public static extern void WTSFreeMemory(IntPtr pMemory);
+}
+
+// ESC 메뉴 '어비스' 아이콘 일치 계산 (Return-ToAbyssSelection 메뉴 분기의 글자 탐색 폴백). mscorlib 만 씁니다 - 이미지는 호출부가 32bpp BGRA 바이트로 넘깁니다.
+// 알고리즘은 오프라인 평가와 같습니다 - 알파 가중 템플릿, 영평균 정규화 상호상관, 평탄 창 0점, 크기별 봉우리 4개(±19 억제), 2등 = 최고 중심 ±20 밖 최고.
+public static class HoneyNogiIconMatch
+{
+    public const int SeparationReference = 20;
+    public const int PeaksPerSize = 4;
+    static readonly System.Collections.Generic.Dictionary<int, double[]> templates = new System.Collections.Generic.Dictionary<int, double[]>();
+
+    public static void ClearTemplates() { templates.Clear(); }
+    public static int TemplateCount { get { return templates.Count; } }
+
+    // 크기 size 캔버스(32bpp BGRA, 행 간격 stride)의 알파만 가중치로 등록
+    public static void SetTemplate(int size, byte[] bgra, int stride)
+    {
+        if (size <= 0 || bgra == null || stride < size * 4 || bgra.Length < stride * size) throw new System.ArgumentException("template bytes do not match the size");
+        double[] template = new double[size * size];
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+                template[y * size + x] = bgra[y * stride + x * 4 + 3];
+        templates[size] = template;
+    }
+
+    // 반환 { best, bestCx, bestCy, bestSize, second, secondCx, secondCy, secondSize } - 중심은 영역 비트맵 안의 px
+    public static double[] Match(byte[] bgra, int stride, int width, int height)
+    {
+        if (templates.Count == 0) throw new System.InvalidOperationException("templates are not prepared");
+        if (bgra == null || width <= 0 || height <= 0 || stride < width * 4 || bgra.Length < stride * height) throw new System.ArgumentException("region bytes do not match the size");
+        double[] gray = new double[width * height];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                int index = y * stride + x * 4;
+                gray[y * width + x] = 0.114 * bgra[index] + 0.587 * bgra[index + 1] + 0.299 * bgra[index + 2];
+            }
+        double[] sum1, sum2;
+        Integrals(gray, width, height, out sum1, out sum2);
+        System.Collections.Generic.List<int> sizes = new System.Collections.Generic.List<int>(templates.Keys);
+        sizes.Sort();
+        System.Collections.Generic.List<double[]> peaks = new System.Collections.Generic.List<double[]>();
+        foreach (int size in sizes)
+            foreach (double[] peak in NccPeaks(gray, width, height, sum1, sum2, templates[size], size))
+                peaks.Add(new double[] { peak[0], peak[1] + size / 2.0, peak[2] + size / 2.0, size });
+        double[] result = new double[] { 0, -1, -1, 0, 0, -1, -1, 0 };
+        bool hasBest = false;
+        foreach (double[] candidate in peaks)
+        {
+            if (!hasBest || candidate[0] > result[0])
+            {
+                result[0] = candidate[0]; result[1] = candidate[1]; result[2] = candidate[2]; result[3] = candidate[3];
+                hasBest = true;
+            }
+        }
+        bool hasSecond = false;
+        foreach (double[] candidate in peaks)
+        {
+            if (System.Math.Abs(candidate[1] - result[1]) < SeparationReference && System.Math.Abs(candidate[2] - result[2]) < SeparationReference) continue;
+            if (!hasSecond || candidate[0] > result[4])
+            {
+                result[4] = candidate[0]; result[5] = candidate[1]; result[6] = candidate[2]; result[7] = candidate[3];
+                hasSecond = true;
+            }
+        }
+        return result;
+    }
+
+    static void Integrals(double[] image, int width, int height, out double[] sum1, out double[] sum2)
+    {
+        int stride = width + 1;
+        sum1 = new double[stride * (height + 1)];
+        sum2 = new double[stride * (height + 1)];
+        for (int y = 0; y < height; y++)
+        {
+            double row1 = 0, row2 = 0;
+            for (int x = 0; x < width; x++)
+            {
+                double value = image[y * width + x];
+                row1 += value; row2 += value * value;
+                sum1[(y + 1) * stride + x + 1] = sum1[y * stride + x + 1] + row1;
+                sum2[(y + 1) * stride + x + 1] = sum2[y * stride + x + 1] + row2;
+            }
+        }
+    }
+
+    static System.Collections.Generic.List<double[]> NccPeaks(double[] image, int width, int height, double[] sum1, double[] sum2, double[] template, int size)
+    {
+        System.Collections.Generic.List<double[]> peaks = new System.Collections.Generic.List<double[]>();
+        int outWidth = width - size + 1, outHeight = height - size + 1;
+        if (outWidth <= 0 || outHeight <= 0) return peaks;
+        int count = size * size;
+        double sumT = 0, sumT2 = 0;
+        System.Collections.Generic.List<int> offsetY = new System.Collections.Generic.List<int>();
+        System.Collections.Generic.List<int> offsetX = new System.Collections.Generic.List<int>();
+        System.Collections.Generic.List<double> weights = new System.Collections.Generic.List<double>();
+        for (int ty = 0; ty < size; ty++)
+            for (int tx = 0; tx < size; tx++)
+            {
+                double value = template[ty * size + tx];
+                sumT += value; sumT2 += value * value;
+                if (value != 0) { offsetY.Add(ty); offsetX.Add(tx); weights.Add(value); }
+            }
+        double templateMean = sumT / count;
+        double templateVar = sumT2 - sumT * sumT / count;
+        if (templateVar <= 1e-9) return peaks;
+        double[] cross = new double[outWidth * outHeight];
+        int[] oy = offsetY.ToArray(); int[] ox = offsetX.ToArray(); double[] wt = weights.ToArray();
+        for (int y = 0; y < outHeight; y++)
+        {
+            int destination = y * outWidth;
+            for (int k = 0; k < wt.Length; k++)
+            {
+                int source = (y + oy[k]) * width + ox[k];
+                double weight = wt[k];
+                for (int x = 0; x < outWidth; x++) cross[destination + x] += weight * image[source + x];
+            }
+        }
+        double[] score = new double[outWidth * outHeight];
+        int integralStride = width + 1;
+        double minVar = count * 0.25;
+        for (int y = 0; y < outHeight; y++)
+            for (int x = 0; x < outWidth; x++)
+            {
+                int a = y * integralStride + x, b = a + size, c = (y + size) * integralStride + x, d = c + size;
+                double sI = sum1[d] - sum1[b] - sum1[c] + sum1[a];
+                double sI2 = sum2[d] - sum2[b] - sum2[c] + sum2[a];
+                double varI = sI2 - sI * sI / count;
+                double value = 0;
+                if (varI > minVar) value = (cross[y * outWidth + x] - templateMean * sI) / System.Math.Sqrt(varI * templateVar);
+                score[y * outWidth + x] = value;
+            }
+        bool[] suppressed = new bool[outWidth * outHeight];
+        for (int p = 0; p < PeaksPerSize; p++)
+        {
+            double best = double.NegativeInfinity; int bestIndex = -1;
+            for (int i = 0; i < score.Length; i++) if (!suppressed[i] && score[i] > best) { best = score[i]; bestIndex = i; }
+            if (bestIndex < 0) break;
+            int bx = bestIndex % outWidth, by = bestIndex / outWidth;
+            peaks.Add(new double[] { best, bx, by });
+            int y0 = System.Math.Max(0, by - SeparationReference + 1), y1 = System.Math.Min(outHeight - 1, by + SeparationReference - 1);
+            int x0 = System.Math.Max(0, bx - SeparationReference + 1), x1 = System.Math.Min(outWidth - 1, bx + SeparationReference - 1);
+            for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) suppressed[y * outWidth + x] = true;
+        }
+        return peaks;
+    }
 }
 '@
 
@@ -6040,6 +6188,8 @@ function Test-MenuExitLabel {
   return (($ocrText -replace '\s', '').Contains('종료'))
 }
 
+$script:lastAbyssMenuSignal = ''   # Test-AbyssMenu 가 마지막으로 참을 낸 신호 - 'abyss-text'(1차 '어비스'/'비스') / 'exit-label'(2차 '게임 종료' 만) / ''(거짓)
+
 function Test-AbyssMenu {
   param([System.Diagnostics.Process]$Game)
 
@@ -6050,12 +6200,157 @@ function Test-AbyssMenu {
   $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssMenu[0] -ReferenceY $rgAbyssMenu[1] `
     -RegionWidth $rgAbyssMenu[2] -RegionHeight $rgAbyssMenu[3] -Scale 4 -Engine $ocrKoreanEngine
   $normalized = $ocrText -replace '\s', ''
-  if ($normalized.Contains('어비스') -or $normalized.Contains('비스')) { return $true }
+  if ($normalized.Contains('어비스') -or $normalized.Contains('비스')) { $script:lastAbyssMenuSignal = 'abyss-text'; return $true }
   # 2차 신호: 4번째 줄 글자가 통째로 깨지는 PC(OCR 엔진 차이)에서도 메뉴 열림을 놓치지 않게
   # 다른 위치의 메뉴 전용 문구('게임 종료')로 한 번 더 확인합니다.
   # (이 판정이 없으면 메뉴가 열린 채 공지사항의 'Home' 배지가 HUD로 오인되어
   #  ESC 위치를 재클릭 → 우편함이 열리는 사고가 남 - 2026-07-17 04:25 실측)
-  return (Test-MenuExitLabel -Game $Game)
+  # 어느 신호로 참인지 남깁니다 - 복귀 루프의 아이콘 폴백은 2차 신호만으로 메뉴인 회전에서만 엽니다(관측 4건 모두 이 모양 - 설계 v2 D-R). 판정 값은 같습니다
+  if (Test-MenuExitLabel -Game $Game) { $script:lastAbyssMenuSignal = 'exit-label'; return $true }
+  $script:lastAbyssMenuSignal = ''
+  return $false
+}
+
+# ===== ESC 메뉴 '어비스' 아이콘 탐색 (Return-ToAbyssSelection 메뉴 분기의 글자 탐색 폴백) =====
+# 실사고 4건(09-15 타 PC 네이티브 1908 '어H|스' / 10-01 17:31·10-02 15:52·10-02 17:14 개발 PC 콘솔 전환 뒤 '어HI스'): 메뉴의 '어비스' 글자가 렌더 이상으로
+# 깨져 한 메뉴에서 글자 탐색이 끝까지 실패 → 60초 마감 → 코드 1. 사용자 결정(2026-10-02): 글자로 먼저 찾고, 못 찾으면 아이콘 그림으로 찾는다.
+# 판정 = 알파 가중 템플릿의 영평균 정규화 상호상관(NCC) - 계산은 시작 Add-Type 의 HoneyNogiIconMatch, 이미지 준비·캡처는 아래 함수들.
+# 상수는 config 가 아니라 스크립트 상수입니다 (coordsVersion·configSchemaVersion 무관). 회귀 tests\test_abyss_menu_icon.ps1 이 이 대입문을 소스에서 캡처해 계약값을 고정 단언하고(B1① - 값을 바꾸려면 설계 재합의) 관측 경계와도 대조합니다(B1②).
+$abyssMenuIconMinSize    = 24     # 관측 최적 크기 25~32 기준 px(1272·1908@150%·네이티브 1908) + 양쪽 1px. 점수가 크기에 날카로워(±1px 에서 최대 -0.16) 1px 간격 필수
+$abyssMenuIconMaxSize    = 33
+$abyssMenuIconMinScore   = 0.80   # 메뉴 열림 양성 best 최소 0.894(178장) / 메뉴 밖 화면 최대 0.595 / 메뉴 안 다른 아이콘(2등) 최대 0.592
+$abyssMenuIconMinMargin  = 0.20   # best - 2등: 양성 최소 0.313. 같은 그림이 두 곳 보이면(합성 2개 = 차이 0) 누르지 않음
+$abyssMenuIconLabelRatio = 0.91   # 클릭점 = 아이콘 중심 + 0.91 x 크기 아래 = '어비스' 라벨 중심 (글자 탐색 성공 145장에서 세로 오차 최대 0.70 기준 px)
+# 아이콘 원본 = icons\abyssMenu.png 와 같은 바이트 (exe 는 이미지 파일을 추출하지 않으므로 스크립트에 내장 - GUI 생활 아이콘과 같은 방식).
+# 두 사본의 일치는 tests\test_icon_assets.ps1 과 빌드 검사가 지킵니다. 손으로 옮기지 말고 그 테스트(또는 빌드)가 출력하는 줄을 그대로 붙일 것
+$script:workerIconB64 = @{
+  abyssMenu = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAFSklEQVR4nO2bz4tcRRDHPxsSMOohLqgEFWV946+jFxGR5CSz/jiLoIclIMpmsiI5Lxj/AN09CAqakxdPAeNMFITd4EXEw16M7GwSQUQEURGR4A/Kw+vOvu2t6tfvTb+MsPuFZma6q6uq61VXV3e/mRER9jIOTFuBaWPfANNWYNrYN8C0FZg29rwBDt4gOQ8DTwKPAI8Bc8CdAc1PwBXgK+AbYB241LViMx3nAQPgBeBxTXbwW1PkS+BDYARs5VXNSxXpoqxIPcI+dVjpQtfcDAcJA2lrAI9BTp1zTYECGAK9Bn1SpoCFEXCKDNMixyrQp/ngJ8W8k9mflNGkHnAMWGsrO/jdRpER8HRL+aUSGabACqU7xjCmVBZKT5lHN8DI0eJoYl61Ciw10lRDpmBiRf3fJgxaAxH5tctAmHMFOCki/1aUXBGRIgPfQkSGFb7PR4zVWF4bhYZir8n93E8oGGDfaPMeOOzaAC9XnkRjYR2VqneIiLzSlQHmROSXQNhQ0t3usOORIudwAt09IvK17MYfiXIQkUZ5wBJwW1Dn1+Oipu8A2CAt7zjgaAc1dJ8Djyr1t9BkdWjgATHE5rx30c0GsjYrHmbR1O03kjwzVaFYjh8bWHV+VgfTdwPwJQxwVj/LUBqSNk9Nn4gGKzKHwckrFDOm96Tw6VpGaPtgGhlgLiLkiogcSlTMK3Qiwu+E2AbXptlNInI1wq82GKYYYCEi4AOFvojQFyLSi7T3EvqH8s5G6BcU+h0lJSofi7SdVermI/RD97mutK0HNBo03msR+pjuQNqydG+k7TulLrZ89YDPgItK20XXFtsAabzXIvQx3YG03eAl4CGrf/D7IPAncKiOaUv8DdwM/BPUW4P4lvJA1kSKB9xh1I+VuqN0N3gc76OJuoCt+3WkGGA2gcajy8G3kVGre+6LkZ8z88shI5ymO5ByMfKmUf+JUvc7pTt2dT44djJCvAQ8Y/SJBrncFyMF9nzMhR4ZL0lyTwG/hq9Srtk5jDF2vFYDGXlQlyk1KNX8vZq7L4jIRiRbs7ARZHLVvUW2W6JYYyF6Tv6xQRsipDkuIu8YPD02Hc1xpX8ILS0+b/A0t8YxA4S7OY93FVpt82PtEn2pGqJu59aX3dA2R+8ZOptb6lgMqDvlqcNqhMeAnStFDzuFLtie/21hjyXxCVWROgU8FkXk9gptynkArs9ihDZ1CohEPKyNAcSgt6aMSHm5cVX0Sw6LNgbLpS2YBmi7DGqXkqewl70jwH3usw6e1sIY/Squ1UVpWwNoCmwZ9blhXYu3kh0zQCzbmke3+AXsA5EVV2D7lZmPgLfc9yeA74FzFTpN7gWlvh+RC7GxWHNDRJ4SkWs188paX7VA52mX3edJVzcrImdc3ZKr04KqdfRu5Sse19xY1HGm7AXqlkPLutVr8zHwQJ2gAJtsL5Wxq/C2+pWIeECO4tEmda2m1p3p2PWLkj6B8U+hAJbd92XKA4tZ4IyrW2L7ifo+kyZBUWjnAYuULzR61BnpL/c5YneA+oJyGjwLvA+8DrxKea/3Btt3ja8BnwJvAw8Cp10fzyNEwbahwvvKELdWvv8InN/RGrhEk9fcQmjJSSxDTIUWaGNJVx12JEVhEKwGnjbQjp+2gPtb8ruMHuQmPcW5rmfo3pMeZWnKnqYcSFNcdn1TZLRG7iD4nFJ3jlLpmYalcH1D3J1T4dwGsC5QcuKunMxCA3R9oPm/Q2iAkUqVjhtxL/BDVm7B8nJkgiWmyQtTk5a2Om6KyIsSWQb3HPb8f4b2DTBtBaaNfQNMW4FpY88b4D+HPyrnLUKXRwAAAABJRU5ErkJggg=='
+}
+$script:abyssMenuIconTemplatesReady = $false   # 크기별 템플릿 등록 여부 - 첫 폴백 때 한 번 (평소 회차는 글자 탐색이 성공해 이 비용이 없음)
+
+function Get-BitmapBgraBytes {
+  param([System.Drawing.Bitmap]$Bitmap)
+
+  # 비트맵 전체를 32bpp BGRA 바이트로 복사합니다 (Invoke-OcrOnBitmap 의 LockBits 관용구와 같은 순서 - 바이트 순서 B,G,R,A).
+  # 바이트 배열을 그대로 돌려주면 파이프라인에서 풀리므로(규칙 3) 바이트·행 간격·크기를 객체 하나로 돌려줍니다
+  $lockRect = New-Object System.Drawing.Rectangle(0, 0, $Bitmap.Width, $Bitmap.Height)
+  $lockData = $Bitmap.LockBits($lockRect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  try {
+    $pixelBytes = New-Object byte[] ($lockData.Stride * $Bitmap.Height)
+    [System.Runtime.InteropServices.Marshal]::Copy($lockData.Scan0, $pixelBytes, 0, $pixelBytes.Length)
+    return [pscustomobject]@{ Bytes = $pixelBytes; Stride = $lockData.Stride; Width = $Bitmap.Width; Height = $Bitmap.Height }
+  } finally {
+    $Bitmap.UnlockBits($lockData)
+  }
+}
+
+function Initialize-AbyssMenuIconTemplates {
+  # 첫 폴백 때 한 번: 내장 아이콘(base64)을 크기마다 투명 캔버스에 HighQualityBicubic 으로 줄여 그리고, 그 알파를 매칭 형에 등록합니다 (약 0.04초).
+  # 실패를 삼키지 않습니다 - 해독·그리기는 모든 판독이 이미 쓰는 GDI+ 경로라 실패면 코드 결함이고, 예외가 최상위 catch 로 올라가 오류 세트(코드 1)가
+  # 원인을 남깁니다. 조용히 '사용 불가' 로 꺼 두면 2026-08-09 커서 대피처럼 기능이 전 PC 에서 무동작인 채 아무도 모릅니다
+  if ($script:abyssMenuIconTemplatesReady) { return }
+  $iconStream = New-Object System.IO.MemoryStream(, [Convert]::FromBase64String([string]$script:workerIconB64['abyssMenu']))
+  try {
+    $iconImage = [System.Drawing.Image]::FromStream($iconStream)
+    try {
+      # FromStream 은 스트림 수명에 묶이므로 Bitmap 사본으로 그립니다 (GUI 아이콘 해독과 같은 계약)
+      $iconBitmap = New-Object System.Drawing.Bitmap($iconImage)
+      try {
+        [HoneyNogiIconMatch]::ClearTemplates()
+        for ($templateSize = $abyssMenuIconMinSize; $templateSize -le $abyssMenuIconMaxSize; $templateSize++) {
+          $templateCanvas = New-Object System.Drawing.Bitmap($templateSize, $templateSize, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+          try {
+            $canvasGraphics = [System.Drawing.Graphics]::FromImage($templateCanvas)
+            try {
+              $canvasGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+              $canvasGraphics.Clear([System.Drawing.Color]::Transparent)
+              $canvasGraphics.DrawImage($iconBitmap, (New-Object System.Drawing.Rectangle(0, 0, $templateSize, $templateSize)))
+            } finally {
+              $canvasGraphics.Dispose()
+            }
+            $canvasPixels = Get-BitmapBgraBytes -Bitmap $templateCanvas
+            [HoneyNogiIconMatch]::SetTemplate($templateSize, $canvasPixels.Bytes, $canvasPixels.Stride)
+          } finally {
+            $templateCanvas.Dispose()
+          }
+        }
+      } finally {
+        $iconBitmap.Dispose()
+      }
+    } finally {
+      $iconImage.Dispose()
+    }
+  } finally {
+    $iconStream.Dispose()
+  }
+  $script:abyssMenuIconTemplatesReady = $true
+}
+
+function Test-AbyssMenuIconAccept {
+  param([double]$Best, [double]$Second)
+
+  # 아이콘 일치 수락 (순수 - 진리표 대상): 최고 일치도가 임계 이상 **그리고** 다른 자리 최고(2등)와의 차이도 임계 이상일 때만
+  return (($Best -ge $abyssMenuIconMinScore) -and (($Best - $Second) -ge $abyssMenuIconMinMargin))
+}
+
+function Get-AbyssMenuIconClickPoint {
+  param($Capture, [double]$CenterX, [double]$CenterY, [int]$Size)
+
+  # 아이콘 중심(캡처 비트맵 안 px)에서 '어비스' 라벨 상당점을 구해, 같은 캡처의 환산으로 화면 좌표를 돌려줍니다 (순수 - 진리표 대상).
+  # 라벨 = 관측된 정상 클릭 자리(글자 탐색 클릭). 역환산 식은 Find-GameTextPoint 와 같습니다 - 탐지와 클릭이 같은 환산을 왕복
+  $labelX = $CenterX
+  $labelY = $CenterY + ($abyssMenuIconLabelRatio * $Size)
+  $screenX = $Capture.CropLeft + [int][Math]::Round($labelX * $Capture.CropWidth / $Capture.ScaledWidth)
+  $screenY = $Capture.CropTop + [int][Math]::Round($labelY * $Capture.CropHeight / $Capture.ScaledHeight)
+  return [System.Drawing.Point]::new($screenX, $screenY)
+}
+
+function Get-GameWindowShapeText {
+  param([System.Diagnostics.Process]$Game)
+
+  # 진단 꼬리용 창 모양 '1272x717·DPI 96' (판정에 쓰지 않음). 콘솔 전환처럼 판 도중 창이 바뀌면 회차 시작 줄의 창 정보와 달라 그 순간 값을 남깁니다.
+  # DPI API 는 구 OS 에 진입점이 없을 수 있어 시작 진단 줄(창 정보 계측)처럼 따로 try 로 감쌉니다
+  try {
+    $shapeRect = New-Object HoneyNogiInput+RECT
+    if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$shapeRect)) { return '측정 불가' }
+    $shapeText = '{0}x{1}' -f ($shapeRect.Right - $shapeRect.Left), ($shapeRect.Bottom - $shapeRect.Top)
+    try { $shapeText += ('·DPI {0}' -f [HoneyNogiInput]::GetDpiForWindow($Game.MainWindowHandle)) } catch { }
+    return $shapeText
+  } catch {
+    return '측정 불가'
+  }
+}
+
+function Find-AbyssMenuIconPoint {
+  param([System.Diagnostics.Process]$Game)
+
+  # ESC 메뉴 영역($rgAbyssMenu - 글자 탐색과 같은 영역, 배너 제외)을 기준 단위(Scale 1 - 창 크기와 무관하게 350x520)로 한 번 캡처해 '어비스' 아이콘을
+  # 찾습니다. 판독 1회 - 클릭·키·양보·전면화·커서 대피 없음(호출부가 토큰 대조 뒤에 부르므로 숨은 양보가 출처를 끊으면 안 됨).
+  # 반환 Status: found(수락 - Point 에 라벨 상당점 화면 좌표) / not-found(기준 미달) / capture-failed(호출부 가드가 회전을 끝냄)
+  $result = [pscustomobject]@{ Status = 'not-found'; Point = $null; Score = 0.0; Second = 0.0; Size = 0; CenterX = 0.0; CenterY = 0.0
+    ElapsedMs = 0; FirstUse = $false; Window = '' }
+  if ($script:screenCaptureFailing) { $result.Status = 'capture-failed'; return $result }
+  $iconWatch = [System.Diagnostics.Stopwatch]::StartNew()   # 첫 사용의 템플릿 준비까지 포함 - 소요 꼬리가 실제 지연과 같게
+  $result.FirstUse = -not $script:abyssMenuIconTemplatesReady
+  Initialize-AbyssMenuIconTemplates
+  $capture = Get-GameRegionCapture -Game $Game -ReferenceX $rgAbyssMenu[0] -ReferenceY $rgAbyssMenu[1] `
+    -RegionWidth $rgAbyssMenu[2] -RegionHeight $rgAbyssMenu[3] -Scale 1
+  if (-not $capture) { $result.Status = 'capture-failed'; return $result }
+  try {
+    $regionPixels = Get-BitmapBgraBytes -Bitmap $capture.Bitmap
+    $match = [HoneyNogiIconMatch]::Match($regionPixels.Bytes, $regionPixels.Stride, $regionPixels.Width, $regionPixels.Height)
+  } finally {
+    $capture.Bitmap.Dispose()
+  }
+  $result.ElapsedMs = [int]$iconWatch.Elapsed.TotalMilliseconds
+  $result.Window = Get-GameWindowShapeText -Game $Game
+  $result.Score = [double]$match[0]; $result.Size = [int]$match[3]; $result.Second = [double]$match[4]
+  $result.CenterX = $rgAbyssMenu[0] + [double]$match[1]; $result.CenterY = $rgAbyssMenu[1] + [double]$match[2]
+  if (-not (Test-AbyssMenuIconAccept -Best $result.Score -Second $result.Second)) { return $result }
+  # Get-AbyssMenuIconClickPoint 는 캡처의 숫자 필드만 읽어 비트맵 해제 뒤에 불러도 됩니다
+  $result.Point = Get-AbyssMenuIconClickPoint -Capture $capture -CenterX ([double]$match[1]) -CenterY ([double]$match[2]) -Size ([int]$match[3])
+  $result.Status = 'found'
+  return $result
 }
 
 function Test-AbyssSelectionScreen {
@@ -6173,6 +6468,8 @@ function Invoke-ClickUntil {
   throw "$Description 대기 시간이 초과됐습니다."
 }
 
+$script:lastQuestTrackerText = ''   # Test-InDungeonQuest 의 마지막 추적기 판독문 - 진단 전용 (아이콘 클릭 로그의 '필드 확정 때 추적기' 꼬리)
+
 function Test-InDungeonQuest {
   param([System.Diagnostics.Process]$Game)
 
@@ -6182,6 +6479,7 @@ function Test-InDungeonQuest {
   $ocrText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgQuestTracker[0] -ReferenceY $rgQuestTracker[1] `
     -RegionWidth $rgQuestTracker[2] -RegionHeight $rgQuestTracker[3] -Scale 3 -Engine $ocrKoreanEngine
   $normalized = $ocrText -replace '\s', ''
+  $script:lastQuestTrackerText = $normalized   # 진단 전용 - 복귀 루프가 필드 확정 근거로 아이콘 클릭 로그에 남깁니다 (판정에 쓰지 않음)
   foreach ($titleKeyword in $allDungeonKeywords) {
     if ($normalized.Contains($titleKeyword)) { return $true }
   }
@@ -12880,6 +13178,7 @@ function Return-ToAbyssSelection {
   # 변했으면 폐기하고, 캡처 실패 일련번호가 변한 회전은 패널·던전 안 배제 판독이 실행되지 않았을 수 있어 토큰을 쓰지 않습니다.
   $fieldProvenYieldMs = [double]0
   $fieldProvenSerial = 0
+  $fieldProvenTrackerText = ''   # 필드 확정 표본의 추적기 판독문 - 아이콘으로 찾은 클릭의 진단 꼬리 (판정에 쓰지 않음)
   $turnStart = Get-Date        # 직전 회전 시작 시각 - 캡처 실패 동결 회전의 길이만큼 던전 안 첫 확인 시각을 미룸 (규칙 15, 구현 리뷰 2차 P2)
   $returnFreezeRecovered = $false   # 직전 동결 회전의 복구 탐침이 캡처를 되살림 - 다음 회전은 판독·조작 없이 조정 마감만 (⑥e 설계 2.13, 09-30 리뷰5 P2-1)
   # 선택 화면 출처 상태 (⑥e 설계 2.14, 09-30 리뷰5 P1-1 · 사용자 결정 D7): 발급은 워커 자신의 '어비스' 메뉴 클릭 전송 확인 뒤 1곳, 폐기는 양보·캡처 실패
@@ -13076,11 +13375,41 @@ function Return-ToAbyssSelection {
       # (실측: 어비스는 (971,531) 로 이동). 배너 높이는 광고마다 다를 수 있어 새 고정 좌표로
       # 바꾸면 다음 배너에서 또 깨집니다 - 생활 분기의 '가까운 위치 찾기'와 같은 계약입니다.
       # 못 찾으면 클릭하지 않습니다 (엉뚱한 항목을 여는 것보다 재시도가 낫습니다).
+      $abyssMenuSignal = $script:lastAbyssMenuSignal   # 이 회전 메뉴 분기 입구 판정의 신호 - 아이콘 폴백은 'exit-label'(2차 신호만으로 메뉴)일 때만 (설계 v2 D-R)
       $abyssMenuPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgAbyssMenu[0] -ReferenceY $rgAbyssMenu[1] `
         -RegionWidth $rgAbyssMenu[2] -RegionHeight $rgAbyssMenu[3] -SearchText '어비스' -ExactText '어비스' -Scale 4
+      $abyssMenuFoundBy = '글자 탐색'
+      $abyssMenuIcon = $null
       if (-not $abyssMenuPoint) {
+        # 글자 판독의 캡처가 실패했으면(플래그·일련번호) 미발견으로 세지도, 아이콘을 찾지도 않고 회전을 끝냅니다 - 실패 표본으로 판정하지 않음(규칙 15).
+        # 다음 회전 서두 동결 블록이 토큰을 폐기하고 복구 탐침을 돕니다 (ESC 전송 직전 가드와 같은 꼴)
+        if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { Start-Sleep -Milliseconds 700; continue }
+        # 폴백 (사용자 결정 2026-10-02 - 글자 먼저, 못 찾으면 아이콘): 렌더 이상으로 '어비스' 글자가 깨진 메뉴는 아이콘 그림으로 찾습니다.
+        # 실사고 4건 모두 한 메뉴의 글자가 끝까지 안 읽혀(17/17·17/17·18/18·5/5 회전) 기다리지 않고 첫 미발견에서 찾습니다.
+        # 열리는 회전은 메뉴 판정이 2차 신호 '게임 종료' 만으로 참인 회전뿐입니다 - 4건 모두 이 모양('어H|스'·'어HI스' - '비스' 조각 없음)이고,
+        # 아이콘 일치는 '그 그림이 하나뿐' 만 보장하므로 '메뉴임' 은 메뉴 전용 문구로 따로 보증합니다 (설계 리뷰 P2 - 판독 추가 없음)
+        if ($abyssMenuSignal -eq 'exit-label') {
+          $abyssMenuIcon = Find-AbyssMenuIconPoint -Game $Game
+          # 아이콘 판독의 캡처가 실패했으면 그 판독 하나로 누르지 않습니다 (위와 같은 꼴 - 실패 사이 화면이 바뀌었을 수 있음)
+          if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { Start-Sleep -Milliseconds 700; continue }
+          if ($abyssMenuIcon.Status -eq 'found') {
+            $abyssMenuPoint = $abyssMenuIcon.Point
+            $abyssMenuFoundBy = '아이콘 탐색'
+            Write-RunLog ("[어비스] 메뉴의 '어비스' 글자가 읽히지 않아 아이콘으로 찾았습니다 (판독: 일치도 {0:0.000}, 2등 {1:0.000}, 크기 {2}, 아이콘 중심 {3},{4}, 창 {5}, {6:0.00}초{7}, 필드 확정 때 추적기 '{8}', 메뉴 판정 신호 {9})" -f `
+              $abyssMenuIcon.Score, $abyssMenuIcon.Second, $abyssMenuIcon.Size, $abyssMenuIcon.CenterX, $abyssMenuIcon.CenterY, $abyssMenuIcon.Window, ($abyssMenuIcon.ElapsedMs / 1000.0),
+              $(if ($abyssMenuIcon.FirstUse) { ' - 첫 사용 준비 포함' } else { '' }), $fieldProvenTrackerText, $abyssMenuSignal)
+          }
+        }
+      }
+      if (-not $abyssMenuPoint) {
+        # 글자·아이콘 둘 다 유효한 캡처에서 못 찾았을 때만 미발견으로 셉니다 (고정 좌표 폴백 금지 - 08-08 광고 배너 실사고)
         $abyssMenuMissCount++
-        Write-RunLog "[어비스] 메뉴에서 '어비스' 글자를 찾지 못했습니다 - 재시도 ($abyssMenuMissCount)"
+        if ($abyssMenuIcon) {
+          Write-RunLog ("[어비스] 메뉴에서 '어비스' 글자를 찾지 못했습니다 - 재시도 ({0}) (판독: 아이콘 일치도 {1:0.000}, 2등 {2:0.000}, 크기 {3} - 기준 미달, 창 {4})" -f `
+            $abyssMenuMissCount, $abyssMenuIcon.Score, $abyssMenuIcon.Second, $abyssMenuIcon.Size, $abyssMenuIcon.Window)
+        } else {
+          Write-RunLog ("[어비스] 메뉴에서 '어비스' 글자를 찾지 못했습니다 - 재시도 ({0}) (판독: 아이콘 탐색 안 함 - 메뉴 판정에서 '어비스' 글자 조각이 읽힌 회전)" -f $abyssMenuMissCount)
+        }
         if ($abyssMenuMissCount -eq 3) { Write-LifeDiagnostics -Game $Game -Context '어비스 메뉴 항목 미발견' }
         Start-Sleep -Seconds 2
         continue
@@ -13096,7 +13425,7 @@ function Return-ToAbyssSelection {
         }
         continue
       }
-      Write-RunLog "[어비스] 어비스 메뉴 클릭 (글자 탐색 화면좌표 $([int]$abyssMenuPoint.X),$([int]$abyssMenuPoint.Y))"
+      Write-RunLog "[어비스] 어비스 메뉴 클릭 ($abyssMenuFoundBy 화면좌표 $([int]$abyssMenuPoint.X),$([int]$abyssMenuPoint.Y))"
       $fieldProven = $false   # 토큰 소비 - 다음 메뉴는 다시 필드 확인이 필요 (구현 리뷰 P1)
       # 선택 화면 출처 발급 - 여기 한 곳, 전송 확인 뒤 (⑥e 설계 2.14 - 09-30 리뷰5 P1-1): 확정된 필드(W) → 워커 ESC → 이 메뉴 → 워커 '어비스' 클릭이
       # 끊김 없이 이어졌다는 기록입니다 (위 토큰 대조가 발급 뒤 양보·캡처 실패를 이미 거름). 기준값 둘로 발급 뒤의 캡처 실패·양보를 판정 때 거부합니다
@@ -13117,7 +13446,7 @@ function Return-ToAbyssSelection {
             -ExpectedYieldMs $selectionExpectedYieldMs -ReferenceSerial $confirmSerial -YieldMs ([double]$script:userYieldTotalMs)
           break
         }
-        if (Test-AbyssMenu -Game $Game) { break }      # 아직 메뉴 - 다음 회전에서 다시 클릭
+        if (Test-AbyssMenu -Game $Game) { break }      # 아직 메뉴 - 토큰을 이미 소비해(위) 다음 회전은 이 메뉴를 다시 누르지 않고 ESC 로 닫은 뒤 필드부터 다시 증명합니다
       }
       if ($selectionConfirmed) { continue }   # 오클릭 판정 판독·ESC 없이 곧바로 회전 서두의 완료로 (2.14)
       # 오클릭 판정 - 세 판독 직전 일련번호를 잡아 둡니다 (⑥e 설계 2.13 - 반영본 검증, 09-30 리뷰5): 플래그는 세 판독 앞에서 한 번만 보므로, 세 판독에서
@@ -13233,7 +13562,7 @@ function Return-ToAbyssSelection {
       if ($script:lastClickPerformed) {
         Write-RunLog '[어비스] ESC 클릭'
         $fieldProven = $true   # 필드(HUD + 추적기 던전명 없음)를 확인하고 워커가 직접 연 메뉴에만 유효한 일회성 토큰 (구현 리뷰 P1)
-        $fieldProvenYieldMs = [double]$script:userYieldTotalMs; $fieldProvenSerial = $script:captureFailSerial   # 발급 시점 기준값 - 메뉴 분기에서 대조 (구현 리뷰 2차 P1)
+        $fieldProvenYieldMs = [double]$script:userYieldTotalMs; $fieldProvenSerial = $script:captureFailSerial; $fieldProvenTrackerText = [string]$script:lastQuestTrackerText   # 발급 시점 기준값 - 메뉴 분기에서 대조 (구현 리뷰 2차 P1)
       } else {
         Write-RunLog "[어비스] ESC 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 회전에서 재시도"
         if ($script:lastClickSkipReason -eq 'user-active') {

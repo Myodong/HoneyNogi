@@ -35,8 +35,15 @@ if ($bomMissing.Count -gt 0) {
 }
 
 # 기대 테스트 개수 (추가/삭제 시 함께 갱신). 숫자가 어긋나면 실패로 끝냅니다.
-$expectedTestCount = 91   # 10-02 +1: test_time_until_mode (시간 지정 '그 판까지' - GUI 다음 회차 판단·실행 진리표, 타이머·시작 게이트·UNTIL 배선, 문구, 문화권 왕복 - 설계 리뷰 1차 P2) / 10-01 +1: test_abyss_party_member (⑥e 파티원 관측 루프 D·퇴장 절차 P - 순수 진리표·가상 시계 행동·배선) / 09-26 +1: test_abyss_party_signatures (⑥a 파티 준비 패널·파티원 보상·접힌 패널·권장 인원 팝업 서명 - 실기 -1·09-21 캡처 재생, 고치기 전 오판 재현) / 09-25 +1: test_revive_state_machine (부활 상태 머신 - 성공 확인 계상·에피소드 전송 예산·상한 즉시 정지·생략 3갈래, 목록 1절 1번) / 09-21 +1: test_abyss_return_loop (v2.1.12 구현 리뷰 2차 P1 - 복귀 루프 필드 토큰의 양보·캡처 실패 대조, 던전 안 시계 동결 - 행동 진리표) / 09-21 +1: test_abyss_screen_signatures (v2.1.12 던전 안 선택 화면 오판 핫픽스 - 보상 서명·재매칭 패널·fail-closed 배선) / 09-20 +1: test_difficulty_tabs_offline (v2.1.12 어비스 상세 난이도 알약 상단 확장 - 09-15 타 PC 제보 재현) / 09-18 +1: test_abyss_exit_button (v2.1.11 어비스 보상 화면 3버튼 - 나가기 글자 위치 클릭) / 09-16 +1: test_dg_card_console_offline (v2.1.10 콘솔 카드 '태되' 조각 재현) / 09-16 +1: test_abyss_chance_toggle_yield (v2.1.10 우연한 만남 켜기 양보·팝업 복구) / 09-15 +1: test_nyan_gold_offline (v2.1.10 골드 앞자리 소실 재현) / 09-15 +1: test_quest_tracker_offline (v2.1.9 타 PC 트래커 상단 잘림 재현) / 09-14 +1: test_nyan_cards_scale_offline (v2.1.9 카드 존 배율 라벨 재현) / 08-20 +1: test_dg_pill_highlight (v2.1.2) / 09-01 +1: test_embedded_host (v2.1.4) / 09-07 +1: test_dg_card_console (v2.1.6) / 09-08 +1: test_yield_batch (v2.1.7) / 09-09 +1: test_life_cycle_deadline (v2.1.8) / 09-09 +1: test_life_scroll_yield (v2.1.8 실기 실측) / 09-10 +1: test_party_find_yield (v2.1.8) / 09-10 +1: test_abyss_detail_back (v2.1.8) / 09-11 +1: test_event_overlay_yield (v2.1.8) / 09-11 +1: test_dg_retry_button_offline (v2.1.8 실사고 - 이진화 폴백) / 09-13 +1: test_life_close_yield (v2.1.9) / 09-13 +2: test_last_run_exit_yield, test_popup_helper_yield (v2.1.9) / 09-13 +1: test_entry_popup_yield (v2.1.9)
+$expectedTestCount = 93   # 10-07 +2: test_icon_assets, test_abyss_menu_icon (v2.1.12 어비스 ESC 메뉴 '어비스' 아이콘 폴백 - 아이콘 자산 원본·워커 사본 일치, 매칭 상수 계약·수락 진리표·배선, 저장 캡처 재생) / 10-02 +1: test_time_until_mode (시간 지정 '그 판까지' - GUI 다음 회차 판단·실행 진리표, 타이머·시작 게이트·UNTIL 배선, 문구, 문화권 왕복 - 설계 리뷰 1차 P2) / 10-01 +1: test_abyss_party_member (⑥e 파티원 관측 루프 D·퇴장 절차 P - 순수 진리표·가상 시계 행동·배선) / 09-26 +1: test_abyss_party_signatures (⑥a 파티 준비 패널·파티원 보상·접힌 패널·권장 인원 팝업 서명 - 실기 -1·09-21 캡처 재생, 고치기 전 오판 재현) / 09-25 +1: test_revive_state_machine (부활 상태 머신 - 성공 확인 계상·에피소드 전송 예산·상한 즉시 정지·생략 3갈래, 목록 1절 1번) / 09-21 +1: test_abyss_return_loop (v2.1.12 구현 리뷰 2차 P1 - 복귀 루프 필드 토큰의 양보·캡처 실패 대조, 던전 안 시계 동결 - 행동 진리표) / 09-21 +1: test_abyss_screen_signatures (v2.1.12 던전 안 선택 화면 오판 핫픽스 - 보상 서명·재매칭 패널·fail-closed 배선) / 09-20 +1: test_difficulty_tabs_offline (v2.1.12 어비스 상세 난이도 알약 상단 확장 - 09-15 타 PC 제보 재현) / 09-18 +1: test_abyss_exit_button (v2.1.11 어비스 보상 화면 3버튼 - 나가기 글자 위치 클릭) / 09-16 +1: test_dg_card_console_offline (v2.1.10 콘솔 카드 '태되' 조각 재현) / 09-16 +1: test_abyss_chance_toggle_yield (v2.1.10 우연한 만남 켜기 양보·팝업 복구) / 09-15 +1: test_nyan_gold_offline (v2.1.10 골드 앞자리 소실 재현) / 09-15 +1: test_quest_tracker_offline (v2.1.9 타 PC 트래커 상단 잘림 재현) / 09-14 +1: test_nyan_cards_scale_offline (v2.1.9 카드 존 배율 라벨 재현) / 08-20 +1: test_dg_pill_highlight (v2.1.2) / 09-01 +1: test_embedded_host (v2.1.4) / 09-07 +1: test_dg_card_console (v2.1.6) / 09-08 +1: test_yield_batch (v2.1.7) / 09-09 +1: test_life_cycle_deadline (v2.1.8) / 09-09 +1: test_life_scroll_yield (v2.1.8 실기 실측) / 09-10 +1: test_party_find_yield (v2.1.8) / 09-10 +1: test_abyss_detail_back (v2.1.8) / 09-11 +1: test_event_overlay_yield (v2.1.8) / 09-11 +1: test_dg_retry_button_offline (v2.1.8 실사고 - 이진화 폴백) / 09-13 +1: test_life_close_yield (v2.1.9) / 09-13 +2: test_last_run_exit_yield, test_popup_helper_yield (v2.1.9) / 09-13 +1: test_entry_popup_yield (v2.1.9)
 
+# ★ 2026-10-07 SKIP 표시 (ESC 메뉴 아이콘 폴백 설계 v2 10.6 - 설계 리뷰 ② P2): 통과한 테스트의 출력을 버려 와서 자식 테스트가 건너뛴 단
+#   (보존 캡처 폴더·OCR 언어 팩이 없는 PC 의 'SKIP …' 줄)이 사라지고 결과가 '전부 통과' 로만 남았습니다. 통과한 테스트라도 줄 머리 'SKIP'
+#   (앞 공백 허용) 줄이 있으면 '== 이름: 통과 (SKIP n) ==' 와 그 줄들을 찍고, 마지막 결과 줄 끝에 SKIP 합계(모든 테스트의 SKIP 줄 수와 그 줄이
+#   있는 파일 수 - 실패한 테스트는 출력 전체가 이미 위에 찍힘)를 붙입니다. **종료 코드는 바꾸지 않습니다** - 다른 PC 의 정상 SKIP 을 실패로
+#   만들지 않기 위해서입니다. 그래서 테스트 안에서 있어야 할 파일이 빠진 경우는 SKIP 이 아니라 FAIL 로 내야 합니다
+$skipLineTotal = 0
+$skipFileCount = 0
 $failedTests = @()
 $erroredTests = @()
 foreach ($t in $tests) {
@@ -56,6 +63,8 @@ foreach ($t in $tests) {
     $exit = -1
   }
   $hasFail = (@($out) | Where-Object { $_ -match '^FAIL' }).Count -gt 0
+  $skipLines = @(@($out) | Where-Object { "$_" -match '^\s*SKIP' })
+  if ($skipLines.Count -gt 0) { $skipLineTotal += $skipLines.Count; $skipFileCount++ }
   if ($runError) {
     $erroredTests += $t.Name
     "== $($t.Name): 실행 실패 =="
@@ -65,10 +74,16 @@ foreach ($t in $tests) {
     $failedTests += $t.Name
     "== $($t.Name): 실패 (exit $exit) =="
     @($out) | ForEach-Object { "  $_" }
+  } elseif ($skipLines.Count -gt 0) {
+    # 통과지만 건너뛴 단이 있음 - 조용히 '통과' 로만 남기지 않고 그 줄들을 보여 줍니다 (위 ★ 2026-10-07)
+    "== $($t.Name): 통과 (SKIP $($skipLines.Count)) =="
+    $skipLines | ForEach-Object { "  $_" }
   } else {
     "== $($t.Name): 통과 =="
   }
 }
+# ${} 필수 - '$skipLineTotal개' 는 그 이름의 변수로 읽힙니다 (규칙 3)
+$skipSummary = " - SKIP 줄 ${skipLineTotal}개(파일 ${skipFileCount}개)"
 ''
 $countMismatch = ($tests.Count -ne $expectedTestCount)
 if ($countMismatch) {
@@ -85,8 +100,8 @@ if ($badCount -gt 0 -or $countMismatch) {
   if ($erroredTests.Count -gt 0) { $parts += "실행 실패 $($erroredTests.Count)개 - $($erroredTests -join ', ')" }
   if ($countMismatch) { $parts += "개수 불일치($($tests.Count)/$expectedTestCount)" }
   if ($bomMissing.Count -gt 0) { $parts += "BOM 없음 $($bomMissing.Count)개 - $($bomMissing -join ', ')" }
-  "결과: $($tests.Count)개 중 $($parts -join ' / ')"
+  "결과: $($tests.Count)개 중 $($parts -join ' / ')$skipSummary"
   exit 1
 }
-"결과: $($tests.Count)개 전부 통과"
+"결과: $($tests.Count)개 전부 통과$skipSummary"
 exit 0
