@@ -21,6 +21,9 @@
 #      복구 탐침 + continue 형, 선택 화면은 워커 자신의 '어비스' 클릭 출처가 살아 있을 때만 완료(회전 서두 한 곳), 필드 모양은 W 초 확정 뒤에만 ESC(2.14)
 #   ⑥ ESC 메뉴 '어비스' 아이콘 폴백 (2026-10-07 설계 v2 10.4): 클릭 로그의 탐색 출처는 변수 $abyssMenuFoundBy - '글자 탐색' 은 글자 탐색 바로 뒤,
 #      '아이콘 탐색' 은 아이콘 found 블록 안 각 1곳. 클릭 블록·토큰 소비·선택 화면 출처 발급은 그대로 하나 (행동은 test_abyss_return_loop RLI 사례)
+#   ⑦ 어비스 완료 기록 (2026-10-09 구현 명세 ① 2.10): 본류 마커 호출은 반환값을 버리는 [void] 모양(W5), 완료 기록(cleared) 호출은 마커 블록 바로 뒤 ·
+#      나가기 헬퍼 바로 앞의 별도 if 1곳(W3 - 조건 = 클리어·보상 문맥 ∧ 정리 전용 아님). 기록 내용은 test_abyss_journal_store X4, GUI 계상과의 결합은
+#      test_abyss_handoff_gui 결합 행
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
@@ -93,7 +96,15 @@ Check-Equal '배선(⑥a): 클리어 감시 - 접힌 패널은 같은 폴의 하
 Check-Equal '배선: 클리어 감시 마감 시 불명 오버레이·필드 관측이면 진단 + 코드 4' ([bool]($clearWait -match '\$ambiguousOverlaySeen -or \$fieldSeen\) \{[\s\S]{0,400}Write-LifeDiagnostics[\s\S]{0,600}exit 4')) 'True'
 Check-Equal '배선: 클리어 감시 최종 탐침에 선택 화면 조항 없음 (있으면 불명 오버레이가 마감을 영영 넘김)' ([regex]::Matches($clearWait, 'Test-AbyssSelectionScreen -Game \$Game\) -and -not \(Test-HomeEndEscHud').Count) 0
 Check-Equal '배선: 클리어 감시 필드 증거는 HUD + 추적기 던전명 없음 2연속' ([bool]($clearWait -match '\$questNow = Test-InDungeonQuest -Game \$Game[\s\S]{0,300}\$fieldStreak -ge 2')) 'True'
-Check-Equal "배선: 본류 마커는 clear/reward 문맥에서만" ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*Write-CustomClearMarker")) 'True'
+# 2026-10-09 구현 명세 ① 2.10 W5: 마커 함수가 기록 성공 여부(bool)를 돌려주게 되어 결과를 쓰지 않는 호출은 [void] 로 버립니다(호출 4곳 전부 -
+#   반환값 정의·4곳 단언은 test_abyss_custom_worker). 이 단언은 본류 호출의 모양만 W5 로 바꿨고 '클리어·보상 문맥에서만' 은 그대로입니다
+Check-Equal "배선: 본류 마커는 clear/reward 문맥에서만" ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\[void\]\(Write-CustomClearMarker\)")) 'True'
+# 2.10 W3: 어비스 완료 기록(cleared)은 마커 블록 바로 뒤 · 나가기 헬퍼 바로 앞의 별도 if 이고, 조건 = 클리어·보상 문맥 ∧ 정리 전용 아님(커스텀·비커스텀
+#   모두 - 마커를 썼는지와 무관). 마커 블록 안에 넣으면 비커스텀·마커 실패 판이 빠지고, 헬퍼 뒤로 가면 나가기 위치 미발견 코드 4(클리어 뒤 정지)의 근거가
+#   사라집니다. 호출은 워커 전체에 1곳(보상·클리어 화면 시작 분기는 기록하지 않음 - 명세 J1)
+Check-Equal '배선(2.10 W3): 마커 블록 → 완료 기록 if(조건 = clear/reward ∧ 정리 전용 아님) → 나가기 헬퍼 순 · 호출 1곳' (
+  ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\[void\]\(Write-CustomClearMarker\)\s*\}\s*if \(\(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\) -and -not \(\`$script:customMode -and \`$script:customCleanupOnly\)\) \{\s*Add-AbyssJournalClearedEntry\s*\}\s*\[void\]\(Invoke-AbyssExitClick -Game \`$game ")) -and
+  ([regex]::Matches($src, 'Add-AbyssJournalClearedEntry').Count -eq 2)) 'True'
 $ret = Body 'Return-ToAbyssSelection'
 Check-Equal '배선: 복귀 루프 - 재매칭·준비·접힌 준비 패널이면 대기 (선택 화면 판정보다 앞)' (($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -gt 0) -and ($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -lt $ret.IndexOf('if (Test-AbyssSelectionScreen -Game $Game) {')) -and ([bool]($ret -match '\$entryWaitingNow = \(\$panelKindNow -eq ''none''\) -and \(-not \$script:screenCaptureFailing\) -and \(Test-AbyssEntryWaiting -Game \$Game\)'))) 'True'
 # ⑥e 설계 2.13: 만료 판정 산술이 Get-YieldAdjustedDeadline → Get-FreezeAdjustedDeadline(양보 + 캡처 실패 누적 차분 - 같은 회전 실패 → 복구의 실패 시간도 뺌)

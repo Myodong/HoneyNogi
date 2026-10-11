@@ -1650,6 +1650,7 @@ function Invoke-WorkerChain {
   # 바깥 분기는 GUI 타이머와 같습니다: 0·11 → 계상 뒤 Invoke-NextCycleDecision / 10 → 미계상 Invoke-NextCycleDecision / 그 밖(4·1·2·3·반환·예외) →
   # 시간 판정과 무관하게 정지 (K-T4 가 지킴). 코드 10 앞부분(잔여 로그 수집·거점 퇴장 판별·준비 실행 연속 수)은 모형에 없습니다 - 파티원 D 는
   # 코드 10 을 내지 않습니다 (§3 exit 모양). 'next' 일 때만 기동 지연 뒤 다음 워커
+  # 파티원은 InsideHandoff 판별 대상 밖입니다 - 어비스 파티원 실행은 완료 기록 범위(Test-AbyssHandoffRunActive) 밖이라 판별 none·마무리 실행 없음, 그래서 이 모형이 그대로 맞습니다 (설계 v11 R1 6.5)
   param([int]$Workers, [double]$StartupDelay = 2)
   $results = @()
   for ($w = 1; $w -le $Workers; $w++) {

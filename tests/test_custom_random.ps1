@@ -7,7 +7,7 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectR
     -Names @('ConvertTo-StrictBoolean', 'Format-CustomItemToken', 'Get-CustomFingerprint',
       'New-CustomShuffleOrder', 'Test-CustomShuffleOrder', 'Get-CustomOrderKey',
       'Get-CustomExecutionItems', 'Get-CustomRandomOrderEnabled',
-      'New-CustomMarkerOwnerJson', 'Test-CustomMarkerOwnerMatchesContext')) {
+      'New-CustomMarkerOwnerJson', 'Get-CustomCanonicalOwner', 'ConvertTo-CustomMarkerOwnerJson', 'Test-CustomMarkerOwnerMatchesContext')) {
   Invoke-Expression $definition
 }
 $guiSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_gui.ps1'))
@@ -52,22 +52,24 @@ Assert-Case '설정: 불리언 true 인정' (Get-CustomRandomOrderEnabled -Node 
 Assert-Case '설정: 문자열 true 불인정' (Get-CustomRandomOrderEnabled -Node ([pscustomobject]@{ randomOrder = 'true' })) $false
 Assert-Case '설정: 키 없음 = false' (Get-CustomRandomOrderEnabled -Node ([pscustomobject]@{})) $false
 
-# ── 5. 완료 마커 v2 (orderKey 대조 - 진행 초기화 후 낡은 마커 오계상 방지) ────────
+# ── 5. 완료 마커 v3 (orderKey + 진행 세대 대조 - 진행 초기화 후 낡은 마커 오계상 방지) ──
+# 세대(generation) 매트릭스는 test_custom_marker_validity(⑭)가 실제 컨텍스트로 봅니다 - 여기는 순열(orderKey) 축만
 $mkContext = @{ Items = $mapItems; Order = @(1, 0, 2); Lap = 2; Index = 1; Item = $mapItems[0]; RandomOrder = $true }
 $mkOwnerJson = New-CustomMarkerOwnerJson -Context $mkContext
 $mkOwner = $mkOwnerJson | ConvertFrom-Json
-Assert-Case '마커: 소유자 version 2' ([int]$mkOwner.version) 2
+Assert-Case '마커: 소유자 version 3' ([int]$mkOwner.version) 3
+Assert-Case '마커: generation 기록 (컨텍스트에 세대 없음 = 0)' ([string]$mkOwner.generation) '0'
 Assert-Case '마커: orderKey 기록' ([string]$mkOwner.orderKey) '1,0,2'
 Assert-Case '마커: 동일 순열 = 일치' (Test-CustomMarkerOwnerMatchesContext -Owner $mkOwner -Context $mkContext) $true
 $mkOtherOrder = @{ Items = $mapItems; Order = @(0, 1, 2); Lap = 2; Index = 1; Item = $mapItems[1]; RandomOrder = $true }
 Assert-Case '마커: 다른 순열 = 불일치' (Test-CustomMarkerOwnerMatchesContext -Owner $mkOwner -Context $mkOtherOrder) $false
 $mkSeqContext = @{ Items = $mapItems; Order = $null; Lap = 1; Index = 0; Item = $mapItems[0]; RandomOrder = $false }
-$mkV1Owner = (New-CustomMarkerOwnerJson -Context $mkSeqContext) | ConvertFrom-Json
-$mkV1Owner.PSObject.Properties.Remove('orderKey')   # v1 마커 모사 (orderKey 필드 없음)
-Assert-Case '마커: v1(orderKey 없음) - 순차와 일치(하위 호환)' `
-  (Test-CustomMarkerOwnerMatchesContext -Owner $mkV1Owner -Context $mkSeqContext) $true
-Assert-Case '마커: v1 - 랜덤 컨텍스트와 불일치' `
-  (Test-CustomMarkerOwnerMatchesContext -Owner $mkV1Owner -Context (@{ Items = $mapItems; Order = @(0, 1, 2); Lap = 1; Index = 0; Item = $mapItems[0]; RandomOrder = $true })) $false
+$mkNoOrderKeyOwner = (New-CustomMarkerOwnerJson -Context $mkSeqContext) | ConvertFrom-Json
+$mkNoOrderKeyOwner.PSObject.Properties.Remove('orderKey')   # orderKey 필드가 없는 소유자 객체 (대조 함수 단독 - 파일 읽기는 version 3 만이라 거절)
+Assert-Case '마커 대조: orderKey 없는 소유자 = 순차와 일치(대조 함수의 선택 처리 유지)' `
+  (Test-CustomMarkerOwnerMatchesContext -Owner $mkNoOrderKeyOwner -Context $mkSeqContext) $true
+Assert-Case '마커 대조: orderKey 없는 소유자 - 랜덤 컨텍스트와 불일치' `
+  (Test-CustomMarkerOwnerMatchesContext -Owner $mkNoOrderKeyOwner -Context (@{ Items = $mapItems; Order = @(0, 1, 2); Lap = 1; Index = 0; Item = $mapItems[0]; RandomOrder = $true })) $false
 
 # ── 6. 소스 계약 가드 (IO/UI 배선) ──────────────────────────────────────────────
 Assert-Case '가드: Step - 바퀴 전환만 새 순열' `
@@ -82,8 +84,14 @@ Assert-Case '가드: 게이트 - 층 혼합 config 는 랜덤 해제 정규화' 
   ($guiSource -match '혼합 리스트는 랜덤 진행을 쓸 수 없어 해제') $true
 Assert-Case '가드: 워커 NEXT/LIST 는 실행 순서 기준' `
   ([regex]::Matches($guiSource, '\$customContext\.ExecutionItems').Count -ge 3) $true
-Assert-Case '가드: 마커 읽기 v1/v2 인정' `
-  ($guiSource -match '@\(1, 2\) -notcontains \[int\]\$owner\.version') $true
+# 스키마 11(10-08): 마커 읽기는 version 3 만 - version 2 이하는 진행 세대가 없어 지금 진행의 기록인지 증명할 수 없음 (설계 v10 1.7)
+$readOwnerBody = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') `
+      -Names @('Read-CustomMarkerOwner')))
+Assert-Case '가드: 마커 읽기는 version 3 만 인정 + 필수 6필드(orderKey·generation 포함) + 세대 정수 판정 · 옛 v1/v2 허용 없음' `
+  ('{0}/{1}/{2}/{3}' -f ($readOwnerBody -match '\(\[int\]\$owner\.version -ne 3\)'),
+    ($readOwnerBody -match "@\('fingerprint', 'orderKey', 'lap', 'index', 'item', 'generation'\)"),
+    ($readOwnerBody -match "\(\[string\]\`$owner\.generation\) -notmatch '\^\\d\+\$'"),
+    ($readOwnerBody -match '@\(1, 2\)')) 'True/True/True/False'
 # 2026-08-09 감사: 마커 삭제가 전역($customMarkerFile = 마지막으로 시작한 섹션)을 쓰고 있어
 # 다른 콘텐츠의 유효 마커를 파괴했습니다. 이 계약을 '섹션별 마커'로 격상합니다.
 # 무효화는 공용 계약(Clear-CustomMarkerFile: 삭제 → 확인 → '{}')을 거칩니다.
@@ -150,7 +158,7 @@ Assert-Case '가드: 회차 시작 시 섞인 순서 표시 배선' `
 $configJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 # 스키마는 **새 설정 키를 추가할 때마다** 올려야 합니다. 안 올리면 기존 사용자는 이전 게이트에
 # 걸려 새 키를 영영 못 받습니다 (2026-08-10 실기에서 repeat.mode/untilTime 으로 적발).
-Assert-Case 'config: schema 10' ([int]$configJson.configSchemaVersion) 10   # 09-25 revive.maxPerCycle 제거·checkpointReviveLimit 신설(10) ← life 신설(5) → '채집 대기' 의미 변경(6) → 가방/도구 옵션 제거(7) → 반복 모드 저장(8) → etc(기타) 신설(9)
+Assert-Case 'config: schema 11' ([int]$configJson.configSchemaVersion) 11   # 10-08 커스텀 진행 세대 progressGeneration 신설(11) ← 09-25 revive.maxPerCycle 제거·checkpointReviveLimit 신설(10) ← life 신설(5) → '채집 대기' 의미 변경(6) → 가방/도구 옵션 제거(7) → 반복 모드 저장(8) → etc(기타) 신설(9)
 Assert-Case 'config: randomOrder 기본 false 4섹션' `
   (($configJson.customRepeat.randomOrder -eq $false) -and ($configJson.deepCustomRepeat.randomOrder -eq $false) -and ($configJson.abyssCustomRepeat.randomOrder -eq $false) -and ($configJson.lifeCustomRepeat.randomOrder -eq $false)) $true
 

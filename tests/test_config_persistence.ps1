@@ -13,11 +13,15 @@ $guiPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'mabinogi_gui.ps1'
 $tokens = $null; $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw "GUI 파서 오류: $($parseErrors[0].Message)" }
+  # 스키마 11(10-08): 10→11 이전 블록이 Read-CustomMarkerOwner -Path 로 섹션 마커를 읽고, 진행을 지운 섹션은 Step-CustomProgressGeneration
+  # 으로 세대를 올립니다. 정상 마커 픽스처는 실제 New-CustomMarkerOwnerJson(version 3)으로 만듭니다
   foreach ($name in @('Read-Config', 'ConvertTo-StrictBoolean', 'Write-Utf8FileAtomic', 'Save-Config', 'Update-ConfigToLatest',
     'Format-CustomItemToken', 'Get-CustomFingerprint', 'Get-CustomNextProgress',
     'Step-CustomProgress', 'Reset-CustomProgress', 'Get-CustomMarkerFileForSection', 'Clear-CustomMarkerFile',
     'Get-CustomMarkerStaleFile', 'Test-CustomMarkerStale',
-    'Get-CustomRandomOrderEnabled', 'New-CustomShuffleOrder', 'Test-CustomShuffleOrder')) {
+    'Get-CustomRandomOrderEnabled', 'New-CustomShuffleOrder', 'Test-CustomShuffleOrder',
+    'Read-CustomMarkerOwner', 'Step-CustomProgressGeneration', 'New-CustomMarkerOwnerJson', 'Get-CustomCanonicalOwner',
+    'ConvertTo-CustomMarkerOwnerJson', 'Get-CustomOrderKey', 'Remove-AbyssJournalSectionEntries')) {
   $fn = $ast.FindAll({
       param($node)
       $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -25,10 +29,30 @@ if ($parseErrors.Count -gt 0) { throw "GUI 파서 오류: $($parseErrors[0].Mess
   if (-not $fn) { throw "본체 함수를 찾지 못했습니다: $name" }
   Invoke-Expression $fn.Extent.Text
 }
+# 단계 2.3(10-08): 어비스 진행 초기화가 완료 기록 폐기 헬퍼(Remove-AbyssJournalSectionEntries)를 부르고, 헬퍼는 저장소 묶음
+#   (Update-AbyssJournal …)을 씁니다. 묶음 = 머리 주석 ~ '묶음 끝' 표지 주석 사이 최상위 함수 전부(회귀 test_abyss_journal_store 와 같은
+#   경계). 이 파일 최상위 foreach 에서 정의합니다 - 클로저 mutator 쪽에서 보이는 함수는 최상위 정의뿐입니다(구현 명세 ① 2.0 체크리스트 6)
+$journalBundleHeader = @($tokens | Where-Object { $_.Kind -eq [System.Management.Automation.Language.TokenKind]::Comment -and
+    $_.Text.Contains('어비스 완료 기록(handoff journal) 저장소') })
+$journalBundleEnd = @($tokens | Where-Object { $_.Kind -eq [System.Management.Automation.Language.TokenKind]::Comment -and
+    $_.Text.Contains('어비스 완료 기록 저장소 묶음 끝') })
+if ($journalBundleHeader.Count -ne 1 -or $journalBundleEnd.Count -ne 1) { throw '완료 기록 저장소 묶음의 머리 주석·끝 표지를 찾지 못했습니다' }
+$journalBundleNames = @()
+foreach ($statement in $ast.EndBlock.Statements) {
+  if (-not ($statement -is [System.Management.Automation.Language.FunctionDefinitionAst])) { continue }
+  if ($statement.Extent.StartOffset -lt $journalBundleHeader[0].Extent.StartOffset) { continue }
+  if ($statement.Extent.StartOffset -gt $journalBundleEnd[0].Extent.StartOffset) { break }
+  Invoke-Expression $statement.Extent.Text
+  $journalBundleNames += $statement.Name
+}
+if ($journalBundleNames -notcontains 'Update-AbyssJournal') { throw '완료 기록 저장소 묶음에 Update-AbyssJournal 이 없습니다' }
+$script:abyssJournalSavedBy = 'gui'
 
+$script:guiLogLines = @()
 function Add-GuiLog {
   param([string]$Message)
   $script:lastGuiLog = $Message
+  $script:guiLogLines += $Message   # 시작 안내 블록(최상위 if)을 소스 그대로 돌릴 때 줄 수를 셉니다
 }
 
 $testRoot = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(),
@@ -44,6 +68,8 @@ $customDungeonMarkerFile = [System.IO.Path]::Combine($testRoot, 'custom_done.mar
 $customAbyssMarkerFile = [System.IO.Path]::Combine($testRoot, 'abyss_custom_done.marker')
 $customDeepMarkerFile = [System.IO.Path]::Combine($testRoot, 'deep_custom_done.marker')
 $customLifeMarkerFile = [System.IO.Path]::Combine($testRoot, 'life_custom_done.marker')
+# 어비스 완료 기록(journal)도 임시 폴더로 - 7) 의 어비스 진행 초기화는 파일이 없어 바꿀 것이 없으므로(unchanged) 아무 파일도 만들지 않아야 합니다
+$abyssJournalPath = [System.IO.Path]::Combine($testRoot, 'abyss_handoff.json')
 $utf8Bom = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $true
 
 try {
@@ -210,6 +236,70 @@ try {
   $resultLimit = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   Assert-Case '실배포(좌표만 낮음): 정수가 아닌 상한은 기본값(3)으로' ([int]$resultLimit.revive.checkpointReviveLimit) 3
 
+  # ★ 스키마 11(10-08 커스텀 진행 세대 progressGeneration - 설계 v10 1.2·1.3): 사용자 스키마를 10·9 로 **고정**한 픽스처로 키 유입을
+  #   봅니다. 위 '$realSchema - 1' 은 config.json 의 번호를 안 올리고 키만 넣으면 함께 내려가(10 - 1 = 9) 그 실수를 못 잡습니다.
+  #   9 = 마지막 배포본(v2.1.11)의 스키마. 생활 섹션은 마커를 만들지 않아 키가 없어야 합니다.
+  $generationSections = @('customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat')
+  function Remove-TestGenerationKeys {
+    # 스키마 11 이전 config 모사 - 전투 3섹션의 세대 키와 설명 키를 뺍니다
+    param($Config)
+    foreach ($genSection in $generationSections) {
+      $Config.$genSection.PSObject.Properties.Remove('progressGeneration')
+      $Config.$genSection.PSObject.Properties.Remove('_progressGeneration')
+    }
+  }
+  function Get-TestGenerationText {
+    # 섹션별 '세대/설명 키 유무' (키 없음 = '없음')
+    param($Config)
+    return ((@($generationSections) + 'lifeCustomRepeat' | ForEach-Object {
+          $genProperty = $Config.$_.PSObject.Properties['progressGeneration']
+          '{0}={1}/{2}' -f $_, $(if ($genProperty) { [string]$genProperty.Value } else { '없음' }), [bool]$Config.$_.PSObject.Properties['_progressGeneration']
+        }) -join ' ')
+  }
+  foreach ($fixedUserSchema in @(10, 9)) {
+    $genUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $genUser.configSchemaVersion = $fixedUserSchema
+    Remove-TestGenerationKeys -Config $genUser
+    [System.IO.File]::WriteAllText($configPath, ($genUser | ConvertTo-Json -Depth 20), $utf8Bom)
+    $migratedGen = Update-ConfigToLatest
+    $resultGen = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-Case "스키마 11 키 유입(사용자 스키마 $fixedUserSchema 고정): 이전 실행 · 최신 스키마" `
+      ('{0}/{1}' -f $migratedGen, ([int]$resultGen.configSchemaVersion -eq $realSchema)) 'True/True'
+    Assert-Case "스키마 11 키 유입(사용자 스키마 $fixedUserSchema 고정): 전투 3섹션 세대 0 + 설명 키 · 생활은 키 없음" `
+      (Get-TestGenerationText -Config $resultGen) 'customRepeat=0/True abyssCustomRepeat=0/True deepCustomRepeat=0/True lifeCustomRepeat=없음/False'
+  }
+  # 이전이 진행을 지운 섹션만 세대 +1 (같은 저장 - 설계 v10 1.3). ① 스키마 10 사용자(키 없음): 진행 있던 던전·심층 = 0+1, 진행 없던 어비스 = 0,
+  #   생활은 진행이 있어도 키를 만들지 않음 ② 좌표만 낮은 스키마 11 사용자(세대 3·5·7): 사용자 값 이월 + 진행 있던 어비스만 +1
+  $bumpUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $bumpUser.configSchemaVersion = 10
+  Remove-TestGenerationKeys -Config $bumpUser
+  $bumpUser.customRepeat.progress = [pscustomobject]@{ lap = 2; index = 1; fingerprint = 'x' }
+  $bumpUser.deepCustomRepeat.progress = [pscustomobject]@{ lap = 1; index = 0; fingerprint = 'y' }
+  $bumpUser.lifeCustomRepeat.progress = [pscustomobject]@{ lap = 1; index = 2; fingerprint = 'z' }
+  [System.IO.File]::WriteAllText($configPath, ($bumpUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  [void](Update-ConfigToLatest)
+  $resultBump = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '세대 +1(스키마 10 → 11): 진행을 지운 전투 섹션만 1 · 생활 키 없음' `
+    (Get-TestGenerationText -Config $resultBump) 'customRepeat=1/True abyssCustomRepeat=0/True deepCustomRepeat=1/True lifeCustomRepeat=없음/False'
+  Assert-Case '세대 +1(스키마 10 → 11): 진행 기록은 전부 지움 · 지운 섹션 목록' `
+    ('{0}/{1}/{2} · {3}' -f ($null -eq $resultBump.customRepeat.progress), ($null -eq $resultBump.deepCustomRepeat.progress),
+      ($null -eq $resultBump.lifeCustomRepeat.progress), (@($script:customProgressResetSections) -join ',')) 'True/True/True · customRepeat,deepCustomRepeat,lifeCustomRepeat'
+  # 이 시점에는 마커 파일이 하나도 없어 진행 초기화 경로의 정리는 '할 일 없음' 성공입니다 - 그것을 구버전 무효화 건수로 세면 없는 무효화를
+  #   안내합니다(변이 검증 보강 2026-10-09)
+  Assert-Case '세대 +1(스키마 10 → 11): 구버전 마커가 없으면 구버전 무효화 0건 · 구버전 실패 없음' `
+    ('{0}/{1}' -f $script:legacyMarkerClearedCount, $script:legacyMarkerClearFailed) '0/False'
+  $carryUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $carryUser.coordsVersion = $realCoords - 1
+  $carryUser.customRepeat.progressGeneration = 3
+  $carryUser.abyssCustomRepeat.progressGeneration = 5
+  $carryUser.deepCustomRepeat.progressGeneration = 7
+  $carryUser.abyssCustomRepeat.progress = [pscustomobject]@{ lap = 1; index = 1; fingerprint = 'a' }
+  [System.IO.File]::WriteAllText($configPath, ($carryUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  [void](Update-ConfigToLatest)
+  $resultCarry = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '세대 이월(좌표만 낮은 스키마 11): 사용자 세대 그대로 + 진행 지운 어비스만 +1' `
+    (Get-TestGenerationText -Config $resultCarry) 'customRepeat=3/True abyssCustomRepeat=6/True deepCustomRepeat=7/True lifeCustomRepeat=없음/False'
+
   $userConfigV4Life = [pscustomobject]@{
     configSchemaVersion = 4
     coordsVersion = 6
@@ -253,13 +343,21 @@ try {
     }
     abyssCustomRepeat = [pscustomobject]@{ items = @(); progress = $null }
   }
+  # 스키마 11(10-08): 정상 마커 픽스처는 owner version 3(5필드 + generation 0 - 실제 New-CustomMarkerOwnerJson). 예전처럼 '{}' 로 두면
+  #   10→11 이전이 '구버전(세대를 증명할 수 없는) 마커' 로 모아 지워서 '진행 없던 섹션의 정상 마커 보존' 을 볼 수 없습니다(구현 명세 ① 5절 A8 (가))
+  $markerFixtureItem = [pscustomobject]@{ difficulty = '일반'; stage = '1-1'; coin = $false; doubleLoot = $false; exhaustContinue = $false; noDoubleSweep = $false }
+  $canonicalV3MarkerJson = New-CustomMarkerOwnerJson -Context @{
+    Items = @($markerFixtureItem); Order = $null; Lap = 1; Index = 0; Item = $markerFixtureItem; Generation = 0 }
   function Reset-TestMarkers {
     foreach ($markerPath in @($customDungeonMarkerFile, $customAbyssMarkerFile,
         $customDeepMarkerFile, $customLifeMarkerFile)) {
-      [System.IO.File]::WriteAllText($markerPath, '{}')
+      [System.IO.File]::WriteAllText($markerPath, $canonicalV3MarkerJson)
     }
   }
   Reset-TestMarkers
+  $fixtureOwner = Read-CustomMarkerOwner -Path $customAbyssMarkerFile
+  Assert-Case '이전+마커: 픽스처 마커는 정상 version 3 (version + 필수 6필드 = 속성 7 · generation 0)' `
+    ('{0}/{1}/{2}' -f [int]$fixtureOwner.version, @($fixtureOwner.PSObject.Properties).Count, [string]$fixtureOwner.generation) '3/7/0'
   [System.IO.File]::WriteAllText($defaultPath, ($defaultWithCustom | ConvertTo-Json -Depth 10), $utf8Bom)
   [System.IO.File]::WriteAllText($configPath, ($userWithProgress | ConvertTo-Json -Depth 10), $utf8Bom)
   $script:customProgressReset = $false
@@ -268,6 +366,7 @@ try {
   Assert-Case '이전+마커: 진행 초기화 플래그 켜짐' $script:customProgressReset $true
   Assert-Case '이전+마커: 실제 초기화된 섹션만 수집' `
     ((@($script:customProgressResetSections) -join ',')) 'customRepeat'
+  Assert-Case '이전+마커: 정상 version 3 마커는 구버전 정리 대상이 아님' (@($script:legacyMarkerPathsToClear).Count) 0
   Assert-Case '이전+마커: 던전 마커 삭제' (Test-Path -LiteralPath $customDungeonMarkerFile) $false
   # 진행이 없던 섹션의 **정상** 마커는 파괴하면 안 됩니다 (집계 플래그 하나로 4종을 다
   # 지우면 어비스의 유효한 미완료 마무리 근거가 사라져 클리어한 판을 다시 돕니다 - 리뷰 적발)
@@ -318,6 +417,170 @@ try {
   finally { $markerLock.Dispose() }
   Assert-Case '마커잠금: 이전 자체는 성공' $migrateMarkerLocked $true
   Assert-Case '마커잠금: 무효화 실패를 플래그로 보고' $script:customMarkerClearFailed $true
+  Remove-Item -LiteralPath ($customDungeonMarkerFile + '.stale') -Force -ErrorAction SilentlyContinue
+
+  # 5-3) 스키마 10→11 구버전 완료 마커 (설계 v10 1.3·1.7 · 구현 명세 ① 2.2 ④⑥⑧). 이전 블록은 던전·어비스·심층 마커 중 version 3 으로
+  #      읽히지 않는 것의 경로를 **모으기만** 하고, 무효화는 Save-Config 성공 뒤 진행 초기화 마커 정리와 같은 단계에서 경로당 1회.
+  #      안내 2줄은 진행 초기화 안내 밖 - 진행이 없던(1바퀴 0번) 사용자가 주 대상이라 그 안에 두면 아무것도 안 보입니다.
+  #      시작 안내 블록은 최상위 if 라 이름으로 뽑을 수 없어 AST 로 잘라 점소싱합니다(T4-e 3 방식).
+  $legacyV2MarkerJson = '{"version":2,"fingerprint":"","orderKey":"","lap":1,"index":0,"item":"x"}'   # 스키마 10 까지의 GUI 가 쓰던 모양
+  $testMarkerPaths = @($customDungeonMarkerFile, $customAbyssMarkerFile, $customDeepMarkerFile, $customLifeMarkerFile)
+  function Get-TestMarkerState {
+    # 마커 4개의 내용(없으면 '없음', 잠금 주입 중이라 못 읽으면 '잠김') - 블록 통과 시점과 이전 시점의 비교용
+    return ((@($testMarkerPaths) | ForEach-Object {
+          if (-not [System.IO.File]::Exists($_)) { '없음' }
+          else { try { [System.IO.File]::ReadAllText($_) } catch { '잠김' } }
+        }) -join ' | ')
+  }
+  function Set-TestLegacyMarkers {
+    foreach ($markerPath in $testMarkerPaths) { [System.IO.File]::WriteAllText($markerPath, $legacyV2MarkerJson) }
+  }
+  function New-TestLegacyUser {
+    # 스키마 10 사용자(세대 키 없음 · 진행 없음 = 1바퀴 0번)
+    $legacyUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $legacyUser.configSchemaVersion = 10
+    Remove-TestGenerationKeys -Config $legacyUser
+    return $legacyUser
+  }
+  $migrationNoticeIf = @($ast.EndBlock.Statements | Where-Object {
+      ($_ -is [System.Management.Automation.Language.IfStatementAst]) -and ($_.Clauses[0].Item1.Extent.Text -eq '$script:configMigrated') })
+  Assert-Case '시작 안내: 최상위 if ($script:configMigrated) 블록 1개' $migrationNoticeIf.Count 1
+  $migrationNoticeBlock = [scriptblock]::Create($migrationNoticeIf[0].Extent.Text)
+  function Invoke-MigrationNotice {
+    # 시작 안내 블록을 소스 그대로 실행하고 찍힌 줄을 $script:guiLogLines 에 남깁니다 (점소싱 - 블록이 읽는 $script: 상태는 이 테스트가 정함)
+    $script:guiLogLines = @()
+    $script:configMigrated = $true
+    $script:gatherWaitReset = 0
+    . $migrationNoticeBlock
+  }
+  function Get-TestNoticeCount {
+    param([string]$Pattern)
+    return @($script:guiLogLines | Where-Object { $_ -match $Pattern }).Count
+  }
+  # 블록 통과 시점의 마커 상태를 찍으려고 저장 함수를 감쌉니다 (블록 → 2-1)~5) → 저장 순서라 저장 직전 = 블록 통과 뒤 · 마커 정리 전)
+  $realSaveConfig = ${function:Save-Config}
+  function Save-Config {
+    param($Config)
+    $script:markerStateAtSave = Get-TestMarkerState
+    & $realSaveConfig $Config
+  }
+  [System.IO.File]::WriteAllText($defaultPath, ($realDefault | ConvertTo-Json -Depth 20), $utf8Bom)
+
+  # ⓐ-0 저장 실패 주입(config 잠금): 이전 실패 · 마커 4개 그대로 · 묘비 0 - 무효화는 저장 성공 뒤라 옛 진행과 마커가 함께 남습니다
+  Set-TestLegacyMarkers
+  $markerStateBefore = Get-TestMarkerState
+  [System.IO.File]::WriteAllText($configPath, ((New-TestLegacyUser) | ConvertTo-Json -Depth 20), $utf8Bom)
+  $legacySaveLock = [System.IO.File]::Open($configPath, [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  try { $migratedLegacySaveFail = Update-ConfigToLatest }
+  finally { $legacySaveLock.Dispose() }
+  Assert-Case '구버전 마커(저장 실패): 이전 실패 · 실패 원인 보존 · 마커 4개 그대로 · 묘비 0 · 설정 스키마 그대로' `
+    ('{0}/{1}/{2}/{3}/{4}' -f $migratedLegacySaveFail, (-not [string]::IsNullOrWhiteSpace($script:configMigrationError)),
+      ((Get-TestMarkerState) -eq $markerStateBefore), @($testMarkerPaths | Where-Object { [System.IO.File]::Exists($_ + '.stale') }).Count,
+      [int](Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json).configSchemaVersion) 'False/True/True/0/10'
+
+  # ⓐ 진행 없음 + 4섹션 version 2 마커 → 모으기만(저장 직전 마커 그대로) → 저장 뒤 3섹션 무효화 · 생활 그대로 · '[안내] … 3건'
+  Set-TestLegacyMarkers
+  $markerStateBefore = Get-TestMarkerState
+  $script:markerStateAtSave = $null
+  [System.IO.File]::WriteAllText($configPath, ((New-TestLegacyUser) | ConvertTo-Json -Depth 20), $utf8Bom)
+  $script:customProgressReset = $false
+  $migratedLegacy = Update-ConfigToLatest
+  Assert-Case '구버전 마커: 이전 실행 · 진행 초기화 아님' ('{0}/{1}' -f $migratedLegacy, $script:customProgressReset) 'True/False'
+  Assert-Case '구버전 마커: 블록은 모으기만 - 저장 직전 시점에 마커 4개 그대로' ($script:markerStateAtSave -eq $markerStateBefore) $true
+  Assert-Case '구버전 마커: 모은 경로 = 던전·어비스·심층(생활 제외)' `
+    ((@($script:legacyMarkerPathsToClear) | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ',') 'custom_done.marker,abyss_custom_done.marker,deep_custom_done.marker'
+  Assert-Case '구버전 마커: 저장 뒤 3섹션 무효화 · 생활 마커 그대로' `
+    ((@($testMarkerPaths) | ForEach-Object { [System.IO.File]::Exists($_) }) -join '/') 'False/False/False/True'
+  Assert-Case '구버전 마커: 무효화 3건 · 구버전 실패 없음 · 진행 초기화 실패 없음' `
+    ('{0}/{1}/{2}' -f $script:legacyMarkerClearedCount, $script:legacyMarkerClearFailed, $script:customMarkerClearFailed) '3/False/False'
+  Invoke-MigrationNotice
+  Assert-Case '구버전 마커 안내: [안내] … 3건 1줄(진행 초기화 안내 없이도) · 구버전 경고 0' `
+    ('{0}/{1}/{2}' -f @($script:guiLogLines | Where-Object { $_ -eq '[안내] 구버전 커스텀 완료 기록 3건을 무효화했습니다 (새 형식 세대 검사 도입 - 해당 항목은 처음부터 다시 진행합니다)' }).Count,
+      (Get-TestNoticeCount '구버전 커스텀 완료 기록 파일을 지우지 못했습니다'), (Get-TestNoticeCount '진행 기록을 초기화했습니다')) '1/0/0'
+
+  # ⓑ 같은 구성 + 어비스 마커 잠금(삭제·덮어쓰기 모두 실패) → 구버전 실패 플래그 → 진행 초기화가 없어도 '[경고] 구버전 …' 1줄
+  Set-TestLegacyMarkers
+  [System.IO.File]::WriteAllText($configPath, ((New-TestLegacyUser) | ConvertTo-Json -Depth 20), $utf8Bom)
+  $script:customProgressReset = $false
+  $legacyLock = [System.IO.File]::Open($customAbyssMarkerFile, [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+  try { $migratedLegacyLocked = Update-ConfigToLatest }
+  finally { $legacyLock.Dispose() }
+  Assert-Case '구버전 마커(잠금): 이전 성공 · 무효화 2건 · 구버전 실패 · 진행 초기화 실패 아님' `
+    ('{0}/{1}/{2}/{3}' -f $migratedLegacyLocked, $script:legacyMarkerClearedCount, $script:legacyMarkerClearFailed, $script:customMarkerClearFailed) 'True/2/True/False'
+  Invoke-MigrationNotice
+  Assert-Case '구버전 마커(잠금) 안내: [안내] 2건 1 · [경고] 구버전 1 · 진행 초기화 경고 0' `
+    ('{0}/{1}/{2}' -f (Get-TestNoticeCount '^\[안내\] 구버전 커스텀 완료 기록 2건을 무효화했습니다'),
+      (Get-TestNoticeCount '^\[경고\] 구버전 커스텀 완료 기록 파일을 지우지 못했습니다'), (Get-TestNoticeCount '^\[경고\] 이전 완료 기록 파일을 지우지 못했습니다')) '1/1/0'
+  Remove-Item -LiteralPath ($customAbyssMarkerFile + '.stale') -Force -ErrorAction SilentlyContinue
+
+  # ⓒ 진행 있던 던전의 version 2 마커 = 두 목록에 다 듦(명세 리뷰 2 P3) → 그 경로 정리 1회. 성공은 구버전 건수에 들고, 계속 실패하면
+  #    경고는 진행 초기화 쪽 1줄만(같은 파일 경고 두 줄 금지). 정리 함수를 감싸 경로별 호출 수를 셉니다
+  $realClearMarker = ${function:Clear-CustomMarkerFile}
+  function Clear-CustomMarkerFile {
+    param([string]$Path)
+    $clearKey = [System.IO.Path]::GetFileName($Path)
+    $script:clearMarkerCalls[$clearKey] = 1 + [int]$script:clearMarkerCalls[$clearKey]
+    return (& $realClearMarker -Path $Path)
+  }
+  foreach ($unionCase in @('성공', '계속 실패')) {
+    Set-TestLegacyMarkers
+    Remove-Item -LiteralPath $customDeepMarkerFile -Force
+    $unionUser = New-TestLegacyUser
+    $unionUser.customRepeat.progress = [pscustomobject]@{ lap = 1; index = 1; fingerprint = 'x' }
+    [System.IO.File]::WriteAllText($configPath, ($unionUser | ConvertTo-Json -Depth 20), $utf8Bom)
+    $script:customProgressReset = $false
+    $script:clearMarkerCalls = @{}
+    $unionLock = $null
+    if ($unionCase -eq '계속 실패') {
+      $unionLock = [System.IO.File]::Open($customDungeonMarkerFile, [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    }
+    try { $migratedUnion = Update-ConfigToLatest }
+    finally { if ($unionLock) { $unionLock.Dispose() } }
+    Assert-Case "두 목록 같은 경로($unionCase): 이전 성공 · 던전 정리 1회 · 어비스 정리 1회" `
+      ('{0}/{1}/{2}' -f $migratedUnion, [int]$script:clearMarkerCalls['custom_done.marker'], [int]$script:clearMarkerCalls['abyss_custom_done.marker']) 'True/1/1'
+    Invoke-MigrationNotice
+    # 무효화가 1건(계속 실패)이어도 건수 안내는 1줄입니다 - 안내 문턱이 '2건 이상' 으로 밀리면 한 모드만 쓰던 사용자는 못 봅니다(변이 검증 보강 2026-10-09)
+    Assert-Case "두 목록 같은 경로($unionCase): [안내] 구버전 … N건(N = 무효화 건수) 1줄" `
+      (@($script:guiLogLines | Where-Object { $_ -eq ('[안내] 구버전 커스텀 완료 기록 {0}건을 무효화했습니다 (새 형식 세대 검사 도입 - 해당 항목은 처음부터 다시 진행합니다)' -f $script:legacyMarkerClearedCount) }).Count) 1
+    $unionWarnings = (Get-TestNoticeCount '^\[경고\] 이전 완료 기록 파일을 지우지 못했습니다') + (Get-TestNoticeCount '^\[경고\] 구버전 커스텀 완료 기록 파일을 지우지 못했습니다')
+    if ($unionCase -eq '성공') {
+      Assert-Case '두 목록 같은 경로(성공): 실패 플래그 둘 다 거짓 · 무효화 2건(던전+어비스) · 마커 경고 0' `
+        ('{0}/{1}/{2}/{3}' -f $script:customMarkerClearFailed, $script:legacyMarkerClearFailed, $script:legacyMarkerClearedCount, $unionWarnings) 'False/False/2/0'
+    } else {
+      Assert-Case '두 목록 같은 경로(계속 실패): 진행 초기화 실패 플래그만 · 무효화 1건(어비스) · 마커 경고 1줄' `
+        ('{0}/{1}/{2}/{3}' -f $script:customMarkerClearFailed, $script:legacyMarkerClearFailed, $script:legacyMarkerClearedCount, $unionWarnings) 'True/False/1/1'
+    }
+    Remove-Item -LiteralPath ($customDungeonMarkerFile + '.stale') -Force -ErrorAction SilentlyContinue
+  }
+  ${function:Clear-CustomMarkerFile} = $realClearMarker
+
+  # ⓓ 이미 스키마 11 인 사용자의 다음 이전(좌표만 낮음)은 구버전 수집을 하지 않습니다 - 문턱이 $defSchema 가 아니라 11 고정이라,
+  #    version 3 을 쓰는 사용자의 마커가 그때 잠깐 못 읽혀도(= $null) 지워지지 않습니다. 여기서는 '{}' 마커로 '수집 안 함' 만 봅니다
+  [System.IO.File]::WriteAllText($customAbyssMarkerFile, '{}')
+  $coordsOnlyUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $coordsOnlyUser.coordsVersion = $realCoords - 1
+  [System.IO.File]::WriteAllText($configPath, ($coordsOnlyUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedCoordsOnly = Update-ConfigToLatest
+  Assert-Case '구버전 마커(스키마 11 사용자의 좌표 이전): 수집 0 · 마커 그대로 · 무효화 0건' `
+    ('{0}/{1}/{2}/{3}' -f $migratedCoordsOnly, @($script:legacyMarkerPathsToClear).Count,
+      $(if ([System.IO.File]::Exists($customAbyssMarkerFile)) { [System.IO.File]::ReadAllText($customAbyssMarkerFile) } else { '없음' }), $script:legacyMarkerClearedCount) 'True/0/{}/0'
+  # ⓓ-2 다음 스키마 이전(내장 스키마 = 지금 + 1 가상): 스키마가 같은 위 ⓓ 로는 문턱 '11 고정' 과 '$defSchema' 가 같은 답이라
+  #    가르지 못합니다(변이 검증 보강 2026-10-09). 문턱이 $defSchema 를 따라가면 version 3 사용자의 마커가 다음 스키마 이전 때 그 순간
+  #    못 읽혔다는 이유로 지워집니다 - 2-0b 주석이 막겠다고 한 경우
+  $nextSchemaDefault = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $nextSchemaDefault.configSchemaVersion = $realSchema + 1
+  [System.IO.File]::WriteAllText($defaultPath, ($nextSchemaDefault | ConvertTo-Json -Depth 20), $utf8Bom)
+  [System.IO.File]::WriteAllText($customAbyssMarkerFile, '{}')
+  [System.IO.File]::WriteAllText($configPath, ($realDefault | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedNextSchema = Update-ConfigToLatest
+  Assert-Case '구버전 마커(스키마 11 사용자의 다음 스키마 이전 - 가상 내장 스키마 +1): 이전 실행 · 수집 0 · 마커 그대로 · 무효화 0건' `
+    ('{0}/{1}/{2}/{3}' -f $migratedNextSchema, @($script:legacyMarkerPathsToClear).Count,
+      $(if ([System.IO.File]::Exists($customAbyssMarkerFile)) { [System.IO.File]::ReadAllText($customAbyssMarkerFile) } else { '없음' }), $script:legacyMarkerClearedCount) 'True/0/{}/0'
+  [System.IO.File]::WriteAllText($defaultPath, ($realDefault | ConvertTo-Json -Depth 20), $utf8Bom)
+  ${function:Save-Config} = $realSaveConfig
   # 무효화 계약 자체(삭제 → 확인 → '{}')는 단일 함수로 직접 검증합니다
   $clearProbe = [System.IO.Path]::Combine($testRoot, 'clear_probe.marker')
   [System.IO.File]::WriteAllText($clearProbe, '{"version":2,"lap":1,"index":0}')
@@ -454,7 +717,12 @@ try {
   $afterAbyssAdvance = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   Assert-Case '어비스 진행: 던전 진행 보존' $afterAbyssAdvance.customRepeat.progress.lap 7
   Assert-Case '어비스 진행: 디스크 전진' $afterAbyssAdvance.abyssCustomRepeat.progress.lap 2
+  $journalLogLinesBefore = @($script:guiLogLines).Count
   Assert-Case '어비스 초기화: 별도 섹션 성공' (Reset-CustomProgress -SectionName 'abyssCustomRepeat') $true
+  # 단계 2.3: 어비스 초기화는 완료 기록 폐기를 거칩니다 - 파일이 없으면 바꿀 것이 없어 조용히 지나가야 합니다(경고 0 · 파일 생성 0)
+  Assert-Case '어비스 초기화: 완료 기록 파일이 없으면 폐기는 조용히 지나감(완료 기록 파일 0 · 정리 실패 경고 0)' `
+    ('{0}/{1}' -f @(Get-ChildItem -LiteralPath $testRoot -Force | Where-Object { $_.Name -like '*abyss_handoff*' }).Count,
+      @(@($script:guiLogLines) | Select-Object -Skip $journalLogLinesBefore | Where-Object { $_ -match '완료 기록 정리 실패' }).Count) '0/0'
   $afterAbyssReset = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   Assert-Case '어비스 초기화: 어비스 progress만 null' ($null -eq $afterAbyssReset.abyssCustomRepeat.progress) $true
   Assert-Case '어비스 초기화: 던전 진행 계속 보존' $afterAbyssReset.customRepeat.progress.lap 7
@@ -483,7 +751,8 @@ try {
       [System.IO.Path]::Combine($testRoot, 'stale_probe.marker'),
       [System.IO.Path]::Combine($testRoot, 'stale_probe.marker.stale'),
       ($customDungeonMarkerFile + '.stale'), ($customAbyssMarkerFile + '.stale'),
-      ($customDeepMarkerFile + '.stale'), ($customLifeMarkerFile + '.stale'))) {
+      ($customDeepMarkerFile + '.stale'), ($customLifeMarkerFile + '.stale'),
+      $abyssJournalPath, ($abyssJournalPath + '.bak'))) {
     if ([System.IO.File]::Exists($path)) { [System.IO.File]::Delete($path) }
   }
   if ([System.IO.Directory]::Exists($testRoot)) { [System.IO.Directory]::Delete($testRoot, $false) }

@@ -848,6 +848,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
 # 시간 지정에는 GUI 가 이 신호를 넘기지 않습니다 - 던전·심층은 결과 화면 14-T 가 지정 시각을 보고 이 플래그를 판 중간에 세우고,
 # 파티원은 G 의 'time' 이 같은 역할을 합니다 (시간 지정 '그 판까지' 설계 3.2·4.1).
 $script:dgLastRun = ([string]$env:HONEYNOGI_LAST_RUN -eq '1')
+# 이번 실행 id (GUI 가 시작 버튼마다 새로 만드는 HONEYNOGI_RUN_ID - 구현 명세 ① 2.10 W2). 어비스 본류의 클리어 완료 기록
+# (Add-AbyssJournalClearedEntry)이 항목의 runId 와 비커스텀 owner { runId } 로 씁니다 - 비커스텀은 GUI 의 코드 4 계상이 지금 실행 id 와
+# 같은 기록만 셉니다(커스텀은 owner 5필드·세대로 대조 - 항목의 runId 는 기록용). 콘텐츠·모드와 무관하게 읽고, 워커 단독 실행(빈 값)도
+# 그대로 둡니다(그 기록은 다음 GUI 시작의 지난 기록 정리가 지우는 대상이라 따로 가르지 않음 - 규칙 8).
+$script:abyssRunId = [string]$env:HONEYNOGI_RUN_ID
 # 던전 선택/옵션 화면의 OCR 영역들 (2026-07-15 실측 검증)
 # 좌상단 제목 (선택: '○○ 던전' / 옵션: 'N층 M구역') - 기본값은 config.json과 동일하게 유지.
 # 상단 45→34 (2026-08-13 11:53 실사고, coordsVersion 9): 네이티브 1908 창은 제목이 위로 밀려
@@ -1882,6 +1887,11 @@ $logRecoveryPath = Join-Path $logDir 'mabinogi_run_once.recovery.log'
 # 안전 중지 신호 파일: 컨트롤 패널에서 '안전 중지'를 누르면 생성됩니다.
 # 이 파일이 있으면 던전에서 나와 밖(HUD)이 확인된 시점에서 회차를 조기 종료합니다.
 $safeStopFlagPath = Join-Path $logDir 'safe_stop.flag'
+# 어비스 완료 기록(handoff journal - 설계 v10 6.1): GUI 와 같은 Log 폴더(위 폴백 규칙 포함)의 같은 파일입니다.
+# 읽기·쓰기는 Write-CustomClearMarker 아래의 Read-/Update-AbyssJournal 묶음(GUI 와 본문이 같은 사본)으로만 합니다.
+$abyssJournalPath = Join-Path $logDir 'abyss_handoff.json'
+# 저장소가 남기는 작성자 표지(savedBy). GUI 사본은 'gui' - 두 스크립트가 같은 변수 이름을 써야 저장소 본문이 같게 유지됩니다.
+$script:abyssJournalSavedBy = "worker:$PID"
 
 # 원격 데스크톱 창 최소화 등으로 화면 캡처가 안 되는 동안 true가 되는 상태 플래그입니다.
 # 이 동안에는 각 대기 단계의 제한 시간이 흐르지 않습니다(화면 복구 후 이어서 감지).
@@ -8767,10 +8777,13 @@ function Write-CustomClearMarker {
   # GUI 타이머가 같은 Log 폴더를 폴링 중이라 공유 위반이 날 수 있어 Write-RunLog 와
   # 같은 20회 재시도 패턴으로 흡수하고, 끝내 실패해도 진행은 계속합니다
   # (마커는 보험이지 필수가 아님 - 정상 코드 0이면 GUI가 종료 코드로 전진).
-  if ([string]::IsNullOrWhiteSpace($script:customMarkerPath)) { return }
+  # 반환(구현 명세 ① 2.10 W5 · 5절 A9): 기록함 $true · 경로가 빈 값 $true(GUI 가 이번 회차 마커를 일부러 비운 것 - 기록 대상이 아니라
+  # 실패가 아님) · 소유자 정보 없음 $false · 쓰기 20회 실패 $false. 결과를 실제로 받는 호출은 뒤 단위(⑤ - 다시 하기 가능 여부)뿐이라 지금
+  # 호출 4곳은 [void] 로 버립니다 - 감싸지 않으면 반환값이 그 자리의 출력으로 흘러 함수 반환·로그를 오염시킵니다(명세 리뷰 2 P3).
+  if ([string]::IsNullOrWhiteSpace($script:customMarkerPath)) { return $true }
   if ([string]::IsNullOrWhiteSpace($script:customOwnerJson)) {
     Write-RunLog '[경고] 완료 마커 소유자 정보가 없어 마커를 기록하지 않습니다 - GUI/워커 버전을 확인해 주세요'
-    return
+    return $false
   }
   $written = $false
   for ($attempt = 0; $attempt -lt 20; $attempt++) {
@@ -8787,6 +8800,703 @@ function Write-CustomClearMarker {
   } else {
     Write-RunLog '[경고] 완료 마커 기록에 실패했습니다 - 정상 종료면 GUI가 종료 코드로 계상하므로 진행을 계속합니다'
   }
+  return $written
+}
+
+# ===== 어비스 완료 기록(handoff journal) 저장소 - GUI·워커 두 사본 =====
+# 설계 v10 6.1(저장·읽기 계약) + 반환 태그 결정 + 구현 명세 ① 2.1. 아래 함수 묶음은 GUI(mabinogi_gui.ps1)와 워커
+# (mabinogi_run_once.ps1)에 **주석을 뺀 토큰이 같게** 들어 있습니다(회귀 test_abyss_journal_store - 토큰 사이 공백만
+# 무시하고 줄바꿈·문자열 내용은 비교). 한쪽을 고치면 다른 쪽도 같은 글자로 고칩니다. 그래서 본문은 바깥 이름을 쓰지
+# 않습니다 - 경로는 -Path, 작성자 표지는 두 스크립트에 같은 이름으로 둔 $script:abyssJournalSavedBy, 경고 문구는 반환
+# Warnings 로 돌려주고 로그는 호출부(GUI Add-GuiLog / 워커 Write-RunLog)가 남깁니다.
+# 파일(같은 폴더): 본 파일 abyss_handoff.json · 직전본 abyss_handoff.json.bak(File.Replace 가 갱신하는 지속 파일) ·
+# 잠금 abyss_handoff.lock(DeleteOnClose) · 임시 .abyss_handoff.json.<pid>.<guid>.tmp · 손상 증거
+# abyss_handoff.json.corrupt.<yyyyMMdd_HHmmss>. 파일을 바꾸는 경로(저장·복구·청소)는 전부 같은 .lock 아래에서만 돕니다.
+# 예외 경계: 저장소·IO 실패만 태그(Status)로 바꾸고 throw 하지 않습니다. -Mutator·-Expect 가 던진 예외는 종류와 무관하게
+# (IOException 이어도) 잡지 않고 전파합니다 - 구현 결함이라 워커에서는 최상위 catch(코드 1 + 오류 세트)로 드러나야
+# 합니다. 그래서 IO 호출 지점마다 typed catch 를 두고 mutator·expect 호출은 그 catch 밖에 둡니다 - typed catch 는
+# New-Object 가 MethodInvocationException 에 감싼 IOException 도 잡지만, 일반 catch 의 -is [IO.IOException] 은
+# 감싼 예외라 거짓입니다(실측).
+# 한 try 의 catch 절은 2개까지만 둡니다: PS 5.1 은 함수를 컴파일한 뒤(호출이 수십 번 쌓이면 백그라운드에서 - 처음 몇 번은
+# 해석 실행이라 정상) catch 절이 3개 이상인 try 에서 세 번째부터의 절에 걸릴 예외를 한 칸 앞 절로 보냅니다(실측 2026-10-08,
+# PS 5.1.26100.9444 - 파일 없음·폴더 없음·IO·접근 거부 4절이던 후보 읽기에서 공유 위반이 '폴더 없음' 절로 가, 본 파일을 없는
+# 것으로 보고 빈 journal 에서 저장을 시작했음). IOException 의 하위 형식(파일·폴더 없음)은 IOException 절 안에서
+# $_.Exception -is 로 가릅니다 - typed catch 안의 $_.Exception 은 감싼 예외를 푼 안쪽 예외입니다(실측).
+# 묶음의 끝은 Update-AbyssJournal 뒤의 '묶음 끝' 표지 주석입니다(회귀가 두 표지 사이 함수만 두 사본 비교 대상으로 봅니다).
+
+function New-AbyssJournalEmpty {
+  # 빈 journal - 파일이 하나도 없을 때(읽기 (d))의 시작 상태. 디스크에는 쓰지 않습니다(mutator 가 바꿨을 때만
+  # Update-AbyssJournal 이 Move 로 처음 만듭니다 - 빈 파일을 먼저 만들면 '없음' 과 '있음' 이 섞여 복구 판정이 흐려짐).
+  return [pscustomobject]@{
+    version = 1
+    seq     = 0
+    savedAt = ''
+    savedBy = ''
+    entries = @()
+    applied = @()
+    pending = @()
+  }
+}
+
+function New-AbyssJournalEntry {
+  # 항목 기본값(설계 v10 6.1 스키마 + 닫기 메타 screen · 정리 전용 표지 cleanupOnly). 호출부가 필요한 필드만 덮어씁니다.
+  # nonce = GUID 'D' 형식(GUI 꼬리 숨김 정규식 [0-9A-Fa-f-]+ 와 맞음), 비커스텀 generation 0, 시각 필드(at.*)는
+  # Get-AbyssJournalTimeText 형식으로 그 단계에 도달했을 때 호출부가 채웁니다.
+  param([string]$Stage = 'entered')
+  return [pscustomobject]@{
+    nonce          = [guid]::NewGuid().ToString('D')
+    runId          = ''
+    section        = ''
+    generation     = 0
+    owner          = $null
+    nextOwner      = $null
+    stage          = $Stage
+    decision       = $null
+    attempts       = 0
+    retryClicks    = 0
+    resumeAttempts = 0
+    launchState    = 'pending'
+    afterEntry     = [pscustomobject]@{ index = 0; total = $null; keys = $null }
+    reason         = ''
+    screen         = ''
+    cleanupOnly    = $false
+    at             = [pscustomobject]@{ entered = $null; cleared = $null; retryAttempt = $null; retryClicked = $null; reentered = $null }
+  }
+}
+
+function Get-AbyssJournalTimeText {
+  # journal 시각 형식 - 왕복 'o'(문화권 무관, 예 2026-10-08T18:28:21.0934628+09:00). 읽기는 ConvertFrom-AbyssJournalTime.
+  return (Get-Date).ToString('o')
+}
+
+function ConvertFrom-AbyssJournalTime {
+  # journal 시각 문자열 → [DateTime](Kind Local). 빈 값·형식 오류는 $null. 쓰기 형식과 짝을 이 묶음에 고정해 두는 이유:
+  # 재개 마감(retryClicked + 300초)처럼 뒤 단계가 이 값을 계산에 씁니다(구현 명세 ① 5절 A2 ⑦).
+  param($Text)
+  if ([string]::IsNullOrWhiteSpace([string]$Text)) { return $null }
+  try {
+    return [DateTime]::Parse([string]$Text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+  } catch {
+    return $null
+  }
+}
+
+function Get-AbyssJournalStageRank {
+  # 단계 순위: entered 0 < cleared 1 < retry-attempt 2 < retry-clicked 3 < reentered 4. post-clear-stop 은 '클리어 이상'
+  # 판정에만 쓰는 종료 표지라 cleared 와 같은 1(그 안의 세밀한 순서는 없음). 모르는 값은 -1 - '클리어 이상' 에서 빠집니다.
+  param([string]$Stage)
+  if ($Stage -eq 'entered') { return 0 }
+  if ($Stage -eq 'cleared') { return 1 }
+  if ($Stage -eq 'retry-attempt') { return 2 }
+  if ($Stage -eq 'retry-clicked') { return 3 }
+  if ($Stage -eq 'reentered') { return 4 }
+  if ($Stage -eq 'post-clear-stop') { return 1 }
+  return -1
+}
+
+function Get-AbyssJournalField {
+  # 해시테이블·PSCustomObject 공용 필드 읽기 → @{ Has; Value }. owner 를 메모리에서 해시테이블로 만든 경우와 파일에서
+  # 읽은 경우(PSCustomObject)를 같게 봅니다 - PSObject.Properties 는 해시테이블의 키를 보지 못합니다.
+  param($Object, [string]$Name)
+  if ($null -eq $Object) { return @{ Has = $false; Value = $null } }
+  if ($Object -is [System.Collections.IDictionary]) {
+    if ($Object.Contains($Name)) { return @{ Has = $true; Value = $Object[$Name] } }
+    return @{ Has = $false; Value = $null }
+  }
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) { return @{ Has = $false; Value = $null } }
+  return @{ Has = $true; Value = $property.Value }
+}
+
+function Test-AbyssJournalOwnerMatch {
+  # 항목(또는 pending 원소)의 owner 가 지금 owner 와 같은가 - 같은 열쇠로 마커·journal·pending 이 같은 사실을 봅니다.
+  # 커스텀 = 마커 소유자와 같은 5필드(fingerprint·orderKey·lap·index·item) AND 항목의 형제 필드 generation. 캐스트는 마커
+  # 대조(Test-CustomMarkerOwnerMatchesContext)와 같게 [string]/[int], orderKey 없음 = ''. 비커스텀 = runId 문자열 -
+  # 지금 owner 에 runId 가 있으면 비커스텀으로 봅니다. -Field 'nextOwner' 면 그 항목의 nextOwner 를 같은 규칙(같은
+  # generation)으로 봅니다. 필드가 없거나 숫자로 못 읽는 등 판단할 수 없으면 $false.
+  param($Entry, $Owner, $Generation = 0, [string]$Field = 'owner')
+  try {
+    if ($null -eq $Owner) { return $false }
+    $entryOwner = (Get-AbyssJournalField -Object $Entry -Name $Field).Value
+    if ($null -eq $entryOwner) { return $false }
+    $wantRunId = Get-AbyssJournalField -Object $Owner -Name 'runId'
+    if ($wantRunId.Has) {
+      $haveRunId = Get-AbyssJournalField -Object $entryOwner -Name 'runId'
+      return [bool]($haveRunId.Has -and ([string]$haveRunId.Value -eq [string]$wantRunId.Value))
+    }
+    $entryGeneration = Get-AbyssJournalField -Object $Entry -Name 'generation'
+    if (-not $entryGeneration.Has) { return $false }
+    foreach ($name in @('fingerprint', 'lap', 'index', 'item')) {
+      if (-not (Get-AbyssJournalField -Object $entryOwner -Name $name).Has) { return $false }
+      if (-not (Get-AbyssJournalField -Object $Owner -Name $name).Has) { return $false }
+    }
+    $haveOrderKey = [string](Get-AbyssJournalField -Object $entryOwner -Name 'orderKey').Value
+    $wantOrderKey = [string](Get-AbyssJournalField -Object $Owner -Name 'orderKey').Value
+    return [bool](([string]$entryOwner.fingerprint -eq [string]$Owner.fingerprint) -and
+      ($haveOrderKey -eq $wantOrderKey) -and
+      ([int]$entryOwner.lap -eq [int]$Owner.lap) -and
+      ([int]$entryOwner.index -eq [int]$Owner.index) -and
+      ([string]$entryOwner.item -eq [string]$Owner.item) -and
+      ([int]$entryGeneration.Value -eq [int]$Generation))
+  } catch {
+    return $false
+  }
+}
+
+function Set-AbyssJournalProperty {
+  # PSCustomObject 필드 쓰기 - 있으면 대입(필드 순서 유지), 없으면 Add-Member. ConvertFrom-Json 결과에 없는 속성을 대입하면
+  # PS 5.1 이 예외를 내고(실측 SetValueInvocationException), Add-Member -Force 로 덮어쓰면 그 필드가 맨 뒤로 옮겨집니다(실측).
+  param($Object, [string]$Name, $Value)
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -ne $property) {
+    $property.Value = $Value
+  } else {
+    Add-Member -InputObject $Object -NotePropertyName $Name -NotePropertyValue $Value
+  }
+}
+
+function Test-AbyssJournalShape {
+  # 읽기 규칙의 '유효' - 파싱 결과가 객체 ∧ version = 1 ∧ seq·entries·applied·pending 존재(값 null 은 정규화가 빈 배열로).
+  # seq 는 후보 선택과 (b) 조건의 비교에 쓰므로 숫자만(0 이상의 정수)이 아니면 무효입니다. 자릿수(Int64 범위)는 보지
+  # 않습니다 - 저장소는 seq 를 0 부터 1씩만 올려 범위 끝에 닿지 않고, 손으로 고쳐 범위를 넘긴 파일은 [long] 변환 예외로
+  # 드러납니다(관측 0 - 막는 코드를 두지 않음). 저장 직전 재파싱 확인도 같은 규칙 - 다음 읽기가 손상으로 볼 내용을 쓰지
+  # 않게 합니다.
+  param($Journal)
+  if (-not ($Journal -is [System.Management.Automation.PSCustomObject])) { return $false }
+  foreach ($name in @('version', 'seq', 'entries', 'applied', 'pending')) {
+    if ($null -eq $Journal.PSObject.Properties[$name]) { return $false }
+  }
+  if ([string]$Journal.version -ne '1') { return $false }
+  if (-not ([string]$Journal.seq -match '^\d+$')) { return $false }
+  return $true
+}
+
+function ConvertTo-AbyssJournalNormalized {
+  # entries·applied·pending 을 늘 배열로(null·없음 → 빈 배열). PS 5.1 은 Where-Object 결과를 @() 없이 대입하면 1건이 객체로
+  # 풀리고(그대로 저장하면 {"entries":{…}}), Write-Output -NoEnumerate 로 감싼 배열은 {"value":[…],"Count":n} 으로
+  # 직렬화됩니다(실측) - [object[]]@(…) 로 새 배열에 담아 둘 다 막습니다. 읽은 직후와 쓰기 직전에 부릅니다.
+  # 다른 필드는 건드리지 않습니다 - 모르는 필드도 그대로 왕복합니다.
+  # 값은 대입문으로 담습니다 - $(if …) 하위 식은 빈 배열을 $null 로, 1개 배열을 그 원소로 풀어 버립니다(실측).
+  param($Journal)
+  foreach ($name in @('entries', 'applied', 'pending')) {
+    $property = $Journal.PSObject.Properties[$name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+      $value = [object[]]@()
+    } else {
+      $value = [object[]]@($property.Value)
+    }
+    Set-AbyssJournalProperty -Object $Journal -Name $name -Value $value
+  }
+  return $Journal
+}
+
+function ConvertTo-AbyssJournalText {
+  # 직렬화: ConvertTo-Json -Depth 10(기본 Depth 2 면 owner 가 "@{fingerprint=…}" 문자열로 무너짐 - 실측) → \uXXXX 복원
+  # (Save-Config 와 같은 식 - 사람이 읽게) → 다시 파싱해 읽기 규칙상 유효한지 확인. 유효하지 않으면 예외(파일은 아직 안
+  # 건드림 - 구현 결함). 인코딩(UTF-8 BOM)·쓰기는 Write-AbyssJournalTempFile.
+  param($Journal)
+  $json = $Journal | ConvertTo-Json -Depth 10
+  $json = [regex]::Replace($json, '\\u([0-9a-fA-F]{4})', {
+      param($m) [string][char][Convert]::ToInt32($m.Groups[1].Value, 16) })
+  $reparsed = $json | ConvertFrom-Json -ErrorAction Stop
+  if (-not (Test-AbyssJournalShape -Journal $reparsed)) {
+    throw '완료 기록 직렬화 결과가 읽기 규칙상 유효하지 않습니다 (version·seq·entries·applied·pending 확인)'
+  }
+  return $json
+}
+
+function New-AbyssJournalTempPath {
+  # 임시 파일 경로 - 같은 폴더의 .<본 파일 이름>.<pid>.<guid>.tmp(config 원자 저장과 같은 명명 규칙). 만들지는 않습니다.
+  param([string]$Path)
+  $fullPath = [IO.Path]::GetFullPath($Path)
+  $tempName = '.{0}.{1}.{2}.tmp' -f [IO.Path]::GetFileName($fullPath), $PID, ([guid]::NewGuid().ToString('N'))
+  return [IO.Path]::Combine([IO.Path]::GetDirectoryName($fullPath), $tempName)
+}
+
+function Write-AbyssJournalTempFile {
+  # 임시 파일 쓰기 - CreateNew(남의 파일을 덮지 않음) → UTF-8 BOM + 본문 → Flush(true)(OS 버퍼까지 디스크로 - 교체
+  # 직전에 전원이 나가도 교체될 내용이 남게) → 닫기. 저장·복원 공용이라 이 묶음의 Flush(true) 는 여기 한 곳입니다.
+  # 실패하면 IO 예외를 그대로 올립니다(만들다 만 파일은 경로를 쥔 호출부가 지움).
+  param([string]$TempPath, [string]$Text)
+  $encoding = New-Object System.Text.UTF8Encoding($true)
+  $preamble = $encoding.GetPreamble()
+  $body = $encoding.GetBytes($Text)
+  $stream = New-Object System.IO.FileStream($TempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+  try {
+    $stream.Write($preamble, 0, $preamble.Length)
+    $stream.Write($body, 0, $body.Length)
+    $stream.Flush($true)
+  } finally {
+    $stream.Dispose()
+  }
+}
+
+function Remove-AbyssJournalFileQuietly {
+  # 남은 임시 파일 청소 - 실패는 저장·읽기 실패가 아닙니다(config 원자 저장의 청소와 같은 원칙: 끝난 교체를 청소 예외로
+  # 실패 처리하지 않음). 남은 .tmp 는 본 파일이 있는 동안 후보가 아니고 다음 잠금 읽기가 다시 지웁니다.
+  param([string]$FilePath)
+  try {
+    if ([IO.File]::Exists($FilePath)) { [IO.File]::Delete($FilePath) }
+  } catch [System.IO.IOException] {
+  } catch [System.UnauthorizedAccessException] {
+  }
+}
+
+function Step-AbyssJournalBudget {
+  # 합산 재시도 예산 1회 소모 - 잠금 획득과 잠금 뒤 모든 IO 실패(재판독·복구·임시 쓰기·Replace·Move)를 합쳐 20회 × 50ms
+  # (설계 v10 6.1 - 워커 완료 마커 기록과 같은 예산). 따로 세면 잠금 대기 뒤 교체 대기가 다시 1초를 써 버립니다.
+  # 남았으면 50ms 쉬고 $true(다시 시도), 다 썼으면 $false(쉬지 않고 실패 태그). 화면 대기가 아니라 양보·동결 대상이 아닙니다.
+  param($Budget)
+  $Budget.Left = [int]$Budget.Left - 1
+  if ($Budget.Left -le 0) { return $false }
+  Start-Sleep -Milliseconds 50
+  return $true
+}
+
+function Open-AbyssJournalLock {
+  # 잠금 획득(설계 v10 6.1 ①) - .lock 을 CreateNew + FileShare.None + DeleteOnClose 로 엽니다. 쥔 프로세스가 죽으면 OS 가
+  # 핸들과 함께 파일을 지워 고아 잠금이 남지 않습니다(실측). 실패하면 합산 예산 안에서 50ms 간격으로 다시 시도합니다.
+  # 반환 @{ Stream; Tag } - 성공 = 해제할 잠금 스트림 / 실패 = Stream $null, Tag 'locked' 또는 'io-failed'.
+  # 'locked' 는 예산이 끝날 때까지 경합(다른 쪽이 잠금을 쥠)이 이어진 경우뿐 - 마지막 실패의 HResult(감싼 예외면 안쪽
+  # IOException 의 값)로 가립니다. 실측(2026-10-08, PS 5.1.26100.9444): 다른 프로세스 보유·같은 프로세스 보유·보유자 없는
+  # 파일 존재 = 셋 다 0x80070050(파일 있음). 0x80070020(공유 위반)·0x80070021(잠금 위반)은 CreateNew 에서 관측되지
+  # 않았지만 명세 계약대로 경합에 둡니다. 폴더 없음(0x80070003)·삭제 대기 중·경로가 폴더(접근 거부 0x80070005)는 잠금
+  # 경합이 아니라 io-failed 입니다.
+  param([string]$Path, $Budget)
+  $lockPath = [IO.Path]::ChangeExtension([IO.Path]::GetFullPath($Path), '.lock')
+  while ($true) {
+    $contended = $false
+    try {
+      $stream = New-Object System.IO.FileStream($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None, 4096, [IO.FileOptions]::DeleteOnClose)
+      return @{ Stream = $stream; Tag = '' }
+    } catch [System.IO.IOException] {
+      $ioException = $_.Exception
+      while ($null -ne $ioException -and -not ($ioException -is [System.IO.IOException])) { $ioException = $ioException.InnerException }
+      $contended = ($null -ne $ioException) -and (@(0x80070020, 0x80070021, 0x80070050) -contains [int]$ioException.HResult)
+    } catch [System.UnauthorizedAccessException] {
+      $contended = $false
+    }
+    if (-not (Step-AbyssJournalBudget -Budget $Budget)) {
+      return @{ Stream = $null; Tag = $(if ($contended) { 'locked' } else { 'io-failed' }) }
+    }
+  }
+}
+
+function Read-AbyssJournalCandidate {
+  # 후보 파일 하나의 판정 → @{ Path; Exists; Valid; IoFailed; Seq; Journal; WriteTime }. 공유 모드 ReadWrite|Delete 로
+  # 엽니다 - Delete 공유 없이 열어 두면 쓰는 쪽의 File.Replace 가 실패합니다(실측). 파싱 실패·형식 불일치 = 무효(손상),
+  # 읽기 IO 실패 = IoFailed(손상이 아님 - 다른 프로그램이 잠깐 쥐었을 수 있어 잠금 쪽이 같은 예산으로 다시 읽습니다).
+  # 읽는 사이 사라진 파일(교체 중)은 없는 것으로 봅니다.
+  param([string]$FilePath)
+  $candidate = @{ Path = $FilePath; Exists = $false; Valid = $false; IoFailed = $false; Seq = [long]-1; Journal = $null; WriteTime = [DateTime]::MinValue }
+  if (-not [IO.File]::Exists($FilePath)) { return $candidate }
+  $text = $null
+  try {
+    $stream = [IO.File]::Open($FilePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try {
+      $reader = New-Object System.IO.StreamReader($stream, (New-Object System.Text.UTF8Encoding($false)), $true)
+      $text = $reader.ReadToEnd()
+    } finally {
+      $stream.Dispose()
+    }
+    $candidate.WriteTime = [IO.File]::GetLastWriteTimeUtc($FilePath)
+  } catch [System.IO.IOException] {
+    # 파일·폴더 없음(IOException 하위)은 읽는 사이 사라진 것 - 절을 따로 두지 않습니다(묶음 머리 주석 - catch 절 2개까지)
+    if ($_.Exception -is [System.IO.FileNotFoundException] -or $_.Exception -is [System.IO.DirectoryNotFoundException]) { return $candidate }
+    $candidate.Exists = $true
+    $candidate.IoFailed = $true
+    return $candidate
+  } catch [System.UnauthorizedAccessException] {
+    $candidate.Exists = $true
+    $candidate.IoFailed = $true
+    return $candidate
+  }
+  $candidate.Exists = $true
+  $parsed = $null
+  try {
+    $parsed = ConvertFrom-Json -InputObject $text -ErrorAction Stop
+  } catch {
+    return $candidate
+  }
+  if (-not (Test-AbyssJournalShape -Journal $parsed)) { return $candidate }
+  $candidate.Valid = $true
+  $candidate.Seq = [long]$parsed.seq
+  $candidate.Journal = ConvertTo-AbyssJournalNormalized -Journal $parsed
+  return $candidate
+}
+
+function Read-AbyssJournalUnlocked {
+  # 순수 읽기(설계 v10 6.1 읽기 계약) - 후보 판정·선택·정규화만 하고 **파일은 바꾸지 않습니다**. 진단·표시 전용이고 어떤
+  # 결정·복구에도 쓰지 않습니다(잠금 밖에서 본 판정은 그 사이 쓰는 쪽이 교체를 끝냈을 수 있음). 잠금 아래의 재판독은
+  # Read-AbyssJournalHeld 가 이 함수로 합니다.
+  # 반환 @{ Status(ok/corrupt/io-failed); Branch(a~e); Journal; Warnings; Detail } - Detail 은 Held 의 복구 재료(내부용).
+  # 후보 = 본 파일, .bak, 그리고 본 파일이 없을 때만 .tmp. 분기:
+  #  (a) 본 파일 유효 → 채택(다른 후보 seq 가 더 커도 본 파일 - 경고만. 이때 .bak·임시본 목록의 읽기 실패는 판정에 쓰지 않고
+  #  경고만 - 본 파일이 정답이고, .bak 이 막혔으면 다음 교체가 같은 예산으로 드러냅니다) (b) 본 파일 없음 ∧ .bak 유효 ∧ 유효
+  #  .tmp 의 seq = .bak seq + 1 → 그 .tmp(교체 도중 종료 - 같은 seq 둘이면 나중에 쓴 쪽) (c) 본 파일 없음·손상 ∧ .bak 유효
+  #  → .bak (d) 본 파일·.bak 이 둘 다 없음 → 빈 journal - 남은 .tmp 는 유효하든 아니든 확정되지 않은 첫 쓰기라 올리지 않고
+  #  (Held 가 청소) (e) 그 밖(.bak 손상 포함) → corrupt.
+  #  (b) 에 '.bak 없음' 을 허용하지 않는 이유(구현 리뷰 2.1 P1): 첫 저장의 Move 가 예산 끝까지 실패해 io-failed 를 돌려준 뒤
+  #  임시본 삭제까지 실패하면, 그 임시본이 다음 읽기에서 본 파일로 올라가 '실패라고 알린 저장' 이 나중에 커밋됩니다.
+  param([string]$Path)
+  $mainPath = [IO.Path]::GetFullPath($Path)
+  $detail = @{ MainPath = $mainPath; BakPath = ($mainPath + '.bak'); MainExists = $false; TempFiles = @(); ChosenTemp = ''; MaxSeq = [long]-1 }
+  $result = @{ Status = 'ok'; Branch = ''; Journal = $null; Warnings = @(); Detail = $detail }
+  $main = Read-AbyssJournalCandidate -FilePath $mainPath
+  if ($main.IoFailed) {
+    $result.Status = 'io-failed'
+    return $result
+  }
+  $detail.MainExists = $main.Exists
+  $tempPattern = '^\.' + [regex]::Escape([IO.Path]::GetFileName($mainPath)) + '\..+\.tmp$'
+  try {
+    $detail.TempFiles = @([IO.Directory]::GetFiles([IO.Path]::GetDirectoryName($mainPath)) |
+        Where-Object { [IO.Path]::GetFileName($_) -match $tempPattern } | Sort-Object)
+  } catch [System.IO.IOException] {
+    # 폴더 없음(IOException 하위)은 임시 파일 없음 - 절을 따로 두지 않습니다(묶음 머리 주석 - catch 절 2개까지)
+    if ($_.Exception -is [System.IO.DirectoryNotFoundException]) {
+      $detail.TempFiles = @()
+    } elseif (-not $main.Exists) {
+      $result.Status = 'io-failed'
+      return $result
+    } else {
+      $result.Warnings += '[경고] 완료 기록 임시본 목록을 읽지 못했습니다 - 임시본 청소를 건너뜁니다'
+    }
+  } catch [System.UnauthorizedAccessException] {
+    if (-not $main.Exists) {
+      $result.Status = 'io-failed'
+      return $result
+    }
+    $result.Warnings += '[경고] 완료 기록 임시본 목록을 읽지 못했습니다 - 임시본 청소를 건너뜁니다'
+  }
+  $bak = Read-AbyssJournalCandidate -FilePath $detail.BakPath
+  if ($main.Valid) {
+    $result.Branch = 'a'
+    $result.Journal = $main.Journal
+    if ($bak.IoFailed) {
+      $result.Warnings += '[경고] 완료 기록 직전본을 읽지 못했습니다 - 순번 비교를 건너뜁니다'
+    }
+    if ($bak.Valid -and $bak.Seq -gt $main.Seq) {
+      $result.Warnings += ('[경고] 완료 기록 직전본의 순번({0})이 본 파일({1})보다 큽니다 - 본 파일을 그대로 씁니다' -f $bak.Seq, $main.Seq)
+    }
+    return $result
+  }
+  if ($bak.IoFailed) {
+    $result.Status = 'io-failed'
+    return $result
+  }
+  $temps = @()
+  if (-not $main.Exists) {
+    foreach ($tempFile in $detail.TempFiles) {
+      $temp = Read-AbyssJournalCandidate -FilePath $tempFile
+      if ($temp.IoFailed) {
+        $result.Status = 'io-failed'
+        return $result
+      }
+      if ($temp.Exists) { $temps += $temp }
+    }
+  }
+  $maxSeq = $bak.Seq
+  foreach ($temp in $temps) {
+    if ($temp.Valid -and $temp.Seq -gt $maxSeq) { $maxSeq = $temp.Seq }
+  }
+  $detail.MaxSeq = $maxSeq
+  if (-not $main.Exists) {
+    $chosen = $null
+    foreach ($temp in $temps) {
+      if (-not $temp.Valid) { continue }
+      if (-not ($bak.Valid -and $temp.Seq -eq ($bak.Seq + 1))) { continue }
+      if ($null -eq $chosen -or $temp.Seq -gt $chosen.Seq -or ($temp.Seq -eq $chosen.Seq -and $temp.WriteTime -gt $chosen.WriteTime)) {
+        $chosen = $temp
+      }
+    }
+    if ($null -ne $chosen) {
+      $result.Branch = 'b'
+      $result.Journal = $chosen.Journal
+      $detail.ChosenTemp = $chosen.Path
+      return $result
+    }
+  }
+  if ($bak.Valid) {
+    $result.Branch = 'c'
+    $result.Journal = $bak.Journal
+    return $result
+  }
+  if (-not $main.Exists -and -not $bak.Exists) {
+    $result.Branch = 'd'
+    $result.Journal = New-AbyssJournalEmpty
+    return $result
+  }
+  $result.Status = 'corrupt'
+  $result.Branch = 'e'
+  return $result
+}
+
+function Read-AbyssJournalHeld {
+  # 잠금 보유 전제의 읽기(설계 v10 6.1) - 같은 프로세스는 .lock 을 다시 열 수 없어(실측) 저장 함수는 래퍼가 아니라 이것을
+  # 부릅니다. 잠금 아래에서 Unlocked 로 **다시 읽은** 결과에만 복구·청소를 합니다: (b) 고른 .tmp 를 Move 로 본 파일에
+  # 올림 (c) 손상 본 파일을 .corrupt.<시각> 으로 옮겨 증거로 두고, .bak 은 그대로 둔 채 그 내용(seq = 아는 최대 + 1)을
+  # 임시 파일 → Move 로 본 파일 복원 (a)(b)(c) 남은 .tmp 청소. (d) 빈 journal 은 쓰지 않고, corrupt 는 파일을 바꾸지 않습니다.
+  # 읽기·복구 IO 실패는 같은 예산(-Budget - 잠금과 합산, 없으면 새 20회) 안에서 처음부터 다시 읽어 재시도하고 끝내 안 되면
+  # io-failed - 손상본만 옮기고 복원 전에 멈춘 중간 상태는 다음 읽기의 (c) 가 이어받습니다.
+  # 반환 @{ Status(ok/corrupt/io-failed); Branch; Journal; Warnings }.
+  param([string]$Path, $Budget = $null)
+  if ($null -eq $Budget) { $Budget = @{ Left = 20 } }
+  $warnings = @()
+  while ($true) {
+    $read = Read-AbyssJournalUnlocked -Path $Path
+    $warnings = @($read.Warnings)
+    if ($read.Status -eq 'corrupt') {
+      return @{ Status = 'corrupt'; Branch = 'e'; Journal = $null; Warnings = $warnings }
+    }
+    if ($read.Status -eq 'ok') {
+      $detail = $read.Detail
+      $restoreTemp = ''
+      try {
+        if ($read.Branch -eq 'b') {
+          [IO.File]::Move($detail.ChosenTemp, $detail.MainPath)
+          $warnings += '[경고] 완료 기록 교체 중 종료 - 임시본으로 완료'
+        } elseif ($read.Branch -eq 'c') {
+          if ($detail.MainExists) {
+            [IO.File]::Move($detail.MainPath, ($detail.MainPath + '.corrupt.' + (Get-Date).ToString('yyyyMMdd_HHmmss')))
+          }
+          $restored = $read.Journal
+          Set-AbyssJournalProperty -Object $restored -Name 'seq' -Value ([long]$detail.MaxSeq + 1)
+          Set-AbyssJournalProperty -Object $restored -Name 'savedAt' -Value (Get-AbyssJournalTimeText)
+          Set-AbyssJournalProperty -Object $restored -Name 'savedBy' -Value ([string]$script:abyssJournalSavedBy)
+          $restoreText = ConvertTo-AbyssJournalText -Journal $restored
+          $restoreTemp = New-AbyssJournalTempPath -Path $detail.MainPath
+          Write-AbyssJournalTempFile -TempPath $restoreTemp -Text $restoreText
+          [IO.File]::Move($restoreTemp, $detail.MainPath)
+          $restoreTemp = ''
+          $warnings += '[경고] 완료 기록 파일 손상 - 직전본으로 복구'
+        }
+        foreach ($tempFile in $detail.TempFiles) { Remove-AbyssJournalFileQuietly -FilePath $tempFile }
+        return @{ Status = 'ok'; Branch = $read.Branch; Journal = $read.Journal; Warnings = $warnings }
+      } catch [System.IO.IOException] {
+      } catch [System.UnauthorizedAccessException] {
+      } finally {
+        if ($restoreTemp) { Remove-AbyssJournalFileQuietly -FilePath $restoreTemp }
+      }
+    }
+    if (-not (Step-AbyssJournalBudget -Budget $Budget)) {
+      return @{ Status = 'io-failed'; Branch = ''; Journal = $null; Warnings = $warnings }
+    }
+  }
+}
+
+function Read-AbyssJournal {
+  # 잠금 래퍼(설계 v10 6.1 읽기 계약) - 저장과 같은 방식으로 .lock 을 합산 예산(20회 × 50ms) 안에 얻고 → Held → 해제.
+  # Update 밖의 모든 결정(종료 코드 처리·시작 게이트·기동 후보 고르기)은 이 결과로만 내립니다.
+  # 반환 @{ Status(ok/locked/corrupt/io-failed); Branch(a~e); Journal; Warnings }. 잠금을 못 얻으면 파일 변경 0.
+  param([string]$Path)
+  $mainPath = [IO.Path]::GetFullPath($Path)
+  $budget = @{ Left = 20 }
+  $lock = Open-AbyssJournalLock -Path $mainPath -Budget $budget
+  if ($null -eq $lock.Stream) {
+    return @{ Status = $lock.Tag; Branch = ''; Journal = $null; Warnings = @() }
+  }
+  try {
+    return (Read-AbyssJournalHeld -Path $mainPath -Budget $budget)
+  } finally {
+    $lock.Stream.Dispose()
+  }
+}
+
+function Update-AbyssJournal {
+  # 저장 계약(설계 v10 6.1 ①~⑦ + 반환 태그 결정): 잠금 → Held 재판독·복구 → -Expect → -Mutator → seq+1·savedAt·savedBy →
+  # 직렬화 → 임시 파일(CreateNew → Flush(true) → 닫기) → File.Replace(본 파일 → .bak, 본 파일이 없으면 Move) → 잠금 해제.
+  # -Mutator · -Expect 는 호출부가 .GetNewClosure() 로 만듭니다 - 클로저가 아니면 이 함수의 지역 변수가 호출부의 같은 이름
+  # 변수를 가립니다(동적 스코프 - 실측). 클로저는 $script: 를 $null 로 읽으므로 필요한 값은 호출부 지역 변수로 잡고,
+  # 클로저가 부를 수 있는 함수는 최상위(글로벌) 함수뿐입니다.
+  #  -Expect { param($journal) … } : 정확히 [bool] 1개를 돌려줍니다(출력 없음·둘 이상·bool 아님 = 계약 위반 예외).
+  #   $false 면 expect-failed - mutator 를 부르지 않고 쓰지도 않습니다(잠금 안 RMW 의 논리 CAS).
+  #  -Mutator { param($journal, $change) … } : 메모리 사본을 바꾸고 바꿨으면 $change.Changed = $true. 출력은 버립니다.
+  #   안 바꾸면 unchanged - 이 호출의 논리 변경 쓰기 0(임시 파일·Replace 0). 단 잠금 아래 재판독이 (b)/(c) 복구를 했다면 그
+  #   복구 쓰기는 별개이고 Warnings 에 복구 경고가 실립니다(expect-failed 도 같음 - 구현 리뷰 2.1 P2).
+  #   항목을 고정 필드로 다시 만들지 말 것(모르는 필드 왕복 보존).
+  # 반환 @{ Tag; Warnings } - Tag ∈ changed / unchanged / expect-failed / locked / corrupt / io-failed, Warnings = 복구 경고.
+  # 예산: 잠금 획득과 잠금 뒤 모든 IO 실패를 합쳐 20회 × 50ms. 잠금 뒤의 실패(접근 거부 포함)는 io-failed 입니다 - 예외는
+  # 본 파일이 유효할 때의 보조 읽기 실패 두 가지(.bak 읽기 · 임시본 목록 읽기)로, 판정에 쓰지 않고 경고만 남깁니다(Unlocked (a)).
+  # 바깥은 try/finally(catch 없음) - mutator·expect 예외가 나가도 잠금 스트림과 임시 파일을 반드시 정리합니다(GUI 는 예외
+  # 뒤에도 살아 있어 핸들이 남으면 이후 모든 기록이 'locked' 가 됩니다).
+  param([string]$Path, [scriptblock]$Mutator, [scriptblock]$Expect = $null)
+  if ($null -eq $Mutator) { throw '완료 기록 저장 계약 위반 - -Mutator 가 없습니다' }
+  $mainPath = [IO.Path]::GetFullPath($Path)
+  $budget = @{ Left = 20 }
+  $lockStream = $null
+  $tempPath = ''
+  try {
+    $lock = Open-AbyssJournalLock -Path $mainPath -Budget $budget
+    if ($null -eq $lock.Stream) {
+      return @{ Tag = $lock.Tag; Warnings = @() }
+    }
+    $lockStream = $lock.Stream
+    $read = Read-AbyssJournalHeld -Path $mainPath -Budget $budget
+    $warnings = @($read.Warnings)
+    if ($read.Status -ne 'ok') {
+      return @{ Tag = $read.Status; Warnings = $warnings }
+    }
+    $journal = $read.Journal
+    if ($null -ne $Expect) {
+      $expectOutput = @(& $Expect $journal)
+      if ($expectOutput.Count -ne 1 -or -not ($expectOutput[0] -is [bool])) {
+        $firstKind = 'null'
+        if ($expectOutput.Count -gt 0 -and $null -ne $expectOutput[0]) { $firstKind = $expectOutput[0].GetType().Name }
+        throw ('완료 기록 저장 계약 위반 - -Expect 는 [bool] 값 하나만 돌려줘야 합니다 (출력 {0}개, 첫 값 {1})' -f $expectOutput.Count, $firstKind)
+      }
+      if (-not $expectOutput[0]) {
+        return @{ Tag = 'expect-failed'; Warnings = $warnings }
+      }
+    }
+    $change = @{ Changed = $false }
+    [void](& $Mutator $journal $change)
+    if (-not $change.Changed) {
+      return @{ Tag = 'unchanged'; Warnings = $warnings }
+    }
+    $journal = ConvertTo-AbyssJournalNormalized -Journal $journal
+    Set-AbyssJournalProperty -Object $journal -Name 'seq' -Value ([long]$journal.seq + 1)
+    Set-AbyssJournalProperty -Object $journal -Name 'savedAt' -Value (Get-AbyssJournalTimeText)
+    Set-AbyssJournalProperty -Object $journal -Name 'savedBy' -Value ([string]$script:abyssJournalSavedBy)
+    $text = ConvertTo-AbyssJournalText -Journal $journal
+    $bakPath = $mainPath + '.bak'
+    $tempReady = $false
+    while ($true) {
+      try {
+        if (-not $tempReady) {
+          if ($tempPath) { Remove-AbyssJournalFileQuietly -FilePath $tempPath }
+          $tempPath = New-AbyssJournalTempPath -Path $mainPath
+          Write-AbyssJournalTempFile -TempPath $tempPath -Text $text
+          $tempReady = $true
+        }
+        if ([IO.File]::Exists($mainPath)) {
+          [IO.File]::Replace($tempPath, $mainPath, $bakPath, $true)
+        } else {
+          [IO.File]::Move($tempPath, $mainPath)
+        }
+        $tempPath = ''
+        return @{ Tag = 'changed'; Warnings = $warnings }
+      } catch [System.IO.IOException] {
+      } catch [System.UnauthorizedAccessException] {
+      }
+      if (-not (Step-AbyssJournalBudget -Budget $budget)) {
+        # 실패를 알리기 전에 임시본을 지웁니다. 못 지워 남으면 경고 - 본 파일이 없고 .bak 이 있을 때(교체가 반쯤 끝난 상태)
+        # 그 임시본은 다음 읽기의 (b) 가 올릴 수 있습니다(구현 리뷰 2.1 P1 - .bak 이 없으면 올리지 않습니다).
+        # 남았는지는 잡힌 삭제 예외로 판정합니다 - File.Exists 는 접근 오류면 실제로 있어도 거짓을 돌려줄 수 있습니다(구현 리뷰
+        # 2.1 확인 라운드). File.Delete 는 없는 파일이면 조용히 지나가고, 폴더 없음은 남은 파일이 없다는 뜻입니다.
+        if ($tempPath) {
+          $tempLeft = $false
+          try {
+            [IO.File]::Delete($tempPath)
+          } catch [System.IO.IOException] {
+            $tempLeft = -not ($_.Exception -is [System.IO.DirectoryNotFoundException])
+          } catch [System.UnauthorizedAccessException] {
+            $tempLeft = $true
+          }
+          if ($tempLeft) {
+            $warnings += '[경고] 완료 기록 저장 실패 - 임시본을 지우지 못했습니다 (본 파일이 없으면 다음 읽기에서 이 저장이 적용될 수 있습니다)'
+          }
+          $tempPath = ''
+        }
+        return @{ Tag = 'io-failed'; Warnings = $warnings }
+      }
+    }
+  } finally {
+    if ($tempPath) { Remove-AbyssJournalFileQuietly -FilePath $tempPath }
+    if ($null -ne $lockStream) { $lockStream.Dispose() }
+  }
+}
+# ===== 어비스 완료 기록 저장소 묶음 끝 - 위 머리 주석부터 여기까지가 두 사본 같은 글자 =====
+
+# ===== 어비스 완료 기록 - 워커 전용 함수 (구현 명세 ① 2.10 W3·W4) =====
+# GUI 에는 없는 함수라 위 묶음 끝 표지 뒤에 둡니다 - 표지 안에 두면 두 사본 비교(회귀 test_abyss_journal_store)의 함수 이름 집합이 갈라집니다.
+
+function ConvertTo-AbyssJournalOwner {
+  # 커스텀 완료 기록의 owner·세대 - GUI 가 넘긴 소유자 JSON(HONEYNOGI_CUSTOM_OWNER = 완료 마커와 같은 version 3 직렬화, GUI
+  # ConvertTo-CustomMarkerOwnerJson)에서 꺼냅니다. 세대의 출처는 이 JSON 입니다(구현 명세 ① 5절 A3 - 같은 계산으로 넘어오는
+  # HONEYNOGI_CUSTOM_GENERATION 은 [설정] 스냅샷에만 남겨 두 값이 어긋나면 로그로 드러나게 함). 이 워커가 OWNER 를 해석하는 곳은 여기뿐입니다
+  # (완료 마커는 받은 글자 그대로 씀).
+  # 반환 @{ Owner = 5필드(fingerprint·orderKey·lap·index·item - 완료 기록 owner 모양, 세대는 항목의 형제 필드); Generation = 정수 } -
+  # 캐스트는 GUI 의 owner 대조(Test-AbyssJournalOwnerMatch)·마커 직렬화와 같은 [string]/[int] 이고 세대가 없으면 0 입니다.
+  # 해석하지 못하면(빈 값 · JSON 아님 · 객체 아님 · 정수로 못 읽음) $null. 파일·로그·$script: 를 쓰지 않는 순수 함수입니다.
+  param([string]$OwnerJson)
+  if ([string]::IsNullOrWhiteSpace($OwnerJson)) { return $null }
+  try {
+    $parsed = $OwnerJson | ConvertFrom-Json -ErrorAction Stop
+    if (-not ($parsed -is [System.Management.Automation.PSCustomObject])) { return $null }
+    $generation = 0
+    if ($null -ne $parsed.PSObject.Properties['generation']) { $generation = [int]$parsed.generation }
+    $owner = [pscustomobject]@{
+      fingerprint = [string]$parsed.fingerprint
+      orderKey    = [string]$parsed.orderKey
+      lap         = [int]$parsed.lap
+      index       = [int]$parsed.index
+      item        = [string]$parsed.item
+    }
+    return @{ Owner = $owner; Generation = $generation }
+  } catch {
+    return $null
+  }
+}
+
+function Add-AbyssJournalClearedEntry {
+  # 어비스 본류의 클리어 완료 기록 - journal 항목 1건(stage 'cleared'). 부르는 곳은 본류의 결과 화면 도달 직후 한 곳(완료 마커 블록 뒤 ·
+  # 나가기 헬퍼 앞)이고, 정리 전용 판은 부르는 쪽 조건이 뺍니다 (구현 명세 ① 2.10 W3 · 설계 v10 6.1 기록 시점 표 'cleared').
+  # 항목 = 기본값(New-AbyssJournalEntry - 새 nonce · nextOwner 없음 · launchState pending · afterEntry { index 0 }) 위에
+  #  - 공통: runId = 이번 실행 id($script:abyssRunId) · stage cleared · decision exit(다시 하기가 꺼진 빌드라 옛 나가기) · at.cleared
+  #  - 커스텀: section abyssCustomRepeat · owner = GUI 가 넘긴 소유자 JSON 의 5필드 · generation = 그 JSON 의 세대(ConvertTo-AbyssJournalOwner)
+  #  - 비커스텀: section '' · owner { runId } · generation 0
+  # GUI 는 이 기록으로 클리어 뒤 조건 정지(코드 4)를 1회 계상하고(마커를 못 쓴 커스텀 판 포함), 코드 0·11 에서는 소비만 합니다. 커스텀은 오류
+  # 종료(코드 1)와 다음 시작에서 완료 마커와 같은 마무리 복구 근거로도 씁니다(구현 명세 ① 5절 A10 · 2.9 S3).
+  # 커스텀인데 소유자 JSON 을 못 읽으면 기록하지 않고 [경고] 한 줄 - owner 없는 기록은 GUI 가 어느 판과도 대조하지 못합니다.
+  # 저장 실패(locked·corrupt·io-failed)는 [경고] 한 줄 뒤 그대로 돌아갑니다 - 종료 코드·흐름은 바뀌지 않습니다. 실패 낱말은 설계 R2 3.6 과
+  # 같습니다(파일 사용 중 / 파일 손상 / 기록 실패). 성공 줄은 파일 로그 전용이라 GUI 가 화면에서 숨깁니다(W7).
+  # 예외는 감싸지 않습니다(설계 R2-5): 저장소가 잠금·IO 실패를 태그로 바꾸므로 남는 예외는 구현 결함이고, 최상위 catch 의 코드 1 + 오류 세트로
+  # 드러나야 합니다. 클릭·키·캡처가 없어 클릭·대기 계약(규칙 4)·캡처 실패 동결(규칙 15) 대상이 아닙니다. 반환값 없음.
+  $runIdValue = [string]$script:abyssRunId
+  $sectionName = ''
+  $generationValue = 0
+  $ownerValue = [pscustomobject]@{ runId = $runIdValue }
+  if ($script:customMode) {
+    $parsedOwner = ConvertTo-AbyssJournalOwner -OwnerJson ([string]$script:customOwnerJson)
+    if ($null -eq $parsedOwner) {
+      Write-RunLog '[경고] 커스텀 항목 소유자 정보를 읽지 못해 클리어 완료 기록을 남기지 않습니다 - GUI/워커 버전을 확인해 주세요'
+      return
+    }
+    $sectionName = 'abyssCustomRepeat'
+    $generationValue = [int]$parsedOwner.Generation
+    $ownerValue = $parsedOwner.Owner
+  }
+  $clearedEntry = New-AbyssJournalEntry -Stage 'cleared'
+  $clearedEntry.runId = $runIdValue
+  $clearedEntry.section = $sectionName
+  $clearedEntry.generation = $generationValue
+  $clearedEntry.owner = $ownerValue
+  $clearedEntry.decision = 'exit'
+  $clearedEntry.at.cleared = Get-AbyssJournalTimeText
+  # mutator 는 클로저로 만듭니다 - 클로저가 아니면 저장 함수의 지역 변수가 같은 이름의 이 함수 변수를 가립니다(동적 스코프 - 실측).
+  # 클로저 안에서는 $script: 를 읽지 않고(빈 값으로 읽힘) 함수도 부르지 않습니다 - 넣을 항목은 위에서 지역 변수로 만들었습니다(명세 ① 2.0 체크리스트 5·6)
+  $mutator = {
+    param($journal, $change)
+    $journal.entries = @(@($journal.entries) + $clearedEntry)
+    $change.Changed = $true
+  }.GetNewClosure()
+  $record = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+  # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+  foreach ($recordWarning in @($record.Warnings)) { Write-RunLog ([string]$recordWarning) }
+  if ([string]$record.Tag -eq 'changed') {
+    Write-RunLog '[어비스] 클리어 완료 기록 저장 (결과 화면 도달)'
+    return
+  }
+  $failureKind = switch ([string]$record.Tag) {
+    'locked' { '파일 사용 중' }
+    'corrupt' { '파일 손상' }
+    'io-failed' { '기록 실패' }
+    default { [string]$record.Tag }
+  }
+  # 문구는 -f 식이 아니라 문자열로 둡니다 - 워커 로그 심각도 회귀(test_log_severity)는 Write-RunLog 의 문자열 인자만 모아 분류하므로
+  # 식으로 쓰면 이 줄이 그 검사 밖으로 빠집니다(구현 명세 ① 2.10 W3 '새 로그 줄은 그 회귀 대상' - 단계 2.10 명세 대조 P3-1)
+  Write-RunLog "[경고] 클리어 완료 기록을 저장하지 못했습니다 ($failureKind) - 정상 종료면 GUI가 종료 코드로 계상하므로 진행을 계속합니다"
 }
 
 function Invoke-NormalDungeonCycle {
@@ -10516,8 +11226,9 @@ function Invoke-NormalDungeonCycle {
   # 13-커스텀. 결과 화면 도달 = 이 판의 클리어 확정 지점 (정상 판/복구 판/전리품 공개 경유가
   # 전부 여기로 합류). 이후 마무리(다시 하기 → 옵션 복귀)에서 끊겨도 GUI가 완료로 계상하도록
   # 완료 마커를 먼저 기록합니다. 새 시작 정리 모드(수동 진행분)는 기록하지 않습니다.
+  # 반환값(기록 성공 여부)은 이 단위에서 쓰지 않아 버립니다 - 그대로 두면 이 함수의 출력에 섞입니다(구현 명세 ① 2.10 W5)
   if ($script:customMode -and -not $script:customCleanupOnly) {
-    Write-CustomClearMarker
+    [void](Write-CustomClearMarker)
   }
 
   # 14. 안전 중지가 예약돼 있으면 나가기로 마치고, 아니면 다시 하기로 곧장 재입장합니다.
@@ -17283,10 +17994,16 @@ try {
     # 대분류가 '생활'이면 contentCategory(전투 하위 선택)는 참고용으로만 남습니다.
     # 생활 상세 설정(스킬/대상/대기 등)은 아래 섹션 목록의 'life' 한 줄 JSON 으로 남습니다.
     Write-RunLog "[설정] 꿀비노기 v$appVersionInfo($hostModeInfo), 대분류 '$mainCategory', 콘텐츠 '$contentCategory', 반복 $repeatInfo, coordsVersion $(Get-ConfigValue $config @('coordsVersion') '?')"
+    # 어비스 완료 기록(journal)용 env - 받은 값 그대로(빈 값 = 안 넘어옴) 한 줄 (구현 명세 ① 2.10 W6 · 설계 v10 6.1 env 목록). 제보 로그만으로
+    # 그 회차가 어느 실행 id·어떤 이어받기 기동이었는지 볼 수 있게 합니다. 지정 시각(UNTIL)·사이클 추정치 env 는 여기 넣지 않습니다 - 그 env 를
+    # 읽는 곳의 개수를 회귀가 고정합니다(test_life_gather · test_abyss_party_member)
+    Write-RunLog "[설정] 완료 기록 env: RUN_ID '$env:HONEYNOGI_RUN_ID', HANDOFF_NONCE '$env:HONEYNOGI_HANDOFF_NONCE', RESUME_REENTRY '$env:HONEYNOGI_RESUME_REENTRY', FINISH_ONLY '$env:HONEYNOGI_FINISH_ONLY'"
     if ($script:customMode) {
       # 커스텀 리스트는 압축 문자열 한 줄로만 남깁니다 (타 PC 제보 분석 요건 -
       # customRepeat 섹션을 아래 목록에 넣으면 items 배열 전체가 JSON으로 쏟아져 제외)
-      Write-RunLog "[설정] 커스텀 리스트: $($script:customListText) (현재 $($script:customPositionText), 이전 항목 '$env:HONEYNOGI_CUSTOM_PREV', 다음 항목 '$env:HONEYNOGI_CUSTOM_NEXT', 재시작 $($script:customRestart))"
+      # 완료 마커·완료 기록의 소유자 JSON(OWNER - version 3)과 진행 세대(GENERATION)도 함께 - 같은 계산에서 나온 두 값이라 어긋나면 이 줄로
+      # 드러납니다(설계 v10 1.7 · 구현 명세 ① 2.10 W6)
+      Write-RunLog "[설정] 커스텀 리스트: $($script:customListText) (현재 $($script:customPositionText), 이전 항목 '$env:HONEYNOGI_CUSTOM_PREV', 다음 항목 '$env:HONEYNOGI_CUSTOM_NEXT', 재시작 $($script:customRestart), OWNER '$env:HONEYNOGI_CUSTOM_OWNER', GENERATION '$env:HONEYNOGI_CUSTOM_GENERATION')"
     }
     if ($script:lifeCustomMode) {
       # 생활 커스텀은 이전/다음 항목 개념이 없습니다 (사이클마다 메뉴부터 새로 시작하므로
@@ -17702,7 +18419,7 @@ try {
 
   if ($startExitDetected) {
     Write-RunLog '[어비스] 시작: 보상 화면(나가기) 감지 - 마무리부터 진행'
-    if ($script:customMode -and -not $script:customCleanupOnly) { Write-CustomClearMarker }
+    if ($script:customMode -and -not $script:customCleanupOnly) { [void](Write-CustomClearMarker) }
     # 2026-09-18 3버튼 개편: 글자 위치 클릭 (고정 좌표 (636,655) 는 '다시 하기' 자리 - 재입장 오클릭)
     # 부모 마감 = 뒤이어 부를 복귀 루프와 같은 예산 (⑥e 설계 2.13 - 반영본 검증, 09-30 리뷰4): 헬퍼 안 복구 회전(같은 회전 복구·탐침 복구 뒤)만 이어지면
     # 'expired' 로 돌아오고, 'selection'(워커가 연 화면인지 모르는 선택 화면)과 함께 버려진 뒤 곧바로 복귀 루프가 새 예산으로 이어받습니다 (새 한도 값 아님)
@@ -17723,7 +18440,7 @@ try {
       -TimeoutSeconds ($timeoutExit + 15) -ReclickEverySeconds 3 -Condition { Test-ExitButton -Game $game } `
       -SourceCondition { Test-DungeonClearPrompt -Game $game }
     Write-RunLog '[어비스] 나가기 버튼 감지'
-    if ($script:customMode -and -not $script:customCleanupOnly) { Write-CustomClearMarker }
+    if ($script:customMode -and -not $script:customCleanupOnly) { [void](Write-CustomClearMarker) }
     # 2026-09-18 3버튼 개편: 글자 위치 클릭 (고정 좌표 (636,655) 는 '다시 하기' 자리 - 재입장 오클릭)
     # 부모 마감 = 뒤이어 부를 복귀 루프와 같은 예산 (⑥e 설계 2.13 - 반영본 검증, 09-30 리뷰4): 헬퍼 안 복구 회전(같은 회전 복구·탐침 복구 뒤)만 이어지면
     # 'expired' 로 돌아오고, 'selection'(워커가 연 화면인지 모르는 선택 화면)과 함께 버려진 뒤 곧바로 복귀 루프가 새 예산으로 이어받습니다 (새 한도 값 아님)
@@ -18420,7 +19137,15 @@ try {
     # 끊겨도 GUI가 같은 판을 다시 입장하지 않고 마무리만 복구할 수 있게 먼저 기록합니다.
     # 마커는 클리어·보상 화면을 본 문맥에서만 씁니다 - 클리어 감시는 2026-09-21 부터 'selection' 을 돌려주지 않지만
     # (불명 오버레이는 관측 지속 → 마감 시 코드 4), 증거 없는 결과에 마커가 찍히는 경로를 명시로 막습니다 (설계 합의 A2).
-    Write-CustomClearMarker
+    # 반환값(기록 성공 여부)은 이 단위에서 쓰지 않아 버립니다 (구현 명세 ① 2.10 W5)
+    [void](Write-CustomClearMarker)
+  }
+  # 어비스 완료 기록(journal) - 같은 클리어 확정 지점에서 'cleared' 항목 1건을 나가기 헬퍼 앞에 남깁니다 (구현 명세 ① 2.10 W3).
+  # 완료 마커를 썼는지와 무관하게 남깁니다 - 마커 쓰기가 실패한 커스텀 판도, 마커가 없는 비커스텀 판도 그 뒤 나가기·복귀 중 조건 정지(코드 4)로
+  # 끝나면 GUI 가 이 기록으로 1회 계상합니다. 정리 전용 판(손으로 들어간 판 - 계상하지 않음)만 뺍니다. 저장 실패는 [경고] 한 줄 뒤 그대로
+  # 진행하고(종료 코드·흐름 불변), 예외는 감싸지 않습니다(함수 머리 주석)
+  if (($clearOutcome -eq 'clear' -or $clearOutcome -eq 'reward') -and -not ($script:customMode -and $script:customCleanupOnly)) {
+    Add-AbyssJournalClearedEntry
   }
   # 2026-09-18 3버튼 개편('[ESC] 나가기' / '[Space] 다시 하기' / '다른 던전 가기'): 옛 고정 좌표 (636,655) 는
   # '다시 하기' 자리라 글자 위치로 클릭합니다 (미검출은 재판독 후 코드 4 - 재입장 오클릭 방지). 'matching'(재매칭 패널)이면

@@ -105,4 +105,93 @@ Check-RecoveryBlock '완료 복구가 상세 화면에서 시작하면 뒤로가
 Check-Pattern '완료 복구 두 블록의 옛 복구 완료 문구 0건 (어비스 선택·상세 경로)' `
   '^(?![\s\S]*(어비스 선택 화면이 이미 준비돼 있습니다 - 완료 항목 재입장 없이 복구 완료|어비스 상세 화면에서 선택 화면으로 복귀 - 완료 항목 재입장 없이 복구 완료))'
 
+# ── 완료 마커 기록 함수의 반환값 (2026-10-09 구현 명세 ① 2.10 W5 · 5절 A9) ──
+# 기록함 $true · 경로가 빈 값 $true(GUI 가 이번 회차 마커를 일부러 비움 - 기록 대상이 아니라 실패가 아님) · 소유자 정보 없음 $false · 쓰기 20회 실패
+# $false. 결과를 실제로 받는 호출은 뒤 단위(⑤ - 다시 하기 가능 여부)에서 생기고, 지금 호출 4곳은 [void] 로 버립니다 - 감싸지 않으면 반환값이 그 자리의
+# 출력으로 흘러(던전 사이클 함수 안이면 그 함수의 반환값에 섞임) 오염시킵니다(명세 리뷰 2 P3). 실제 함수를 추출해 임시 파일로 돌리고 Write-RunLog 는
+# 줄을 모으는 모의입니다. 20회 실패는 이 프로세스가 마커 파일을 FileShare.None 으로 쥐어 Set-Content 가 매번 막히게 합니다(재시도 사이 대기는 그 행 동안
+# Start-Sleep 모의로 셈 - 실제로는 자지 않음, 20번·합 1000ms 단언).
+$markerDefinitionText = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Write-CustomClearMarker'))
+# 마커 함수 안 exit 문 0 (단계 2.10 구현 검증 - 생존 변이 e3): 마커를 못 써도 같은 판의 본류(완료 기록 · 나가기 · 복귀)가 이어져야 합니다. 이 회귀는 함수를
+# 같은 프로세스에서 부르므로 exit 가 들면 아래 행이 단언 없이 끝나 통과로 보입니다 - 그래서 동작 행보다 먼저 정적으로 봅니다
+$markerDefinitionAst = [System.Management.Automation.Language.Parser]::ParseInput($markerDefinitionText, [ref]$null, [ref]$null)
+Assert-Case 'W5 마커 함수 정의 1 · 그 안 exit 문 0(동작 행보다 먼저)' `
+  ('{0}/{1}' -f @($markerDefinitionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)).Count,
+    @($markerDefinitionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count) '1/0'
+Invoke-Expression $markerDefinitionText
+$script:markerLogLines = New-Object System.Collections.Generic.List[string]
+function Write-RunLog {
+  param([string]$Message)
+  $script:markerLogLines.Add($Message)
+}
+$markerFolder = Join-Path ([IO.Path]::GetTempPath()) ('honeynogi_marker_return_' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($markerFolder)
+$markerOwnerJson = '{"version":3,"fingerprint":"A|solo|어려움|허상의 정박지|없음","orderKey":"","lap":1,"index":0,"item":"A|solo|어려움|허상의 정박지|없음","generation":2}'
+function Invoke-MarkerReturnRow {
+  # 한 행 = 마커 경로·소유자 JSON 을 두고 실제 함수 1번 → '반환값 개수/형식/값 · 로그' (파일 내용은 부른 쪽이 잡은 파일을 놓은 뒤 Get-MarkerFileText 로)
+  param([string]$MarkerPath, [string]$OwnerJson)
+  $script:customMarkerPath = $MarkerPath
+  $script:customOwnerJson = $OwnerJson
+  $script:markerLogLines.Clear()
+  $output = @(Write-CustomClearMarker)
+  $firstType = $(if ($output.Count -gt 0 -and $null -ne $output[0]) { $output[0].GetType().Name } else { '(없음)' })
+  return ('{0}개/{1}/{2} · [{3}]' -f $output.Count, $firstType, ($output -join ','), (@($script:markerLogLines) -join ' | '))
+}
+function Get-MarkerFileText {
+  param([string]$MarkerPath)
+  if ($MarkerPath -and [IO.File]::Exists($MarkerPath)) { return ([IO.File]::ReadAllText($MarkerPath)).Trim() }
+  return '(파일 없음)'
+}
+try {
+  $writtenPath = Join-Path $markerFolder 'written.marker'
+  $writtenRow = Invoke-MarkerReturnRow -MarkerPath $writtenPath -OwnerJson $markerOwnerJson
+  Assert-Case 'W5 기록함 → $true 하나 · 기록 줄 · 파일 = 소유자 JSON' ('{0} · {1}' -f $writtenRow, (Get-MarkerFileText $writtenPath)) `
+    ('1개/Boolean/True · [[커스텀] 완료 마커 기록 (결과 화면 도달)] · {0}' -f $markerOwnerJson)
+  Assert-Case 'W5 경로 빈 값(GUI 가 일부러 비움) → $true 하나 · 로그 0' (Invoke-MarkerReturnRow -MarkerPath '' -OwnerJson $markerOwnerJson) `
+    '1개/Boolean/True · []'
+  $noOwnerPath = Join-Path $markerFolder 'no-owner.marker'
+  $noOwnerRow = Invoke-MarkerReturnRow -MarkerPath $noOwnerPath -OwnerJson ''
+  Assert-Case 'W5 소유자 정보 없음 → $false 하나 · 경고 1줄 · 파일 없음' ('{0} · {1}' -f $noOwnerRow, (Get-MarkerFileText $noOwnerPath)) `
+    '1개/Boolean/False · [[경고] 완료 마커 소유자 정보가 없어 마커를 기록하지 않습니다 - GUI/워커 버전을 확인해 주세요] · (파일 없음)'
+  $heldPath = Join-Path $markerFolder 'held.marker'
+  [IO.File]::WriteAllText($heldPath, 'held-before')
+  $heldStream = [IO.File]::Open($heldPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+  # 재시도 사이 대기를 셉니다(단계 2.10 구현 검증 - 생존 변이 r13): 본문 무변경 계약(명세 2.10 W5 - 20회 Set-Content · 실패마다 50ms)이라 결과값만 보면
+  # 재시도 횟수를 줄여도 같은 $false 가 나옵니다. 이 행 동안만 Start-Sleep 을 같은 이름 함수로 가립니다(실제로는 자지 않음)
+  $script:markerSleepCalls = 0
+  $script:markerSleepMs = 0
+  function Start-Sleep {
+    param([int]$Seconds = 0, [int]$Milliseconds = 0)
+    $script:markerSleepCalls++
+    $script:markerSleepMs += $Milliseconds + ($Seconds * 1000)
+  }
+  try {
+    $heldRow = Invoke-MarkerReturnRow -MarkerPath $heldPath -OwnerJson $markerOwnerJson
+  } finally {
+    $heldStream.Dispose()
+    Remove-Item -Path 'Function:\Start-Sleep'
+  }
+  Assert-Case 'W5 쓰기 20회 실패(다른 쪽이 마커 파일을 쥠) → $false 하나 · 실패 경고 1줄 · 파일 그대로' ('{0} · {1}' -f $heldRow, (Get-MarkerFileText $heldPath)) `
+    '1개/Boolean/False · [[경고] 완료 마커 기록에 실패했습니다 - 정상 종료면 GUI가 종료 코드로 계상하므로 진행을 계속합니다] · held-before'
+  Assert-Case 'W5 쓰기 20회 실패 → 재시도 사이 대기 20번 · 합 1000ms(본문 그대로 - 20회 · 실패마다 50ms)' ('{0}번/{1}ms' -f $script:markerSleepCalls, $script:markerSleepMs) '20번/1000ms'
+} finally {
+  try { [IO.Directory]::Delete($markerFolder, $true) } catch { "참고: 임시 폴더 정리 실패 - $($_.Exception.Message)" }
+}
+# 호출 4곳(던전 사이클 1 · 어비스 보상 화면 시작 1 · 클리어 화면 시작 1 · 본류 1)은 전부 [void](…) 로 반환값을 버림 - 감싸지 않은 호출 0
+# (주석 뺀 사본의 AST - 호출 소유자 함수와 감싼 모양을 함께 봅니다)
+$markerWorkerAst = [System.Management.Automation.Language.Parser]::ParseInput((Remove-SourceComments -Text $worker), [ref]$null, [ref]$null)
+$markerCalls = @($markerWorkerAst.FindAll({ param($node)
+      ($node -is [System.Management.Automation.Language.CommandAst]) -and ($node.GetCommandName() -eq 'Write-CustomClearMarker') }, $true))
+$markerCallShapes = foreach ($markerCall in $markerCalls) {
+  $ownerNode = $markerCall.Parent
+  while ($ownerNode -and -not ($ownerNode -is [System.Management.Automation.Language.FunctionDefinitionAst])) { $ownerNode = $ownerNode.Parent }
+  $wrapped = ($markerCall.Parent -is [System.Management.Automation.Language.PipelineAst]) -and
+    ($markerCall.Parent.Parent -is [System.Management.Automation.Language.ParenExpressionAst]) -and
+    ($markerCall.Parent.Parent.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) -and
+    ($markerCall.Parent.Parent.Parent.Type.TypeName.Name -eq 'void')
+  '{0}:{1}' -f $(if ($ownerNode) { $ownerNode.Name } else { '(최상위)' }), $(if ($wrapped) { '[void]' } else { '감싸지 않음' })
+}
+Assert-Case 'W5 호출 4곳 전부 [void](Write-CustomClearMarker) (던전 사이클 1 · 최상위 흐름 3)' ((@($markerCallShapes) | Sort-Object) -join ', ') `
+  '(최상위):[void], (최상위):[void], (최상위):[void], Invoke-NormalDungeonCycle:[void]'
+
 exit $fails

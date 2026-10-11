@@ -12,6 +12,7 @@
 #   ② 워커의 Write-RunLog 문자열 리터럴을 AST 로 전수 수집합니다.
 #   ③ 그중 '오류'로 분류되는 줄은 반드시 [오류] 태그를 달고 있어야 합니다.
 #   ④ 워커가 실제로 쓰는 선두 태그가 GUI 규칙에 전부 등장해야 합니다(새 태그 누락 감시).
+#   ⑤ 어비스 클리어 완료 기록 줄(2026-10-10 구현 명세 ① 2.10 W3)이 ② 의 수집에 실제로 드는지 - 문자열이 아닌 인자는 ②③④ 밖입니다.
 $ErrorActionPreference = 'Stop'
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -124,5 +125,32 @@ foreach ($tag in ($workerTags.Keys | Sort-Object)) {
 if ($unknownTags.Count -gt 0) { "     └ GUI 가 모르는 태그: $($unknownTags -join ', ')" }
 Assert-Case '워커 선두 태그를 GUI 가 전부 인지' $unknownTags.Count 0
 Assert-Case '수집된 워커 선두 태그 수(참고)' ([bool]($workerTags.Count -ge 14)) 'True'
+
+# ── ⑤ 어비스 클리어 완료 기록(구현 명세 ① 2.10 W3)의 줄이 ② 의 전수 수집에 실제로 드는가 (검토 P3-18 · 단계 2.10 명세 대조 P3-1) ──
+# ② 는 Write-RunLog 의 문자열 인자만 모읍니다 - -f 식·괄호 식으로 쓴 줄은 ③④ 검사 밖으로 조용히 빠집니다(2.10 첫 구현의 저장 실패 줄이 그랬음).
+# 그래서 기록 함수의 Write-RunLog 첫 인자를 봅니다: 문자열 3줄(소유자 해석 실패 [경고] · 성공 [어비스] · 저장 실패 [경고] - 소스 순서, 태그는 이 둘만)
+# · 문자열이 아닌 것은 저장소가 돌려준 복구 경고를 그대로 넘기는 1줄뿐(그 문구는 저장소 묶음의 상수)
+$clearedFunctions = @($workerAst.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Add-AbyssJournalClearedEntry'
+}, $true))
+$clearedTags = @()
+$clearedOtherCount = 0
+foreach ($clearedFunction in $clearedFunctions) {
+  foreach ($clearedCall in @($clearedFunction.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Write-RunLog'
+  }, $true))) {
+    $clearedArgument = @($clearedCall.CommandElements)[1]
+    if ($clearedArgument -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+        $clearedArgument -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+      $clearedTags += $(if ($clearedArgument.Value -match '^\[([^\]]{1,8})\]') { $Matches[1] } else { '(태그 없음)' })
+    } else {
+      $clearedOtherCount++
+    }
+  }
+}
+Assert-Case '어비스 클리어 완료 기록 줄(2.10 W3) - 함수 1 · 문자열 줄의 선두 태그(소스 순) · 문자열 아닌 줄 1(저장소 경고 전달)' `
+  ('{0}/{1}/{2}' -f $clearedFunctions.Count, ($clearedTags -join ','), $clearedOtherCount) '1/경고,어비스,경고/1'
 
 exit $fails

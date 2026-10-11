@@ -155,8 +155,24 @@ Assert-Case 'GUI: $isAbyss 는 전투 대분류 안에서 던전·심층·사냥
 Assert-Case 'GUI: 콘텐츠 라디오 4개 모두 가시성 갱신 블록에 배선' (@('rbCatAbyss', 'rbCatDungeon', 'rbCatDeep', 'rbCatHunting') | Where-Object { $guiSource -notmatch ('\$' + $_ + '\.Add_CheckedChanged\(\$updateCategoryPanels\)') }).Count 0
 Assert-Case 'GUI: 적용 설정 요약에 거점 부활 상한 표기' ($guiSource -match '거점 부활 상한 \$\(\[int\]\$numCheckpointLimit\.Value\)회') $true
 Assert-Case 'GUI: 워커가 두 원인 조각을 실제로 둔다 (거점 상한 leave / 부활 불가 대기 초과)' ('{0}/{1}' -f ([regex]::Matches($workerSource, "\`$script:abyssLeaveCause = '거점 부활 상한으로'").Count), ([regex]::Matches($workerSource, "\`$script:abyssLeaveCause = '부활 불가 화면 대기 초과로'").Count)) '1/1'
-Assert-Case 'GUI: 코드 10 분기가 잔여 로그 수집 → 퇴장 사유면 streak 0 + 재입장 안내, 아니면 streak++ + 준비 실행 안내' ($guiSource -match '(?s)elseif \(\$exitCode -eq 10\) \{[\s\S]{0,1200}?Read-NewLogLines -Path \$workerLog[\s\S]{0,900}?if \(Test-CheckpointLeaveReason -Reason \$script:lastWorkerDoneReason\) \{\s*\r?\n\s*\$script:preparedStreak = 0\s*\r?\n\s*Add-GuiLog ''\[안내\] 사망 화면에서 던전을 나왔[^\r\n]*''\s*\r?\n\s*\} else \{\s*\r?\n\s*\$script:preparedStreak\+\+') $true
-Assert-Case 'GUI: 코드 10 잔여 수집이 기본 로그 + 복구 로그 둘 다 (코드 4·최종 수집과 같은 계약 - 구현 리뷰 2차 P2)' ($guiSource -match '(?s)elseif \(\$exitCode -eq 10\) \{[\s\S]{0,1400}?\$tailLines \+= @\(Read-NewLogLines -Path \$workerLog -Offset \(\[ref\]\$script:logOffset\)\)\s*\r?\n\s*\$tailLines \+= @\(Read-NewLogLines -Path \$workerRecoveryLog -Offset \(\[ref\]\$script:recoveryLogOffset\)\)[^\r\n]*\r?\n\s*foreach \(\$tailLine in \$tailLines\) \{') $true
+# 2026-10-09 (구현 명세 ① 2.4): 코드 10·코드 4 갈래의 잔여 수집 사본을 종료 처리 첫머리의 공통 최종 수집(Invoke-ExitLogFinalCollect - 모든
+#   종료 코드에 한 번, 갈래 앞 한 줄)으로 합쳤습니다. 코드 10 의 퇴장 판별은 그 수집이 끝낸 사유를 읽습니다(행동 = test_abyss_handoff_gui
+#   C3·C9, 호출 자리 = test_time_until_mode T4-e 1b). 종료 처리 if 사슬(코드 0·11 갈래 ~ 그 밖 코드)만 AST 로 잘라 주석 뺀 사본으로 봅니다
+#   (갈래 머리는 대소문자까지 같은 것만 - 단계 2.6 의 종료 처리 함수들이 매개변수 $ExitCode 로 비슷한 조건을 쓸 수 있어서입니다)
+# 2026-10-09 (구현 명세 ① 2.6 · 설계 v11 R2 3.7·3.9 ③): 코드 10 갈래의 첫 문장 = 완료 기록 끝 처리(이번 기동 nonce done - 다음 기동 앞), 바로 다음 =
+#   마무리 실행 판별. 퇴장 판별 창은 그 두 문장 뒤부터 잽니다(창에는 주석 자리의 공백도 듦 - 지금 626자)
+$guiParsedForExit = [System.Management.Automation.Language.Parser]::ParseInput($guiSource, [ref]$null, [ref]$null)
+$exitChainIfs = @($guiParsedForExit.FindAll({ param($node)
+      $node -is [System.Management.Automation.Language.IfStatementAst] -and
+      $node.Clauses[0].Item1.Extent.Text -ceq '($exitCode -eq 0) -or ($exitCode -eq 11)' }, $true))
+Assert-Case 'GUI: 종료 처리 if 사슬(코드 0·11 갈래부터) 1개' $exitChainIfs.Count 1
+$exitChainCode = $(if ($exitChainIfs.Count -eq 1) { Remove-SourceComments -Text $exitChainIfs[0].Extent.Text } else { '' })
+Assert-Case 'GUI: 코드 10 분기 = 첫 문장 완료 기록 끝 처리 → 마무리 실행 판별 → 퇴장 사유면 streak 0 + 재입장 안내, 아니면 streak++ + 준비 실행 안내 (사유는 갈래 앞 공통 최종 수집이 끝낸 값)' ($exitChainCode -match '(?s)elseif \(\$exitCode -eq 10\) \{\s*if \(-not \(Complete-AbyssExitJournal -ExitCode \$exitCode\)\) \{ return \}\s*if \(\$script:lastLaunchKind -eq ''finish-only''\) \{ Complete-FinishOnlyCycle -ExitCode \$exitCode; return \}[\s\S]{0,1200}?if \(Test-CheckpointLeaveReason -Reason \$script:lastWorkerDoneReason\) \{\s*\r?\n\s*\$script:preparedStreak = 0\s*\r?\n\s*Add-GuiLog ''\[안내\] 사망 화면에서 던전을 나왔[^\r\n]*''\s*\r?\n\s*\} else \{\s*\r?\n\s*\$script:preparedStreak\+\+') $true
+$finalCollectCode = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Invoke-ExitLogFinalCollect')))
+Assert-Case 'GUI: 종료 처리 갈래 안 Read-NewLogLines 0 (코드 10·코드 4 사본 제거) · 공통 최종 수집이 기본 로그 + 복구 로그를 출처별로 @() 로 읽음 (복구 로그도 - 구현 리뷰 2차 P2 계약)' `
+  ('{0}/{1}/{2}' -f [regex]::Matches($exitChainCode, 'Read-NewLogLines').Count,
+    [regex]::Matches($finalCollectCode, [regex]::Escape('@(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))')).Count,
+    [regex]::Matches($finalCollectCode, [regex]::Escape('@(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))')).Count) '0/1/1'
 Assert-Case 'GUI: preparedStreak 은 코드 10 외 전부 초기화' `
   ($guiSource -match 'if \(\$exitCode -ne 10\) \{ \$script:preparedStreak = 0 \}') $true
 # v2.1.4: 워커 스폰이 임베디드 호스트/기존 powershell 2분기가 되어 try 와 스폰 사이에
@@ -305,8 +321,8 @@ Assert-Case '3차: 런처 powershell 이름 검색 fallback 제거' `
   ($launcherSource -notmatch 'psExe = "powershell\.exe"') $true
 
 # ── v1.2.1: 코드 4 상태줄에 실제 [완료] 사유 표시 (2026-08-02 오해 실사례) ──────────
-Assert-Case 'GUI: [완료] 사유 수집 4곳(기본/복구/코드 10 잔여/최종 폴링) - 2026-09-25 거점 퇴장 판별용 잔여 수집 추가' `
-  ([regex]::Matches($guiSource, "match '\\\[완료\\\]\\s\*\(\.\+\)'").Count) 4
+Assert-Case 'GUI: [완료] 사유 수집 3곳(타이머 기본/복구 + 공통 최종 수집의 줄 처리 1곳) - 2026-09-25 거점 퇴장 판별용 잔여 수집 추가로 4, 2026-10-09 코드 10·코드 4 사본을 공통 최종 수집으로 합쳐 3' `
+  ([regex]::Matches($guiSource, "match '\\\[완료\\\]\\s\*\(\.\+\)'").Count) 3
 Assert-Case 'GUI: 코드 4 상태줄이 실제 사유 우선 + 범용 폴백(생활 분기 선행)' `
   ($guiSource -match '\$code4Reason = "조건 정지: \$code4Reason"[\s\S]{0,400}elseif \(\$script:mainCategory -eq ''life''\)[\s\S]{0,400}elseif \(\$rbCatDeep\.Checked\)') $true
 # v2.1.4: 계약은 '사유 초기화가 워커 스폰보다 앞' - 스폰 앵커를 powershell 고정 문자열에서
@@ -409,9 +425,9 @@ Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life/etc allowlist'
   (($guiSource -match "if \(\`$usr\.PSObject\.Properties\['mainCategory'\]\) \{ \`$def\.mainCategory = \`$usr\.mainCategory \}") -and
    ($guiSource -match "'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life', 'etc'\)")) $true
 $auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-# 스키마 9 (2026-08-15): etc(기타 - 고양이 상인) 섹션 신설
-Assert-Case 'config: 스키마 9 + mainCategory 기본 battle + life/etc 섹션' `
-  (([int]$auditConfigJson.configSchemaVersion -eq 10) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
+# 스키마 9 (2026-08-15): etc(기타 - 고양이 상인) 섹션 신설 → 10 (09-25 거점 부활 상한) → 11 (10-08 커스텀 진행 세대 progressGeneration)
+Assert-Case 'config: 스키마 11 + mainCategory 기본 battle + life/etc 섹션' `
+  (([int]$auditConfigJson.configSchemaVersion -eq 11) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
    ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily') -and
    ($null -ne $auditConfigJson.etc) -and ([string]$auditConfigJson.etc.content -eq 'catMerchant')) $true
 # 버전 번호를 고정값으로 박으면 올릴 때마다 이 테스트가 깨집니다 (2026-08-09 v2.0.1 에서 발생).
@@ -776,4 +792,26 @@ Assert-Case '계측: 생활 시작 팝업 가드 소진 1줄은 라운드 증가
 # 2026-09-20 동승 ⑤: '다음 층으로' 완료 판정의 현행 조건 고정 - 4절 '층 검증 없음' 항목의 표류 감지용 (본체 착수 때 교체)
 Assert-Case "'다음 층으로' 완료 판정: 현행 조건은 제목 '구역' 조각 또는 선택 화면 제목 (층 검증 없음 - 알려진 한계)" `
   ($workerSource -match "if \(\`$floorTitleNow\.Contains\('구역'\) -or \(Test-DgSelectionTitle -TitleText \`$floorTitleNow\)\) \{\r?\n\s+\`$movedToNextFloor = \`$true") $true
+
+# 2026-10-09 PS 5.1 함정 가드(규칙 문서 절대 규칙 3 'try 하나에 catch 절은 2개까지'): 함수가 수십 번 호출돼 컴파일된 뒤에는
+# catch 절이 3개 이상인 try 에서 세 번째 절부터 예외가 한 칸 앞 절로 갑니다. 2026-10-08 journal 저장소 실측 - '파일 사용 중'
+# IOException 이 DirectoryNotFound 절로 들어가 '파일 없음 → 빈 기록' 으로 분류됐고 이어진 저장이 기록을 지웠습니다(재현).
+# 컴파일 전에는 정상이라 짧은 진리표로는 안 보이므로, 저장소 .ps1 전부(루트·tests·있으면 build)를 AST 로 훑어 0개를 고정합니다.
+$catchGuardFiles = @(Get-ChildItem -LiteralPath $projectRoot -Filter '*.ps1' -File) + @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -File)
+$catchGuardBuildDir = Join-Path $projectRoot 'build'
+if (Test-Path -LiteralPath $catchGuardBuildDir) { $catchGuardFiles += @(Get-ChildItem -LiteralPath $catchGuardBuildDir -Filter '*.ps1' -File) }
+$catchGuardTryTotal = 0
+$catchGuardHits = @()
+foreach ($catchGuardFile in $catchGuardFiles) {
+  $catchGuardErrors = $null
+  $catchGuardAst = [System.Management.Automation.Language.Parser]::ParseFile($catchGuardFile.FullName, [ref]$null, [ref]$catchGuardErrors)
+  $catchGuardTries = @($catchGuardAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.TryStatementAst] }, $true))
+  $catchGuardTryTotal += $catchGuardTries.Count
+  foreach ($catchGuardTry in $catchGuardTries) {
+    if ($catchGuardTry.CatchClauses.Count -ge 3) { $catchGuardHits += ('{0}:{1}' -f $catchGuardFile.Name, $catchGuardTry.Extent.StartLineNumber) }
+  }
+}
+Assert-Case 'PS 5.1 함정 가드: 검사 대상이 비어 있지 않음 (워커·GUI 포함, try 가 실제로 세어짐)' `
+  ((@($catchGuardFiles | Where-Object { $_.Name -in @('mabinogi_run_once.ps1', 'mabinogi_gui.ps1') }).Count -eq 2) -and ($catchGuardTryTotal -gt 0)) $true
+Assert-Case "PS 5.1 함정 가드: catch 절 3개 이상인 try 0개 (파일 $($catchGuardFiles.Count)개 · try $catchGuardTryTotal 개)" ($catchGuardHits -join ', ') ''
 exit $fails

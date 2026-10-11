@@ -11,7 +11,11 @@
 #   T4-b Test-TimeAllowsNextCycle - 전투·생활 '지금 < 목표', 기타 '지금 + 클리어 대기 <= 목표'(옛 식 그대로)
 #   T4-c Test-WorkerTimeJudgeActive - 던전·심층·어비스 파티원(전투·비커스텀)만. 생활·기타로 바꿔도 보존되는 전투 라디오를 모형화 (설계 회귀 R-3)
 #   T4-d 문구 보조 함수 - 전투 '판'·생활 '사이클' 새 문구, 기타 출력은 옛 문구와 글자 그대로
-#   T4-e 배선 (주석 뺀 GUI 사본) - 타이머 바깥 조건·호출 두 곳·완료 줄·옛 사슬 리터럴 위치·판단 호출 인자·시작 게이트·UNTIL 분기·상태줄·설명서
+#   T4-e 배선 (주석 뺀 GUI 사본) - 타이머 바깥 조건·공통 최종 수집 자리(1b)·호출 두 곳·완료 줄·옛 사슬 리터럴 위치·판단 호출 인자·시작 게이트·UNTIL 분기·상태줄·설명서
+#        + 단계 2.6(구현 명세 ① · 설계 v11 R1 6.1 · R2 5.4): 재입장 실행부·완주 호출 자리(2c) · 0·11 갈래의 판별 → 일반 끝 처리 순서(2d) · 코드 10 첫 문장(S6)
+#        + 단계 2.7(구현 명세 ① 2.7 ⑥): 코드 4 갈래 = 계상 한 줄 → 사유 계산 → 끝 정지 계획(2e)
+#        + 단계 2.8(구현 명세 ① 2.8 · 설계 v11 R1 6.1): 코드 1 을 받는 갈래 = 마무리 실행 판별 → 완료 기록 라우팅 한 줄(2c) · T4-a 코드 1 행 4개
+#          · 예전 처리 recover 갈래 안전 중지의 nonce 닫기 → 정지 순서(2c - 단계 2.7·2.8 구현 리뷰 확인 라운드 · retry 갈래는 열어 둠 - 구현 리뷰 확인)
 #   T4-f Invoke-NextCycleDecision 행동 - Stop-AllRun·Start-NextCycle·Add-GuiLog 를 모의로 바꿔 '무엇을 했는지'로 지킴 (인자 누락·고정값 변이를 잡는 곳)
 #   T4-g 시작 게이트 행동 - Invoke-StartAutomation 의 시간 지정 블록을 그대로 실행 (전투·생활은 거부 없음 - 조건 2·생활 확장 조건 2, 기타는 거부 원문 - 해당 없음)
 #   T4-h UNTIL 전달 범위 행동 - Start-NextCycle 의 UNTIL 구간을 그대로 실행 (설계 2.5 표 - 받는 워커는 던전·심층·어비스 파티원뿐, 생활은 받지 않음 - 생활 확장 A안)
@@ -195,7 +199,11 @@ function Stop-AllRun {
   $script:targetTime = $null
   $lblStatus.ForeColor = [System.Drawing.Color]::DimGray
 }
-function Start-NextCycle { $script:actions += 'next' }
+function Start-NextCycle {
+  # GUI Start-NextCycle 과 같은 서명 (구현 명세 ① 2.5 ④ - 재개·재입장 실행부·마무리 실행 기동의 선택 인자. 실행 함수는 인자 없이 부름). 호출 기록만
+  param([switch]$PreserveMarker, [switch]$FromInsideHandoff, $FinishOnlyHold = $null, [string]$ResumeNonce = '')
+  $script:actions += 'next'
+}
 function Add-GuiLog { param([string]$Message) $script:guiLogs += $Message }
 function Write-RunLog { param($Message) $script:runLogs += [string]$Message }   # 워커 파서의 형식 오류 경고 1줄이 여기로 옴
 function Reset-GuiState {
@@ -260,6 +268,12 @@ $t4aRows = @(
   @{ N = 11; Code = 10; Stop = $true; Reached = $false; Streak = 3; TimeOk = $false; X = 'safe-stop'; Why = '' }
   @{ N = 12; Code = 10; Stop = $false; Reached = $true; Streak = 0; TimeOk = $true; X = 'next'; Why = ' - 코드 10 은 회차로 세지 않아 지정 횟수를 보지 않음' }
   @{ N = 13; Code = 11; Stop = $false; Reached = $false; Streak = 0; TimeOk = $true; X = 'next'; Why = '' }
+  # 코드 1 - 재입장(reentered) 뒤 오류 종료를 코드 1 라우팅이 재입장 실행부로 넘기면 같은 순수부가 판단합니다(구현 명세 ① 2.8 · 설계 v11 R1 4·6.1).
+  # 코드 1 은 11 이 아니라 지정 시간 칸이 살고(H23), 회차로 센 판이라 지정 횟수도 봅니다(H43 - 도달 경로 없는 완결용)
+  @{ N = 14; Code = 1; Stop = $false; Reached = $false; Streak = 0; TimeOk = $true; X = 'next'; Why = ' - 코드 1 재입장 (설계 R1 H22)' }
+  @{ N = 15; Code = 1; Stop = $false; Reached = $false; Streak = 0; TimeOk = $false; X = 'time'; Why = ' - 코드 1 은 11 이 아니라 시간 칸이 삶 (H23)' }
+  @{ N = 16; Code = 1; Stop = $true; Reached = $false; Streak = 0; TimeOk = $false; X = 'safe-stop'; Why = ' - (H25)' }
+  @{ N = 17; Code = 1; Stop = $false; Reached = $true; Streak = 0; TimeOk = $true; X = 'count'; Why = ' - (H43)' }
 )
 $t4aRun = 0
 foreach ($row in $t4aRows) {
@@ -341,11 +355,80 @@ $suffixCode = Get-GuiFunctionCode 'Get-TimeStatusSuffix'
 
 # 1. 바깥 조건 - 11 을 빼면 11 이 그 밖 코드 사슬(오류 정지)로 갑니다 (변이 G8)
 Assert-Case 'T4-e 1: 타이머 바깥 조건이 코드 0 과 11 을 같은 갈래로 받음' (Get-TextCount $guiCode 'if (($exitCode -eq 0) -or ($exitCode -eq 11)) {') 1
+# 1b. 공통 최종 수집 자리 (구현 명세 ① 2.4 · v11 R1 6.1) - 준비 실행 연속 수 초기화 뒤·코드 0·11 갈래 앞의 호출 한 줄이고 GUI 전체에서 그 한
+#     곳(타이머)뿐입니다. 갈래 안이나 판별 뒤로 옮기면 그 밖 갈래가 종료 직전 [완료] 줄을 못 봅니다(변이 R1-M14 · 행동은 test_abyss_handoff_gui C 행)
+Assert-Case 'T4-e 1b: 공통 최종 수집 호출 = 연속 수 초기화 → 수집 → 코드 0·11 갈래 순서 1곳 · GUI 전체 호출 1곳(함수 밖 - 타이머)' `
+  ('{0} · {1}' -f (Get-PatternCount $guiCode (New-SequencePattern @('if ($exitCode -ne 10) { $script:preparedStreak = 0 }', 'Invoke-ExitLogFinalCollect', 'if (($exitCode -eq 0) -or ($exitCode -eq 11)) {'))),
+    (Get-CallOwners $guiAst 'Invoke-ExitLogFinalCollect')) '1 · 1|(함수 밖)'
 
 # 2. 실행 함수 호출 두 곳 - 타이머에 남은 것은 이 호출 한 줄씩뿐입니다 (0 고정 변이 G14)
 Assert-Case 'T4-e 2: 실행 함수 호출 = 원문 2곳 · 호출 2개가 둘 다 함수 밖(타이머 스크립트블록)' ('{0} · {1}' -f (Get-TextCount $guiCode 'Invoke-NextCycleDecision -ExitCode $exitCode'), (Get-CallOwners $guiAst 'Invoke-NextCycleDecision')) '2 · 2|(함수 밖),(함수 밖)'
 Assert-Case 'T4-e 2a: 코드 0·11 의 비커스텀 꼬리 = 실행 함수 한 줄 (바로 뒤가 코드 10 갈래)' (Get-PatternCount $guiCode (New-SequencePattern @('} else {', 'Invoke-NextCycleDecision -ExitCode $exitCode', '}', '} elseif ($exitCode -eq 10) {'))) 1
 Assert-Case 'T4-e 2b: 코드 10 꼬리 = 커스텀 PREV 정리 뒤 실행 함수 한 줄 (바로 뒤가 코드 2 갈래)' (Get-PatternCount $guiCode (New-SequencePattern @('$script:customRestart = $false', '}', 'Invoke-NextCycleDecision -ExitCode $exitCode', '} elseif ($exitCode -eq 2) {'))) 1
+# 2c. 재입장 실행부·마무리 실행 완주의 호출 자리 (구현 명세 ① 2.6·2.8 · 설계 v11 R1 6.1) - 실행부는 0·11 갈래(타이머) 1곳 + 코드 1 라우팅(reentered 의
+#     이어받기 - 단계 2.8), 완주는 0·11 갈래·코드 10 갈래 2곳 - 둘 다 타이머. 코드 10 갈래 = 첫 문장 완료 기록 끝 처리 → 바로 다음 마무리 실행 판별
+#     (변이 R1-M10·M23). 코드 1 을 받는 갈래(그 밖 코드 포함) = 첫 문장 마무리 실행 판별(오류 정지 · return - 변이 R1-M17) → 바로 다음 라우팅 한 줄 →
+#     라우팅이 끝냈으면 return, 라우팅 호출은 타이머 1곳. 라우팅 함수 안의 순서(비커스텀 재입장 오류 상한이 실행부보다 앞 - 설계 R1 H48)는 함수 안이라
+#     원문 패턴이 아니라 test_abyss_handoff_gui 의 행동 행이 지킵니다(구현 명세 ① 2.8 · 검토 P3-16).
+#     + 단계 2.7·2.8 구현 리뷰 확인 라운드: 코드 1 갈래의 예전 처리에서 안전 중지로 멈추는 두 곳 중 recover 갈래 = 안전 중지 if → 이번 기동 nonce 닫기(-RoutedNonce
+#     빈 값) → '안전 중지' 정지 → else 순서 1곳 · 닫기 호출 = 타이머 1 + 라우팅 4. retry 갈래의 안전 중지는 닫지 않고 열어 둠(구현 리뷰 확인 - 그 자리는
+#     test_abyss_handoff_gui S21). 기대값 이력: 끝 두 칸 없음 '… · 1|(함수 밖)'(단계 2.8) → '… · 2 · 6|(함수 밖),(함수 밖),…'(확인 라운드 - 두 곳 닫음) →
+#     '… · 1 · 5|(함수 밖),…'(구현 리뷰 확인 - retry 열어 둠). 행동은 test_abyss_handoff_gui NC9~NC11
+Assert-Case 'T4-e 2c: 재입장 실행부 호출 = 타이머 · 코드 1 라우팅 · 완주 호출 2곳(둘 다 타이머) · 코드 10 갈래 = 첫 문장 끝 처리 → 마무리 실행 판별 순서 1 · 코드 1 갈래 = 마무리 실행 판별 → 라우팅 순서 1 · 라우팅 호출 = 타이머 · 예전 처리 안전 중지 = 닫기 → 정지 순서 1(recover) · 닫기 호출 = 타이머 1 + 라우팅 4' `
+  ('{0} · {1} · {2} · {3} · {4} · {5} · {6}' -f (Get-CallOwners $guiAst 'Invoke-InsideHandoffExit'), (Get-CallOwners $guiAst 'Complete-FinishOnlyCycle'),
+    (Get-PatternCount $guiCode (New-SequencePattern @('} elseif ($exitCode -eq 10) {', 'if (-not (Complete-AbyssExitJournal -ExitCode $exitCode)) { return }',
+          "if (`$script:lastLaunchKind -eq 'finish-only') { Complete-FinishOnlyCycle -ExitCode `$exitCode; return }"))),
+    (Get-PatternCount $guiCode (New-SequencePattern @('} else {', "if (`$script:lastLaunchKind -eq 'finish-only') {",
+          'Stop-AllRun -IsError "마무리 실행 중 오류 종료(코드 $exitCode) - 자동 재시작하지 않고 정지 (진행 기록 보존, 캐릭터가 던전 안일 수 있습니다)"',
+          '$lblStatus.ForeColor = [System.Drawing.Color]::Firebrick', 'return', '}',
+          '$code1Route = Invoke-Code1JournalRouting -ExitCode $exitCode', "if (`$code1Route -eq 'handled') { return }"))),
+    (Get-CallOwners $guiAst 'Invoke-Code1JournalRouting'),
+    (Get-PatternCount $guiCode (New-SequencePattern @('if ($script:stopRequested) {', "Close-AbyssLaunchNonceOnStop -RoutedNonce ''", "Stop-AllRun '안전 중지'", '} else {'))),
+    (Get-CallOwners $guiAst 'Close-AbyssLaunchNonceOnStop')) `
+  ('2|(함수 밖),Invoke-Code1JournalRouting · 2|(함수 밖),(함수 밖) · 1 · 1 · 1|(함수 밖) · 1 · ' +
+    '5|(함수 밖),Invoke-Code1JournalRouting,Invoke-Code1JournalRouting,Invoke-Code1JournalRouting,Invoke-Code1JournalRouting')
+# 2d. 0·11 갈래의 완료 기록 처리 순서 (설계 v11 R1 3.3 코드 모양 · 6.1) - 비커스텀 완료 줄 뒤 판별 → 기록 오류면 정지·return → 재입장이면 실행부·return →
+#     마무리 실행이면 완주·return → 일반 끝 처리 한 줄 → 커스텀 사슬 머리. 조각 사이는 공백만(주석 자리 포함) - 판별을 완료 줄 앞으로 옮기거나 return 을
+#     지워 아래 사슬로 흘리거나(변이 R1-M9) 끝 처리와 사슬 머리 사이에 문장을 끼우면 깨집니다(재입장 오류 연속 0 은 끝 처리 안 - 명세 5절 B4)
+Assert-Case 'T4-e 2d: 0·11 갈래 = 완료 줄 → 판별 → 오류 정지 → 실행부 → 완주 → 일반 끝 처리 한 줄 → 커스텀 사슬 순서 1' `
+  (Get-PatternCount $guiCode (New-SequencePattern @(
+        'Add-GuiLog "=== $($script:completedCycles)회차 완료$cycleDoneSuffix ==="', '}',
+        '$handoffExit = Read-AbyssExitHandoff -ExitCode $exitCode -Context $finishedContext',
+        "if (`$handoffExit.Kind -eq 'journal-error') {", 'Stop-AllRun -IsError $handoffExit.Reason', '$lblStatus.ForeColor = [System.Drawing.Color]::Firebrick', 'return', '}',
+        "if (`$handoffExit.Kind -eq 'inside-handoff') {", 'Invoke-InsideHandoffExit -ExitCode $exitCode -Handoff $handoffExit -FinishedContext $finishedContext', 'return', '}',
+        "if (`$script:lastLaunchKind -eq 'finish-only') {", 'Complete-FinishOnlyCycle -ExitCode $exitCode', 'return', '}',
+        'if (-not (Complete-AbyssExitJournal -ExitCode $exitCode -Context $finishedContext)) { return }',
+        'if ($script:customActive) {'))) 1
+# S6 (설계 v11 R2 5.4). 코드 10 갈래의 첫 문장 = 종료 처리 mutation(완료 기록 끝 처리) - ① 갈래 머리 바로 다음 ② 같은 갈래의 다음 회차 판단보다 앞.
+#    판단 안의 Start-NextCycle 이 다음 기동 후보를 고르므로, 이번 기동 nonce 를 열어 둔 채 넘어가면 같은 항목을 다시 넘깁니다(변이 R2 '끝 처리를 판단 뒤로').
+#    사이에 다른 문장(판별·연속 수·커스텀 PREV)이 있어 ② 는 같은 갈래 안의 위치(IndexOf)로 봅니다
+$exitChainIfs = @($guiAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.IfStatementAst]) -and ($node.Clauses[0].Item1.Extent.Text -ceq '($exitCode -eq 0) -or ($exitCode -eq 11)') }, $true))
+$code10Block = ''
+if ($exitChainIfs.Count -eq 1) {
+  $code10Clauses = @($exitChainIfs[0].Clauses | Where-Object { $_.Item1.Extent.Text -ceq '$exitCode -eq 10' })
+  if ($code10Clauses.Count -eq 1) { $code10Block = $guiCode.Substring($code10Clauses[0].Item2.Extent.StartOffset, $code10Clauses[0].Item2.Extent.EndOffset - $code10Clauses[0].Item2.Extent.StartOffset) }
+}
+$code10Mutation = 'if (-not (Complete-AbyssExitJournal -ExitCode $exitCode)) { return }'
+$code10MutationAt = $code10Block.IndexOf($code10Mutation)
+$code10DecisionAt = $code10Block.IndexOf('Invoke-NextCycleDecision -ExitCode $exitCode')
+Assert-Case 'S6 코드 10 갈래: 첫 문장 = 완료 기록 끝 처리(갈래 머리 바로 다음 1) · 그 위치 < 같은 갈래의 다음 회차 판단 위치' `
+  ('{0} · {1}' -f (Get-PatternCount $guiCode (New-SequencePattern @('} elseif ($exitCode -eq 10) {', $code10Mutation))), [int](($code10MutationAt -ge 0) -and ($code10DecisionAt -gt $code10MutationAt))) '1 · 1'
+# 2e. 코드 4 갈래 (구현 명세 ① 2.7 ⑥ · 설계 v11 R1 6.1 · 3.7 표 4행): ⓐ 갈래 머리 바로 다음 = 계상 함수 한 줄(거짓이면 함수 안에서 오류 정지까지 했으니 return -
+#     정지 두 번 금지) ⓑ 끝 정지 = 사유·심각도 순수부(Get-Code4StopPlan) 결과로 - 마무리 실행 기동의 오류 보류를 정상 정지로 덮지 않음(변이 R1-M22 의 배선 짝,
+#     행동은 test_abyss_handoff_gui H32d). 두 조각은 코드 4 갈래 안에서 세고(사유 계산 뒤), 코드 4 사유를 그대로 정지하는 옛 리터럴은 GUI 전체 0 · 두 함수 호출은 타이머 1곳씩
+$code4Block = ''
+if ($exitChainIfs.Count -eq 1) {
+  $code4Clauses = @($exitChainIfs[0].Clauses | Where-Object { $_.Item1.Extent.Text -ceq '$exitCode -eq 4' })
+  if ($code4Clauses.Count -eq 1) { $code4Block = $guiCode.Substring($code4Clauses[0].Item2.Extent.StartOffset, $code4Clauses[0].Item2.Extent.EndOffset - $code4Clauses[0].Item2.Extent.StartOffset) }
+}
+$code4StopPattern = New-SequencePattern @('$code4Plan = Get-Code4StopPlan -Code4Reason $code4Reason -LaunchKind $script:lastLaunchKind -Hold $script:finishOnlyHold',
+  'if ($code4Plan.IsError) {', 'Stop-AllRun -IsError $code4Plan.Reason', '$lblStatus.ForeColor = [System.Drawing.Color]::Firebrick', '} else {',
+  'Stop-AllRun $code4Plan.Reason', '$lblStatus.ForeColor = [System.Drawing.Color]::SteelBlue', '}')
+Assert-Case 'T4-e 2e: 코드 4 갈래 = 머리 → 계상 한 줄(거짓이면 return) 1 · 갈래 안 끝 정지 = 정지 계획 → 오류면 빨강 / 아니면 SteelBlue 1 · 사유 계산 뒤 · 옛 리터럴 0 · 호출 소유자 타이머' `
+  ('{0} · {1} · {2} · {3} · {4} · {5}' -f (Get-PatternCount $guiCode (New-SequencePattern @('} elseif ($exitCode -eq 4) {', 'if (-not (Invoke-Code4Accounting)) { return }'))),
+    (Get-PatternCount $code4Block $code4StopPattern), [int](($code4Block.IndexOf('$code4Reason = ''''') -ge 0) -and ($code4Block.IndexOf('$code4Plan = Get-Code4StopPlan') -gt $code4Block.IndexOf('$code4Reason = '''''))),
+    (Get-TextCount $guiCode 'Stop-AllRun $code4Reason'), (Get-CallOwners $guiAst 'Invoke-Code4Accounting'), (Get-CallOwners $guiAst 'Get-Code4StopPlan')) `
+  '1 · 1 · 1 · 0 · 1|(함수 밖) · 1|(함수 밖)'
 
 # 3. 완료 줄 - 실기에서 워커 11 → 호스트 → GUI 수신을 이 줄로 봅니다 (설계 9.1·9.2). 원문 + 소스 그대로 실행
 Assert-Case 'T4-e 3: 완료 줄 꼬리는 변수에 먼저 담음(PS 5.1 파서 함정 S2) · 완료 줄 1곳' ('{0}/{1}' -f (Get-TextCount $guiCode '$cycleDoneSuffix = $(if ($exitCode -eq 11) { '' (다음 판으로 이어 감)'' } else { '''' })'), (Get-TextCount $guiCode 'Add-GuiLog "=== $($script:completedCycles)회차 완료$cycleDoneSuffix ==="')) '1/1'
@@ -390,11 +473,15 @@ foreach ($item in $chainLiterals) {
 $noticeOwners = '{0} / {1} / {2}' -f (Get-CallOwners $guiAst 'Get-TimeStopNotice'), (Get-CallOwners $guiAst 'Get-TimeStartNotice'), (Get-CallOwners $guiAst 'Get-TimeStatusSuffix')
 Assert-Case 'T4-e 4: 문구 함수 호출 위치 - 정지 안내는 실행 함수, 시작 로그는 시작 처리, 상태줄 꼬리는 안전 중지 버튼 처리기(함수 밖)·회차 시작' $noticeOwners '1|Invoke-NextCycleDecision / 1|Invoke-StartAutomation / 2|(함수 밖),Start-NextCycle'
 
-# 5. 판단 함수에 넘기는 인자 - -ExitCode 누락이면 11 이 0 이 되고, -TimeAllows $true 고정이면 전투 시간 지정이 영영 안 멈춤 (변이 G10·G11)
+# 5. 판단 함수에 넘기는 인자 - -ExitCode 누락이면 11 이 0 이 되고, -TimeAllows $true 고정이면 전투 시간 지정이 영영 안 멈춤 (변이 G10·G11).
+#    2026-10-09 (구현 명세 ① 2.6 · 설계 v11 R1 6.1): 재입장 실행부도 같은 순수부를 부릅니다(준비 실행 연속은 0 - 코드 10 으로 부르지 않음, 변이 R1-M3·M4).
+#    호출마다 '감싼 함수|인자 원문' 을 서수 정렬해 둘 다 봅니다(예전 단언은 첫 호출 하나만 봤음)
 $actionCalls = @(Get-CommandCalls $guiAst 'Get-NextCycleAction')
-$actionCallText = $(if ($actionCalls.Count -ge 1) { ($actionCalls[0].Extent.Text -replace '\s+', ' ').Trim() } else { '' })
-$actionCallOwner = $(if ($actionCalls.Count -ge 1) { Get-EnclosingFunctionName $actionCalls[0] } else { '' })
-Assert-Case 'T4-e 5: 판단 함수 호출은 GUI 전체 1곳(실행 함수 안) · 인자 원문(공백 정규화)' ('{0}|{1}|{2}' -f $actionCalls.Count, $actionCallOwner, $actionCallText) '1|Invoke-NextCycleDecision|Get-NextCycleAction -ExitCode $ExitCode -StopRequested $script:stopRequested -ReachedTarget $reachedTarget -PreparedStreak $script:preparedStreak -TimeAllows $timeAllows'
+[string[]]$actionCallTexts = @($actionCalls | ForEach-Object { '{0}|{1}' -f (Get-EnclosingFunctionName $_), (($_.Extent.Text -replace '\s+', ' ').Trim()) })
+[Array]::Sort($actionCallTexts, [StringComparer]::Ordinal)
+Assert-Case 'T4-e 5: 판단 함수 호출 2곳 = 재입장 실행부 · 실행 함수 - 감싼 함수와 인자 원문(공백 정규화)' ('{0}: {1}' -f $actionCalls.Count, ($actionCallTexts -join ' / ')) `
+  ('2: Invoke-InsideHandoffExit|Get-NextCycleAction -ExitCode $ExitCode -StopRequested $script:stopRequested -ReachedTarget $reachedTarget -PreparedStreak 0 -TimeAllows $timeAllows / ' +
+  'Invoke-NextCycleDecision|Get-NextCycleAction -ExitCode $ExitCode -StopRequested $script:stopRequested -ReachedTarget $reachedTarget -PreparedStreak $script:preparedStreak -TimeAllows $timeAllows')
 
 # 6. 시작 게이트 - 기타만 거부(문구 원문 그대로), 전투·생활은 게이트를 타지 않음 (변이 G6 · 생활 확장 L2·L3)
 $gateLine = 'if (($script:mainCategory -eq ''etc'') -and (-not (Test-TimeAllowsNextCycle))) {'
@@ -404,8 +491,8 @@ $startNoticeLine = 'Add-GuiLog (Get-TimeStartNotice -TargetTime $script:targetTi
 Assert-Case 'T4-e 6: 시작 게이트(기타 전용)·거부 문구(인라인 원문)·시작 로그 호출이 GUI 전체에 1곳씩 · 옛 게이트(-ne battle)·라벨 변수 0건' ('{0}/{1}/{2}/{3}/{4}' -f (Get-TextCount $guiCode $gateLine), (Get-TextCount $guiCode $refuseLine), (Get-TextCount $guiCode $startNoticeLine), (Get-TextCount $guiCode $oldGateLine), (Get-TextCount $guiCode '$estimateLabel')) '1/1/1/0/0'
 Assert-Case 'T4-e 6: 게이트 → 거부 → 목표 시각 해제 → return → 시작 로그 순서로 붙어 있음 (Invoke-StartAutomation 안)' (Get-PatternCount $startAutomationCode (New-SequencePattern @($gateLine, $refuseLine, '$script:targetTime = $null', 'return', '}', $startNoticeLine))) 1
 
-# 7. 시간 판단 호출 위치
-Assert-Case 'T4-e 7: 시간 판단 호출 2곳 = 실행 함수 · 시작 게이트' (Get-CallOwners $guiAst 'Test-TimeAllowsNextCycle') '2|Invoke-NextCycleDecision,Invoke-StartAutomation'
+# 7. 시간 판단 호출 위치 (2026-10-09 구현 명세 ① 2.6 - 재입장 실행부가 더함: 지정 시각 뒤 재입장은 마무리 실행으로 정지 - 설계 v11 R1 H5)
+Assert-Case 'T4-e 7: 시간 판단 호출 3곳 = 재입장 실행부 · 실행 함수 · 시작 게이트' (Get-CallOwners $guiAst 'Test-TimeAllowsNextCycle') '3|Invoke-InsideHandoffExit,Invoke-NextCycleDecision,Invoke-StartAutomation'
 
 # 8. UNTIL 전달 - 매 회차 먼저 비우고, 전투 분기(판단 워커만 + InvariantCulture 생산)만 남음 - 생활 분기 없음 (변이 G9·P2 · 생활 확장 L6)
 $envPattern = New-SequencePattern @(
@@ -664,7 +751,7 @@ foreach ($cultureName in @('ko-KR', 'th-TH', 'fi-FI')) {
 Assert-Case 'P2 문화권 원복 (기준 ko-KR 로 돌아옴)' ([Threading.Thread]::CurrentThread.CurrentCulture.Name) 'ko-KR'
 
 # ── 실행 행 수 (예외로 표가 중간에 끊기면 여기서 드러남) ─────────────────────────────
-Assert-Case '실행 행 수 T4-a/T4-b/T4-c/T4-f/T4-g/T4-h/P2' ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $t4aRun, $t4bRun, $t4cRun, $t4fRun, $t4gRun, $t4hRun, $p2Run) '13/12/11/15/10/12/12'
+Assert-Case '실행 행 수 T4-a/T4-b/T4-c/T4-f/T4-g/T4-h/P2' ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $t4aRun, $t4bRun, $t4cRun, $t4fRun, $t4gRun, $t4hRun, $p2Run) '17/12/11/15/10/12/12'
 
 [Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
 $env:HONEYNOGI_UNTIL_TIME = $originalUntilEnv

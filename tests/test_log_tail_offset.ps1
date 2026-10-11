@@ -76,10 +76,11 @@ try {
 }
 
 $guiRaw = Get-Content -LiteralPath $guiPath -Raw -Encoding UTF8
-# 호출부 계약: 4곳(타이머의 기본/복구 로그 + 종료 마무리의 기본/복구 로그) 전부 @() 로
-# 감싸야 합니다. 감사 당시 종료 마무리 2곳은 이미 감싸져 있었고 타이머 2곳만 빠져 있었습니다.
-Check-Equal 'GUI: Read-NewLogLines 호출 6곳 모두 @() 로 감쌈 (2026-09-25 코드 10 분기의 잔여 수집 추가로 4→5, 복구 로그 수집 추가로 6)' `
-  ([regex]::Matches($guiRaw, '@\(Read-NewLogLines ').Count) 6
+# 호출부 계약: 4곳(타이머 통상 tail 의 기본/복구 로그 + 종료 처리 공통 최종 수집 Invoke-ExitLogFinalCollect 의 기본/복구 로그) 전부
+# @() 로 감싸야 합니다. 감사 당시 종료 마무리 2곳은 이미 감싸져 있었고 타이머 2곳만 빠져 있었습니다. 원문(주석 포함)을 세므로 GUI 의
+# 새 주석에는 그 호출 조각을 쓰지 않습니다 (구현 명세 ① 2.0 체크리스트 11).
+Check-Equal 'GUI: Read-NewLogLines 호출 4곳 모두 @() 로 감쌈 (2026-09-25 코드 10 분기의 잔여 수집 추가로 4→5, 복구 로그 수집 추가로 6, 2026-10-09 코드 10·코드 4 사본을 공통 최종 수집의 출처별 2곳으로 합쳐 4)' `
+  ([regex]::Matches($guiRaw, '@\(Read-NewLogLines ').Count) 4
 Check-Equal 'GUI: 감싸지 않은 Read-NewLogLines 대입 없음' `
   ([regex]::Matches($guiRaw, '=\s*Read-NewLogLines ').Count) 0
 if ($guiRaw.Contains('\[설정\]|\[준비\]\s*게임 확인:\s*PID')) {
@@ -731,6 +732,91 @@ foreach ($tidy6Kind in @($tidy6Assigned | Select-Object -Unique)) {
     Check-Equal ("GUI 6차(워커 종류 '{0}', {1}): '{2} 조작 감지'" -f $tidy6Kind, $tidy6Id, $tidy6Labels[$tidy6Kind]) `
       (Convert-WorkerLogLineForGui ('12:00:00 ' + $tidy6Raw) $false) `
       ('12:00:00 [안내] {0} 조작 감지 - 조작이 끝날 때까지 멈추고 기다립니다' -f $tidy6Labels[$tidy6Kind])
+  }
+}
+
+# ── InsideHandoff 꼬리 숨김 (2026-10-08 사용자 결정 Q9 · 구현 명세 ① 2.4 · v11 R1 3.1·6.2) - 파일 원본·판별은 원문, 화면에서만 지움 ──
+# 워커 문구는 설계 R1 2.2 순서 4 그대로이고 nonce 는 GUID 'D' 형식입니다 (워커가 이 줄을 내는 단위는 ⑤ - 실로그가 생기면 그 원문을 더할 것)
+$ihBody = "[완료] '다시 하기' 재입장 확인 - 직전 판을 회차로 계상, 다음 실행이 이 판을 이어받습니다"
+$ihTail = ' [terminal=InsideHandoff nonce=0f8fad5b-d9cb-469f-a165-70867728950e]'
+Check-Equal 'GUI Q9: InsideHandoff 완료 줄의 꼬리 0·본문 그대로' `
+  (Convert-WorkerLogLineForGui "12:00:00 $ihBody$ihTail" $false) "12:00:00 $ihBody"
+Check-Equal 'GUI Q9: 대문자 GUID nonce·커스텀 실행에서도 꼬리 0' `
+  (Convert-WorkerLogLineForGui "12:00:00 $ihBody [terminal=InsideHandoff nonce=7C9E6679-7425-40DE-944B-E07FC1F90AE7]" $true) "12:00:00 $ihBody"
+Check-Equal 'GUI Q9: 꼬리 없는 같은 줄은 그대로' (Convert-WorkerLogLineForGui "12:00:00 $ihBody" $false) "12:00:00 $ihBody"
+# 근접 변형 - 그대로여야 함: 꼬리 뒤에 글이 더 붙음(끝 앵커) · 다른 terminal 값 · GUID 글자가 아닌 nonce · 꼬리 앞 공백 없음
+$ihKeepCases = @(
+  "12:00:00 $ihBody$ihTail 후속문구",
+  "12:00:00 $ihBody [terminal=ReadySelection nonce=0f8fad5b-d9cb-469f-a165-70867728950e]",
+  "12:00:00 $ihBody [terminal=InsideHandoff nonce=0f8fad5b-zzzz]",
+  "12:00:00 $ihBody[terminal=InsideHandoff nonce=0f8fad5b-d9cb-469f-a165-70867728950e]"
+)
+foreach ($ihKeep in $ihKeepCases) {
+  Check-Equal ('GUI Q9(보존 근접 변형): {0}' -f $ihKeep) (Convert-WorkerLogLineForGui $ihKeep $false) $ihKeep
+}
+# 수집 식(타이머 통상 tail 의 [완료] 사유 갱신 - 화면 변환 전 원문)을 소스 그대로 돌리면 사유에 꼬리가 남습니다(판별은 원문이라 숨김과
+# 닿지 않음). 공통 최종 수집 경로의 같은 단언은 tests\test_abyss_handoff_gui.ps1 H1·H2 가 타이머 틱을 그대로 돌려서 합니다
+$guiTailAst = [System.Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$null, [ref]$null)
+$tailReasonIfs = @($guiTailAst.FindAll({ param($node)
+      $node -is [System.Management.Automation.Language.IfStatementAst] -and
+      $node.Clauses[0].Item1.Extent.Text -eq '$logLine -match ''\[완료\]\s*(.+)''' }, $true))
+Check-Equal 'GUI Q9: 타이머 통상 tail 의 [완료] 사유 수집 식 1곳' $tailReasonIfs.Count 1
+if ($tailReasonIfs.Count -eq 1) {
+  $script:lastWorkerDoneReason = ''
+  $logLine = "12:00:00 $ihBody$ihTail"
+  . ([scriptblock]::Create($tailReasonIfs[0].Extent.Text))
+  Check-Equal 'GUI Q9: 수집 식에는 꼬리가 남음 (화면 변환 전 원문)' $script:lastWorkerDoneReason ($ihBody.Substring('[완료] '.Length) + $ihTail)
+}
+
+# ── 어비스 클리어 완료 기록 성공 줄 숨김 (구현 명세 ① 2.10 W7 · 5절 B8 · 검토 P3-2) - 개발자 메모라 파일에만, 화면에서는 줄 전체를 숨김 ──
+# 워커 문구는 소스에서 잡습니다(사본을 박지 않음): 기록 함수 Add-AbyssJournalClearedEntry 의 Write-RunLog 첫 인자 - 성공 줄([어비스] 문자열 1) ·
+# 소유자 해석 실패 [경고] 문자열 1 · 저장 실패 [경고] 문자열(실패 낱말 변수 1개를 품은 확장 문자열 1 - 그 자리를 실패 낱말 3종(설계 R2 3.6)으로
+# 채움. 단계 2.10 명세 대조 P3-1 로 -f 식에서 문자열로 바뀜 - 워커 로그 심각도 회귀가 문자열 인자만 분류). 성공 줄만 숨고(시각 접두 있음·없음 ·
+# 커스텀·비커스텀 모두 - 워커가 모드와 무관하게 씀) 두 [경고] 줄은 그대로 보입니다(사용자가 알아야 하는 줄). 한쪽만 바뀌면(워커 문구·GUI 규칙)
+# 개발자 메모 줄이 창에 뜹니다(명세 0.4 ⑦)
+$clearedFunctionAst = $workerAst.Find({ param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Add-AbyssJournalClearedEntry' }, $true)
+$clearedSuccessTexts = @()
+$clearedWarningTexts = @()
+$clearedFailFormats = @()
+if ($null -ne $clearedFunctionAst) {
+  foreach ($clearedLogCall in @($clearedFunctionAst.FindAll({ param($node)
+          $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Write-RunLog' -and $node.CommandElements.Count -ge 2 }, $true))) {
+    $clearedArgument = $clearedLogCall.CommandElements[1]
+    if ($clearedArgument -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+      if ($clearedArgument.Value.StartsWith('[어비스]')) { $clearedSuccessTexts += $clearedArgument.Value }
+      elseif ($clearedArgument.Value.StartsWith('[경고]')) { $clearedWarningTexts += $clearedArgument.Value }
+    } elseif ($clearedArgument -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+      # 저장 실패 줄 - 변수 1개(실패 낱말)를 품은 [경고] 문자열. 그 변수 자리를 {0} 으로 바꿔 아래에서 실패 낱말 3종으로 채웁니다
+      $clearedNested = @($clearedArgument.NestedExpressions)
+      if ($clearedArgument.Value.StartsWith('[경고]') -and ($clearedNested.Count -eq 1) -and
+          ($clearedNested[0] -is [System.Management.Automation.Language.VariableExpressionAst])) {
+        $clearedFailFormats += $clearedArgument.Value.Replace($clearedNested[0].Extent.Text, '{0}')
+      }
+    }
+  }
+}
+Check-Equal 'GUI W7: 워커 기록 함수의 줄 원문 - 성공([어비스]) 1 · 소유자 [경고] 1 · 저장 실패 [경고](실패 낱말 변수 1개) 1' `
+  ('{0}/{1}/{2}' -f $clearedSuccessTexts.Count, $clearedWarningTexts.Count, $clearedFailFormats.Count) '1/1/1'
+if ($clearedSuccessTexts.Count -eq 1 -and $clearedWarningTexts.Count -eq 1 -and $clearedFailFormats.Count -eq 1) {
+  $clearedSuccess = $clearedSuccessTexts[0]
+  Check-Equal 'GUI W7: 성공 줄(시각 접두) → 숨김' (Convert-WorkerLogLineForGui "12:00:00 $clearedSuccess" $false) $null
+  Check-Equal 'GUI W7: 성공 줄(접두 없음) → 숨김' (Convert-WorkerLogLineForGui $clearedSuccess $false) $null
+  Check-Equal 'GUI W7: 성공 줄 · 커스텀 실행 → 숨김(모드 무관)' (Convert-WorkerLogLineForGui "12:00:00 $clearedSuccess" $true) $null
+  Check-Equal 'GUI W7: 소유자 해석 실패 [경고] 줄은 그대로 보임' `
+    (Convert-WorkerLogLineForGui "12:00:00 $($clearedWarningTexts[0])" $true) "12:00:00 $($clearedWarningTexts[0])"
+  foreach ($clearedFailKind in @('파일 사용 중', '파일 손상', '기록 실패')) {
+    $clearedFailLine = '12:00:00 ' + ($clearedFailFormats[0] -f $clearedFailKind)
+    Check-Equal ('GUI W7: 저장 실패 [경고] 줄({0})은 그대로 보임' -f $clearedFailKind) (Convert-WorkerLogLineForGui $clearedFailLine $false) $clearedFailLine
+  }
+  # 근접 변형 - 그대로여야 함: 뒤에 글이 더 붙음(끝 앵커) · 다른 태그 · 다른 줄 안에 인용(머리 앵커)
+  $clearedKeepCases = @(
+    "12:00:00 $clearedSuccess 후속문구",
+    ('12:00:00 ' + $clearedSuccess.Replace('[어비스]', '[커스텀]')),
+    "12:00:00 [오류] 확인 필요 - $clearedSuccess"
+  )
+  foreach ($clearedKeep in $clearedKeepCases) {
+    Check-Equal ('GUI W7(보존 근접 변형): {0}' -f $clearedKeep) (Convert-WorkerLogLineForGui $clearedKeep $false) $clearedKeep
   }
 }
 

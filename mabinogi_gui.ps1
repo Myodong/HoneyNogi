@@ -262,6 +262,11 @@ $workerLog = Join-Path $honeyLogDir 'mabinogi_run_once.log'
 $workerRecoveryLog = Join-Path $honeyLogDir 'mabinogi_run_once.recovery.log'
 # 안전 중지 신호 파일: GUI가 만들면 워커가 '던전 밖(HUD) 확인' 시점에서 회차를 조기 종료합니다.
 $safeStopFlag = Join-Path $honeyLogDir 'safe_stop.flag'
+# 어비스 완료 기록(handoff journal - 설계 v10 6.1): 클리어를 확인한 판의 사실을 GUI·워커가 같은 파일로 주고받습니다.
+# 같은 폴더에 직전본(.bak)·잠금(.lock)·임시(.tmp)·손상 증거(.corrupt.*)가 생기며, 읽기·쓰기는 Read-/Update-AbyssJournal 묶음으로만 합니다.
+$abyssJournalPath = Join-Path $honeyLogDir 'abyss_handoff.json'
+# 저장소가 남기는 작성자 표지(savedBy). 워커 사본은 'worker:<pid>' - 두 스크립트가 같은 변수 이름을 써야 저장소 본문이 같게 유지됩니다.
+$script:abyssJournalSavedBy = 'gui'
 # 커스텀 반복 완료 마커: 던전/어비스를 별도 파일로 두어 한쪽 모드로 먼저 시작해도 다른 쪽의
 # 미완료 복구 근거가 지워지지 않게 합니다. 워커가 클리어 확정(결과 화면 도달) 시점에 현재
 # 항목의 소유자 정보(리스트 지문/lap/index/항목 토큰)를 기록하고 코드 0에서 한 번만 전진합니다.
@@ -409,6 +414,611 @@ function Save-Config {
   Write-Utf8FileAtomic -Path $configPath -Text $json
 }
 
+# ===== 어비스 완료 기록(handoff journal) 저장소 - GUI·워커 두 사본 =====
+# 설계 v10 6.1(저장·읽기 계약) + 반환 태그 결정 + 구현 명세 ① 2.1. 아래 함수 묶음은 GUI(mabinogi_gui.ps1)와 워커
+# (mabinogi_run_once.ps1)에 **주석을 뺀 토큰이 같게** 들어 있습니다(회귀 test_abyss_journal_store - 토큰 사이 공백만
+# 무시하고 줄바꿈·문자열 내용은 비교). 한쪽을 고치면 다른 쪽도 같은 글자로 고칩니다. 그래서 본문은 바깥 이름을 쓰지
+# 않습니다 - 경로는 -Path, 작성자 표지는 두 스크립트에 같은 이름으로 둔 $script:abyssJournalSavedBy, 경고 문구는 반환
+# Warnings 로 돌려주고 로그는 호출부(GUI Add-GuiLog / 워커 Write-RunLog)가 남깁니다.
+# 파일(같은 폴더): 본 파일 abyss_handoff.json · 직전본 abyss_handoff.json.bak(File.Replace 가 갱신하는 지속 파일) ·
+# 잠금 abyss_handoff.lock(DeleteOnClose) · 임시 .abyss_handoff.json.<pid>.<guid>.tmp · 손상 증거
+# abyss_handoff.json.corrupt.<yyyyMMdd_HHmmss>. 파일을 바꾸는 경로(저장·복구·청소)는 전부 같은 .lock 아래에서만 돕니다.
+# 예외 경계: 저장소·IO 실패만 태그(Status)로 바꾸고 throw 하지 않습니다. -Mutator·-Expect 가 던진 예외는 종류와 무관하게
+# (IOException 이어도) 잡지 않고 전파합니다 - 구현 결함이라 워커에서는 최상위 catch(코드 1 + 오류 세트)로 드러나야
+# 합니다. 그래서 IO 호출 지점마다 typed catch 를 두고 mutator·expect 호출은 그 catch 밖에 둡니다 - typed catch 는
+# New-Object 가 MethodInvocationException 에 감싼 IOException 도 잡지만, 일반 catch 의 -is [IO.IOException] 은
+# 감싼 예외라 거짓입니다(실측).
+# 한 try 의 catch 절은 2개까지만 둡니다: PS 5.1 은 함수를 컴파일한 뒤(호출이 수십 번 쌓이면 백그라운드에서 - 처음 몇 번은
+# 해석 실행이라 정상) catch 절이 3개 이상인 try 에서 세 번째부터의 절에 걸릴 예외를 한 칸 앞 절로 보냅니다(실측 2026-10-08,
+# PS 5.1.26100.9444 - 파일 없음·폴더 없음·IO·접근 거부 4절이던 후보 읽기에서 공유 위반이 '폴더 없음' 절로 가, 본 파일을 없는
+# 것으로 보고 빈 journal 에서 저장을 시작했음). IOException 의 하위 형식(파일·폴더 없음)은 IOException 절 안에서
+# $_.Exception -is 로 가릅니다 - typed catch 안의 $_.Exception 은 감싼 예외를 푼 안쪽 예외입니다(실측).
+# 묶음의 끝은 Update-AbyssJournal 뒤의 '묶음 끝' 표지 주석입니다(회귀가 두 표지 사이 함수만 두 사본 비교 대상으로 봅니다).
+
+function New-AbyssJournalEmpty {
+  # 빈 journal - 파일이 하나도 없을 때(읽기 (d))의 시작 상태. 디스크에는 쓰지 않습니다(mutator 가 바꿨을 때만
+  # Update-AbyssJournal 이 Move 로 처음 만듭니다 - 빈 파일을 먼저 만들면 '없음' 과 '있음' 이 섞여 복구 판정이 흐려짐).
+  return [pscustomobject]@{
+    version = 1
+    seq     = 0
+    savedAt = ''
+    savedBy = ''
+    entries = @()
+    applied = @()
+    pending = @()
+  }
+}
+
+function New-AbyssJournalEntry {
+  # 항목 기본값(설계 v10 6.1 스키마 + 닫기 메타 screen · 정리 전용 표지 cleanupOnly). 호출부가 필요한 필드만 덮어씁니다.
+  # nonce = GUID 'D' 형식(GUI 꼬리 숨김 정규식 [0-9A-Fa-f-]+ 와 맞음), 비커스텀 generation 0, 시각 필드(at.*)는
+  # Get-AbyssJournalTimeText 형식으로 그 단계에 도달했을 때 호출부가 채웁니다.
+  param([string]$Stage = 'entered')
+  return [pscustomobject]@{
+    nonce          = [guid]::NewGuid().ToString('D')
+    runId          = ''
+    section        = ''
+    generation     = 0
+    owner          = $null
+    nextOwner      = $null
+    stage          = $Stage
+    decision       = $null
+    attempts       = 0
+    retryClicks    = 0
+    resumeAttempts = 0
+    launchState    = 'pending'
+    afterEntry     = [pscustomobject]@{ index = 0; total = $null; keys = $null }
+    reason         = ''
+    screen         = ''
+    cleanupOnly    = $false
+    at             = [pscustomobject]@{ entered = $null; cleared = $null; retryAttempt = $null; retryClicked = $null; reentered = $null }
+  }
+}
+
+function Get-AbyssJournalTimeText {
+  # journal 시각 형식 - 왕복 'o'(문화권 무관, 예 2026-10-08T18:28:21.0934628+09:00). 읽기는 ConvertFrom-AbyssJournalTime.
+  return (Get-Date).ToString('o')
+}
+
+function ConvertFrom-AbyssJournalTime {
+  # journal 시각 문자열 → [DateTime](Kind Local). 빈 값·형식 오류는 $null. 쓰기 형식과 짝을 이 묶음에 고정해 두는 이유:
+  # 재개 마감(retryClicked + 300초)처럼 뒤 단계가 이 값을 계산에 씁니다(구현 명세 ① 5절 A2 ⑦).
+  param($Text)
+  if ([string]::IsNullOrWhiteSpace([string]$Text)) { return $null }
+  try {
+    return [DateTime]::Parse([string]$Text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+  } catch {
+    return $null
+  }
+}
+
+function Get-AbyssJournalStageRank {
+  # 단계 순위: entered 0 < cleared 1 < retry-attempt 2 < retry-clicked 3 < reentered 4. post-clear-stop 은 '클리어 이상'
+  # 판정에만 쓰는 종료 표지라 cleared 와 같은 1(그 안의 세밀한 순서는 없음). 모르는 값은 -1 - '클리어 이상' 에서 빠집니다.
+  param([string]$Stage)
+  if ($Stage -eq 'entered') { return 0 }
+  if ($Stage -eq 'cleared') { return 1 }
+  if ($Stage -eq 'retry-attempt') { return 2 }
+  if ($Stage -eq 'retry-clicked') { return 3 }
+  if ($Stage -eq 'reentered') { return 4 }
+  if ($Stage -eq 'post-clear-stop') { return 1 }
+  return -1
+}
+
+function Get-AbyssJournalField {
+  # 해시테이블·PSCustomObject 공용 필드 읽기 → @{ Has; Value }. owner 를 메모리에서 해시테이블로 만든 경우와 파일에서
+  # 읽은 경우(PSCustomObject)를 같게 봅니다 - PSObject.Properties 는 해시테이블의 키를 보지 못합니다.
+  param($Object, [string]$Name)
+  if ($null -eq $Object) { return @{ Has = $false; Value = $null } }
+  if ($Object -is [System.Collections.IDictionary]) {
+    if ($Object.Contains($Name)) { return @{ Has = $true; Value = $Object[$Name] } }
+    return @{ Has = $false; Value = $null }
+  }
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) { return @{ Has = $false; Value = $null } }
+  return @{ Has = $true; Value = $property.Value }
+}
+
+function Test-AbyssJournalOwnerMatch {
+  # 항목(또는 pending 원소)의 owner 가 지금 owner 와 같은가 - 같은 열쇠로 마커·journal·pending 이 같은 사실을 봅니다.
+  # 커스텀 = 마커 소유자와 같은 5필드(fingerprint·orderKey·lap·index·item) AND 항목의 형제 필드 generation. 캐스트는 마커
+  # 대조(Test-CustomMarkerOwnerMatchesContext)와 같게 [string]/[int], orderKey 없음 = ''. 비커스텀 = runId 문자열 -
+  # 지금 owner 에 runId 가 있으면 비커스텀으로 봅니다. -Field 'nextOwner' 면 그 항목의 nextOwner 를 같은 규칙(같은
+  # generation)으로 봅니다. 필드가 없거나 숫자로 못 읽는 등 판단할 수 없으면 $false.
+  param($Entry, $Owner, $Generation = 0, [string]$Field = 'owner')
+  try {
+    if ($null -eq $Owner) { return $false }
+    $entryOwner = (Get-AbyssJournalField -Object $Entry -Name $Field).Value
+    if ($null -eq $entryOwner) { return $false }
+    $wantRunId = Get-AbyssJournalField -Object $Owner -Name 'runId'
+    if ($wantRunId.Has) {
+      $haveRunId = Get-AbyssJournalField -Object $entryOwner -Name 'runId'
+      return [bool]($haveRunId.Has -and ([string]$haveRunId.Value -eq [string]$wantRunId.Value))
+    }
+    $entryGeneration = Get-AbyssJournalField -Object $Entry -Name 'generation'
+    if (-not $entryGeneration.Has) { return $false }
+    foreach ($name in @('fingerprint', 'lap', 'index', 'item')) {
+      if (-not (Get-AbyssJournalField -Object $entryOwner -Name $name).Has) { return $false }
+      if (-not (Get-AbyssJournalField -Object $Owner -Name $name).Has) { return $false }
+    }
+    $haveOrderKey = [string](Get-AbyssJournalField -Object $entryOwner -Name 'orderKey').Value
+    $wantOrderKey = [string](Get-AbyssJournalField -Object $Owner -Name 'orderKey').Value
+    return [bool](([string]$entryOwner.fingerprint -eq [string]$Owner.fingerprint) -and
+      ($haveOrderKey -eq $wantOrderKey) -and
+      ([int]$entryOwner.lap -eq [int]$Owner.lap) -and
+      ([int]$entryOwner.index -eq [int]$Owner.index) -and
+      ([string]$entryOwner.item -eq [string]$Owner.item) -and
+      ([int]$entryGeneration.Value -eq [int]$Generation))
+  } catch {
+    return $false
+  }
+}
+
+function Set-AbyssJournalProperty {
+  # PSCustomObject 필드 쓰기 - 있으면 대입(필드 순서 유지), 없으면 Add-Member. ConvertFrom-Json 결과에 없는 속성을 대입하면
+  # PS 5.1 이 예외를 내고(실측 SetValueInvocationException), Add-Member -Force 로 덮어쓰면 그 필드가 맨 뒤로 옮겨집니다(실측).
+  param($Object, [string]$Name, $Value)
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -ne $property) {
+    $property.Value = $Value
+  } else {
+    Add-Member -InputObject $Object -NotePropertyName $Name -NotePropertyValue $Value
+  }
+}
+
+function Test-AbyssJournalShape {
+  # 읽기 규칙의 '유효' - 파싱 결과가 객체 ∧ version = 1 ∧ seq·entries·applied·pending 존재(값 null 은 정규화가 빈 배열로).
+  # seq 는 후보 선택과 (b) 조건의 비교에 쓰므로 숫자만(0 이상의 정수)이 아니면 무효입니다. 자릿수(Int64 범위)는 보지
+  # 않습니다 - 저장소는 seq 를 0 부터 1씩만 올려 범위 끝에 닿지 않고, 손으로 고쳐 범위를 넘긴 파일은 [long] 변환 예외로
+  # 드러납니다(관측 0 - 막는 코드를 두지 않음). 저장 직전 재파싱 확인도 같은 규칙 - 다음 읽기가 손상으로 볼 내용을 쓰지
+  # 않게 합니다.
+  param($Journal)
+  if (-not ($Journal -is [System.Management.Automation.PSCustomObject])) { return $false }
+  foreach ($name in @('version', 'seq', 'entries', 'applied', 'pending')) {
+    if ($null -eq $Journal.PSObject.Properties[$name]) { return $false }
+  }
+  if ([string]$Journal.version -ne '1') { return $false }
+  if (-not ([string]$Journal.seq -match '^\d+$')) { return $false }
+  return $true
+}
+
+function ConvertTo-AbyssJournalNormalized {
+  # entries·applied·pending 을 늘 배열로(null·없음 → 빈 배열). PS 5.1 은 Where-Object 결과를 @() 없이 대입하면 1건이 객체로
+  # 풀리고(그대로 저장하면 {"entries":{…}}), Write-Output -NoEnumerate 로 감싼 배열은 {"value":[…],"Count":n} 으로
+  # 직렬화됩니다(실측) - [object[]]@(…) 로 새 배열에 담아 둘 다 막습니다. 읽은 직후와 쓰기 직전에 부릅니다.
+  # 다른 필드는 건드리지 않습니다 - 모르는 필드도 그대로 왕복합니다.
+  # 값은 대입문으로 담습니다 - $(if …) 하위 식은 빈 배열을 $null 로, 1개 배열을 그 원소로 풀어 버립니다(실측).
+  param($Journal)
+  foreach ($name in @('entries', 'applied', 'pending')) {
+    $property = $Journal.PSObject.Properties[$name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+      $value = [object[]]@()
+    } else {
+      $value = [object[]]@($property.Value)
+    }
+    Set-AbyssJournalProperty -Object $Journal -Name $name -Value $value
+  }
+  return $Journal
+}
+
+function ConvertTo-AbyssJournalText {
+  # 직렬화: ConvertTo-Json -Depth 10(기본 Depth 2 면 owner 가 "@{fingerprint=…}" 문자열로 무너짐 - 실측) → \uXXXX 복원
+  # (Save-Config 와 같은 식 - 사람이 읽게) → 다시 파싱해 읽기 규칙상 유효한지 확인. 유효하지 않으면 예외(파일은 아직 안
+  # 건드림 - 구현 결함). 인코딩(UTF-8 BOM)·쓰기는 Write-AbyssJournalTempFile.
+  param($Journal)
+  $json = $Journal | ConvertTo-Json -Depth 10
+  $json = [regex]::Replace($json, '\\u([0-9a-fA-F]{4})', {
+      param($m) [string][char][Convert]::ToInt32($m.Groups[1].Value, 16) })
+  $reparsed = $json | ConvertFrom-Json -ErrorAction Stop
+  if (-not (Test-AbyssJournalShape -Journal $reparsed)) {
+    throw '완료 기록 직렬화 결과가 읽기 규칙상 유효하지 않습니다 (version·seq·entries·applied·pending 확인)'
+  }
+  return $json
+}
+
+function New-AbyssJournalTempPath {
+  # 임시 파일 경로 - 같은 폴더의 .<본 파일 이름>.<pid>.<guid>.tmp(config 원자 저장과 같은 명명 규칙). 만들지는 않습니다.
+  param([string]$Path)
+  $fullPath = [IO.Path]::GetFullPath($Path)
+  $tempName = '.{0}.{1}.{2}.tmp' -f [IO.Path]::GetFileName($fullPath), $PID, ([guid]::NewGuid().ToString('N'))
+  return [IO.Path]::Combine([IO.Path]::GetDirectoryName($fullPath), $tempName)
+}
+
+function Write-AbyssJournalTempFile {
+  # 임시 파일 쓰기 - CreateNew(남의 파일을 덮지 않음) → UTF-8 BOM + 본문 → Flush(true)(OS 버퍼까지 디스크로 - 교체
+  # 직전에 전원이 나가도 교체될 내용이 남게) → 닫기. 저장·복원 공용이라 이 묶음의 Flush(true) 는 여기 한 곳입니다.
+  # 실패하면 IO 예외를 그대로 올립니다(만들다 만 파일은 경로를 쥔 호출부가 지움).
+  param([string]$TempPath, [string]$Text)
+  $encoding = New-Object System.Text.UTF8Encoding($true)
+  $preamble = $encoding.GetPreamble()
+  $body = $encoding.GetBytes($Text)
+  $stream = New-Object System.IO.FileStream($TempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+  try {
+    $stream.Write($preamble, 0, $preamble.Length)
+    $stream.Write($body, 0, $body.Length)
+    $stream.Flush($true)
+  } finally {
+    $stream.Dispose()
+  }
+}
+
+function Remove-AbyssJournalFileQuietly {
+  # 남은 임시 파일 청소 - 실패는 저장·읽기 실패가 아닙니다(config 원자 저장의 청소와 같은 원칙: 끝난 교체를 청소 예외로
+  # 실패 처리하지 않음). 남은 .tmp 는 본 파일이 있는 동안 후보가 아니고 다음 잠금 읽기가 다시 지웁니다.
+  param([string]$FilePath)
+  try {
+    if ([IO.File]::Exists($FilePath)) { [IO.File]::Delete($FilePath) }
+  } catch [System.IO.IOException] {
+  } catch [System.UnauthorizedAccessException] {
+  }
+}
+
+function Step-AbyssJournalBudget {
+  # 합산 재시도 예산 1회 소모 - 잠금 획득과 잠금 뒤 모든 IO 실패(재판독·복구·임시 쓰기·Replace·Move)를 합쳐 20회 × 50ms
+  # (설계 v10 6.1 - 워커 완료 마커 기록과 같은 예산). 따로 세면 잠금 대기 뒤 교체 대기가 다시 1초를 써 버립니다.
+  # 남았으면 50ms 쉬고 $true(다시 시도), 다 썼으면 $false(쉬지 않고 실패 태그). 화면 대기가 아니라 양보·동결 대상이 아닙니다.
+  param($Budget)
+  $Budget.Left = [int]$Budget.Left - 1
+  if ($Budget.Left -le 0) { return $false }
+  Start-Sleep -Milliseconds 50
+  return $true
+}
+
+function Open-AbyssJournalLock {
+  # 잠금 획득(설계 v10 6.1 ①) - .lock 을 CreateNew + FileShare.None + DeleteOnClose 로 엽니다. 쥔 프로세스가 죽으면 OS 가
+  # 핸들과 함께 파일을 지워 고아 잠금이 남지 않습니다(실측). 실패하면 합산 예산 안에서 50ms 간격으로 다시 시도합니다.
+  # 반환 @{ Stream; Tag } - 성공 = 해제할 잠금 스트림 / 실패 = Stream $null, Tag 'locked' 또는 'io-failed'.
+  # 'locked' 는 예산이 끝날 때까지 경합(다른 쪽이 잠금을 쥠)이 이어진 경우뿐 - 마지막 실패의 HResult(감싼 예외면 안쪽
+  # IOException 의 값)로 가립니다. 실측(2026-10-08, PS 5.1.26100.9444): 다른 프로세스 보유·같은 프로세스 보유·보유자 없는
+  # 파일 존재 = 셋 다 0x80070050(파일 있음). 0x80070020(공유 위반)·0x80070021(잠금 위반)은 CreateNew 에서 관측되지
+  # 않았지만 명세 계약대로 경합에 둡니다. 폴더 없음(0x80070003)·삭제 대기 중·경로가 폴더(접근 거부 0x80070005)는 잠금
+  # 경합이 아니라 io-failed 입니다.
+  param([string]$Path, $Budget)
+  $lockPath = [IO.Path]::ChangeExtension([IO.Path]::GetFullPath($Path), '.lock')
+  while ($true) {
+    $contended = $false
+    try {
+      $stream = New-Object System.IO.FileStream($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None, 4096, [IO.FileOptions]::DeleteOnClose)
+      return @{ Stream = $stream; Tag = '' }
+    } catch [System.IO.IOException] {
+      $ioException = $_.Exception
+      while ($null -ne $ioException -and -not ($ioException -is [System.IO.IOException])) { $ioException = $ioException.InnerException }
+      $contended = ($null -ne $ioException) -and (@(0x80070020, 0x80070021, 0x80070050) -contains [int]$ioException.HResult)
+    } catch [System.UnauthorizedAccessException] {
+      $contended = $false
+    }
+    if (-not (Step-AbyssJournalBudget -Budget $Budget)) {
+      return @{ Stream = $null; Tag = $(if ($contended) { 'locked' } else { 'io-failed' }) }
+    }
+  }
+}
+
+function Read-AbyssJournalCandidate {
+  # 후보 파일 하나의 판정 → @{ Path; Exists; Valid; IoFailed; Seq; Journal; WriteTime }. 공유 모드 ReadWrite|Delete 로
+  # 엽니다 - Delete 공유 없이 열어 두면 쓰는 쪽의 File.Replace 가 실패합니다(실측). 파싱 실패·형식 불일치 = 무효(손상),
+  # 읽기 IO 실패 = IoFailed(손상이 아님 - 다른 프로그램이 잠깐 쥐었을 수 있어 잠금 쪽이 같은 예산으로 다시 읽습니다).
+  # 읽는 사이 사라진 파일(교체 중)은 없는 것으로 봅니다.
+  param([string]$FilePath)
+  $candidate = @{ Path = $FilePath; Exists = $false; Valid = $false; IoFailed = $false; Seq = [long]-1; Journal = $null; WriteTime = [DateTime]::MinValue }
+  if (-not [IO.File]::Exists($FilePath)) { return $candidate }
+  $text = $null
+  try {
+    $stream = [IO.File]::Open($FilePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try {
+      $reader = New-Object System.IO.StreamReader($stream, (New-Object System.Text.UTF8Encoding($false)), $true)
+      $text = $reader.ReadToEnd()
+    } finally {
+      $stream.Dispose()
+    }
+    $candidate.WriteTime = [IO.File]::GetLastWriteTimeUtc($FilePath)
+  } catch [System.IO.IOException] {
+    # 파일·폴더 없음(IOException 하위)은 읽는 사이 사라진 것 - 절을 따로 두지 않습니다(묶음 머리 주석 - catch 절 2개까지)
+    if ($_.Exception -is [System.IO.FileNotFoundException] -or $_.Exception -is [System.IO.DirectoryNotFoundException]) { return $candidate }
+    $candidate.Exists = $true
+    $candidate.IoFailed = $true
+    return $candidate
+  } catch [System.UnauthorizedAccessException] {
+    $candidate.Exists = $true
+    $candidate.IoFailed = $true
+    return $candidate
+  }
+  $candidate.Exists = $true
+  $parsed = $null
+  try {
+    $parsed = ConvertFrom-Json -InputObject $text -ErrorAction Stop
+  } catch {
+    return $candidate
+  }
+  if (-not (Test-AbyssJournalShape -Journal $parsed)) { return $candidate }
+  $candidate.Valid = $true
+  $candidate.Seq = [long]$parsed.seq
+  $candidate.Journal = ConvertTo-AbyssJournalNormalized -Journal $parsed
+  return $candidate
+}
+
+function Read-AbyssJournalUnlocked {
+  # 순수 읽기(설계 v10 6.1 읽기 계약) - 후보 판정·선택·정규화만 하고 **파일은 바꾸지 않습니다**. 진단·표시 전용이고 어떤
+  # 결정·복구에도 쓰지 않습니다(잠금 밖에서 본 판정은 그 사이 쓰는 쪽이 교체를 끝냈을 수 있음). 잠금 아래의 재판독은
+  # Read-AbyssJournalHeld 가 이 함수로 합니다.
+  # 반환 @{ Status(ok/corrupt/io-failed); Branch(a~e); Journal; Warnings; Detail } - Detail 은 Held 의 복구 재료(내부용).
+  # 후보 = 본 파일, .bak, 그리고 본 파일이 없을 때만 .tmp. 분기:
+  #  (a) 본 파일 유효 → 채택(다른 후보 seq 가 더 커도 본 파일 - 경고만. 이때 .bak·임시본 목록의 읽기 실패는 판정에 쓰지 않고
+  #  경고만 - 본 파일이 정답이고, .bak 이 막혔으면 다음 교체가 같은 예산으로 드러냅니다) (b) 본 파일 없음 ∧ .bak 유효 ∧ 유효
+  #  .tmp 의 seq = .bak seq + 1 → 그 .tmp(교체 도중 종료 - 같은 seq 둘이면 나중에 쓴 쪽) (c) 본 파일 없음·손상 ∧ .bak 유효
+  #  → .bak (d) 본 파일·.bak 이 둘 다 없음 → 빈 journal - 남은 .tmp 는 유효하든 아니든 확정되지 않은 첫 쓰기라 올리지 않고
+  #  (Held 가 청소) (e) 그 밖(.bak 손상 포함) → corrupt.
+  #  (b) 에 '.bak 없음' 을 허용하지 않는 이유(구현 리뷰 2.1 P1): 첫 저장의 Move 가 예산 끝까지 실패해 io-failed 를 돌려준 뒤
+  #  임시본 삭제까지 실패하면, 그 임시본이 다음 읽기에서 본 파일로 올라가 '실패라고 알린 저장' 이 나중에 커밋됩니다.
+  param([string]$Path)
+  $mainPath = [IO.Path]::GetFullPath($Path)
+  $detail = @{ MainPath = $mainPath; BakPath = ($mainPath + '.bak'); MainExists = $false; TempFiles = @(); ChosenTemp = ''; MaxSeq = [long]-1 }
+  $result = @{ Status = 'ok'; Branch = ''; Journal = $null; Warnings = @(); Detail = $detail }
+  $main = Read-AbyssJournalCandidate -FilePath $mainPath
+  if ($main.IoFailed) {
+    $result.Status = 'io-failed'
+    return $result
+  }
+  $detail.MainExists = $main.Exists
+  $tempPattern = '^\.' + [regex]::Escape([IO.Path]::GetFileName($mainPath)) + '\..+\.tmp$'
+  try {
+    $detail.TempFiles = @([IO.Directory]::GetFiles([IO.Path]::GetDirectoryName($mainPath)) |
+        Where-Object { [IO.Path]::GetFileName($_) -match $tempPattern } | Sort-Object)
+  } catch [System.IO.IOException] {
+    # 폴더 없음(IOException 하위)은 임시 파일 없음 - 절을 따로 두지 않습니다(묶음 머리 주석 - catch 절 2개까지)
+    if ($_.Exception -is [System.IO.DirectoryNotFoundException]) {
+      $detail.TempFiles = @()
+    } elseif (-not $main.Exists) {
+      $result.Status = 'io-failed'
+      return $result
+    } else {
+      $result.Warnings += '[경고] 완료 기록 임시본 목록을 읽지 못했습니다 - 임시본 청소를 건너뜁니다'
+    }
+  } catch [System.UnauthorizedAccessException] {
+    if (-not $main.Exists) {
+      $result.Status = 'io-failed'
+      return $result
+    }
+    $result.Warnings += '[경고] 완료 기록 임시본 목록을 읽지 못했습니다 - 임시본 청소를 건너뜁니다'
+  }
+  $bak = Read-AbyssJournalCandidate -FilePath $detail.BakPath
+  if ($main.Valid) {
+    $result.Branch = 'a'
+    $result.Journal = $main.Journal
+    if ($bak.IoFailed) {
+      $result.Warnings += '[경고] 완료 기록 직전본을 읽지 못했습니다 - 순번 비교를 건너뜁니다'
+    }
+    if ($bak.Valid -and $bak.Seq -gt $main.Seq) {
+      $result.Warnings += ('[경고] 완료 기록 직전본의 순번({0})이 본 파일({1})보다 큽니다 - 본 파일을 그대로 씁니다' -f $bak.Seq, $main.Seq)
+    }
+    return $result
+  }
+  if ($bak.IoFailed) {
+    $result.Status = 'io-failed'
+    return $result
+  }
+  $temps = @()
+  if (-not $main.Exists) {
+    foreach ($tempFile in $detail.TempFiles) {
+      $temp = Read-AbyssJournalCandidate -FilePath $tempFile
+      if ($temp.IoFailed) {
+        $result.Status = 'io-failed'
+        return $result
+      }
+      if ($temp.Exists) { $temps += $temp }
+    }
+  }
+  $maxSeq = $bak.Seq
+  foreach ($temp in $temps) {
+    if ($temp.Valid -and $temp.Seq -gt $maxSeq) { $maxSeq = $temp.Seq }
+  }
+  $detail.MaxSeq = $maxSeq
+  if (-not $main.Exists) {
+    $chosen = $null
+    foreach ($temp in $temps) {
+      if (-not $temp.Valid) { continue }
+      if (-not ($bak.Valid -and $temp.Seq -eq ($bak.Seq + 1))) { continue }
+      if ($null -eq $chosen -or $temp.Seq -gt $chosen.Seq -or ($temp.Seq -eq $chosen.Seq -and $temp.WriteTime -gt $chosen.WriteTime)) {
+        $chosen = $temp
+      }
+    }
+    if ($null -ne $chosen) {
+      $result.Branch = 'b'
+      $result.Journal = $chosen.Journal
+      $detail.ChosenTemp = $chosen.Path
+      return $result
+    }
+  }
+  if ($bak.Valid) {
+    $result.Branch = 'c'
+    $result.Journal = $bak.Journal
+    return $result
+  }
+  if (-not $main.Exists -and -not $bak.Exists) {
+    $result.Branch = 'd'
+    $result.Journal = New-AbyssJournalEmpty
+    return $result
+  }
+  $result.Status = 'corrupt'
+  $result.Branch = 'e'
+  return $result
+}
+
+function Read-AbyssJournalHeld {
+  # 잠금 보유 전제의 읽기(설계 v10 6.1) - 같은 프로세스는 .lock 을 다시 열 수 없어(실측) 저장 함수는 래퍼가 아니라 이것을
+  # 부릅니다. 잠금 아래에서 Unlocked 로 **다시 읽은** 결과에만 복구·청소를 합니다: (b) 고른 .tmp 를 Move 로 본 파일에
+  # 올림 (c) 손상 본 파일을 .corrupt.<시각> 으로 옮겨 증거로 두고, .bak 은 그대로 둔 채 그 내용(seq = 아는 최대 + 1)을
+  # 임시 파일 → Move 로 본 파일 복원 (a)(b)(c) 남은 .tmp 청소. (d) 빈 journal 은 쓰지 않고, corrupt 는 파일을 바꾸지 않습니다.
+  # 읽기·복구 IO 실패는 같은 예산(-Budget - 잠금과 합산, 없으면 새 20회) 안에서 처음부터 다시 읽어 재시도하고 끝내 안 되면
+  # io-failed - 손상본만 옮기고 복원 전에 멈춘 중간 상태는 다음 읽기의 (c) 가 이어받습니다.
+  # 반환 @{ Status(ok/corrupt/io-failed); Branch; Journal; Warnings }.
+  param([string]$Path, $Budget = $null)
+  if ($null -eq $Budget) { $Budget = @{ Left = 20 } }
+  $warnings = @()
+  while ($true) {
+    $read = Read-AbyssJournalUnlocked -Path $Path
+    $warnings = @($read.Warnings)
+    if ($read.Status -eq 'corrupt') {
+      return @{ Status = 'corrupt'; Branch = 'e'; Journal = $null; Warnings = $warnings }
+    }
+    if ($read.Status -eq 'ok') {
+      $detail = $read.Detail
+      $restoreTemp = ''
+      try {
+        if ($read.Branch -eq 'b') {
+          [IO.File]::Move($detail.ChosenTemp, $detail.MainPath)
+          $warnings += '[경고] 완료 기록 교체 중 종료 - 임시본으로 완료'
+        } elseif ($read.Branch -eq 'c') {
+          if ($detail.MainExists) {
+            [IO.File]::Move($detail.MainPath, ($detail.MainPath + '.corrupt.' + (Get-Date).ToString('yyyyMMdd_HHmmss')))
+          }
+          $restored = $read.Journal
+          Set-AbyssJournalProperty -Object $restored -Name 'seq' -Value ([long]$detail.MaxSeq + 1)
+          Set-AbyssJournalProperty -Object $restored -Name 'savedAt' -Value (Get-AbyssJournalTimeText)
+          Set-AbyssJournalProperty -Object $restored -Name 'savedBy' -Value ([string]$script:abyssJournalSavedBy)
+          $restoreText = ConvertTo-AbyssJournalText -Journal $restored
+          $restoreTemp = New-AbyssJournalTempPath -Path $detail.MainPath
+          Write-AbyssJournalTempFile -TempPath $restoreTemp -Text $restoreText
+          [IO.File]::Move($restoreTemp, $detail.MainPath)
+          $restoreTemp = ''
+          $warnings += '[경고] 완료 기록 파일 손상 - 직전본으로 복구'
+        }
+        foreach ($tempFile in $detail.TempFiles) { Remove-AbyssJournalFileQuietly -FilePath $tempFile }
+        return @{ Status = 'ok'; Branch = $read.Branch; Journal = $read.Journal; Warnings = $warnings }
+      } catch [System.IO.IOException] {
+      } catch [System.UnauthorizedAccessException] {
+      } finally {
+        if ($restoreTemp) { Remove-AbyssJournalFileQuietly -FilePath $restoreTemp }
+      }
+    }
+    if (-not (Step-AbyssJournalBudget -Budget $Budget)) {
+      return @{ Status = 'io-failed'; Branch = ''; Journal = $null; Warnings = $warnings }
+    }
+  }
+}
+
+function Read-AbyssJournal {
+  # 잠금 래퍼(설계 v10 6.1 읽기 계약) - 저장과 같은 방식으로 .lock 을 합산 예산(20회 × 50ms) 안에 얻고 → Held → 해제.
+  # Update 밖의 모든 결정(종료 코드 처리·시작 게이트·기동 후보 고르기)은 이 결과로만 내립니다.
+  # 반환 @{ Status(ok/locked/corrupt/io-failed); Branch(a~e); Journal; Warnings }. 잠금을 못 얻으면 파일 변경 0.
+  param([string]$Path)
+  $mainPath = [IO.Path]::GetFullPath($Path)
+  $budget = @{ Left = 20 }
+  $lock = Open-AbyssJournalLock -Path $mainPath -Budget $budget
+  if ($null -eq $lock.Stream) {
+    return @{ Status = $lock.Tag; Branch = ''; Journal = $null; Warnings = @() }
+  }
+  try {
+    return (Read-AbyssJournalHeld -Path $mainPath -Budget $budget)
+  } finally {
+    $lock.Stream.Dispose()
+  }
+}
+
+function Update-AbyssJournal {
+  # 저장 계약(설계 v10 6.1 ①~⑦ + 반환 태그 결정): 잠금 → Held 재판독·복구 → -Expect → -Mutator → seq+1·savedAt·savedBy →
+  # 직렬화 → 임시 파일(CreateNew → Flush(true) → 닫기) → File.Replace(본 파일 → .bak, 본 파일이 없으면 Move) → 잠금 해제.
+  # -Mutator · -Expect 는 호출부가 .GetNewClosure() 로 만듭니다 - 클로저가 아니면 이 함수의 지역 변수가 호출부의 같은 이름
+  # 변수를 가립니다(동적 스코프 - 실측). 클로저는 $script: 를 $null 로 읽으므로 필요한 값은 호출부 지역 변수로 잡고,
+  # 클로저가 부를 수 있는 함수는 최상위(글로벌) 함수뿐입니다.
+  #  -Expect { param($journal) … } : 정확히 [bool] 1개를 돌려줍니다(출력 없음·둘 이상·bool 아님 = 계약 위반 예외).
+  #   $false 면 expect-failed - mutator 를 부르지 않고 쓰지도 않습니다(잠금 안 RMW 의 논리 CAS).
+  #  -Mutator { param($journal, $change) … } : 메모리 사본을 바꾸고 바꿨으면 $change.Changed = $true. 출력은 버립니다.
+  #   안 바꾸면 unchanged - 이 호출의 논리 변경 쓰기 0(임시 파일·Replace 0). 단 잠금 아래 재판독이 (b)/(c) 복구를 했다면 그
+  #   복구 쓰기는 별개이고 Warnings 에 복구 경고가 실립니다(expect-failed 도 같음 - 구현 리뷰 2.1 P2).
+  #   항목을 고정 필드로 다시 만들지 말 것(모르는 필드 왕복 보존).
+  # 반환 @{ Tag; Warnings } - Tag ∈ changed / unchanged / expect-failed / locked / corrupt / io-failed, Warnings = 복구 경고.
+  # 예산: 잠금 획득과 잠금 뒤 모든 IO 실패를 합쳐 20회 × 50ms. 잠금 뒤의 실패(접근 거부 포함)는 io-failed 입니다 - 예외는
+  # 본 파일이 유효할 때의 보조 읽기 실패 두 가지(.bak 읽기 · 임시본 목록 읽기)로, 판정에 쓰지 않고 경고만 남깁니다(Unlocked (a)).
+  # 바깥은 try/finally(catch 없음) - mutator·expect 예외가 나가도 잠금 스트림과 임시 파일을 반드시 정리합니다(GUI 는 예외
+  # 뒤에도 살아 있어 핸들이 남으면 이후 모든 기록이 'locked' 가 됩니다).
+  param([string]$Path, [scriptblock]$Mutator, [scriptblock]$Expect = $null)
+  if ($null -eq $Mutator) { throw '완료 기록 저장 계약 위반 - -Mutator 가 없습니다' }
+  $mainPath = [IO.Path]::GetFullPath($Path)
+  $budget = @{ Left = 20 }
+  $lockStream = $null
+  $tempPath = ''
+  try {
+    $lock = Open-AbyssJournalLock -Path $mainPath -Budget $budget
+    if ($null -eq $lock.Stream) {
+      return @{ Tag = $lock.Tag; Warnings = @() }
+    }
+    $lockStream = $lock.Stream
+    $read = Read-AbyssJournalHeld -Path $mainPath -Budget $budget
+    $warnings = @($read.Warnings)
+    if ($read.Status -ne 'ok') {
+      return @{ Tag = $read.Status; Warnings = $warnings }
+    }
+    $journal = $read.Journal
+    if ($null -ne $Expect) {
+      $expectOutput = @(& $Expect $journal)
+      if ($expectOutput.Count -ne 1 -or -not ($expectOutput[0] -is [bool])) {
+        $firstKind = 'null'
+        if ($expectOutput.Count -gt 0 -and $null -ne $expectOutput[0]) { $firstKind = $expectOutput[0].GetType().Name }
+        throw ('완료 기록 저장 계약 위반 - -Expect 는 [bool] 값 하나만 돌려줘야 합니다 (출력 {0}개, 첫 값 {1})' -f $expectOutput.Count, $firstKind)
+      }
+      if (-not $expectOutput[0]) {
+        return @{ Tag = 'expect-failed'; Warnings = $warnings }
+      }
+    }
+    $change = @{ Changed = $false }
+    [void](& $Mutator $journal $change)
+    if (-not $change.Changed) {
+      return @{ Tag = 'unchanged'; Warnings = $warnings }
+    }
+    $journal = ConvertTo-AbyssJournalNormalized -Journal $journal
+    Set-AbyssJournalProperty -Object $journal -Name 'seq' -Value ([long]$journal.seq + 1)
+    Set-AbyssJournalProperty -Object $journal -Name 'savedAt' -Value (Get-AbyssJournalTimeText)
+    Set-AbyssJournalProperty -Object $journal -Name 'savedBy' -Value ([string]$script:abyssJournalSavedBy)
+    $text = ConvertTo-AbyssJournalText -Journal $journal
+    $bakPath = $mainPath + '.bak'
+    $tempReady = $false
+    while ($true) {
+      try {
+        if (-not $tempReady) {
+          if ($tempPath) { Remove-AbyssJournalFileQuietly -FilePath $tempPath }
+          $tempPath = New-AbyssJournalTempPath -Path $mainPath
+          Write-AbyssJournalTempFile -TempPath $tempPath -Text $text
+          $tempReady = $true
+        }
+        if ([IO.File]::Exists($mainPath)) {
+          [IO.File]::Replace($tempPath, $mainPath, $bakPath, $true)
+        } else {
+          [IO.File]::Move($tempPath, $mainPath)
+        }
+        $tempPath = ''
+        return @{ Tag = 'changed'; Warnings = $warnings }
+      } catch [System.IO.IOException] {
+      } catch [System.UnauthorizedAccessException] {
+      }
+      if (-not (Step-AbyssJournalBudget -Budget $budget)) {
+        # 실패를 알리기 전에 임시본을 지웁니다. 못 지워 남으면 경고 - 본 파일이 없고 .bak 이 있을 때(교체가 반쯤 끝난 상태)
+        # 그 임시본은 다음 읽기의 (b) 가 올릴 수 있습니다(구현 리뷰 2.1 P1 - .bak 이 없으면 올리지 않습니다).
+        # 남았는지는 잡힌 삭제 예외로 판정합니다 - File.Exists 는 접근 오류면 실제로 있어도 거짓을 돌려줄 수 있습니다(구현 리뷰
+        # 2.1 확인 라운드). File.Delete 는 없는 파일이면 조용히 지나가고, 폴더 없음은 남은 파일이 없다는 뜻입니다.
+        if ($tempPath) {
+          $tempLeft = $false
+          try {
+            [IO.File]::Delete($tempPath)
+          } catch [System.IO.IOException] {
+            $tempLeft = -not ($_.Exception -is [System.IO.DirectoryNotFoundException])
+          } catch [System.UnauthorizedAccessException] {
+            $tempLeft = $true
+          }
+          if ($tempLeft) {
+            $warnings += '[경고] 완료 기록 저장 실패 - 임시본을 지우지 못했습니다 (본 파일이 없으면 다음 읽기에서 이 저장이 적용될 수 있습니다)'
+          }
+          $tempPath = ''
+        }
+        return @{ Tag = 'io-failed'; Warnings = $warnings }
+      }
+    }
+  } finally {
+    if ($tempPath) { Remove-AbyssJournalFileQuietly -FilePath $tempPath }
+    if ($null -ne $lockStream) { $lockStream.Dispose() }
+  }
+}
+# ===== 어비스 완료 기록 저장소 묶음 끝 - 위 머리 주석부터 여기까지가 두 사본 같은 글자 =====
+
 function Test-CheckpointLeaveReason {
   # 워커 [완료] 사유가 '거점 부활 상한 퇴장' 인가 (순수부 - 진리표). 워커 문구: '[완료] 거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀
   # 완료 (준비 실행 - …)'. 조각 '거점 부활 상한으로 던전을 나왔' 하나 - 다른 코드 10 사유('안전 중지 예약 확인 - 수동 진행분 정리',
@@ -416,6 +1026,24 @@ function Test-CheckpointLeaveReason {
   # 09-26: 부활 불가 화면 대기 초과 퇴장(파티 회차 실사고 보완)도 같은 코드 10 재입장 - 두 사유 모두 인정
   param([string]$Reason)
   return [bool](([string]$Reason) -match '(거점 부활 상한으로|부활 불가 화면 대기 초과로) 던전을 나왔')
+}
+
+function Step-CustomProgressGeneration {
+  # 진행 세대(progressGeneration) +1 (설계 v10 1.3·1.7). 진행 기록을 처음부터로 되돌리는 저장과 **같은 노드·같은 저장**에서 부릅니다
+  # (저장은 호출부 몫). 세대가 오르면 그 전에 남은 완료 마커(owner version 3)·완료 기록은 처음부터 다시 시작한 진행과 우연히 다시
+  # 맞지 않습니다 - 순차 목록은 초기화 뒤 1바퀴 0번이 5필드 그대로 재현되기 때문입니다.
+  # 던전·어비스·심층 3섹션만 올립니다. 생활(lifeCustomRepeat)은 완료 마커를 만들지 않아 키를 두지 않는데, 생활도 진행 초기화 경로를
+  # 같이 타므로 이 함수가 섹션을 가립니다(명세 리뷰 2 P2). 지금 값은 Get-CustomCurrentContext 와 같은 규칙(키 없음·해석 실패 = 0)으로 읽습니다.
+  param($Node, [string]$SectionName)
+  if (@('customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat') -notcontains $SectionName) { return }
+  $generationNow = 0
+  if ($Node.PSObject.Properties['progressGeneration']) {
+    try { $generationNow = [int]$Node.progressGeneration } catch { $generationNow = 0 }
+    $Node.progressGeneration = $generationNow + 1
+  } else {
+    # ConvertFrom-Json 결과에 없는 속성은 대입하면 예외라(PS 5.1) Add-Member 로 붙입니다
+    $Node | Add-Member -NotePropertyName 'progressGeneration' -NotePropertyValue ($generationNow + 1)
+  }
 }
 
 function Update-ConfigToLatest {
@@ -477,9 +1105,26 @@ function Update-ConfigToLatest {
       $def.life.gatherWaitSeconds = 600
       if ($oldGatherWait -gt 0 -and $oldGatherWait -ne 600) { $script:gatherWaitReset = $oldGatherWait }
     }
+    # 2-0b) 스키마 10→11 구버전 완료 마커 수집 (완료 마커 owner version 3 도입 - 설계 v10 1.3·1.7). 던전·어비스·심층 마커 중
+    #      파일은 있는데 version 3 으로 읽히지 않는 것(version 2 이하·부분 파일·'{}')의 경로를 **모으기만** 합니다. 무효화는
+    #      Save-Config 성공 뒤 아래 진행 초기화 마커 정리와 같은 단계에서 합니다 - 여기서 지우면 저장 실패(기존 설정으로 계속) 때
+    #      옛 진행 + 마커 없음이 되어 클리어한 유료 판을 다시 돕니다. 진행을 지운 섹션만 정리하는 기존 단계로는 진행이 없던
+    #      (1바퀴 0번) 사용자의 version 2 마커가 남습니다. 생활 마커는 만들어지지 않아 제외합니다.
+    #      문턱은 $defSchema 가 아니라 11 고정 - version 3 을 도입한 번호라, 이미 11 인 사용자는 다음 스키마 이전에서 다시 모으지 않습니다
+    $script:legacyMarkerPathsToClear = @()
+    if ($usrSchema -lt 11) {
+      foreach ($legacySection in @('customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat')) {
+        $legacyMarkerPath = Get-CustomMarkerFileForSection -SectionName $legacySection
+        if ((Test-Path -LiteralPath $legacyMarkerPath) -and ($null -eq (Read-CustomMarkerOwner -Path $legacyMarkerPath))) {
+          $script:legacyMarkerPathsToClear += $legacyMarkerPath
+        }
+      }
+    }
     # 2-1) 커스텀 반복 특례: 리스트/설정은 위 루프로 이전하되 '진행 기록만' 초기화합니다.
     #      업데이트로 좌표/판정이 바뀌었을 수 있어 이어가기보다 처음부터가 안전 (요청사항 확정 스펙).
     #      사용자에게는 시작 로그로 안내합니다 ($script:customProgressReset).
+    #      진행을 지운 전투 섹션은 같은 저장에서 진행 세대도 1 올립니다(Step-CustomProgressGeneration - 값은 위 2) 루프가 옮긴
+    #      사용자 값, 구버전 config 면 최신 기본 0). 옛 세대의 완료 기록이 처음부터 다시 시작한 진행과 다시 맞지 않게 (설계 v10 1.3)
     if ($def.PSObject.Properties['customRepeat']) {
       $hadCustomProgress = $false
       try {
@@ -493,7 +1138,10 @@ function Update-ConfigToLatest {
       $script:customProgressReset = $hadCustomProgress
       # 어느 섹션의 진행을 실제로 지웠는지 따로 모읍니다 (저장 성공 뒤 그 섹션 마커만 삭제).
       # 집계 플래그 하나로 4종 마커를 다 지우면 진행이 없던 섹션의 정상 마커까지 파괴됩니다.
-      if ($hadCustomProgress) { $script:customProgressResetSections += 'customRepeat' }
+      if ($hadCustomProgress) {
+        $script:customProgressResetSections += 'customRepeat'
+        Step-CustomProgressGeneration -Node $def.customRepeat -SectionName 'customRepeat'
+      }
     }
     if ($def.PSObject.Properties['abyssCustomRepeat']) {
       $hadAbyssCustomProgress = $false
@@ -506,7 +1154,10 @@ function Update-ConfigToLatest {
       if ($def.abyssCustomRepeat.PSObject.Properties['progress']) { $def.abyssCustomRepeat.progress = $null }
       else { $def.abyssCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = ($script:customProgressReset -or $hadAbyssCustomProgress)
-      if ($hadAbyssCustomProgress) { $script:customProgressResetSections += 'abyssCustomRepeat' }
+      if ($hadAbyssCustomProgress) {
+        $script:customProgressResetSections += 'abyssCustomRepeat'
+        Step-CustomProgressGeneration -Node $def.abyssCustomRepeat -SectionName 'abyssCustomRepeat'
+      }
     }
     if ($def.PSObject.Properties['deepCustomRepeat']) {
       $hadDeepCustomProgress = $false
@@ -519,7 +1170,10 @@ function Update-ConfigToLatest {
       if ($def.deepCustomRepeat.PSObject.Properties['progress']) { $def.deepCustomRepeat.progress = $null }
       else { $def.deepCustomRepeat | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
       $script:customProgressReset = ($script:customProgressReset -or $hadDeepCustomProgress)
-      if ($hadDeepCustomProgress) { $script:customProgressResetSections += 'deepCustomRepeat' }
+      if ($hadDeepCustomProgress) {
+        $script:customProgressResetSections += 'deepCustomRepeat'
+        Step-CustomProgressGeneration -Node $def.deepCustomRepeat -SectionName 'deepCustomRepeat'
+      }
     }
     if ($def.PSObject.Properties['lifeCustomRepeat']) {
       $hadLifeCustomProgress = $false
@@ -579,12 +1233,31 @@ function Update-ConfigToLatest {
     #   섹션 분리(Get-CustomMarkerFileForSection)의 취지와 정면으로 어긋납니다 (리뷰 적발).
     # ★ 무효화 실패를 조용히 성공으로 처리하지 않습니다 (리뷰 적발). 실패하면 시작 안내에
     #   남겨 사용자가 '진행 기록은 처음부터'와 어긋난 복구를 만나도 원인을 알 수 있게 합니다.
+    # ★ 10→11 구버전 마커(2-0b 목록)도 이 단계에서 무효화합니다. 진행이 있던 섹션의 version 2 마커는 두 목록에 다 들어가므로
+    #   경로 합집합으로 **경로당 한 번만** 정리합니다 - 두 번 지우면 첫 시도의 실패 플래그가 둘째 시도가 성공한 뒤에도 남고,
+    #   계속 실패하면 같은 파일의 경고가 두 줄 뜹니다(명세 리뷰 2 P3). 결과 배분: 진행 초기화 목록 경로의 실패는 기존 플래그
+    #   (그 섹션은 진행 초기화 안내가 이미 뜸), 구버전 목록에만 든 경로의 실패는 구버전 플래그, 구버전 목록 경로의 성공은 건수.
     $script:customMarkerClearFailed = $false
+    $script:legacyMarkerClearFailed = $false
+    $script:legacyMarkerClearedCount = 0
+    $resetMarkerPaths = @()
     foreach ($resetSection in @($script:customProgressResetSections)) {
       if ([string]::IsNullOrWhiteSpace($resetSection)) { continue }
-      if (-not (Clear-CustomMarkerFile -Path (Get-CustomMarkerFileForSection -SectionName $resetSection))) {
-        $script:customMarkerClearFailed = $true
-      }
+      $resetMarkerPaths += (Get-CustomMarkerFileForSection -SectionName $resetSection)
+    }
+    $legacyMarkerPaths = @(@($script:legacyMarkerPathsToClear) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    # 경로 → 정리 결과. PowerShell 해시테이블 키는 대소문자를 가리지 않으므로 같은 파일은 한 번만 정리됩니다
+    $markerClearResults = @{}
+    foreach ($markerPathToClear in @($resetMarkerPaths + $legacyMarkerPaths)) {
+      if ($markerClearResults.ContainsKey($markerPathToClear)) { continue }
+      $markerClearResults[$markerPathToClear] = [bool](Clear-CustomMarkerFile -Path $markerPathToClear)
+    }
+    foreach ($resetMarkerPath in $resetMarkerPaths) {
+      if (-not $markerClearResults[$resetMarkerPath]) { $script:customMarkerClearFailed = $true }
+    }
+    foreach ($legacyMarkerPath in $legacyMarkerPaths) {
+      if ($markerClearResults[$legacyMarkerPath]) { $script:legacyMarkerClearedCount++ }
+      elseif ($resetMarkerPaths -notcontains $legacyMarkerPath) { $script:legacyMarkerClearFailed = $true }
     }
     return $true
   } catch {
@@ -719,6 +1392,10 @@ function Convert-WorkerLogLineForGui {
   if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[안내\] 사용자 입력 감지\([^()]*\) - 이번 클릭은 건너뜁니다 \(조작이 끝나면 다음 감지에서 다시 시도\)\s*$') {
     return $null
   }
+  # 어비스 클리어 완료 기록(journal) 저장 성공 줄도 화면에서는 숨깁니다 (구현 명세 ① 2.10 W7 · 5절 B8 - 개발자 메모는 파일에만, 설계 R2 M9 와
+  # 같은 원칙). 워커는 커스텀·비커스텀 모두 이 줄을 써서 모드와 무관하고, 같은 기록의 저장 실패 [경고] 줄은 사용자가 알아야 해서 그대로 보입니다.
+  # 워커 문구와 정확히 같을 때만(시각 접두는 있어도 없어도) 숨깁니다 - 원본 로그 파일은 그대로입니다.
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[어비스\] 클리어 완료 기록 저장 \(결과 화면 도달\)\s*$') { return $null }
   # 정상 워커 로그는 항상 시각(HH:mm:ss)으로 시작합니다. 숫자 단독 줄은 화면에서만 버립니다.
   # ※ 과거 이 줄의 주석은 원인을 '파일 교체 경계'로 적어 두었지만 **오진이었습니다**.
   #   진짜 원인은 타이머의 Read-NewLogLines 반환을 @() 로 감싸지 않아 새 줄이 1줄뿐인 틱에서
@@ -755,6 +1432,11 @@ function Convert-WorkerLogLineForGui {
     return $null
   }
 
+  # 어비스 '다시 하기' 재입장(InsideHandoff) 완료 줄 끝의 판별 표지 ' [terminal=InsideHandoff nonce=<guid>]' 는 화면에서만 지웁니다
+  # (2026-10-08 사용자 결정 Q9 - 새 표지·nonce 꼬리는 GUI 로그에서 숨김, 구현 명세 ① 2.4 · v11 R1 3.1). 판별은 이 변환 전 원문으로
+  # 하므로(타이머 tail·공통 최종 수집이 [완료] 사유를 원문에서 갱신) 숨겨도 판별과 닿지 않고, 워커 파일 원본도 그대로입니다. 줄 끝에서만,
+  # nonce 가 GUID 글자(16진수·하이픈)일 때만 지웁니다. 이 줄은 코드 0·11 이라 [완료] 원문을 쓰는 코드 4 상태줄로는 가지 않습니다.
+  $Line = $Line -replace ' \[terminal=InsideHandoff nonce=[0-9A-Fa-f-]+\]\s*$', ''
   # 좌표·판독 근거 같은 진단 꼬리는 파일에만 남기고 화면에서는 지웁니다 (2026-08-11 사용자
   # 요청 - "(Y=575, 근거 text)"·"(링크 탐색 530,390)" 은 쓰는 사람에게 의미가 없음).
   # 진단 키워드로 시작하는 **줄 끝 괄호 덩어리만** 지우므로 오류 사유 등 사용자에게 필요한
@@ -835,6 +1517,42 @@ function Convert-WorkerLogLineForGui {
   }
 
   return $Line
+}
+
+function Invoke-ExitLogFinalCollect {
+  # 워커 종료 처리의 공통 최종 수집 (구현 명세 ① 2.4 · 설계 v10 6.1 '종료 처리 순서' · v11 R1 3.1). 타이머가 종료 코드를 확정한
+  # 직후·코드별 갈래 앞에서 모든 종료 코드에 한 번 부릅니다. 워커는 마지막 [완료] 줄을 종료 직전에 쓰므로, 그 줄이 같은 틱의 통상
+  # tail 과 HasExited 판정 사이에 쓰이면 통상 tail 은 그 줄을 못 봅니다 - 그래서 종료를 확인한 뒤 두 로그의 남은 줄을 마저 읽습니다.
+  # 예전에는 같은 수집이 코드 10(거점 퇴장 판별)·코드 4(상태줄 사유) 갈래에 사본으로 따로 있었고, 코드 0·11·1·2·3 은 워커의 마지막
+  # 줄이 창에 뜨지 않았습니다(시간 지정 v2 R17). 코드 1·2·3 은 사유를 읽지 않아 화면 표시만 늘고 동작은 그대로입니다.
+  # 계약 (설계 v10 R7-P2-1):
+  #  - 두 출처(기본 로그·복구 로그)를 따로 읽고, 읽기 실패(Read-NewLogLines 의 catch 가 돌려준 $null 원소)는 그 출처마다 [경고] 1줄로
+  #    알린 뒤 그 출처만 건너뜁니다. 한 출처의 실패로 다른 출처를 건너뛰지 않습니다. 파일 없음·새 줄 없음은 빈 배열이라 실패가
+  #    아닙니다(복구 로그는 워커가 기본 로그를 못 쓸 때만 생겨 평소에는 파일이 없습니다).
+  #  - 통상 tail 이 이미 잡은 사유($script:lastWorkerDoneReason)는 지우지 않습니다 - 새로 읽은 [완료] 줄이 있을 때만 덮습니다.
+  #  - [완료] 사유는 화면 표시 변환 전 원문으로 갱신합니다 - 판별 표지(InsideHandoff 꼬리 등)는 Convert-WorkerLogLineForGui 가 화면에서만
+  #    숨깁니다.
+  #  - 읽은 결과는 반드시 배열로 감쌉니다(새 줄이 1줄이면 문자열로 풀림 - 2026-08-09 감사, test_log_tail_offset 이 호출 수를 셈).
+  # 함수로 둔 이유: 타이머 스크립트블록은 이름으로 추출할 수 없어 회귀 ⑯(test_abyss_handoff_gui)가 이 동작을 직접 돌리고, 호출 자리는
+  # T4-e 1b(test_time_until_mode)가 지킵니다. 반환값 없음. 읽기는 출처별 호출 두 번, 줄 처리는 아래 반복문 하나가 기본 → 복구 순서로
+  # 합니다 - 출처마다 경고 또는 그 출처의 줄이 그 순서로 찍힙니다.
+  $workerLogRead = @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))
+  $recoveryLogRead = @(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))
+  $sourceReads = @(
+    @{ Name = '워커 로그'; Lines = $workerLogRead },
+    @{ Name = '복구 로그'; Lines = $recoveryLogRead }
+  )
+  foreach ($sourceRead in $sourceReads) {
+    if (@($sourceRead.Lines) -contains $null) {
+      Add-GuiLog ('[경고] 종료 로그 최종 수집 실패({0}) - 정지 사유를 놓쳤을 수 있습니다' -f $sourceRead.Name)
+      continue
+    }
+    foreach ($collectedLine in $sourceRead.Lines) {
+      if ($collectedLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
+      $displayLine = Convert-WorkerLogLineForGui -Line $collectedLine -CustomActive $script:customActive
+      if ($null -ne $displayLine) { Add-ColoredLogLine ('  ' + $displayLine) }
+    }
+  }
 }
 
 # ============================================================
@@ -1601,6 +2319,18 @@ $script:recoveryLogOffset = [long]0
 $script:uiReady = $false      # 초기 로딩 중 설정 저장이 일어나지 않게 하는 플래그
 $script:preparedStreak = 0    # 연속 '준비 실행'(코드 10) 횟수 - 화면 오판으로 인한 무한 준비 루프 방지 (컨트롤러와 동일)
 $script:lastWorkerDoneReason = ''  # 이번 회차 로그의 마지막 '[완료]' 사유 - 코드 4 상태줄에 실제 이유 표시용 (2026-08-02)
+# --- 어비스 완료 기록(handoff journal) 기동 상태 (설계 v10 6.1 · v11 R1 3.7·3.8 · 구현 명세 ① 2.5) ---
+# 기동마다 Start-NextCycle(Set-HandoffLaunchEnv)이 정하고 종료 처리가 읽습니다. 실행 시작에 처음으로 돌리고 Stop-AllRun 이 비웁니다
+# (RUN_ID 는 정지에서 비우지 않습니다 - 다음 시작이 늘 새 값으로 덮습니다, 명세 5절 C12)
+$script:lastLaunchKind = 'none'      # 이번 기동의 종류: none / next / own / resume / finish-only (종료 처리는 env 가 아니라 이 값을 읽음 - 정지가 env 를 지움)
+$script:lastLaunchNonce = ''         # 이번 기동에 넘긴 완료 기록 nonce (HONEYNOGI_HANDOFF_NONCE - 없으면 빈 값)
+$script:runId = ''                   # 시작 버튼마다 새로 만드는 실행 id (HONEYNOGI_RUN_ID - 비커스텀 완료 기록의 owner)
+$script:finishOnlyHold = $null       # 마무리 실행(finish-only) 기동의 보류 @{ Kind; Reason; IsError; Owner; Position; Snapshot } - 완주 뒤 정지 사유
+$script:abyssErrorStreak = 0         # 비커스텀 어비스 재입장(reentered) 뒤 코드 1 연속 수 - 세션 상한 판단(설계 v10 6.1 코드 1 라우팅)
+$script:customResumePending = $false # 다음 시작의 첫 기동을 재입장 재개(resume) 수동 1회로 띄울지 (시작 게이트 S3 가 예약 - 설계 v10 6.3)
+$script:customResumeNonce = ''       # 그 재개 대상 항목의 nonce
+$script:abyssPartyRetryEnabled = $false # 어비스 '다시 하기' 이어받기(retry·resume) 기능 플래그의 GUI 사본 - 이 빌드는 꺼짐(설계 v10 7절 - retry 를 켜는 단위와 함께만 켬)
+$script:abyssPendingLastTag = ''     # 완료 기록 대기열 함수(Add-AbyssPendingEntry·Invoke-AbyssPendingAdvance)가 이번 호출에서 실패한 저장소 태그(locked/corrupt/io-failed/expect-failed - 성공·그 밖 실패는 빈 값). 정지 문구의 잠금 파일 안내는 이 값으로 정합니다(Get-AbyssPendingStopReason - 단계 2.6 구현 리뷰)
 # --- 커스텀 반복(던전/어비스 리스트 모드) 실행 컨텍스트 ---
 $script:customActive = $false        # 이번 실행이 커스텀 반복 모드인지 (시작 시 확정 - 실행 중 라디오 변경 영향 차단)
 $script:customConfigSection = 'customRepeat' # 실행 중 진행 기록을 읽고 쓸 config 섹션
@@ -1622,6 +2352,9 @@ $script:customEnabledWish = $false   # 커스텀 반복 '선택 의도' - 던전
 $script:customProgressReset = $false # 업데이트 이전(Update-ConfigToLatest)에서 진행 기록을 초기화했는지 (시작 로그 안내용)
 $script:customProgressResetSections = @() # 그중 실제로 초기화된 섹션들 (그 섹션 마커만 저장 성공 뒤 삭제)
 $script:customMarkerClearFailed = $false  # 그 마커 무효화가 실패했는지 (시작 안내에 경고로 노출)
+$script:legacyMarkerPathsToClear = @()    # 스키마 10→11 이전이 모은 구버전 완료 마커(version 2 이하·부분 파일·'{}') 경로 - 저장 성공 뒤 무효화
+$script:legacyMarkerClearFailed = $false  # 그 무효화가 실패했는지 (진행 초기화 안내와 별개로 시작 안내에 경고)
+$script:legacyMarkerClearedCount = 0      # 그 무효화에 성공한 건수 (시작 안내 'N건')
 $script:gatherWaitReset = 0          # '진행 없음' 설정을 기본값으로 되돌렸으면 '되돌리기 전 값' (의미 변경 안내용)
 $script:configMigrationError = $null # 설정 자동 이전 실패 원인 (실패와 '이전 불필요'를 구분해 시작 로그에 표시)
 $script:acrLockUpdating = $false     # 어비스 커스텀 방식·매칭 잠금 적용 중 재진입 가드 (라디오 Checked 변경 → 패널 갱신 → 재호출 방지)
@@ -5357,6 +6090,39 @@ function Get-CustomFingerprint {
   return ($tokens -join ';')
 }
 
+function Get-CustomCanonicalOwner {
+  # 커스텀 컨텍스트(Get-CustomCurrentContext 반환) → 그 판의 owner @{ fingerprint; orderKey; lap; index; item; generation }
+  # (설계 v10 0.5 canonical 5필드 + 진행 세대). 완료 마커 소유자 JSON(New-CustomMarkerOwnerJson)과 기동 때 완료 기록 후보 대조
+  # (Resolve-HandoffEnvForContext)가 같은 값을 보도록 한 곳에서 만듭니다 - 둘이 따로 계산하면 한쪽만 바뀌어 같은 판을 다른 판으로 봅니다
+  param($Context)
+  return @{
+    fingerprint = (Get-CustomFingerprint -Items $Context.Items)
+    orderKey    = (Get-CustomOrderKey -Order $Context.Order)
+    lap         = [int]$Context.Lap
+    index       = [int]$Context.Index
+    item        = (Format-CustomItemToken -Item $Context.Item)
+    generation  = [int]$Context.Generation
+  }
+}
+
+function ConvertTo-CustomMarkerOwnerJson {
+  # owner(5필드 + generation - 해시테이블·JSON 객체 공용) → 완료 마커 소유자 JSON(version 3, 필드 순서 고정).
+  # 마커 소유자(New-CustomMarkerOwnerJson)와 마무리 실행 기동의 HONEYNOGI_CUSTOM_OWNER(보류 Owner - config 를 다시 읽지 않음,
+  # Get-FinishOnlyCustomEnv)가 이 직렬화 하나를 씁니다. 어긋나면 그 워커가 쓴 마커를 Read-CustomMarkerOwner(version 3·필수 6필드)가
+  # 무효로 보고 GUI 재시작 뒤의 마무리 복구가 사라집니다(구현 명세 ① 2.5 ⑥)
+  param($Owner)
+  $ownerObject = [pscustomobject]@{
+    version     = 3
+    fingerprint = [string]$Owner.fingerprint
+    orderKey    = [string]$Owner.orderKey
+    lap         = [int]$Owner.lap
+    index       = [int]$Owner.index
+    item        = [string]$Owner.item
+    generation  = [int]$Owner.generation
+  }
+  return ($ownerObject | ConvertTo-Json -Compress)
+}
+
 function New-CustomMarkerOwnerJson {
   # 완료 마커 소유자: 같은 항목 토큰이 리스트에 중복될 수 있어 항목만으로는 부족합니다.
   # 리스트 전체 지문 + lap/index + 현재 항목 토큰을 함께 기록해 재시작 후에도 정확히 대조합니다.
@@ -5364,27 +6130,30 @@ function New-CustomMarkerOwnerJson {
   if (-not $Context -or -not $Context.Item) { return '' }
   # version 2 (2026-08-04 랜덤 진행): orderKey = 이번 바퀴 순열 식별자 (순차는 '').
   # 진행 초기화 후 우연히 같은 lap/index 가 재현돼도 다른 순열의 낡은 마커가 일치하지 않게 함
-  $owner = [pscustomobject]@{
-    version     = 2
-    fingerprint = (Get-CustomFingerprint -Items $Context.Items)
-    orderKey    = (Get-CustomOrderKey -Order $Context.Order)
-    lap         = [int]$Context.Lap
-    index       = [int]$Context.Index
-    item        = (Format-CustomItemToken -Item $Context.Item)
-  }
-  return ($owner | ConvertTo-Json -Compress)
+  # version 3 (스키마 11 - 설계 v10 1.7): generation = 그 섹션의 진행 세대(progressGeneration, Get-CustomCurrentContext 의 Generation).
+  # 순차 목록은 진행 초기화 뒤 1바퀴 0번이 5필드 그대로 다시 맞아서, 초기화 전에 남은 마커가 지금 판의 마무리로 오인될 수 있었습니다.
+  # 초기화마다 세대가 1씩 오르므로 세대까지 같아야 같은 판입니다.
+  # owner 계산·직렬화는 두 헬퍼에 있습니다 - 마무리 실행 기동이 보류 Owner 로 같은 JSON 을 만들어야 해서 나눴습니다(구현 명세 ① 2.5 ⑥)
+  return (ConvertTo-CustomMarkerOwnerJson -Owner (Get-CustomCanonicalOwner -Context $Context))
 }
 
 function Read-CustomMarkerOwner {
   # 구버전 타임스탬프 마커나 부분 파일은 소유자를 확인할 수 없으므로 $null 처리합니다.
-  if (-not (Test-Path -LiteralPath $customMarkerFile)) { return $null }
+  # version 3 만 인정합니다(스키마 11 - 설계 v10 1.7): 필수 6필드 = 5필드(fingerprint·orderKey·lap·index·item) + 진행 세대
+  # generation(0 이상 정수). version 2 이하는 세대가 없어 지금 진행의 기록인지 증명할 수 없으므로 '판단 불가 = 무효'($null)이고,
+  # 10→11 설정 이전과 시작 게이트가 그런 마커를 폐기합니다.
+  # -Path 는 10→11 이전이 섹션별 마커 경로를 읽을 때만 넘깁니다 - 기존 호출부는 인자 없이 '마지막으로 시작한 섹션' 의 전역 마커를 읽습니다.
+  param([string]$Path = $customMarkerFile)
+  if (-not (Test-Path -LiteralPath $Path)) { return $null }
   try {
-    $raw = Get-Content -LiteralPath $customMarkerFile -Raw -Encoding UTF8 -ErrorAction Stop
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop
     $owner = $raw | ConvertFrom-Json -ErrorAction Stop
-    if (-not $owner.PSObject.Properties['version'] -or (@(1, 2) -notcontains [int]$owner.version)) { return $null }
-    foreach ($required in @('fingerprint', 'lap', 'index', 'item')) {
+    if (-not $owner.PSObject.Properties['version'] -or ([int]$owner.version -ne 3)) { return $null }
+    foreach ($required in @('fingerprint', 'orderKey', 'lap', 'index', 'item', 'generation')) {
       if (-not $owner.PSObject.Properties[$required]) { return $null }
     }
+    # 정수 판정은 순열 검증(Test-CustomShuffleOrder)과 같은 모양 - 소수·불리언·null·음수는 세대로 보지 않습니다
+    if (([string]$owner.generation) -notmatch '^\d+$') { return $null }
     return $owner
   } catch {
     return $null
@@ -5392,6 +6161,9 @@ function Read-CustomMarkerOwner {
 }
 
 function Test-CustomMarkerOwnerMatchesContext {
+  # 마커 소유자와 지금 컨텍스트가 같은 판인가: 5필드 AND 진행 세대(version 3 - 설계 v10 1.7). 한 필드라도 다르면 거짓입니다.
+  # orderKey 가 없는 소유자를 순차('')로 보는 처리는 그대로 둡니다 - 파일 읽기(Read-CustomMarkerOwner)가 version 3(orderKey 필수)만
+  # 넘기므로 실제로는 쓰이지 않습니다(구현 명세 ① 5절 C10)
   param($Owner, $Context)
   if (-not $Owner -or -not $Context -or -not $Context.Item) { return $false }
   try {
@@ -5401,7 +6173,8 @@ function Test-CustomMarkerOwnerMatchesContext {
       ($ownerOrderKey -eq (Get-CustomOrderKey -Order $Context.Order)) -and
       ([int]$Owner.lap -eq [int]$Context.Lap) -and
       ([int]$Owner.index -eq [int]$Context.Index) -and
-      ([string]$Owner.item -eq (Format-CustomItemToken -Item $Context.Item)))
+      ([string]$Owner.item -eq (Format-CustomItemToken -Item $Context.Item)) -and
+      ([int]$Owner.generation -eq [int]$Context.Generation))
   } catch {
     return $false
   }
@@ -6465,11 +7238,17 @@ function Update-DeepTributeTotalLabel {
 function Set-DeepCustomRepeatOnConfig {
   # deepCustomRepeat 섹션을 현재 UI 상태로 갱신합니다 (Save-Config 는 호출부 몫).
   # progress 는 절대 건드리지 않고 그대로 옮겨 담습니다 (진행 기록 비파괴 원칙).
+  # 진행 세대도 같은 원칙 (Set-CustomRepeatOnConfig 와 같은 이유 - 구현 명세 ① 5절 A1)
   param($Config)
   $prevProgress = $null
   if ($Config.PSObject.Properties['deepCustomRepeat'] -and $Config.deepCustomRepeat -and
       $Config.deepCustomRepeat.PSObject.Properties['progress']) {
     $prevProgress = $Config.deepCustomRepeat.progress
+  }
+  $prevGeneration = 0
+  if ($Config.PSObject.Properties['deepCustomRepeat'] -and $Config.deepCustomRepeat -and
+      $Config.deepCustomRepeat.PSObject.Properties['progressGeneration']) {
+    try { $prevGeneration = [int]$Config.deepCustomRepeat.progressGeneration } catch { $prevGeneration = 0 }
   }
   $node = [pscustomobject]@{
     '_설명'         = "'심층던전 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. progress 는 이어가기용 진행 기록이므로 직접 수정하지 마세요."
@@ -6479,6 +7258,8 @@ function Set-DeepCustomRepeatOnConfig {
     listRepeat      = $(if ($rbDcrCount.Checked) { 'count' } else { 'infinite' })
     listRepeatCount = [int]$numDcrLaps.Value
     progress        = $prevProgress
+    '_progressGeneration' = '진행 초기화 세대 번호입니다. 진행 기록이 처음부터로 돌아갈 때(진행 초기화·랜덤 켬/끔·리스트 변경·업데이트 등)와 시작할 때 랜덤 순서 기록이 없거나 손상돼 새로 섞을 때 자동으로 1씩 오르며(바퀴가 넘어가며 새로 섞을 때는 그대로), 완료 기록이 지금 진행의 것인지 가리는 데 씁니다. 직접 수정하지 마세요.'
+    progressGeneration = $prevGeneration
   }
   if ($Config.PSObject.Properties['deepCustomRepeat']) { $Config.deepCustomRepeat = $node }
   else { $Config | Add-Member -NotePropertyName 'deepCustomRepeat' -NotePropertyValue $node }
@@ -7005,17 +7786,25 @@ function Save-CustomRandomOrder {
   else { $node | Add-Member -NotePropertyName 'randomOrder' -NotePropertyValue $Enabled }
   if ($node.PSObject.Properties['progress']) { $node.progress = $null }
   else { $node | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
+  # 진행 초기화와 같은 순서 ②①③ (설계 v10 6.3 · 구현 명세 ① 2.3 ③): ② 진행을 지우는 같은 노드·같은 저장에서 진행 세대 +1(전투
+  #   3섹션만) → ① 저장 성공 뒤 어비스 완료 기록 폐기 → ③ 마커 정리. 저장이 실패하면 아무것도 바꾸지 않습니다(경고 + 그대로 반환)
+  Step-CustomProgressGeneration -Node $node -SectionName $SectionName
   try {
     Save-Config $cfg
   } catch {
     Add-GuiLog "[경고] 랜덤 진행 설정 저장 실패: $($_.Exception.Message) - 토글을 한 번 더 눌러 다시 시도해 주세요."
     return
   }
+  Remove-AbyssJournalSectionEntries -SectionName $SectionName
   # 전역($customMarkerFile = 마지막으로 시작한 섹션)이 아니라 **이 토글이 속한 섹션**의
   # 마커만 지웁니다 (2026-08-09 감사 - 다른 콘텐츠의 유효 마커 파괴 방지).
   # 삭제 실패 시 '{}' 무효화까지 하는 공용 계약을 씁니다 (Clear-CustomMarkerFile).
   if (-not (Clear-CustomMarkerFile -Path (Get-CustomMarkerFileForSection -SectionName $SectionName))) {
-    Add-GuiLog '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 이미 끝낸 판을 복구하려 할 수 있습니다.'
+    # 전투 3섹션은 위 저장에서 진행 세대가 올라 옛 마커가 지금 진행과 맞지 않으므로 복구에 쓰이지 않고, 세대가 없는 생활은 옛 경고가
+    # 그대로 맞습니다(구현 리뷰 2.2·2.3 P3)
+    Add-GuiLog $(if (@('customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat') -contains $SectionName) {
+        '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 다시 정리하며, 옛 세대 기록이라 복구에 쓰이지 않습니다.'
+      } else { '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 이미 끝낸 판을 복구하려 할 수 있습니다.' })
   }
   Add-GuiLog $(if ($Enabled) { '[안내] 랜덤 진행 켬 - 매 바퀴 시작 때 리스트 순서를 무작위로 섞습니다 (진행 기록은 처음부터).' }
     else { '[안내] 랜덤 진행 끔 - 등록 순서로 진행합니다 (진행 기록은 처음부터).' })
@@ -7164,6 +7953,8 @@ function Restore-CustomListRegisteredView {
 function Set-CustomRepeatOnConfig {
   # customRepeat 섹션을 현재 UI 상태로 갱신합니다 (Save-Config 는 호출부 몫).
   # progress 는 절대 건드리지 않고 그대로 옮겨 담습니다 (진행 기록 비파괴 원칙).
+  # 진행 세대(progressGeneration)도 같은 원칙으로 옮겨 담습니다 - 이 함수는 매 시작 저장(Save-SettingsFromUi)이 부르므로 버리면
+  # 세대가 늘 0 으로 돌아가 정당한 완료 마커(owner version 3)가 세대 불일치로 폐기됩니다 (구현 명세 ① 5절 A1 - 탐침 실측)
   # enabled 는 라디오가 아니라 $script:customEnabledWish 를 기록합니다 - 던전 외 카테고리에서
   # 라디오가 표시상 무한 반복으로 폴백해 있어도 선택 의도가 보존되게 (요청사항 확정 스펙).
   param($Config)
@@ -7171,6 +7962,12 @@ function Set-CustomRepeatOnConfig {
   if ($Config.PSObject.Properties['customRepeat'] -and $Config.customRepeat -and
       $Config.customRepeat.PSObject.Properties['progress']) {
     $prevProgress = $Config.customRepeat.progress
+  }
+  # 세대는 정수로만 옮깁니다 - 키 없음·해석 실패 = 0 (Get-CustomCurrentContext 가 읽는 규칙과 같게)
+  $prevGeneration = 0
+  if ($Config.PSObject.Properties['customRepeat'] -and $Config.customRepeat -and
+      $Config.customRepeat.PSObject.Properties['progressGeneration']) {
+    try { $prevGeneration = [int]$Config.customRepeat.progressGeneration } catch { $prevGeneration = 0 }
   }
   $node = [pscustomobject]@{
     '_설명'         = "'던전 커스텀 반복' 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. enabled 는 던전/어비스 공용 커스텀 반복 선택 상태이며 progress 는 이어가기용 진행 기록입니다."
@@ -7181,17 +7978,25 @@ function Set-CustomRepeatOnConfig {
     listRepeat      = $(if ($rbCrCount.Checked) { 'count' } else { 'infinite' })
     listRepeatCount = [int]$numCrLaps.Value
     progress        = $prevProgress
+    '_progressGeneration' = '진행 초기화 세대 번호입니다. 진행 기록이 처음부터로 돌아갈 때(진행 초기화·랜덤 켬/끔·리스트 변경·업데이트 등)와 시작할 때 랜덤 순서 기록이 없거나 손상돼 새로 섞을 때 자동으로 1씩 오르며(바퀴가 넘어가며 새로 섞을 때는 그대로), 완료 기록이 지금 진행의 것인지 가리는 데 씁니다. 직접 수정하지 마세요.'
+    progressGeneration = $prevGeneration
   }
   if ($Config.PSObject.Properties['customRepeat']) { $Config.customRepeat = $node }
   else { $Config | Add-Member -NotePropertyName 'customRepeat' -NotePropertyValue $node }
 }
 
 function Set-AbyssCustomRepeatOnConfig {
+  # abyssCustomRepeat 섹션 갱신 - progress·진행 세대는 그대로 옮겨 담습니다 (Set-CustomRepeatOnConfig 와 같은 원칙, 구현 명세 ① 5절 A1)
   param($Config)
   $prevProgress = $null
   if ($Config.PSObject.Properties['abyssCustomRepeat'] -and $Config.abyssCustomRepeat -and
       $Config.abyssCustomRepeat.PSObject.Properties['progress']) {
     $prevProgress = $Config.abyssCustomRepeat.progress
+  }
+  $prevGeneration = 0
+  if ($Config.PSObject.Properties['abyssCustomRepeat'] -and $Config.abyssCustomRepeat -and
+      $Config.abyssCustomRepeat.PSObject.Properties['progressGeneration']) {
+    try { $prevGeneration = [int]$Config.abyssCustomRepeat.progressGeneration } catch { $prevGeneration = 0 }
   }
   $node = [pscustomobject]@{
     '_설명'         = "'어비스 커스텀 반복' 모드 설정입니다. items 리스트를 위에서부터 순서대로 1판씩 실행합니다. progress 는 이어가기용 진행 기록이므로 직접 수정하지 마세요."
@@ -7201,6 +8006,8 @@ function Set-AbyssCustomRepeatOnConfig {
     listRepeat      = $(if ($rbAcrCount.Checked) { 'count' } else { 'infinite' })
     listRepeatCount = [int]$numAcrLaps.Value
     progress        = $prevProgress
+    '_progressGeneration' = '진행 초기화 세대 번호입니다. 진행 기록이 처음부터로 돌아갈 때(진행 초기화·랜덤 켬/끔·리스트 변경·업데이트 등)와 시작할 때 랜덤 순서 기록이 없거나 손상돼 새로 섞을 때 자동으로 1씩 오르며(바퀴가 넘어가며 새로 섞을 때는 그대로), 완료 기록이 지금 진행의 것인지 가리는 데 씁니다. 직접 수정하지 마세요.'
+    progressGeneration = $prevGeneration
   }
   if ($Config.PSObject.Properties['abyssCustomRepeat']) { $Config.abyssCustomRepeat = $node }
   else { $Config | Add-Member -NotePropertyName 'abyssCustomRepeat' -NotePropertyValue $node }
@@ -7261,7 +8068,9 @@ function Test-CustomLastRun {
 
 function Get-CustomCurrentContext {
   # 이번 회차에 실행할 항목/위치 정보를 config 에서 읽습니다 (단일 해시테이블 반환 - 배열 풀림 무관).
-  # 반환: @{ Items; Total; Lap; Index; Item; ListRepeat; ListRepeatCount; Position } 또는 $null
+  # 반환: @{ Items; Total; Lap; Index; Item; ListRepeat; ListRepeatCount; Position; Generation } 또는 $null
+  # Generation = 그 섹션의 진행 세대(progressGeneration, [int] - 키 없음·해석 실패 = 0: 스키마 11 이전 config·생활). 완료 마커
+  # owner version 3 의 generation 과 대조합니다(설계 v10 1.7)
   param([string]$SectionName = $script:customConfigSection)
   $cfg = Read-Config
   if ([string]::IsNullOrWhiteSpace($SectionName)) { $SectionName = 'customRepeat' }
@@ -7283,6 +8092,9 @@ function Get-CustomCurrentContext {
   if ($node.PSObject.Properties['listRepeat']) { try { $listRepeat = [string]$node.listRepeat } catch { } }
   $listRepeatCount = 1
   if ($node.PSObject.Properties['listRepeatCount']) { try { $listRepeatCount = [int]$node.listRepeatCount } catch { } }
+  # 진행 세대는 새 함수 없이 이 자리에서 읽습니다 - 이 함수를 추출해 돌리는 회귀(test_life_custom_repeat)의 함수 목록이 그대로이게
+  $generation = 0
+  if ($node.PSObject.Properties['progressGeneration']) { try { $generation = [int]$node.progressGeneration } catch { $generation = 0 } }
   # 랜덤 진행 (2026-08-04): Items 는 항상 '등록 순서'로 유지(지문/마커 계약 불변)하고,
   # 실행 순서는 ExecutionItems/Order 로 분리합니다. 이 getter 는 읽기·매핑만 담당 -
   # 순열 생성은 시작 게이트와 Step 의 바퀴 전환에서만 (리뷰 계약).
@@ -7338,6 +8150,7 @@ function Get-CustomCurrentContext {
     ListRepeatCount = $listRepeatCount
     SectionName     = $SectionName
     Position        = $positionText
+    Generation      = $generation
   }
 }
 
@@ -7395,6 +8208,272 @@ function Step-CustomProgress {
   return $newProgress
 }
 
+function Remove-AbyssJournalSectionEntries {
+  # 진행 초기화의 ① - 어비스 완료 기록(journal) 폐기 (설계 v10 6.3 '진행 초기화·재구성 경로의 journal·pending 폐기' · 구현 명세 ① 2.3 ①).
+  # 호출부(진행 초기화·랜덤 토글·새 랜덤 순열)는 ② 진행 null + 세대 +1 저장에 성공한 뒤 이 함수를 부릅니다. 세대가 이미 올라 옛 기록은
+  # 지금 진행과 맞지 않으므로 이 정리는 파일을 작게 유지하는 일일 뿐입니다 - 실패해도 [경고] 한 줄로 끝내고 호출부는 성공을 그대로
+  # 돌려줍니다(파일이 손상('corrupt')이어도 고치지 않고 경고만 - 시작은 시작 게이트가 막습니다, 명세 5절 B6).
+  # journal 은 어비스 커스텀 전용이라 다른 섹션이면 파일을 열지도 않습니다. 어비스면 저장 1회로 section 이 abyssCustomRepeat 인 항목과
+  # pending 전부(pending 에는 section 필드가 없고 어비스 커스텀 전용 - 명세 5절 C6)를 걷어 내고, 걷어 낸 항목의 nonce 만 applied 에서
+  # 뺍니다(남은 항목의 nonce 를 빼면 그 기록이 '아직 반영 안 됨' 으로 되살아나 두 번 계상됩니다). 지울 것이 없으면 바꾸지 않아 이 호출의
+  # 논리 변경 쓰기는 0 입니다(파일이 하나도 없으면 생성도 0). 잠금 아래 직전본·임시본 복구는 저장소 몫이고(구현 명세 ① 2.1 읽기 규칙
+  # (b)(c) - 그 쓰기는 별개), 그 경고는 저장소가 돌려준 Warnings 로 받아 남깁니다.
+  # 예외는 밖으로 내지 않습니다 - 진행 초기화 버튼 처리기에는 try 가 없어 예외가 나가면 모달 오류 창이 뜹니다(명세 5절 A4). 반환값 없음
+  # (호출부가 한 줄로 부름 - 출력이 새면 호출부의 bool 반환에 섞입니다).
+  param([string]$SectionName)
+  if ($SectionName -ne 'abyssCustomRepeat') { return }
+  $journalSection = 'abyssCustomRepeat'
+  # mutator 는 클로저로 만듭니다 - 클로저가 아니면 저장 함수의 지역 변수가 같은 이름의 이 함수 변수를 가립니다(동적 스코프 - 실측).
+  # 클로저 안에서는 $script: 를 읽지 않고(빈 값으로 읽힘) 함수도 부르지 않습니다 - 필요한 값은 위 지역 변수로 잡았습니다(체크리스트 5·6)
+  $mutator = {
+    param($journal, $change)
+    $keptEntries = @()
+    $removedNonces = @{}
+    $removedCount = 0
+    foreach ($entry in @($journal.entries)) {
+      if ($null -ne $entry -and [string]$entry.section -eq $journalSection) {
+        $removedCount++
+        $removedNonces[[string]$entry.nonce] = $true
+      } else {
+        $keptEntries += $entry
+      }
+    }
+    if ($removedCount -eq 0 -and @($journal.pending).Count -eq 0) { return }
+    $keptApplied = @()
+    foreach ($appliedNonce in @($journal.applied)) {
+      if (-not $removedNonces.ContainsKey([string]$appliedNonce)) { $keptApplied += $appliedNonce }
+    }
+    # 남길 항목은 읽은 객체 그대로 담습니다 - 고정 필드로 다시 만들면 모르는 필드가 사라집니다(저장소 계약)
+    $journal.entries = $keptEntries
+    $journal.pending = @()
+    $journal.applied = $keptApplied
+    $change.Changed = $true
+  }.GetNewClosure()
+  try {
+    $cleanup = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+    # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+    foreach ($cleanupWarning in @($cleanup.Warnings)) { Add-GuiLog ([string]$cleanupWarning) }
+    $cleanupTag = [string]$cleanup.Tag
+    if ($cleanupTag -ne 'changed' -and $cleanupTag -ne 'unchanged') {
+      # 실패 종류 문구는 워커의 완료 기록 경고와 같은 낱말(설계 R2 3.6 - locked 파일 사용 중 / corrupt 파일 손상 / io-failed 기록 실패)
+      $failureKind = switch ($cleanupTag) {
+        'locked' { '파일 사용 중' }
+        'corrupt' { '파일 손상' }
+        'io-failed' { '기록 실패' }
+        default { $cleanupTag }
+      }
+      Add-GuiLog ('[경고] 완료 기록 정리 실패({0}) - 옛 세대 기록은 무시됩니다' -f $failureKind)
+    }
+  } catch {
+    Add-GuiLog ('[경고] 완료 기록 정리 실패(예외: {0}) - 옛 세대 기록은 무시됩니다' -f $_.Exception.Message)
+  }
+}
+
+function Get-AbyssJournalTagText {
+  # 완료 기록 저장소의 실패 태그(Status·Tag) → 로그 괄호 안 낱말. 진행 초기화의 정리 경고와 같은 낱말입니다(설계 R2 3.6 - locked 파일
+  # 사용 중 · corrupt 파일 손상 · io-failed 기록 실패). expect-failed 는 대기열 반영에서만 나옵니다 - 판단한 원소를 지우려는 순간 대기열
+  # 맨 앞이 그 원소가 아닌 경우(Invoke-AbyssPendingAdvance ③). 모르는 태그는 그대로 적습니다
+  param([string]$Tag)
+  switch ($Tag) {
+    'locked' { return '파일 사용 중' }
+    'corrupt' { return '파일 손상' }
+    'io-failed' { return '기록 실패' }
+    'expect-failed' { return '대기열이 바뀜' }
+    default { return $Tag }
+  }
+}
+
+function Get-AbyssPendingStopReason {
+  # 완료 기록 대기열 기록·반영이 실패해 멈출 때의 정지 사유 (단계 2.6 구현 리뷰 - 단계 2.6 구현 검증 '알고 두기 ③'). 대기열 함수는 반환값
+  # ($true/$false)을 그대로 두고 실패한 저장소 태그를 $script:abyssPendingLastTag 에 남깁니다 - 그 태그가 'locked'(파일 사용 중)면 다른 '사용 중'
+  # 정지 문구와 같은 잠금 파일 안내(Get-AbyssJournalLockedGuide)를 끝에 붙이고, 그 밖(손상·기록 실패·대기열이 바뀜, 태그 없는 실패 - 진행 저장
+  # 실패·형식 오류·예외)은 문구 그대로 돌려줍니다. 대기열 함수를 부른 바로 뒤에 불러야 합니다(다음 대기열 호출이 태그를 비움).
+  # 재입장 꼬리(Get-InsideHandoffStopReason)는 부른 쪽이 이 결과에 붙입니다 - 꼬리가 늘 맨 끝(다른 '사용 중' 문구와 같은 자리)
+  param([string]$Reason)
+  if ([string]$script:abyssPendingLastTag -eq 'locked') { return ($Reason + ' ' + (Get-AbyssJournalLockedGuide)) }
+  return $Reason
+}
+
+function Add-AbyssPendingEntry {
+  # 완료 기록 대기열(pending-advance 큐)에 원소 1개를 끝에 덧붙입니다 (설계 v10 6.1 'pending-advance 큐' · 구현 명세 ① 2.5a ①).
+  # 대기열 = 클리어(또는 재입장)까지 확인한 판인데 진행 기록 전진(Step-CustomProgress)을 아직 못 한 판의 '전진할 일' 목록입니다. 재입장
+  # 직후 진행 저장이 실패한 판을 즉시 정지로 버리지 않고 여기 남겨 두면, 마무리 실행 완주 처리(또는 다음 시작의 S0)가 순서대로 반영합니다
+  # (Invoke-AbyssPendingAdvance). 원소 = { owner(5필드 fingerprint·orderKey·lap·index·item), generation, nonce, stage, createdAt } - 세대는
+  # journal 항목처럼 owner 의 형제 필드라 반영 쪽이 항목과 같은 대조(Test-AbyssJournalOwnerMatch)를 씁니다.
+  #  -Stage      : inside-handoff(재입장 실행부의 진행 저장 실패) · code1-routed(코드 1 재입장 경로의 같은 실패) · finish-only-complete(마무리
+  #                실행 완주) 셋만 받습니다(명세 5절 B7 - post-clear-stop 은 그 기록 자리를 정하는 뒤 단위가 더함)
+  #  -Owner      : 그 판의 owner(Get-CustomCanonicalOwner 반환·보류 Owner·journal 의 nextOwner - 해시테이블·JSON 객체 공용). 5필드만 옮깁니다
+  #  -Generation : 그 판의 진행 세대(0 이상 정수)   -Nonce : 그 판의 완료 기록 nonce(반영 때 applied 에 들어감 - 같은 판의 원소 둘이 같은
+  #                nonce 일 수 있음)
+  # 모양을 먼저 확인합니다 - 반영 쪽 대조가 읽지 못하는 원소(필드 없음·세대가 정수 아님)는 영영 건너뛰어져 그 판의 전진을 잃습니다. 모자라면
+  # 쓰지 않고 실패입니다. 반환 $true = 저장함 / $false = 넣지 못함(이 호출이 바꾼 기록 0 - 잠금 아래 직전본 복구는 저장소 몫, 사유는 [오류]
+  # 한 줄, 정지는 부른 쪽이 정합니다).
+  # 저장이 실패하면 저장소 태그(locked·corrupt·io-failed)를 $script:abyssPendingLastTag 에 남깁니다 - 반환값은 그대로이고, 부른 쪽이 정지
+  # 문구에 잠금 파일 안내를 붙일지 이 값으로 정합니다(Get-AbyssPendingStopReason - 단계 2.6 구현 리뷰). 성공·그 밖 실패(형식 오류·예외)는 빈 값.
+  # 예외를 밖으로 내지 않습니다 - 부르는 자리(종료 처리 타이머)에서 예외가 나가면 다음 워커 없이 실행 상태로 남습니다(명세 5절 A4).
+  # 세대는 형식 없이 받습니다 - [int] 로 받으면 빠뜨린 인자가 조용히 0 이 되어 세대 1 이상인 판을 영영 못 맞춥니다
+  param([string]$Stage, $Owner, $Generation = $null, [string]$Nonce = '')
+  # 실패 태그는 호출마다 처음부터 - 앞 호출이 남긴 'locked' 가 이번의 다른 실패(형식 오류·예외) 정지 문구에 안내를 붙이지 않게
+  $script:abyssPendingLastTag = ''
+  try {
+    $shapeError = ''
+    if (@('inside-handoff', 'code1-routed', 'finish-only-complete') -cnotcontains $Stage) {
+      $shapeError = "단계 '$Stage'"
+    } elseif (([string]$Generation) -notmatch '^\d+$') {
+      $shapeError = "세대 '$Generation'"
+    } elseif ([string]::IsNullOrWhiteSpace($Nonce)) {
+      $shapeError = 'nonce 없음'
+    } else {
+      foreach ($ownerField in @('fingerprint', 'orderKey', 'lap', 'index', 'item')) {
+        if (-not (Get-AbyssJournalField -Object $Owner -Name $ownerField).Has) { $shapeError = "owner 의 $ownerField 없음"; break }
+      }
+    }
+    if ($shapeError) {
+      Add-GuiLog ('[오류] 완료 기록 대기열 저장 실패(형식 오류: {0})' -f $shapeError)
+      return $false
+    }
+    # 캐스트는 마커 소유자 JSON(ConvertTo-CustomMarkerOwnerJson)과 같게 - 같은 판을 같은 값으로 적어야 반영 때 대조가 맞습니다
+    $pendingElement = [pscustomobject]@{
+      owner      = [pscustomobject]@{
+        fingerprint = [string]$Owner.fingerprint
+        orderKey    = [string]$Owner.orderKey
+        lap         = [int]$Owner.lap
+        index       = [int]$Owner.index
+        item        = [string]$Owner.item
+      }
+      generation = [int]$Generation
+      nonce      = [string]$Nonce
+      stage      = [string]$Stage
+      createdAt  = (Get-AbyssJournalTimeText)
+    }
+    # mutator 는 클로저로 만듭니다 - 클로저가 아니면 저장 함수의 지역 변수가 같은 이름의 이 함수 변수를 가립니다(동적 스코프 - 실측).
+    # 클로저 안에서는 $script: 를 읽지 않고 함수도 부르지 않습니다 - 넣을 원소는 위 지역 변수로 잡았습니다(명세 ① 2.0 체크리스트 5·6)
+    $mutator = {
+      param($journal, $change)
+      $journal.pending = @(@($journal.pending) + $pendingElement)
+      $change.Changed = $true
+    }.GetNewClosure()
+    $record = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+    # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+    foreach ($recordWarning in @($record.Warnings)) { Add-GuiLog ([string]$recordWarning) }
+    if ([string]$record.Tag -eq 'changed') { return $true }
+    $script:abyssPendingLastTag = [string]$record.Tag
+    Add-GuiLog ('[오류] 완료 기록 대기열 저장 실패({0})' -f (Get-AbyssJournalTagText -Tag ([string]$record.Tag)))
+    return $false
+  } catch {
+    Add-GuiLog ('[오류] 완료 기록 대기열 저장 실패(예외: {0})' -f $_.Exception.Message)
+    return $false
+  }
+}
+
+function Invoke-AbyssPendingAdvance {
+  # 완료 기록 대기열을 순서대로 진행 기록에 반영합니다 (설계 v10 6.1 'pending-advance 큐' 반영 규칙 · 구현 명세 ① 2.5a ②). 부르는 곳:
+  #  -Caller start  : 시작 게이트 S0(어비스 커스텀 시작 - 앞 세션이 남긴 대기열). 전진할 때마다 [경고] 한 줄(dev:909 - 그 전진이 설정 파일을
+  #                   손으로 되돌린 뒤의 재일치인지 나중에 가릴 근거)
+  #  -Caller finish : 마무리 실행 완주 처리(대기열 끝 = 방금 넣은 완주 원소). 대기열을 비우면 완료 마커를 정리합니다
+  # 대기열 맨 앞 원소부터 하나씩:
+  #  ① 지금 진행(디스크)의 owner 5필드 + 세대가 원소와 모두 같으면 Step-CustomProgress(저장) → 성공 뒤 그 원소 제거 + nonce applied(저장 1회).
+  #     하나라도 다르면 전진 없이 제거 + applied(이미 반영·진행 초기화·순서 변경 뒤의 기록 - [안내] 한 줄). 대조는 journal 항목과 같은
+  #     Test-AbyssJournalOwnerMatch 입니다 - 지문까지 봅니다: S0 는 지문 불일치 초기화(S1)보다 앞이라, 멈춘 사이 리스트가 바뀌었는데 칸만
+  #     맞는 원소로 전진하면 Step 이 새 리스트 지문을 진행에 적어 S1 이 바뀐 리스트를 알아채지 못합니다
+  #  ② 파일 순서 = config(전진) → journal(제거·applied) → 마커. 사이 어디서 끊겨도 다음 반영이 같은 대조로 다시 판단합니다 - 전진을 마친
+  #     원소는 진행이 이미 다음 칸이라 owner 가 달라 건너뛰고(이중 전진 없음), 제거 전에 끊긴 원소는 남아 있어 잃지 않습니다
+  #  ③ 지울 때는 맨 앞이 판단한 그 원소(nonce·단계·만든 시각)인지 확인하고 지웁니다(-Expect). 같은 판의 원소 둘(재입장 기록·완주 기록)이
+  #     같은 nonce 를 가질 수 있어 nonce 만으로 지우면 둘 다 사라집니다. 맨 앞이 바뀌었으면 지우지 않고 실패입니다
+  # 완료 마커는 finish 가 이 호출에서 원소를 반영해 대기열이 빈 뒤에만 지웁니다. start 는 지우지 않습니다 - 앞 세션이 마무리 실행 완주 직후에
+  # 끊겼으면 대기열(진행 저장에 실패한 판)을 반영한 뒤의 진행 = 완주한 판이고, 그 판의 완료 마커가 시작 게이트의 마무리 복구 근거입니다(설계
+  # v11 R1 3.7 '마커·큐 삭제는 완주 처리의 큐 반영 뒤에만' · dev:990 '완주 직후 GUI 재시작 → 마커로 마무리 복구 → 전진 총 2'). 진행과
+  # 맞지 않는 마커는 시작 게이트가 폐기합니다.
+  # 반환 $true = 대기열을 다 반영함(비어 있었음 포함) / $false = 반영 실패 - 실패한 원소부터 뒤 원소·마커는 그대로이고 사유는 [오류] 한 줄
+  # (정지·시작 거부는 부른 쪽). 예외를 밖으로 내지 않습니다(명세 5절 A4 - 부르는 자리는 시작 버튼 처리기·종료 처리 타이머).
+  # 실패 태그는 Add-AbyssPendingEntry 와 같은 계약입니다 - 읽기 Status(locked·corrupt·io-failed)와 지우기 저장 태그(locked·corrupt·io-failed·
+  # expect-failed)를 $script:abyssPendingLastTag 에 남기고, 그 밖 실패(진행 저장 실패·진행 위치 없음·알 수 없는 호출·예외)·성공은 빈 값입니다.
+  # 읽기도 남기는 이유: 반영의 '사용 중' 은 대개 원소마다 먼저 하는 잠금 읽기에서 납니다(단계 2.6 구현 리뷰 - 부른 쪽의 잠금 파일 안내)
+  param([string]$Caller)
+  # 실패 태그는 호출마다 처음부터(앞 호출이 남긴 값이 이번 정지 문구에 닿지 않게)
+  $script:abyssPendingLastTag = ''
+  # 대기열은 어비스 커스텀 전용입니다(원소에 섹션 필드가 없음 - 명세 5절 C6). 진행·마커도 이 섹션 것만 씁니다 - 마지막으로 시작한 섹션을
+  # 가리키는 전역 마커 경로가 아니라 섹션으로 고릅니다(진행 초기화 2026-08-09 감사와 같은 이유)
+  $pendingSection = 'abyssCustomRepeat'
+  try {
+    if ($Caller -cne 'start' -and $Caller -cne 'finish') {
+      Add-GuiLog ("[오류] 완료 기록 대기열 반영 실패(알 수 없는 호출 '{0}') - 대기열·마커를 보존합니다" -f $Caller)
+      return $false
+    }
+    $consumedCount = 0
+    while ($true) {
+      $read = Read-AbyssJournal -Path $abyssJournalPath
+      foreach ($readWarning in @($read.Warnings)) { Add-GuiLog ([string]$readWarning) }
+      if ([string]$read.Status -ne 'ok') {
+        $script:abyssPendingLastTag = [string]$read.Status
+        Add-GuiLog ('[오류] 완료 기록 대기열 반영 실패({0}) - 대기열·마커를 보존합니다' -f (Get-AbyssJournalTagText -Tag ([string]$read.Status)))
+        return $false
+      }
+      $pendingNow = @($read.Journal.pending)
+      if ($pendingNow.Count -eq 0) { break }
+      $head = $pendingNow[0]
+      # 원소마다 진행을 다시 읽습니다 - 앞 원소의 전진으로 진행이 한 칸 옮겨 갔습니다
+      $context = Get-CustomCurrentContext -SectionName $pendingSection
+      if ($null -eq $context) {
+        Add-GuiLog '[오류] 완료 기록 대기열 반영 실패(커스텀 진행 위치를 읽지 못함) - 대기열·마커를 보존합니다'
+        return $false
+      }
+      $ownerMatched = Test-AbyssJournalOwnerMatch -Entry $head -Owner (Get-CustomCanonicalOwner -Context $context) -Generation ([int]$context.Generation)
+      if ($ownerMatched) {
+        # Step-CustomProgress 는 실패 사유를 스스로 [오류]/[경고] 로 남깁니다
+        if ($null -eq (Step-CustomProgress -SectionName $pendingSection)) {
+          Add-GuiLog '[오류] 완료 기록 대기열 반영 실패(진행 기록 저장 실패) - 대기열·마커를 보존합니다'
+          return $false
+        }
+        if ($Caller -ceq 'start') { Add-GuiLog ('[경고] 이전 세션의 미반영 완료 기록으로 진행을 전진({0})' -f [string]$context.Position) }
+      } else {
+        Add-GuiLog ('[안내] 완료 기록 대기열의 지난 기록을 건너뜁니다({0}) - 지금 진행 위치와 맞지 않습니다 (이미 반영됐거나 진행 초기화·순서 변경 뒤의 기록)' -f [string]$head.stage)
+      }
+      # 지울 원소의 표지 - 클로저가 지역 변수로 잡습니다. 클로저 안에서는 $script: 를 읽지 않고 함수도 부르지 않습니다(명세 ① 2.0 체크리스트 5·6)
+      $headNonce = [string]$head.nonce
+      $headStage = [string]$head.stage
+      $headCreatedAt = [string]$head.createdAt
+      $expect = {
+        param($journal)
+        $currentHead = @($journal.pending)[0]
+        return [bool](($null -ne $currentHead) -and ([string]$currentHead.nonce -ceq $headNonce) -and
+          ([string]$currentHead.stage -ceq $headStage) -and ([string]$currentHead.createdAt -ceq $headCreatedAt))
+      }.GetNewClosure()
+      $mutator = {
+        param($journal, $change)
+        $pendingItems = @($journal.pending)
+        $keptPending = @()
+        for ($pendingIndex = 1; $pendingIndex -lt $pendingItems.Count; $pendingIndex++) { $keptPending += $pendingItems[$pendingIndex] }
+        $journal.pending = $keptPending
+        # applied 는 같은 nonce 를 두 번 넣지 않습니다 - 같은 판의 원소 둘이 같은 nonce 이거나 재입장 처리가 이미 넣었을 수 있습니다
+        if ($headNonce -and (@(@($journal.applied) | ForEach-Object { [string]$_ }) -notcontains $headNonce)) {
+          $journal.applied = @(@($journal.applied) + $headNonce)
+        }
+        $change.Changed = $true
+      }.GetNewClosure()
+      $removal = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+      foreach ($removalWarning in @($removal.Warnings)) { Add-GuiLog ([string]$removalWarning) }
+      if ([string]$removal.Tag -ne 'changed') {
+        $script:abyssPendingLastTag = [string]$removal.Tag
+        Add-GuiLog ('[오류] 완료 기록 대기열 반영 실패({0}) - 대기열·마커를 보존합니다' -f (Get-AbyssJournalTagText -Tag ([string]$removal.Tag)))
+        return $false
+      }
+      $consumedCount++
+    }
+    if ($Caller -ceq 'finish' -and $consumedCount -gt 0) {
+      # 정리 실패는 반영 실패가 아닙니다 - 진행은 이미 마커의 판을 지나 다음 시작 게이트가 그 마커를 맞지 않는 것으로 폐기합니다(묘비 계약은
+      # Clear-CustomMarkerFile 몫). 경고는 코드 4 마커 경로(전진 뒤 정지)의 정리 실패와 같은 글자입니다 - 둘 다 정지 뒤라 '다음 시작'
+      if (-not (Clear-CustomMarkerFile -Path (Get-CustomMarkerFileForSection -SectionName $pendingSection))) {
+        Add-GuiLog '[경고] 완료 마커 파일을 정리하지 못했습니다 - 다음 시작 때 다시 정리합니다.'
+      }
+    }
+    return $true
+  } catch {
+    Add-GuiLog ('[오류] 완료 기록 대기열 반영 실패(예외: {0}) - 대기열·마커를 보존합니다' -f $_.Exception.Message)
+    return $false
+  }
+}
+
 function Reset-CustomProgress {
   # 진행 기록 삭제(progress = null). 진행 초기화 버튼 / 시작 시 지문 불일치 / 완주 / lap 초과 4곳 공용
   # 반환: 디스크 저장까지 성공했으면 $true, 읽기/저장 실패면 $false.
@@ -7408,18 +8487,28 @@ function Reset-CustomProgress {
   $node = $cfg.$SectionName
   if ($node.PSObject.Properties['progress']) { $node.progress = $null }
   else { $node | Add-Member -NotePropertyName 'progress' -NotePropertyValue $null }
+  # 순서 ②①③ (설계 v10 6.3 · 구현 명세 ① 2.3 ②): ② 진행을 지우는 같은 노드·같은 저장에서 진행 세대 +1(전투 3섹션만 - 생활 노드에는
+  #   키를 만들지 않음). 저장 직후부터 옛 완료 마커·완료 기록은 세대가 달라 지금 진행과 맞지 않으므로 아래 ①③ 전에 종료돼도 되살아나지
+  #   않습니다 → ① 어비스 완료 기록 폐기(실패는 경고만 - 옛 세대는 이미 무효) → ③ 마커 정리. ① 을 ② 앞에 두면 ② 가 실패했을 때
+  #   pending(클리어했는데 전진 못 한 판)만 사라져 그 항목을 다시 돕니다
+  Step-CustomProgressGeneration -Node $node -SectionName $SectionName
   try {
     Save-Config $cfg
   } catch {
     Add-GuiLog "[오류] 커스텀 진행 초기화 저장 실패: $($_.Exception.Message)"
     return $false
   }
+  Remove-AbyssJournalSectionEntries -SectionName $SectionName
   # 완료 마커도 함께 무효화 (랜덤 진행: 초기화 후 우연히 같은 순열이 재현돼 낡은 마커가
   # 일치하는 사고 방지 - 리뷰 조건. 순차 모드에서도 초기화 = 새 출발 의도라 무해)
   # progress 는 위에서 $SectionName 으로 정확히 분기하는데 마커만 전역을 쓰고 있었습니다
   # (2026-08-09 감사 - 파라미터 컨텍스트와 전역 상태가 한 함수 안에 공존하면 반드시 갈라짐)
   if (-not (Clear-CustomMarkerFile -Path (Get-CustomMarkerFileForSection -SectionName $SectionName))) {
-    Add-GuiLog '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 이미 끝낸 판을 복구하려 할 수 있습니다.'
+    # 전투 3섹션은 위 저장에서 진행 세대가 올라 옛 마커가 지금 진행과 맞지 않으므로 복구에 쓰이지 않고, 세대가 없는 생활은 옛 경고가
+    # 그대로 맞습니다(구현 리뷰 2.2·2.3 P3)
+    Add-GuiLog $(if (@('customRepeat', 'abyssCustomRepeat', 'deepCustomRepeat') -contains $SectionName) {
+        '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 다시 정리하며, 옛 세대 기록이라 복구에 쓰이지 않습니다.'
+      } else { '[경고] 이전 완료 기록 파일을 지우지 못했습니다 - 다음 시작에서 이미 끝낸 판을 복구하려 할 수 있습니다.' })
   }
   if ($LogMessage) { Add-GuiLog $LogMessage }
   return $true
@@ -7481,12 +8570,17 @@ function Confirm-CustomShuffleReady {
   }
   if ($node.PSObject.Properties['progress']) { $node.progress = $gateNewProgress }
   else { $node | Add-Member -NotePropertyName 'progress' -NotePropertyValue $gateNewProgress }
+  # 새 순열 = orderKey 가 바뀌는 진행 재구성(설계 v10 6.3 · 구현 명세 ① 2.3 ④): 새 순열을 쓰는 같은 저장에서 진행 세대 +1(전투 3섹션만)
+  #   → 저장 성공 뒤 어비스 완료 기록 폐기. 마커 정리는 하지 않습니다 - 시작 게이트의 마커 대조가 세대로 거릅니다. 위의 '순열이 이미
+  #   유효' 와 '혼합 리스트 랜덤 해제' 는 진행을 처음부터로 돌리지 않아 세대를 올리지 않습니다(바퀴 전환과 같은 성격 - 명세 5절 C8)
+  Step-CustomProgressGeneration -Node $node -SectionName $SectionName
   try {
     Save-Config $cfg
   } catch {
     Add-GuiLog "[오류] 랜덤 진행 순서 저장 실패: $($_.Exception.Message) - 시작하지 않습니다."
     return $false
   }
+  Remove-AbyssJournalSectionEntries -SectionName $SectionName
   return $true
 }
 
@@ -7495,10 +8589,22 @@ function Clear-CustomEnv {
   # 있으면 워커가 '존재 = 커스텀 모드' 규약 때문에 어비스/사냥터 회차를 커스텀으로 오동작하므로,
   # 비커스텀 회차 시작 전과 정지(Stop-AllRun) 시 반드시 전부 제거합니다.
   # (HONEYNOGI_REPEAT_INFO 는 기존 변수라 매 회차 덮어쓰므로 정리 불필요)
+  # HONEYNOGI_CUSTOM_GENERATION(진행 세대 - OWNER 와 같은 계산, 구현 명세 ① 5절 A3)도 커스텀 전용이라 여기서 지웁니다 - 남으면 다음
+  # 비커스텀 회차 워커의 [설정] 스냅샷에 앞 실행의 세대가 찍힙니다
   foreach ($envName in @('HONEYNOGI_CUSTOM_ITEM', 'HONEYNOGI_CUSTOM_PREV', 'HONEYNOGI_CUSTOM_NEXT',
       'HONEYNOGI_CUSTOM_RESTART', 'HONEYNOGI_CUSTOM_RECOVERY', 'HONEYNOGI_CUSTOM_POSITION',
       'HONEYNOGI_CUSTOM_LIST', 'HONEYNOGI_CUSTOM_MARKER', 'HONEYNOGI_CUSTOM_OWNER',
-      'HONEYNOGI_LAST_RUN')) {
+      'HONEYNOGI_CUSTOM_GENERATION', 'HONEYNOGI_LAST_RUN')) {
+    Remove-Item -LiteralPath "Env:\$envName" -ErrorAction SilentlyContinue
+  }
+}
+
+function Clear-HandoffEnv {
+  # handoff env 무리 - HONEYNOGI_HANDOFF_NONCE · HONEYNOGI_RESUME_REENTRY · HONEYNOGI_FINISH_ONLY (설계 v11 R1 3.8 ④ · v10 6.1 env 목록).
+  # 기동마다 먼저 지우고 그 기동에 해당할 때만 다시 넣으며, 정지(Stop-AllRun)도 지웁니다 - UNTIL 의 '먼저 비움' 과 같은 이유로 이전 기동
+  # 값이 실패 갈래·다른 콘텐츠의 워커로 새지 않게 합니다. FINISH_ONLY 를 커스텀 전용 목록(Clear-CustomEnv)이 아니라 여기 두는 이유:
+  # 비커스텀 마무리 실행도 씁니다
+  foreach ($envName in @('HONEYNOGI_HANDOFF_NONCE', 'HONEYNOGI_RESUME_REENTRY', 'HONEYNOGI_FINISH_ONLY')) {
     Remove-Item -LiteralPath "Env:\$envName" -ErrorAction SilentlyContinue
   }
 }
@@ -8211,9 +9317,20 @@ function Test-AbyssMemberRunActive {
   # 시작 직전 Save-SettingsFromUi 가 이 라디오 값을 config 에 쓰고 워커는 그 config 로 판정합니다.
   # 대분류를 따로 보는 이유: 생활·기타로 전환해도 전투 라디오의 Checked 는 복귀 대비로 보존됩니다.
   # 실행 중에는 Set-UiRunning 이 대분류 버튼과 콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다.
-  # 쓰는 곳: Test-WorkerTimeJudgeActive(시간 지정 신호 - Start-NextCycle), Invoke-StartAutomation 의 시작 안내 1줄.
+  # 쓰는 곳: Test-WorkerTimeJudgeActive(시간 지정 신호 - Start-NextCycle), Invoke-StartAutomation 의 시작 안내 1줄,
+  # Test-AbyssHandoffRunActive(어비스 완료 기록 범위 - 기동·종료 처리·시작 게이트가 함께 쓰는 술어).
   # (컨트롤 속성 읽기뿐인 순수 판정이라 실패 경로가 없습니다 - 같은 자리의 Get-CycleWaitSecondsForEstimate 와 같음)
   return (($script:mainCategory -eq 'battle') -and $rbCatAbyss.Checked -and $rbModeParty.Checked -and $rbAbyssPartyMember.Checked -and (-not $script:customActive))
+}
+
+function Test-AbyssHandoffRunActive {
+  # 이번 실행이 어비스 완료 기록(handoff journal)을 쓰는 실행인지 (설계 v11 R1 3.2·3.8 ① · 구현 명세 ① 2.5 ①) - 전투 대분류 + 어비스 +
+  # 파티원 실행이 아님. 커스텀 어비스도 포함합니다(위 Test-AbyssMemberRunActive 는 커스텀이면 거짓이라 여기서는 참).
+  # journal 은 어비스 전용입니다(설계 v10 6.3) - 이 술어가 거짓인 실행(던전·심층·사냥터·생활·기타·어비스 파티원)의 기동·종료 처리·시작
+  # 게이트는 journal 을 열지 않습니다. 열면 어비스 journal 의 손상·잠금이 다른 콘텐츠의 기동까지 멈추고, 잠금이면 기동마다 1초를 기다립니다.
+  # 판별·기동·끝 처리·코드 4·코드 1·시작 게이트가 이 술어 하나를 씁니다(설계 리뷰 R1 - 판별과 기동이 같은 술어).
+  # (컨트롤 속성 읽기뿐인 순수 판정 - 실행 중에는 Set-UiRunning 이 대분류·콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다)
+  return (($script:mainCategory -eq 'battle') -and $rbCatAbyss.Checked -and -not (Test-AbyssMemberRunActive))
 }
 
 function Test-WorkerTimeJudgeActive {
@@ -8260,7 +9377,8 @@ function Get-TimeStopNotice {
 }
 
 function Get-NextCycleAction {
-  # 비커스텀 회차 종료 뒤 다음 단계 (순수 - 진리표 tests\test_time_until_mode.ps1 T4-a). 코드 0·11(계상 뒤)·10(미계상) 공용.
+  # 비커스텀 회차 종료 뒤 다음 단계 (순수 - 진리표 tests\test_time_until_mode.ps1 T4-a). 코드 0·11(계상 뒤)·10(미계상)·1(어비스 재입장 실행부
+  # Invoke-InsideHandoffExit - 계상 뒤, 구현 명세 ① 2.11 · 설계 v11 R1 7.3) 공용.
   # 우선순위: 안전 중지 > (지정 횟수 완료 | 준비 실행 3회 연속) > 지정 시간 > 다음 회차 - 옛 타이머 if/elseif 사슬 순서 그대로입니다.
   #  - 코드 10(준비 실행)은 회차로 세지 않으므로 지정 횟수를 보지 않고 준비 실행 3회 연속만 봅니다 (옛 코드 10 사슬과 같음)
   #  - 코드 11 = 워커가 지정 시각 전에 다음 판으로 이어 가기로 정함 - 지정 시각을 보지 않습니다 (조건 4: 이어 간 판은 반드시 이어받음).
@@ -8284,6 +9402,7 @@ function Invoke-NextCycleDecision {
   # (판단은 순수부 Get-NextCycleAction, 실행은 여기 - 타이머에는 호출 한 줄씩만 남습니다).
   # 비교·호출뿐이라 예외 경로가 없습니다 - 타이머 코드 0 분기는 $script:worker = $null 뒤라 여기서 예외가 나면
   # 다음 워커 없이 실행 상태로 남으므로(즉시 중지로만 복구) 이 성질이 계약입니다. 판독·파일 접근을 여기에 더하지 마세요.
+  # 단 'next' 갈래가 부르는 Start-NextCycle 은 어비스 완료 기록(journal)을 읽고 쓰며, 그 안의 예외 없음은 기동 함수가 지킵니다(설계 v11 R1 3.8).
   param([int]$ExitCode)
   # 코드 10 에서도 계산하지만 Get-NextCycleAction 이 코드 10 에서는 보지 않습니다. 준비 실행 연속 수는 코드 10 이 아니면
   # 타이머가 이미 0 으로 되돌려 둡니다
@@ -8338,7 +9457,233 @@ function Move-WorkerLogToArchive {
   }
 }
 
+# ===== 기동의 완료 기록(handoff) 처리 - 설계 v11 R1 3.7·3.8 · v10 6.1 · 구현 명세 ① 2.5 =====
+# Start-NextCycle 이 기동마다 어비스 완료 기록에서 넘길 항목을 고르고(Resolve-HandoffEnvForContext) handoff env·기동 종류를 정합니다
+# (Set-HandoffLaunchEnv). 마무리 실행(finish-only) 기동의 커스텀 env 는 config 를 다시 읽지 않고 보류로 조립합니다(Get-FinishOnlyCustomEnv).
+# 이 묶음의 함수는 예외를 밖으로 내지 않습니다 - 재입장 실행부가 기동을 try 밖 마지막 문장으로 부르고, 타이머의 다음 회차 판단
+# (Invoke-NextCycleDecision)도 예외 없음이 계약입니다(예외가 타이머 catch 로 나가면 다음 워커 없이 실행 상태로 남음).
+
+function Get-InsideHandoffStopReason {
+  # 재입장(InsideHandoff) 뒤에 기동을 보류하고 멈출 때의 사유 꼬리 (설계 v11 R1 3.5). '다시 하기'로 다음 판에 들어간 직후라 캐릭터가
+  # 입장 키 없이 던전 안에 서 있을 수 있음을 알립니다 - 재입장 실행부가 부른 기동·마무리 실행 기동의 실패, 표지가 있는 판별 오류에만 붙입니다
+  param([string]$Reason)
+  return ($Reason + " (캐릭터가 '다시 하기'로 들어간 던전 안일 수 있음 - 입장 키 미전송)")
+}
+
+function Get-AbyssJournalCorruptGuide {
+  # 완료 기록 파일 손상으로 멈추거나 시작하지 않을 때 문구 끝에 붙이는 파일 위치 안내 (구현 명세 ① 5절 C11 · 설계 v10 6.1 '사용자가 옮긴
+  # 뒤 시작'). 손상 파일은 증거로 보존하고 지우지 않으므로 사용자가 옮겨야 다시 시작할 수 있습니다 - 기동·종료 처리·시작 게이트가 같은 글자를 씁니다
+  return '(%LOCALAPPDATA%\HoneyNogi\Log 의 abyss_handoff.json* 파일을 다른 폴더로 옮긴 뒤 다시 시작해 주세요)'
+}
+
+function Get-AbyssJournalLockedGuide {
+  # 완료 기록 파일이 사용 중('locked')이라 멈추거나 시작하지 않을 때 문구 끝에 붙이는 안내 (단계 2.4~2.5a 구현 리뷰 조건 · 설계 v10 6.1
+  # 'locked' 호출부 규칙). 잠금 파일 abyss_handoff.lock 은 쥔 프로세스가 끝나면 OS 가 지우지만, 정전처럼 핸들이 정리되지 않으면 남아 그 뒤
+  # 기록이 전부 '사용 중' 이 될 수 있습니다(미실측 추론). 코드로 지우지 않고(규칙 8 - 관측 0) 사용자가 확인한 뒤 지우게 알립니다 - 다른
+  # 프로세스가 쥔 잠금은 공유 없이 열려 있어 지워지지 않으므로, 안내대로 지워도 쓰는 중인 기록을 깨지 않습니다.
+  # 기동·종료 처리·시작 게이트의 '사용 중' 정지 문구가 모두 이 글자를 씁니다(대기열 기록·반영 실패의 '사용 중' 은 Get-AbyssPendingStopReason 이 붙임)
+  return '(다른 꿀비노기·powershell 프로세스가 없는데도 계속되면 %LOCALAPPDATA%\HoneyNogi\Log 의 abyss_handoff.lock 파일을 지운 뒤 다시 시작해 주세요)'
+}
+
+function Resolve-HandoffEnvForContext {
+  # 이번 기동에 넘길 완료 기록 항목을 journal 에서 고르고, 고른 항목을 같은 저장(잠금 아래 한 mutation)에서 launched 로 적습니다
+  # (설계 v10 6.1 'GUI 기동 시 handoff env 해석' · v11 R1 3.8 ②). 기동마다 다시 고릅니다 - 앞 기동이 넘긴 nonce 를 기억해 두면 그 사이
+  # 워커가 닫은 항목(done)이나 새로 연 항목을 놓칩니다.
+  #  -Context : 이번 기동의 owner - 커스텀 = 5필드 + generation(Get-CustomCanonicalOwner, 마무리 실행은 보류 Owner) / 비커스텀 = @{ runId }
+  #  -Restart : 오류 뒤 같은 항목 재시작($script:customRestart)   -ResumeNonce : 재입장 재개(resume) 대상 nonce (빈 값 = 재개 아님)
+  # 고르는 규칙(먼저 맞는 것):
+  #  ① 재개 요청 → 그 nonce 의 항목이 재입장 요청 단계(retry-attempt·retry-clicked) · owner == 이번 owner · 미적용(applied 밖)이면 resume.
+  #     맞지 않으면 후보 없음 - 워커의 재개 역할 술어와 같은 조건이라 GUI 가 넘겨도 워커가 이어받지 않습니다
+  #  ② 재시작·커스텀 → 열린 자기 항목(own: owner == 이번 owner · stage entered · launchState ≠ done)을 먼저. 열린 entered 는 그 판이 이미
+  #     입장해 키가 나갔을 수 있다는 더 최근의 사실이라 이어받아야 키를 다시 보내지 않습니다
+  #  ③ next(nextOwner == 이번 owner · stage reentered · launchState ≠ done). 비커스텀 일반 시작은 이것만 봅니다 - runId 가 시작마다 새로
+  #     나 열린 자기 항목이 이어질 수 없습니다. 같은 종류가 여럿이면 가장 최근(배열 뒤쪽 - 항목은 끝에만 덧붙습니다)
+  #  ④ 없으면 후보 없음(워커는 이어받을 항목 없이 시작)
+  # 고른 항목이 이미 launched 면(앞 기동이 넘긴 nonce 를 그 종료 처리가 재전달 예외로 남긴 경우) 쓰지 않습니다.
+  # 반환 @{ Status; Nonce; Kind; Detail } - Status ∈ ok(고름) / none(후보 없음 - 이 호출의 쓰기 0) / locked / corrupt / error(그 밖의 저장소
+  # 실패·예외), Kind ∈ next / own / resume / none, Detail = error 의 원인(예외 메시지 - 없으면 빈 값).
+  param($Context, [bool]$Restart = $false, [string]$ResumeNonce = '')
+  try {
+    $wantOwner = $Context
+    $wantGeneration = 0
+    $generationField = Get-AbyssJournalField -Object $Context -Name 'generation'
+    if ($generationField.Has) { $wantGeneration = [int]$generationField.Value }
+    $ownFirst = ($Restart -or -not (Get-AbyssJournalField -Object $Context -Name 'runId').Has)
+    $wantResumeNonce = [string]$ResumeNonce
+    $pick = @{ Nonce = ''; Kind = 'none' }
+    # mutator 는 클로저로 만듭니다 - 클로저가 아니면 저장 함수의 지역 변수가 같은 이름의 이 함수 변수를 가립니다(동적 스코프 - 실측).
+    # 클로저 안에서는 $script: 를 읽지 않고(빈 값으로 읽힘) 위 지역 변수만 씁니다. 부르는 두 함수는 최상위 함수입니다(구현 명세 ① 2.0
+    # 체크리스트 6 - 클로저는 최상위 함수만 부를 수 있음). 고른 결과는 $pick 해시테이블로 돌려받습니다
+    $mutator = {
+      param($journal, $change)
+      $chosen = $null
+      $chosenKind = 'none'
+      if ($wantResumeNonce) {
+        $appliedNonces = @(@($journal.applied) | ForEach-Object { [string]$_ })
+        foreach ($entry in @($journal.entries)) {
+          if ($null -eq $entry -or [string]$entry.nonce -ne $wantResumeNonce) { continue }
+          $entryStage = [string]$entry.stage
+          if (($entryStage -eq 'retry-attempt' -or $entryStage -eq 'retry-clicked') -and ($appliedNonces -notcontains $wantResumeNonce) -and
+            (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $wantOwner -Generation $wantGeneration)) {
+            $chosen = $entry
+            $chosenKind = 'resume'
+          }
+        }
+      } else {
+        $ownEntry = $null
+        $nextEntry = $null
+        foreach ($entry in @($journal.entries)) {
+          if ($null -eq $entry -or [string]$entry.launchState -eq 'done') { continue }
+          $entryStage = [string]$entry.stage
+          if ($entryStage -eq 'entered' -and (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $wantOwner -Generation $wantGeneration)) {
+            $ownEntry = $entry
+          } elseif ($entryStage -eq 'reentered' -and
+            (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $wantOwner -Generation $wantGeneration -Field 'nextOwner')) {
+            $nextEntry = $entry
+          }
+        }
+        if ($ownFirst -and $null -ne $ownEntry) {
+          $chosen = $ownEntry
+          $chosenKind = 'own'
+        } elseif ($null -ne $nextEntry) {
+          $chosen = $nextEntry
+          $chosenKind = 'next'
+        }
+      }
+      if ($null -eq $chosen) { return }
+      $pick.Nonce = [string]$chosen.nonce
+      $pick.Kind = $chosenKind
+      if ([string]$chosen.launchState -ne 'launched') {
+        Set-AbyssJournalProperty -Object $chosen -Name 'launchState' -Value 'launched'
+        $change.Changed = $true
+      }
+    }.GetNewClosure()
+    $update = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+    # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+    foreach ($updateWarning in @($update.Warnings)) { Add-GuiLog ([string]$updateWarning) }
+    $updateTag = [string]$update.Tag
+    if ($updateTag -eq 'changed' -or $updateTag -eq 'unchanged') {
+      if ($pick.Kind -eq 'none') { return @{ Status = 'none'; Nonce = ''; Kind = 'none'; Detail = '' } }
+      return @{ Status = 'ok'; Nonce = [string]$pick.Nonce; Kind = [string]$pick.Kind; Detail = '' }
+    }
+    if ($updateTag -eq 'locked' -or $updateTag -eq 'corrupt') { return @{ Status = $updateTag; Nonce = ''; Kind = 'none'; Detail = '' } }
+    return @{ Status = 'error'; Nonce = ''; Kind = 'none'; Detail = '' }
+  } catch {
+    return @{ Status = 'error'; Nonce = ''; Kind = 'none'; Detail = ('예외: {0}' -f $_.Exception.Message) }
+  }
+}
+
+function Get-FinishOnlyCustomEnv {
+  # 마무리 실행(finish-only) 커스텀 기동의 env 묶음 (설계 v11 R1 3.7 '조립 함수' · 구현 명세 ① 2.5 ⑥) → @{ Ok; Env; Reason }.
+  # config 를 다시 읽지 않습니다(디스크 진행 미사용 - 진행 저장 실패 보류면 디스크는 끝난 판에 머물러 있고 이 판은 한 칸 앞입니다):
+  #  - 보류 Owner(= 이 판)로 ITEM·OWNER·GENERATION, 보류 Position 으로 POSITION·REPEAT_INFO
+  #  - 보류 Snapshot(판별 때의 진행 전 컨텍스트 - 재입장은 바퀴 경계를 넘지 않아 같은 바퀴의 실행 순서)으로 NEXT·LIST
+  #  - RESTART·RECOVERY·NEXT_OWNER·NEXT_BOUNDARY 는 빈 값(마무리 실행 워커는 다음 판을 고르지 않음), LAST_RUN 은 '1'
+  #  - MARKER 는 정리하지 않고 경로만(회차 준비와 같은 식 - 무시 중이면 빈 값). 완주 직후 GUI 가 다시 켜지면 그 마커로 마무리 복구합니다
+  # 마무리 실행은 재입장 실행부만 띄우고 재입장은 어비스뿐이라 목록 표기는 어비스·던전 식(Get-CustomListCompact)입니다.
+  # 실패 = 보류·Snapshot·Owner 없음 · Owner.index 가 Snapshot 범위 밖 · 조립 중 예외 - 예외를 밖으로 내지 않고 Ok 거짓으로 돌려줍니다
+  # (호출부는 env 를 하나도 대입하지 않고 기동하지 않습니다 - 부분 대입 없음). Env 키는 환경 변수 이름 그대로입니다.
+  param($Hold)
+  try {
+    if ($null -eq $Hold -or $null -eq $Hold.Snapshot -or $null -eq $Hold.Owner) {
+      return @{ Ok = $false; Env = $null; Reason = '보류 진행 정보 없음' }
+    }
+    $snapshot = $Hold.Snapshot
+    $holdOwner = $Hold.Owner
+    $snapshotTotal = [int]$snapshot.Total
+    $ownerIndex = [int]$holdOwner.index
+    if ($ownerIndex -lt 0 -or $ownerIndex -ge $snapshotTotal) {
+      return @{ Ok = $false; Env = $null; Reason = ('보류 위치 {0}번이 목록 범위({1}칸) 밖' -f ($ownerIndex + 1), $snapshotTotal) }
+    }
+    $nextIndex = ($ownerIndex + 1) % [Math]::Max(1, $snapshotTotal)
+    $envValues = [ordered]@{
+      HONEYNOGI_CUSTOM_ITEM          = [string]$holdOwner.item
+      HONEYNOGI_CUSTOM_PREV          = [string]$script:customPrevItem
+      HONEYNOGI_CUSTOM_NEXT          = (Format-CustomItemToken -Item (@($snapshot.ExecutionItems)[$nextIndex]))
+      HONEYNOGI_CUSTOM_RESTART       = ''
+      HONEYNOGI_CUSTOM_RECOVERY      = ''
+      HONEYNOGI_CUSTOM_POSITION      = [string]$Hold.Position
+      HONEYNOGI_CUSTOM_LIST          = (Get-CustomListCompact -Items $snapshot.ExecutionItems)
+      HONEYNOGI_CUSTOM_OWNER         = (ConvertTo-CustomMarkerOwnerJson -Owner $holdOwner)
+      HONEYNOGI_CUSTOM_GENERATION    = [string][int]$holdOwner.generation
+      HONEYNOGI_CUSTOM_NEXT_OWNER    = ''
+      HONEYNOGI_CUSTOM_NEXT_BOUNDARY = ''
+      HONEYNOGI_REPEAT_INFO          = ('커스텀 반복 마무리 실행({0})' -f [string]$Hold.Position)
+      HONEYNOGI_LAST_RUN             = '1'
+      HONEYNOGI_CUSTOM_MARKER        = $(if ($script:customMarkerIgnore) { '' } else { [string]$customMarkerFile })
+    }
+    return @{ Ok = $true; Env = $envValues; Reason = '' }
+  } catch {
+    return @{ Ok = $false; Env = $null; Reason = ('환경 변수 조립 예외: {0}' -f $_.Exception.Message) }
+  }
+}
+
+function Set-HandoffLaunchEnv {
+  # 이번 기동의 handoff env 와 기동 종류를 정합니다 (설계 v11 R1 3.8 ①~⑤ · 구현 명세 ① 2.5 ⑧). Start-NextCycle 이 [완료] 사유 초기화
+  # 뒤·워커 기동(try) 앞에서 한 줄로 부릅니다 - 그 앞 UNTIL 구간은 회귀(T4-h·§5)가 [대입, if] 그대로 잘라 실행합니다.
+  #  ④ 먼저 비움: handoff env 무리(Clear-HandoffEnv)·기동 종류·nonce·마무리 실행 보류를 지웁니다 - 앞 기동의 값이 새지 않게
+  #  ① 범위: 어비스 journal 실행(Test-AbyssHandoffRunActive)이 아니면 journal 을 열지 않고 이어받을 항목 없는 기동('none')으로 진행
+  #  ② 후보: Resolve-HandoffEnvForContext - 컨텍스트 = 커스텀은 이 판의 owner(마무리 실행은 보류 Owner), 비커스텀은 이번 실행의 runId
+  #  ⑤ 실패(locked·corrupt·error): 워커를 띄우지 않고 오류 정지 뒤 $false(호출부 return). 재입장 실행부가 부른 기동(-FromInsideHandoff)·
+  #     마무리 실행 기동은 사유 끝에 '던전 안일 수 있음' 꼬리(설계 v11 R1 3.5)
+  # 성공이면 고른 nonce 를 HONEYNOGI_HANDOFF_NONCE 로(재개면 HONEYNOGI_RESUME_REENTRY = '1'), 마무리 실행이면 HONEYNOGI_FINISH_ONLY = '1'.
+  # 기동 종류(none / next / own / resume / finish-only)·nonce 는 종료 처리가 읽습니다(env 는 정지가 지우므로 종료 처리는 이 값을 봅니다).
+  # 반환 $true = 기동 진행 / $false = 이 함수 안에서 이미 정지함
+  param($FinishOnlyHold = $null, [string]$ResumeNonce = '', [switch]$FromInsideHandoff, $CustomContext = $null)
+  Clear-HandoffEnv
+  $script:lastLaunchKind = 'none'
+  $script:lastLaunchNonce = ''
+  $script:finishOnlyHold = $null
+  if (-not (Test-AbyssHandoffRunActive)) { return $true }
+  if (-not $script:customActive) {
+    $resolveContext = @{ runId = [string]$script:runId }
+  } elseif ($null -ne $FinishOnlyHold) {
+    $resolveContext = $FinishOnlyHold.Owner
+  } else {
+    $resolveContext = Get-CustomCanonicalOwner -Context $CustomContext
+  }
+  $resolved = Resolve-HandoffEnvForContext -Context $resolveContext -Restart ([bool]$script:customRestart) -ResumeNonce $ResumeNonce
+  $resolveStatus = [string]$resolved.Status
+  if ($resolveStatus -eq 'locked' -or $resolveStatus -eq 'corrupt' -or $resolveStatus -eq 'error') {
+    # 사유는 정지 전에 만듭니다 - Stop-AllRun 이 기동 종류를 비웁니다
+    if ($resolveStatus -eq 'locked') {
+      $stopReason = '완료 기록 파일이 사용 중 - 기동을 보류하고 정지 (기록·마커 보존) ' + (Get-AbyssJournalLockedGuide)
+    } elseif ($resolveStatus -eq 'corrupt') {
+      $stopReason = '완료 기록 파일 손상 - 파일을 보존하고 정지 ' + (Get-AbyssJournalCorruptGuide)
+    } else {
+      $stopReason = '완료 기록 파일을 읽거나 쓰지 못해 기동을 보류하고 정지'
+      if ([string]$resolved.Detail) { $stopReason += (' ({0})' -f [string]$resolved.Detail) }
+    }
+    if ($FromInsideHandoff -or ($null -ne $FinishOnlyHold)) { $stopReason = Get-InsideHandoffStopReason -Reason $stopReason }
+    Stop-AllRun -IsError $stopReason
+    $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+    return $false
+  }
+  if ($resolveStatus -eq 'ok') {
+    $env:HONEYNOGI_HANDOFF_NONCE = [string]$resolved.Nonce
+    if ([string]$resolved.Kind -eq 'resume') { $env:HONEYNOGI_RESUME_REENTRY = '1' }
+    $script:lastLaunchKind = [string]$resolved.Kind
+    $script:lastLaunchNonce = [string]$resolved.Nonce
+  }
+  if ($null -ne $FinishOnlyHold) {
+    $env:HONEYNOGI_FINISH_ONLY = '1'
+    $script:lastLaunchKind = 'finish-only'
+    $script:finishOnlyHold = $FinishOnlyHold
+  }
+  return $true
+}
+
 function Start-NextCycle {
+  # 회차 기동 - 로그 보관 → 커스텀·비커스텀 env → UNTIL → [완료] 사유 초기화 → handoff env(Set-HandoffLaunchEnv) → 워커 기동 → 상태줄·시작 줄.
+  # 인자 (구현 명세 ① 2.5 ④ · 설계 v11 R1 3.7·3.8). 기존 호출(다음 회차 판단·커스텀 사슬·코드 1 재시작·첫 기동)은 인자 없이 부릅니다:
+  #  -PreserveMarker    : 재입장 재개(resume) 기동 - 같은 항목을 잇는 기동이라 마커 정리와 무시 판단 초기화를 건너뜁니다(MARKER 경로는 그대로)
+  #  -FromInsideHandoff : 재입장 실행부가 부른 다음 판(next-owner) 기동 - 기동 보류·워커 시작 실패 정지 사유 끝에 '던전 안일 수 있음' 꼬리
+  #  -FinishOnlyHold    : 마무리 실행(finish-only) 기동의 보류 @{ Kind; Reason; IsError; Owner; Position; Snapshot } - 커스텀 env 는 config 를
+  #                       다시 읽지 않고 보류로 조립하며(Get-FinishOnlyCustomEnv - 커스텀 블록·마커 정리 미경유), 마지막 판 신호는 '1'.
+  #                       정지 사유 꼬리는 -FromInsideHandoff 와 같습니다(마무리 실행 기동도 늘 재입장 실행부가 부름 - 설계 v11 R1 3.7)
+  #  -ResumeNonce       : 재개 대상 항목 nonce (Resolve-HandoffEnvForContext ①)
+  # 보류는 타입 없이 받습니다 - 선택 인자에 형식을 붙이면 $null 기본값이 형식 변환에 걸리는 함정이 있습니다(규칙 3 · 명세 ① 2.0 체크리스트 3)
+  param([switch]$PreserveMarker, [switch]$FromInsideHandoff, $FinishOnlyHold = $null, [string]$ResumeNonce = '')
   $cycleNumber = $script:completedCycles + 1
   # 지난 세션(또는 직전 회차)의 로그 파일이 남아 있으면, 워커가 새로 쓰기 전에
   # GUI 타이머가 그 내용을 '새 로그'로 착각해 화면에 다시 출력합니다.
@@ -8357,7 +9702,17 @@ function Start-NextCycle {
   # 워커가 이 값을 로그 파일의 [설정] 스냅샷(화면 미표시)에 함께 기록합니다.
   $env:HONEYNOGI_APP_VERSION = $appVersion
   $customContext = $null
-  if ($script:customActive) {
+  $finishOnlyEnv = $null
+  if ($script:customActive -and ($null -ne $FinishOnlyHold)) {
+    # 마무리 실행(커스텀): 디스크 진행을 읽지 않고 보류 Owner·Snapshot 으로 env 를 먼저 다 만듭니다(설계 v11 R1 3.7 - 진행 저장 실패
+    # 보류면 디스크는 끝난 판에 머물러 있어 아래 커스텀 블록을 타면 이미 끝난 판을 다시 띄웁니다). 실패면 env·기동 0 의 오류 정지
+    $finishOnlyEnv = Get-FinishOnlyCustomEnv -Hold $FinishOnlyHold
+    if (-not $finishOnlyEnv.Ok) {
+      Stop-AllRun -IsError (Get-InsideHandoffStopReason -Reason ('마무리 실행 준비 실패({0}) - 기동을 보류하고 정지' -f $finishOnlyEnv.Reason))
+      $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+      return
+    }
+  } elseif ($script:customActive) {
     $customContext = Get-CustomCurrentContext
     if (-not $customContext) {
       # 실행 중에는 리스트 편집이 비활성이라 정상 경로에선 없지만, config 읽기 실패 등 방어
@@ -8391,6 +9746,8 @@ function Start-NextCycle {
         Get-DeepCustomListCompact -Items $customContext.ExecutionItems
       } else { Get-CustomListCompact -Items $customContext.ExecutionItems })
     $env:HONEYNOGI_CUSTOM_OWNER = New-CustomMarkerOwnerJson -Context $customContext
+    # 진행 세대 - 위 OWNER(version 3)의 generation 과 같은 계산(같은 컨텍스트)에서 만듭니다(구현 명세 ① 5절 A3). 워커 [설정] 스냅샷 기록용
+    $env:HONEYNOGI_CUSTOM_GENERATION = [string][int]$customContext.Generation
     $repeatModeText = $(if ($customContext.ListRepeat -eq 'count') { "$($customContext.ListRepeatCount)바퀴" } else { '무한' })
     $env:HONEYNOGI_REPEAT_INFO = "커스텀 반복(항목 $($customContext.Total)개, $($customContext.Lap)바퀴째 $($customContext.Index + 1)번, $repeatModeText)"
     # 마지막 판 신호: N바퀴 모드의 마지막 바퀴 마지막 항목이면 워커가 결과 화면에서
@@ -8409,11 +9766,15 @@ function Start-NextCycle {
     # 나중에 시작 게이트가 묘비만 보고 지워버립니다 → 복구했어야 할 판을 다시 돌아 재화
     # 이중 소모 (2026-08-09 리뷰 적발). Test-Path 로 감싸지 않는 이유도 같습니다 -
     # 마커가 이미 없어도 남은 묘비는 여기서 치워야 합니다.
-    $script:customMarkerIgnore = $false
-    if (-not $script:customRecoveryPending) {
-      if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
-        Add-GuiLog '[경고] 이전 완료 마커 파일을 정리하지 못했습니다 - 이번 회차는 마커를 무시합니다 (완료 계상은 정상 종료 코드로만).'
-        $script:customMarkerIgnore = $true
+    # 재입장 재개(-PreserveMarker)는 같은 항목을 잇는 기동이라 무시 판단 초기화까지 통째로 건너뜁니다(구현 명세 ① 2.5 ⑤ - 의도) - 마커
+    # (owner = 그 항목)는 재개 판이 이어서 소비할 근거이고, 앞 기동이 정리에 실패해 정한 '무시' 를 여기서 풀면 남은 옛 파일·묘비를 믿게 됩니다
+    if (-not $PreserveMarker) {
+      $script:customMarkerIgnore = $false
+      if (-not $script:customRecoveryPending) {
+        if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
+          Add-GuiLog '[경고] 이전 완료 마커 파일을 정리하지 못했습니다 - 이번 회차는 마커를 무시합니다 (완료 계상은 정상 종료 코드로만).'
+          $script:customMarkerIgnore = $true
+        }
       }
     }
     # 정리에 실패한 회차에는 워커에게 **마커 경로를 주지 않습니다**(빈 값 = 기록 안 함,
@@ -8422,6 +9783,13 @@ function Start-NextCycle {
     # 마커를 지워 복구했어야 할 판을 다시 돌게 됩니다 (2026-08-09 재점검 적발).
     # 반드시 위 정리 결과가 확정된 **뒤에** 설정해야 합니다.
     $env:HONEYNOGI_CUSTOM_MARKER = $(if ($script:customMarkerIgnore) { '' } else { $customMarkerFile })
+  } elseif ($null -ne $finishOnlyEnv) {
+    # 마무리 실행(커스텀) env 를 한 번에 대입합니다 - 조립이 모두 끝난 뒤라 부분 대입이 없습니다. 커스텀 env 이름을 전부 덮으므로 앞 기동
+    # 값이 남지 않습니다. 마커는 정리하지 않고 경로만 넘기며(완주 직후 GUI 가 다시 켜지면 그 마커로 마무리 복구 - 설계 v11 R1 3.7), 랜덤
+    # 순서 표시는 생략합니다(표시 전용 - 명세 5절 B11). 빈 값 대입 = 그 변수 삭제($env: 대입과 같음)
+    foreach ($finishOnlyPair in $finishOnlyEnv.Env.GetEnumerator()) {
+      [Environment]::SetEnvironmentVariable([string]$finishOnlyPair.Key, [string]$finishOnlyPair.Value, 'Process')
+    }
   } else {
     # 비커스텀 회차: GUI 프로세스에 잔존한 커스텀 환경변수를 정리합니다
     # (남으면 어비스/사냥터 워커가 커스텀 모드로 오동작 - Clear-CustomEnv 주석 참고)
@@ -8436,6 +9804,8 @@ function Start-NextCycle {
     # 회차 종료 때(Invoke-NextCycleDecision). 무한은 마지막이 없습니다. (Clear-CustomEnv 가 이전 값을 지웠으므로 명시 설정)
     $env:HONEYNOGI_LAST_RUN = $(if (($null -eq $script:targetTime) -and ($script:targetCycles -gt 0) -and
         ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
+    # 비커스텀 마무리 실행: 그 판까지만 하고 끝내도록 위 계산 뒤에 '1' 로 덮어씁니다 (설계 v11 R1 3.7 - 워커는 마지막 판 신호가 1순위)
+    if ($null -ne $FinishOnlyHold) { $env:HONEYNOGI_LAST_RUN = '1' }
   }
   # 시간 지정의 목표 시각을 워커에 전달합니다 (HONEYNOGI_UNTIL_TIME). 매 회차 **먼저 지우고** 아래 조건일 때만 다시
   # 설정합니다 - GUI 프로세스에 남은 값이 다음 비시간 회차·다른 대분류 워커로 새는 것 방지 (커스텀 env 정리와 같은 이유).
@@ -8456,6 +9826,8 @@ function Start-NextCycle {
   # 이번 회차의 [완료] 사유 수집을 초기화합니다 (이전 회차 사유가 코드 4 상태줄에 오표시되는
   # 것 방지 - 리뷰 조건)
   $script:lastWorkerDoneReason = ''
+  # handoff env·기동 종류 (설계 v11 R1 3.8 - 사유 초기화 뒤·기동 앞). 실패면 안에서 정지까지 했으니 기동하지 않습니다
+  if (-not (Set-HandoffLaunchEnv -FinishOnlyHold $FinishOnlyHold -ResumeNonce $ResumeNonce -FromInsideHandoff:$FromInsideHandoff -CustomContext $customContext)) { return }
   # 프로세스 생성 실패 시 UI 잠금·절전 방지가 복원되지 않던 문제 방어 (2026-08-01 전수 점검:
   # 종료 타이머 조건이 running && worker 라 worker 가 null 이면 자동 복구 경로가 없었음)
   try {
@@ -8472,7 +9844,11 @@ function Start-NextCycle {
   }
   if (-not $script:worker) {
     Add-GuiLog '[경고] 자동화 프로세스를 시작하지 못했습니다 - 실행 상태를 되돌립니다. 잠시 후 다시 시작해 주세요.'
-    Stop-AllRun -IsError -Reason '워커 시작 실패'
+    $workerStartFailReason = '워커 시작 실패'
+    # 재입장 실행부가 부른 기동·마무리 실행 기동은 캐릭터가 입장 키 없이 던전 안에 있을 수 있어 꼬리를 붙입니다 - 일반 기동은 문구
+    # 그대로(설계 v11 R1 3.5 · 3.8 ⑤ - 기동 보류 정지(Set-HandoffLaunchEnv)·조립 실패와 같은 규칙)
+    if ($FromInsideHandoff -or ($null -ne $FinishOnlyHold)) { $workerStartFailReason = Get-InsideHandoffStopReason -Reason $workerStartFailReason }
+    Stop-AllRun -IsError -Reason $workerStartFailReason
     return
   }
   if ($customContext) {
@@ -8481,6 +9857,12 @@ function Start-NextCycle {
     # 시간 지정 꼬리는 대분류별 문구입니다 (전투 '지나면 그 판까지' · 생활 '지나면 그 사이클까지' · 기타 기존 문구) - 안전 중지 취소 상태줄과 같은 함수 (설계 2.7 · 생활 확장 v3 2.3)
     $statusSuffix = Get-TimeStatusSuffix -TargetTime $script:targetTime -MainCategory $script:mainCategory
     $lblStatus.Text = "${cycleNumber}회차 실행 중...$statusSuffix"
+  }
+  if ($null -ne $FinishOnlyHold) {
+    # 마무리 실행 상태줄 (설계 v11 R1 3.7) - 위 회차 시작의 두 문장 사이가 아니라 여기 따로 덮어씁니다. 시간 꼬리는 붙이지 않습니다 -
+    # 정지는 이미 정해졌고 이 판을 마치면 멈춥니다. 위치는 디스크가 아니라 보류 위치(이 판)
+    if ($null -ne $finishOnlyEnv) { $lblStatus.Text = "커스텀: $([string]$FinishOnlyHold.Position) 마무리 실행 중 - 이 판을 마치면 멈춥니다" }
+    else { $lblStatus.Text = "${cycleNumber}회차 마무리 실행 중 - 이 판을 마치면 멈춥니다" }
   }
   $lblStatus.ForeColor = [System.Drawing.Color]::ForestGreen
   if ($customContext) {
@@ -8497,7 +9879,8 @@ function Start-NextCycle {
         (Get-LifeSkillNameById -Id ([string]$lifeStartItem.skill)), [string]$lifeStartItem.target,
         $lifeStartRep, $lifeStartRepAll)
     }
-  } else {
+  } elseif ($null -eq $FinishOnlyHold) {
+    # 마무리 실행은 일반 시작 줄을 남기지 않습니다 - 재입장 실행부의 '[안내] 마무리 실행: …' 줄이 갈음합니다(명세 5절 B11)
     Add-GuiLog "=== ${cycleNumber}회차 시작 ==="
   }
 }
@@ -8549,6 +9932,13 @@ function Stop-AllRun {
   Set-UiRunning $false
   $script:stopRequested = $false
   $script:targetTime = $null
+  # handoff env·기동 종류·마무리 실행 보류를 커스텀 여부와 무관하게 지웁니다 (설계 v11 R1 3.7·3.8 ④ - 다음 실행으로 새지 않게).
+  # 종료 처리가 읽는 기동 종류를 여기서 비우므로 호출부는 사유·심각도를 이 함수를 부르기 전에 정합니다.
+  # RUN_ID 는 지우지 않습니다 - 다음 시작이 늘 새 값으로 덮습니다(명세 5절 C12)
+  Clear-HandoffEnv
+  $script:finishOnlyHold = $null
+  $script:lastLaunchKind = 'none'
+  $script:lastLaunchNonce = ''
   $btnSafeStop.Text = ("안전 중지(F9)" + [Environment]::NewLine + "(회차 완료 후)")
   Remove-Item -LiteralPath $safeStopFlag -Force -ErrorAction SilentlyContinue
   # 화면 유지 신호 해제 (평소 절전 설정으로 복귀)
@@ -8585,6 +9975,958 @@ function Stop-AllRun {
   }
   $lblStatus.ForeColor = [System.Drawing.Color]::DimGray
   Add-GuiLog "$(if ($IsError) { '[오류]' } else { '[중단]' }) 중지: $Reason"
+}
+
+# ===== 종료 처리의 완료 기록(handoff) 처리 - 설계 v11 R1 3.2~3.7·4 · R2 3.7 · 구현 명세 ① 2.6·2.7·2.8 =====
+# 타이머 종료 처리가 코드 0·11(재입장 판별 → 오류 정지 / 재입장 실행부 / 마무리 실행 완주 / 일반 끝 처리)과 코드 10(갈래 첫 문장의 끝 처리
+# → 마무리 실행 안전망), 코드 4(갈래 첫 문장의 계상 → 끝 정지 계획), 코드 1(마무리 실행 판별 뒤 라우팅 → 오류 정지 / 재입장 실행부 / 재개 /
+# 예전 처리 - 정지 경로의 끝 처리)에서 부릅니다. 타이머 스크립트블록은 이름으로 추출할 수 없어 동작은 여기
+# 함수에 두고(tests\test_abyss_handoff_gui.ps1 이 이름으로 돌림), 호출 자리는 tests\test_time_until_mode.ps1 T4-e 원문 패턴이 지킵니다.
+# 이 묶음의 함수는 예외를 밖으로 내지 않습니다(명세 5절 A4) - 타이머 종료 처리는 $script:worker = $null 뒤라 예외가 나가면 다음 워커 없이
+# 실행 상태로 남습니다. 정지하는 함수는 사유·심각도를 Stop-AllRun 앞에서 정합니다(Stop-AllRun 이 기동 종류·보류를 비움).
+# 이 빌드의 워커는 재입장 표지·reentered 를 내지 않아 재입장 실행부·마무리 실행은 실제로 생기지 않습니다 - 진리표 회귀로만 돕니다.
+
+function Get-AbyssExitStopReason {
+  # 종료 처리의 완료 기록 오류 정지 사유 꼬리 (설계 v11 R1 3.5 ⓑ) - 워커 [완료] 사유에 재입장 표지([terminal=InsideHandoff …])가 있으면
+  # 캐릭터가 입장 키 없이 다음 판 던전 안에 있을 수 있어 '던전 안일 수 있음' 꼬리를 붙이고, 없으면 문구 그대로 돌려줍니다
+  param([string]$Reason, [string]$WorkerReason)
+  if ($WorkerReason.Contains('[terminal=InsideHandoff')) { return (Get-InsideHandoffStopReason -Reason $Reason) }
+  return $Reason
+}
+
+function Get-WorkerDoneMarkers {
+  # 워커 [완료] 사유의 표지 판별 (순수 - 구현 명세 ① 2.7 ① · 설계 v10 6.1 'GUI 계상 규칙' · v11 R1 3.2). 사유는 화면 변환 전 원문
+  # ($script:lastWorkerDoneReason - 갈래 앞 공통 최종 수집까지 끝낸 값)이고, 코드 4 계상(Invoke-Code4Accounting)과 코드 0·11 재입장 판별
+  # (Get-AbyssExitHandoffKind)이 이 판별 하나를 씁니다. 표지 = 워커가 [완료] 사유에 붙이는 영문 꼬리:
+  #  - Locked            ' (locked)'            : 워커가 완료 기록을 읽지 못해 넘겨받은 항목을 쓰지 못한 기동 - 그 nonce 를 done 으로 닫지 않음(재전달)
+  #  - SelectionOverlay  ' (selection-overlay)' / MenuOverlay ' (menu-overlay)' : 선택 화면·ESC 메뉴에서 던전 안·밖을 몰라 조작 없이 멈춘
+  #                      기동 - 같은 재전달, 커스텀 재개(resume) 기동이면 계상 자체를 보류
+  #  - PostClear         ' (post-clear)'        : 클리어 뒤 조건 정지 - 유효한 클리어 기록이 없을 때 이 표지로 1회 계상(설계 v10 6.1 ④)
+  #  - InsideHandoffNonce : 재입장 완료 줄 꼬리 '[terminal=InsideHandoff nonce=<guid>]' 의 nonce(없으면 빈 값)
+  # 이 빌드의 워커는 이 표지들을 아직 내지 않습니다(재입장·재개·선택 화면 보류·클리어 뒤 정지 표지는 뒤 단위) - 판별 자리를 먼저 두고 진리표로 지킵니다
+  param([string]$Reason)
+  $markerText = [string]$Reason
+  $handoffNonce = ''
+  if ($markerText -match '\[terminal=InsideHandoff nonce=([0-9A-Fa-f-]+)\]') { $handoffNonce = $Matches[1] }
+  return @{
+    Locked             = $markerText.Contains(' (locked)')
+    SelectionOverlay   = $markerText.Contains(' (selection-overlay)')
+    MenuOverlay        = $markerText.Contains(' (menu-overlay)')
+    PostClear          = $markerText.Contains(' (post-clear)')
+    InsideHandoffNonce = $handoffNonce
+  }
+}
+
+function Get-AbyssExitHandoffKind {
+  # 코드 0·11 의 재입장(InsideHandoff) 판별 순수부 (설계 v11 R1 3.2 표 · 구현 명세 ① 2.6). 위 행이 이깁니다:
+  #  1 커스텀인데 진행 위치를 못 읽음(-ReadStatus 'no-context' - 래퍼가 journal 을 열지 않음): 사유에 재입장 표지가 있으면 journal-error,
+  #    없으면 none(지금처럼 커스텀 사슬이 받음)
+  #  2 journal 읽기 실패 → journal-error. locked·corrupt 는 설계 v10 6.1 읽기 계약의 호출부 규칙이고, io-failed 는 그 표 뒤에 저장소에 생긴
+  #    태그라 같은 줄에 둡니다 - 못 읽은 채 none 으로 흘리면 재입장한 판을 일반 회차처럼 넘겨 버립니다. 정지 문구의 '못 한 일' 은 실제 상태로
+  #    적습니다(단계 2.6 구현 리뷰가 넘긴 정리 - 2.8): 커스텀은 진행 전진·기동을 막고 마커도 그대로 '(기록·마커 보존)', 비커스텀(owner = 실행 id)은
+  #    계상이 이미 끝났고(공통 구간 +1) 진행 전진·완료 마커가 없어 못 한 일은 기동뿐 '(기록 보존)'
+  #  3 이 판 owner 의 미적용 항목 중 stage reentered → inside-handoff(journal)
+  #  4 3 이 없고 사유의 표지 nonce 가 같은 owner 의 미적용 retry-attempt·retry-clicked 항목 → inside-handoff(log) - reentered 기록이 실패해도
+  #    워커는 이어 가므로(설계 v10 6.1 기록 시점 표) 종료 문구로 이어받고, 필수 기록이 stage 를 보정합니다
+  #  5 표지가 있는데 4 에 맞는 항목이 없음(nonce 다름·이미 적용됨·다른 owner·단계 다름) → journal-error
+  #  6 그 밖 none
+  # '미적용' = nonce 가 applied 에 없음. owner 대조는 저장소의 Test-AbyssJournalOwnerMatch(커스텀 5필드 + 세대 / 비커스텀 runId). 같은 조건이
+  # 여럿이면 가장 최근(배열 뒤쪽 - 기동 후보 고르기와 같은 규칙). 정지 사유 꼬리는 Get-AbyssExitStopReason(사유에 표지가 있을 때만).
+  # 반환 @{ Kind(none / inside-handoff / journal-error); Nonce; Source(journal / log / ''); Reason(journal-error 의 정지 사유) }
+  param([string]$ReadStatus, $Journal = $null, $Owner = $null, $Generation = 0, [string]$Reason = '')
+  $markerSeen = $Reason.Contains('[terminal=InsideHandoff')
+  if ($ReadStatus -eq 'no-context') {
+    if (-not $markerSeen) { return @{ Kind = 'none'; Nonce = ''; Source = ''; Reason = '' } }
+    return @{ Kind = 'journal-error'; Nonce = ''; Source = ''
+      Reason = (Get-AbyssExitStopReason -Reason '커스텀 진행 위치를 읽지 못해 완료 기록을 대조하지 못함' -WorkerReason $Reason) }
+  }
+  if ($ReadStatus -ne 'ok') {
+    $plainRun = [bool](Get-AbyssJournalField -Object $Owner -Name 'runId').Has
+    $heldWhat = $(if ($plainRun) { '기동을 보류하고 정지 (기록 보존)' } else { '진행 전진·기동을 보류하고 정지 (기록·마커 보존)' })
+    if ($ReadStatus -eq 'locked') {
+      $failText = ('완료 기록 파일이 사용 중 - {0} {1}' -f $heldWhat, (Get-AbyssJournalLockedGuide))
+    } elseif ($ReadStatus -eq 'corrupt') {
+      $failText = '완료 기록 파일 손상 - 파일을 보존하고 정지 ' + (Get-AbyssJournalCorruptGuide)
+    } else {
+      $failText = ('완료 기록 파일을 읽지 못해 {0}' -f $heldWhat)
+    }
+    return @{ Kind = 'journal-error'; Nonce = ''; Source = ''; Reason = (Get-AbyssExitStopReason -Reason $failText -WorkerReason $Reason) }
+  }
+  $appliedNonces = @(@($Journal.applied) | ForEach-Object { [string]$_ })
+  $reenteredNonce = ''
+  foreach ($entry in @($Journal.entries)) {
+    if ($null -eq $entry -or [string]$entry.stage -ne 'reentered' -or $appliedNonces -contains [string]$entry.nonce) { continue }
+    if (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $Owner -Generation $Generation) { $reenteredNonce = [string]$entry.nonce }
+  }
+  if ($reenteredNonce) { return @{ Kind = 'inside-handoff'; Nonce = $reenteredNonce; Source = 'journal'; Reason = '' } }
+  if (-not $markerSeen) { return @{ Kind = 'none'; Nonce = ''; Source = ''; Reason = '' } }
+  # 표지 nonce 는 코드 4 계상과 같은 표지 판별에서 읽습니다(구현 명세 ① 2.7 ① - 표지 글자를 한 곳에)
+  $markerNonce = [string](Get-WorkerDoneMarkers -Reason $Reason).InsideHandoffNonce
+  $loggedNonce = ''
+  foreach ($entry in @($Journal.entries)) {
+    if ($null -eq $entry -or -not $markerNonce -or [string]$entry.nonce -ne $markerNonce) { continue }
+    $entryStage = [string]$entry.stage
+    if ($entryStage -ne 'retry-attempt' -and $entryStage -ne 'retry-clicked') { continue }
+    if ($appliedNonces -contains [string]$entry.nonce) { continue }
+    if (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $Owner -Generation $Generation) { $loggedNonce = [string]$entry.nonce }
+  }
+  if ($loggedNonce) { return @{ Kind = 'inside-handoff'; Nonce = $loggedNonce; Source = 'log'; Reason = '' } }
+  return @{ Kind = 'journal-error'; Nonce = ''; Source = ''
+    Reason = (Get-AbyssExitStopReason -Reason '재입장 완료 문구와 맞는 완료 기록이 없음 - 기동을 보류하고 정지' -WorkerReason $Reason) }
+}
+
+function Read-AbyssExitHandoff {
+  # 코드 0·11 재입장 판별 래퍼 (설계 v11 R1 3.2 · 구현 명세 ① 2.6) - journal 잠금 읽기 1회 → 순수부 Get-AbyssExitHandoffKind. 타이머가 계상
+  # +1·완료 줄 뒤, 커스텀 진행 전진 앞에서 부릅니다 - owner 는 진행 전의 이 판(커스텀 = 공통 구간이 읽은 컨텍스트 -Context, 비커스텀 = 이번
+  # 실행 id)이라 config 를 새로 읽지 않습니다. 코드 0·11 이 아니거나 어비스 완료 기록 실행이 아니면(Test-AbyssHandoffRunActive) journal 을
+  # 열지 않고 none, 커스텀인데 -Context 가 $null(설정 읽기 실패)이면 열지 않고 표 1행으로 정합니다. 저장소가 돌려준 복구 경고는 GUI 로그로
+  # 남깁니다(로그는 호출부 몫). 이 읽기가 설계 v10 의 코드 0 처리가 하는 '재입장 표지 먼저 읽기' 그 1회입니다.
+  # 예외는 읽지 못한 것과 같은 journal-error·같은 글자(순수부 2행 - 비커스텀 '기동 … (기록 보존)' / 커스텀 '진행 전진·기동 … (기록·마커 보존)')로
+  # 돌려줍니다(밖으로 내지 않음 - 명세 5절 A4)
+  param([int]$ExitCode, $Context = $null)
+  $workerReason = [string]$script:lastWorkerDoneReason
+  try {
+    if ((($ExitCode -ne 0) -and ($ExitCode -ne 11)) -or -not (Test-AbyssHandoffRunActive)) {
+      return @{ Kind = 'none'; Nonce = ''; Source = ''; Reason = '' }
+    }
+    if ($script:customActive) {
+      if ($null -eq $Context) { return (Get-AbyssExitHandoffKind -ReadStatus 'no-context' -Reason $workerReason) }
+      $owner = Get-CustomCanonicalOwner -Context $Context
+      $generation = [int]$Context.Generation
+    } else {
+      $owner = @{ runId = [string]$script:runId }
+      $generation = 0
+    }
+    $read = Read-AbyssJournal -Path $abyssJournalPath
+    foreach ($readWarning in @($read.Warnings)) { Add-GuiLog ([string]$readWarning) }
+    return (Get-AbyssExitHandoffKind -ReadStatus ([string]$read.Status) -Journal $read.Journal -Owner $owner -Generation $generation -Reason $workerReason)
+  } catch {
+    $heldWhat = $(if ($script:customActive) { '진행 전진·기동을 보류하고 정지 (기록·마커 보존)' } else { '기동을 보류하고 정지 (기록 보존)' })
+    return @{ Kind = 'journal-error'; Nonce = ''; Source = ''
+      Reason = (Get-AbyssExitStopReason -Reason ('완료 기록 파일을 읽지 못해 {0} (예외: {1})' -f $heldWhat, $_.Exception.Message) -WorkerReason $workerReason) }
+  }
+}
+
+function Complete-AbyssExitJournal {
+  # 종료 처리의 완료 기록 끝 처리 (설계 v10 6.1 'GUI 계상 규칙' 끝 문단 · v11 R1 3.3 · R2 3.7 · 구현 명세 ① 2.6) - 저장 1회(잠금 아래 한 mutation):
+  #  ① 소비: 지금 owner 의 '클리어 이상'·미적용 항목 nonce 를 applied 에(그 판의 계상이 끝났다는 표시 - 다음 시작이 다시 세지 않음)
+  #  ② 이번 기동에 넘긴 nonce($script:lastLaunchNonce) 항목을 launchState done 으로 - 이미 done 이면 그 항목을 건드리지 않습니다(워커가 남긴
+  #     reason·screen 보존). -KeepLaunched 면 하지 않습니다(재전달 예외 - 다음 시작이 같은 nonce 를 다시 받음)
+  # 소비하는 종료·안 하는 종료:
+  #  - 커스텀 코드 0·11 은 -ConsumeOnly 가 아니면 소비하지 않고 ② 만 합니다 - 소비는 커스텀 사슬의 진행 전진(Step-CustomProgress) 성공 바로 뒤
+  #    -ConsumeOnly 호출이 합니다. 전진 저장이 실패하면 미적용 cleared 가 남아 다음 시작이 그 판의 마무리 복구를 예약합니다(완료 마커를 못
+  #    쓴 판도 같은 판을 다시 돌지 않게 - 명세 리뷰 3 P1). -ConsumeOnly 는 ① 만 합니다(nonce 는 건드리지 않음)
+  #  - 소비는 코드 0·11·4·10 만 - 오류 종료(코드 1 과 그 밖 코드)는 소비하지 않습니다(다음 시작의 복구 근거 - 명세 5절 A6ⓐ)
+  #  - 코드 10 이라도 마무리 복구 기동($script:customRecoveryPending)이면 소비하지 않습니다 - 복귀 중 안전 중지의 코드 10 은 복구 미완료라
+  #    마커를 지우지 않는 것과 같게 둡니다(명세 5절 A6ⓑ (가))
+  # -Context: 커스텀 소비의 owner - 진행 컨텍스트(Get-CustomCurrentContext 반환) 또는 owner(5필드 + generation - 마무리 실행의 보류 Owner).
+  #   넘기지 않았으면(코드 10 - 진행 전진이 없음) 지금 컨텍스트를 읽고, 넘겼는데 $null 이면(설정 읽기 실패) 다시 읽지 않고 소비를 건너뜁니다
+  #   (② 는 함). 비커스텀은 이번 실행 id 가 owner 라 이 인자를 쓰지 않습니다.
+  # 할 일이 없으면(어비스 완료 기록 실행이 아님 · 소비도 넘긴 nonce 도 없음) journal 을 열지 않고 $true.
+  # 반환 $true = 이어서 진행 / $false = 이 함수 안에서 오류 정지까지 함(호출부는 return). 코드 0·11 이 성공하면 비커스텀 재입장 오류 연속
+  # ($script:abyssErrorStreak)을 0 으로 되돌립니다 - 타이머 문장 순서(T4-e 2d)를 그대로 두려고 여기서 합니다(명세 5절 B4).
+  # 예외를 밖으로 내지 않습니다(명세 5절 A4) - 잡아서 기록 실패와 같은 오류 정지
+  param([int]$ExitCode, $Context = $null, [switch]$KeepLaunched, [switch]$ConsumeOnly)
+  $workerReason = [string]$script:lastWorkerDoneReason
+  $successCode = (@(0, 11) -contains $ExitCode)
+  # 실패 문구의 '무엇을 못 하고 멈추나' 는 부른 자리의 실제 단계로 고릅니다 - 이미 끝난 일을 '보류' 라고 적거나 지운 마커를 '보존' 이라고
+  # 적지 않게(단계 2.6 구현 검증 - 명세 대조 P3-2):
+  #  - 마무리 실행 기동의 끝(기동 종류 finish-only - 완주 처리의 두 호출·비커스텀 완주·코드 10 첫 문장): 기동할 다음 판이 없고 정지는 띄울 때
+  #    정했으므로 '완료 표시를 남기지 못하고 정지'. 커스텀 0·11 은 대기열 반영(진행 전진·마커 정리)이 이미 끝나 '(진행은 반영됨)', 그 밖 '(기록 보존)'
+  #  - 코드 4(조건 정지 - 다음 기동이 없음): 계상(마커 경로·기록 규칙)은 이 끝 처리 앞의 Invoke-Code4Accounting 이 이미 했고 못 한 일은
+  #    완료 표시(소비·done)뿐 - '완료 표시를 남기지 못하고 정지 (기록 보존)'(구현 명세 ① 2.7 - 설계 v10 6.1 의 '계상·기동을 보류' 는 읽기
+  #    실패로 계상 앞에서 멈출 때의 문구라 계상이 끝난 이 자리와 맞지 않음). 오류 종료(코드 1 과 그 밖 코드 - 2.8)도 같은 글자입니다: 타이머가
+  #    정지하기로 정한 경로(같은 항목 3회째 · 그 밖 오류)에서만 부르고 계상·소비가 없어 못 한 일은 이번 기동 nonce 의 done 표시뿐입니다
+  #  - 비커스텀 0·11(일반 끝 처리)·일반 코드 10: 계상(0·11 은 타이머가 이미 +1, 10 은 계상 없음)·진행 전진·완료 마커와 무관하게 못 한 일은
+  #    기동뿐 - 사용 중도 저장 실패와 같은 '기동을 보류하고 정지 (기록 보존)'(단계 2.6 구현 리뷰 P3 · 코드 10 은 같은 리뷰가 2.7 로 넘김 -
+  #    코드 10 은 계상하지 않고 마커도 건드리지 않음)
+  #  - 그 밖(커스텀 0·11): 사용 중 = 진행 전진 앞(첫 호출) '진행 전진·기동' / 전진 뒤 소비(-ConsumeOnly) '기동' 을 보류 (기록·마커 보존).
+  #    저장 실패·예외 = '기동을 보류하고 정지 (기록 보존)'(명세 2.6 제안 문구)
+  # 손상 문구('파일을 보존하고 정지')는 어디서나 같은 글자입니다(진행 전진·마커 표현 없음).
+  # 예외 갈래(catch)도 같은 글자를 쓰도록 try 앞에서 정합니다 - 문자열만 고르는 식이라 예외가 나지 않습니다
+  if ([string]$script:lastLaunchKind -eq 'finish-only') {
+    $keptText = $(if ($script:customActive -and $successCode) { '진행은 반영됨' } else { '기록 보존' })
+    $lockedWhat = ('마무리 실행 완료 표시를 남기지 못하고 정지 ({0})' -f $keptText)
+    $saveWhat = $lockedWhat
+  } elseif (@(0, 11, 10) -notcontains $ExitCode) {
+    $lockedWhat = '완료 표시를 남기지 못하고 정지 (기록 보존)'
+    $saveWhat = $lockedWhat
+  } elseif (($successCode -and -not $script:customActive) -or ($ExitCode -eq 10)) {
+    $lockedWhat = '기동을 보류하고 정지 (기록 보존)'
+    $saveWhat = $lockedWhat
+  } else {
+    $heldWhat = $(if ($ConsumeOnly) { '기동' } else { '진행 전진·기동' })
+    $lockedWhat = ('{0}을 보류하고 정지 (기록·마커 보존)' -f $heldWhat)
+    $saveWhat = '기동을 보류하고 정지 (기록 보존)'
+  }
+  try {
+    if (-not (Test-AbyssHandoffRunActive)) { return $true }
+    $doConsume = ($ConsumeOnly -or -not ($script:customActive -and $successCode))
+    if (@(0, 11, 4, 10) -notcontains $ExitCode) { $doConsume = $false }
+    if (($ExitCode -eq 10) -and $script:customRecoveryPending) { $doConsume = $false }
+    $doneNonce = ''
+    if (-not $ConsumeOnly -and -not $KeepLaunched) { $doneNonce = [string]$script:lastLaunchNonce }
+    $consumeOwner = $null
+    $consumeGeneration = 0
+    if ($doConsume -and -not $script:customActive) {
+      $consumeOwner = @{ runId = [string]$script:runId }
+    } elseif ($doConsume) {
+      $ownerSource = $Context
+      if (-not $PSBoundParameters.ContainsKey('Context')) { $ownerSource = Get-CustomCurrentContext }
+      if ($null -eq $ownerSource) {
+        $doConsume = $false
+      } elseif ((Get-AbyssJournalField -Object $ownerSource -Name 'fingerprint').Has) {
+        $consumeOwner = $ownerSource
+        $consumeGeneration = [int](Get-AbyssJournalField -Object $ownerSource -Name 'generation').Value
+      } else {
+        $consumeOwner = Get-CustomCanonicalOwner -Context $ownerSource
+        $consumeGeneration = [int]$ownerSource.Generation
+      }
+    }
+    if ($doConsume -or $doneNonce) {
+      # mutator 는 클로저로 만듭니다 - 클로저가 아니면 저장 함수의 지역 변수가 같은 이름의 이 함수 변수를 가립니다(동적 스코프 - 실측). 클로저
+      # 안에서는 $script: 를 읽지 않고 위 지역 변수만 쓰며, 부르는 함수는 최상위 함수뿐입니다(명세 ① 2.0 체크리스트 5·6)
+      $mutator = {
+        param($journal, $change)
+        if ($doConsume) {
+          $appliedNonces = @(@($journal.applied) | ForEach-Object { [string]$_ })
+          $consumedNonces = @()
+          foreach ($entry in @($journal.entries)) {
+            if ($null -eq $entry) { continue }
+            $entryNonce = [string]$entry.nonce
+            if (-not $entryNonce -or $appliedNonces -contains $entryNonce -or $consumedNonces -contains $entryNonce) { continue }
+            if ((Get-AbyssJournalStageRank -Stage ([string]$entry.stage)) -lt 1) { continue }
+            if (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $consumeOwner -Generation $consumeGeneration) { $consumedNonces += $entryNonce }
+          }
+          if ($consumedNonces.Count -gt 0) {
+            $journal.applied = @(@($journal.applied) + $consumedNonces)
+            $change.Changed = $true
+          }
+        }
+        if ($doneNonce) {
+          foreach ($entry in @($journal.entries)) {
+            if ($null -eq $entry -or [string]$entry.nonce -ne $doneNonce -or [string]$entry.launchState -eq 'done') { continue }
+            Set-AbyssJournalProperty -Object $entry -Name 'launchState' -Value 'done'
+            $change.Changed = $true
+          }
+        }
+      }.GetNewClosure()
+      $update = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+      # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+      foreach ($updateWarning in @($update.Warnings)) { Add-GuiLog ([string]$updateWarning) }
+      $updateTag = [string]$update.Tag
+      if ($updateTag -ne 'changed' -and $updateTag -ne 'unchanged') {
+        # 사용 중·저장 실패 문구의 뒷부분은 함수 머리에서 부른 자리의 단계로 골랐습니다($lockedWhat·$saveWhat). 손상은 어디서나 같은 글자
+        if ($updateTag -eq 'locked') {
+          $failText = ('완료 기록 파일이 사용 중 - {0} {1}' -f $lockedWhat, (Get-AbyssJournalLockedGuide))
+        } elseif ($updateTag -eq 'corrupt') {
+          $failText = '완료 기록 파일 손상 - 파일을 보존하고 정지 ' + (Get-AbyssJournalCorruptGuide)
+        } else {
+          $failText = ('완료 기록 저장 실패 - {0}' -f $saveWhat)
+        }
+        Stop-AllRun -IsError (Get-AbyssExitStopReason -Reason $failText -WorkerReason $workerReason)
+        $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+        return $false
+      }
+    }
+    if ($successCode) { $script:abyssErrorStreak = 0 }
+    return $true
+  } catch {
+    Stop-AllRun -IsError (Get-AbyssExitStopReason -Reason ('완료 기록 저장 실패 - {0} (예외: {1})' -f $saveWhat, $_.Exception.Message) -WorkerReason $workerReason)
+    $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+    return $false
+  }
+}
+
+function Invoke-InsideHandoffExit {
+  # 재입장(InsideHandoff) 실행부 (설계 v11 R1 3.4·4 · 구현 명세 ① 2.6·2.8). 판별이 inside-handoff 인 코드 0·11 종료(타이머)와 reentered 뒤의
+  # 코드 1 종료(Invoke-Code1JournalRouting - -ExitCode 1)를 받아, '다시 하기'로 들어간 다음 판 던전 안에 입장 키 없이 서 있는 캐릭터를 반드시 다음
+  # 워커로 이어 줍니다 - 정지 조건이어도 곧바로 멈추지 않고 마무리 실행(finish-only)으로 그 판을 끝까지 한 뒤 멈춥니다(설계 R1 3.5 - Stop-AllRun
+  # 으로 끝내면 캐릭터가 던전 안에 방치됨). 계상 +1·완료 줄은 부른 쪽이 이미 했습니다.
+  #  1 (커스텀) 타이머 커스텀 사슬과 같은 단계·순서 - 오류 연속 0 · 재시작 해제 · PREV = 끝난 판 · 진행 전진 · 복구 대기 해제 · 마커 정리 ·
+  #    바퀴 완주 판정. 진행 저장이 실패하면 즉시 멈추지 않고 대기열에 원소(owner = 끝난 판 · 단계는 부른 자리 - 코드 0·11 = inside-handoff,
+  #    코드 1 = code1-routed, 명세 5절 B7)를 남긴 뒤 보류 step-failed 로 마무리 실행합니다(마무리 실행 완주 처리나 다음 시작이 대기열을 반영) -
+  #    대기열을 못 남기면 오류 정지('사용 중' 이면 잠금 파일 안내)
+  #  2 필수 기록 1건(잠금 아래 한 mutation - 일반 끝 처리를 겸함): 이 항목과 같은 owner 의 미적용 '클리어 이상' 항목 applied · nextOwner 확정
+  #    (비커스텀 = 이번 실행 id, 커스텀 = 전진에 성공했으면 전진 뒤 위치 - 기록과 다르면 GUI 값으로 고치고 [경고], 실패했으면 기록 값 그대로)
+  #    · stage 가 retry-attempt·retry-clicked 면 reentered 로 보정 · launchState launched · 이번 기동에 넘긴 nonce 가 이 항목과 다를 때만 그
+  #    항목 done(같으면 재개 기동의 재입장 - 같은 항목을 다음 기동에 다시 넘기므로 열어 둠). 실패하면 기동하지 않고 오류 정지
+  #  3 판단 - 비커스텀: 다음 회차 판단 순수부(Get-NextCycleAction, 준비 실행 연속 0) / 커스텀: 진행 저장 실패 > 안전 중지 > 바퀴 완주 > 없음
+  #  4 기동 계획 - 다음 판(next-owner) 또는 마무리 실행 + 보류 @{ Kind; Reason; IsError; Owner; Position; Snapshot }:
+  #     Owner = 필수 기록이 확정한 nextOwner 의 5필드 + 그 항목의 generation(형제 필드)을 generation 키로(커스텀 - 마무리 실행 기동이 ITEM·OWNER·
+  #     GENERATION·NEXT 와 기동 후보 대조를 이 값으로 만듭니다. nextOwner 를 그대로 넣으면 세대가 0 이 되어 세대 1 이상인 판의 OWNER·마커가
+  #     무효가 되고 후보도 못 고릅니다) / 비커스텀 @{ runId }. Snapshot = 진행 전 컨텍스트(-FinishedContext - 마무리 실행이 config 를 다시 읽지
+  #     않고 목록을 만듦), 비커스텀 $null
+  # 1~4 는 try 안에서 계획만 정하고, 실패 경로는 오류 정지 뒤 return 입니다. catch 도 오류 정지 뒤 return - PS 5.1 은 catch 가 끝나면 try 다음
+  # 문장으로 이어 가므로 return 이 없으면 정지 뒤 기동합니다(설계 R1 3.4 실행 확인). 기동은 try 밖 마지막 문장 한 번 - 기동 뒤 예외가 방금
+  # 띄운 워커를 정지로 죽이지 않게 하고, 기동 함수는 스스로 예외를 내지 않습니다(설계 R1 3.8). 정지 사유 끝에는 늘 '던전 안일 수 있음' 꼬리
+  # (설계 R1 3.5 ⓐ). -Handoff = 판별 결과 @{ Kind; Nonce; Source; Reason }
+  param([int]$ExitCode, $Handoff, $FinishedContext = $null)
+  $launchPlan = $null
+  try {
+    $handoffNonce = [string]$Handoff.Nonce
+    $isCustom = [bool]$script:customActive
+    $launchNonce = [string]$script:lastLaunchNonce
+    $stepFailed = $false
+    $lapComplete = $false
+    $afterContext = $null
+    $ownerNow = @{ runId = [string]$script:runId }
+    $generationNow = 0
+    if ($isCustom) {
+      $ownerNow = $null
+      if ($null -ne $FinishedContext) {
+        $ownerNow = Get-CustomCanonicalOwner -Context $FinishedContext
+        $generationNow = [int]$FinishedContext.Generation
+      }
+      $wasRecovery = $script:customRecoveryPending
+      $script:customErrorStreak = 0
+      $script:customRestart = $false
+      if ($FinishedContext) { $script:customPrevItem = Format-CustomItemToken -Item $FinishedContext.Item }
+      $advanced = Step-CustomProgress
+      if (-not $advanced) {
+        $stepFailed = $true
+        $queueStage = $(if ($ExitCode -eq 1) { 'code1-routed' } else { 'inside-handoff' })
+        if (-not (Add-AbyssPendingEntry -Stage $queueStage -Owner $ownerNow -Generation $generationNow -Nonce $handoffNonce)) {
+          # 대기열이 '사용 중' 으로 실패했으면 잠금 파일 안내를 붙이고(대기열 함수가 남긴 태그 - 단계 2.6 구현 리뷰), 재입장 꼬리는 그 뒤 맨 끝
+          Stop-AllRun -IsError (Get-InsideHandoffStopReason -Reason (Get-AbyssPendingStopReason -Reason '커스텀 진행 기록·대기열 저장 실패 - 중복 실행 방지를 위해 정지'))
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          return
+        }
+      } else {
+        $script:customRecoveryPending = $false
+        if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
+          Add-GuiLog '[경고] 완료 마커 파일을 정리하지 못했습니다 - 다음 회차 시작 때 다시 정리합니다.'
+        }
+        if ($wasRecovery) { Add-GuiLog '[커스텀] 마무리 복구 완료 - 다음 항목으로 진행합니다.' }
+        if ($FinishedContext) {
+          $lapComplete = Test-CustomLapComplete -ListRepeat $FinishedContext.ListRepeat `
+            -ListRepeatCount $FinishedContext.ListRepeatCount -Lap ([int]$advanced.lap)
+        }
+        $afterContext = Get-CustomCurrentContext
+      }
+    }
+    # 2 필수 기록 - 확정할 nextOwner(전진 뒤 위치의 5필드 · 비커스텀은 실행 id). 전진에 실패했거나 전진 뒤 위치를 못 읽으면 기록 값 그대로
+    $guiNextOwner = $null
+    if (-not $isCustom) {
+      $guiNextOwner = [pscustomobject]@{ runId = [string]$script:runId }
+    } elseif ($null -ne $afterContext) {
+      $afterOwner = Get-CustomCanonicalOwner -Context $afterContext
+      $guiNextOwner = [pscustomobject]@{ fingerprint = [string]$afterOwner.fingerprint; orderKey = [string]$afterOwner.orderKey
+        lap = [int]$afterOwner.lap; index = [int]$afterOwner.index; item = [string]$afterOwner.item }
+    }
+    # 클로저(-Expect·-Mutator)는 $script: 를 읽지 않고 위 지역 변수만 쓰며, 결과는 $record 해시테이블로 돌려받습니다(명세 ① 2.0 체크리스트 5·6)
+    $record = @{ NextOwner = $null; Generation = 0; Replaced = $false }
+    $expect = {
+      param($journal)
+      return [bool](@(@($journal.entries) | Where-Object { ($null -ne $_) -and ([string]$_.nonce -eq $handoffNonce) }).Count -gt 0)
+    }.GetNewClosure()
+    $mutator = {
+      param($journal, $change)
+      $appliedNonces = @(@($journal.applied) | ForEach-Object { [string]$_ })
+      $newApplied = @()
+      $target = $null
+      foreach ($entry in @($journal.entries)) {
+        if ($null -eq $entry) { continue }
+        $entryNonce = [string]$entry.nonce
+        if ($entryNonce -eq $handoffNonce) { $target = $entry }
+        if (-not $entryNonce -or $appliedNonces -contains $entryNonce -or $newApplied -contains $entryNonce) { continue }
+        if (($entryNonce -eq $handoffNonce) -or (((Get-AbyssJournalStageRank -Stage ([string]$entry.stage)) -ge 1) -and
+            (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $ownerNow -Generation $generationNow))) { $newApplied += $entryNonce }
+      }
+      if ($newApplied.Count -gt 0) {
+        $journal.applied = @(@($journal.applied) + $newApplied)
+        $change.Changed = $true
+      }
+      $targetGeneration = [int](Get-AbyssJournalField -Object $target -Name 'generation').Value
+      if (($null -ne $guiNextOwner) -and -not (Test-AbyssJournalOwnerMatch -Entry $target -Owner $guiNextOwner -Generation $targetGeneration -Field 'nextOwner')) {
+        Set-AbyssJournalProperty -Object $target -Name 'nextOwner' -Value $guiNextOwner
+        $record.Replaced = $true
+        $change.Changed = $true
+      }
+      $targetStage = [string]$target.stage
+      if (($targetStage -eq 'retry-attempt') -or ($targetStage -eq 'retry-clicked')) {
+        Set-AbyssJournalProperty -Object $target -Name 'stage' -Value 'reentered'
+        $change.Changed = $true
+      }
+      if ([string]$target.launchState -ne 'launched') {
+        Set-AbyssJournalProperty -Object $target -Name 'launchState' -Value 'launched'
+        $change.Changed = $true
+      }
+      if ($launchNonce -and ($launchNonce -ne $handoffNonce)) {
+        foreach ($entry in @($journal.entries)) {
+          if ($null -eq $entry -or [string]$entry.nonce -ne $launchNonce -or [string]$entry.launchState -eq 'done') { continue }
+          Set-AbyssJournalProperty -Object $entry -Name 'launchState' -Value 'done'
+          $change.Changed = $true
+        }
+      }
+      $record.NextOwner = (Get-AbyssJournalField -Object $target -Name 'nextOwner').Value
+      $record.Generation = $targetGeneration
+    }.GetNewClosure()
+    $recordResult = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+    foreach ($recordWarning in @($recordResult.Warnings)) { Add-GuiLog ([string]$recordWarning) }
+    $recordTag = [string]$recordResult.Tag
+    if ($recordTag -ne 'changed' -and $recordTag -ne 'unchanged') {
+      # 사용 중·손상은 설계 v10 6.1 호출부 규칙 문구(설계 R1 3.5 '그 문구가 있으면 그것'), 그 밖(기록 실패·판별한 항목이 사라짐)은 설계 R1 3.5 ②.
+      # 사용 중 문구의 괄호는 실제 상태로 고릅니다 - 커스텀 전진에 성공했으면 마커를 위 1 에서 이미 정리해 '(기록 보존)', 그 밖(비커스텀 · 진행
+      # 저장 실패 - 마커 정리 전)은 '(기록·마커 보존)' (단계 2.6 구현 검증 - 명세 대조 P3-2)
+      if ($recordTag -eq 'locked') {
+        $keptText = $(if ($isCustom -and -not $stepFailed) { '기록 보존' } else { '기록·마커 보존' })
+        $recordFail = ('완료 기록 파일이 사용 중 - 기동을 보류하고 정지 ({0}) {1}' -f $keptText, (Get-AbyssJournalLockedGuide))
+      } elseif ($recordTag -eq 'corrupt') {
+        $recordFail = '완료 기록 파일 손상 - 파일을 보존하고 정지 ' + (Get-AbyssJournalCorruptGuide)
+      } else {
+        $recordFail = '재입장 완료 기록 실패 - 기동을 보류하고 정지 (기록 보존)'
+      }
+      Stop-AllRun -IsError (Get-InsideHandoffStopReason -Reason $recordFail)
+      $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+      return
+    }
+    if ($isCustom -and $record.Replaced) { Add-GuiLog '[경고] 재입장 완료 기록의 다음 판 위치가 진행 기록과 달라 진행 기록 값으로 고쳤습니다' }
+    if ([string]$Handoff.Source -eq 'log') { Add-GuiLog '[경고] 재입장 완료 기록이 없어 종료 문구로 이어받기를 확인했습니다 - 완료 기록을 보정하고 이어 갑니다' }
+    if (@(0, 11) -contains $ExitCode) { $script:abyssErrorStreak = 0 }
+    # 3 판단 → 4 계획. 보류 사유 = 정지할 때의 사유 글자 그대로(정지 리터럴을 여기 따로 쓰지 않음 - 완주 처리가 이 값으로 정지)
+    $holdKind = ''
+    $holdReason = ''
+    $holdIsError = $false
+    if ($isCustom) {
+      if ($stepFailed) { $holdKind = 'step-failed'; $holdReason = '커스텀 진행 기록 저장 실패'; $holdIsError = $true }
+      elseif ($script:stopRequested) { $holdKind = 'safe-stop'; $holdReason = '안전 중지' }
+      elseif ($lapComplete) { $holdKind = 'lap-complete'; $holdReason = '지정 바퀴 완료' }
+    } else {
+      # 다음 회차 판단 순수부를 그대로 씁니다 - 지정 횟수·지정 시각 계산은 Invoke-NextCycleDecision 과 같은 식(설계 R1 3.6 (가))
+      $reachedTarget = ($script:targetCycles -gt 0 -and $script:completedCycles -ge $script:targetCycles)
+      $timeAllows = Test-TimeAllowsNextCycle
+      $nextAction = Get-NextCycleAction -ExitCode $ExitCode -StopRequested $script:stopRequested -ReachedTarget $reachedTarget -PreparedStreak 0 -TimeAllows $timeAllows
+      if ($nextAction -eq 'safe-stop') { $holdKind = 'safe-stop'; $holdReason = '안전 중지' }
+      elseif ($nextAction -eq 'count') { $holdKind = 'count'; $holdReason = '지정 횟수 완료' }
+      elseif ($nextAction -eq 'time') { $holdKind = 'time'; $holdReason = ('지정 시간({0}) 도달' -f $script:targetTime.ToString('HH:mm')) }
+      elseif (($ExitCode -eq 11) -and (-not $timeAllows)) {
+        # 다음 회차 판단의 코드 11 안내와 같은 1줄 - 워커가 지정 시각 전에 이어 가기로 정했으니 이어받습니다
+        Add-GuiLog ('[안내] 지정 시간({0}) 전에 워커가 다음 판으로 이어 가기로 정했습니다 - 다음 워커가 이어받아 마무리합니다.' -f $script:targetTime.ToString('HH:mm'))
+      }
+    }
+    if (-not $holdKind) {
+      $launchPlan = @{ Kind = 'next-owner' }
+    } else {
+      if ($isCustom) {
+        $holdOwner = $null
+        if ($null -ne $record.NextOwner) {
+          $holdOwner = @{
+            fingerprint = [string]$record.NextOwner.fingerprint
+            orderKey    = [string](Get-AbyssJournalField -Object $record.NextOwner -Name 'orderKey').Value
+            lap         = [int]$record.NextOwner.lap
+            index       = [int]$record.NextOwner.index
+            item        = [string]$record.NextOwner.item
+            generation  = [int]$record.Generation
+          }
+        }
+        # 위치 문구 = 진행 컨텍스트와 같은 식(전진 뒤 위치를 읽었으면 그 문구, 아니면 보류 Owner 의 칸을 진행 전 목록 기준으로)
+        $holdPosition = ''
+        if ($null -ne $afterContext) {
+          $holdPosition = [string]$afterContext.Position
+        } elseif (($null -ne $holdOwner) -and ($null -ne $FinishedContext)) {
+          $holdPosition = Get-CustomPositionText -Lap $holdOwner.lap -Index $holdOwner.index -Total ([int]$FinishedContext.Total)
+          if ($FinishedContext.RandomOrder) { $holdPosition += ' (랜덤)' }
+        }
+        $hold = @{ Kind = $holdKind; Reason = $holdReason; IsError = $holdIsError; Owner = $holdOwner; Position = $holdPosition; Snapshot = $FinishedContext }
+      } else {
+        $hold = @{ Kind = $holdKind; Reason = $holdReason; IsError = $holdIsError; Owner = @{ runId = [string]$script:runId }; Position = ''; Snapshot = $null }
+      }
+      $launchPlan = @{ Kind = 'finish-only'; Hold = $hold }
+      $noticeTag = $(if ($holdIsError) { '[경고]' } else { '[안내]' })
+      Add-GuiLog ("{0} 마무리 실행: {1} - '다시 하기'로 이미 들어간 판을 끝까지 하고 선택 화면에서 멈춥니다" -f $noticeTag, $holdReason)
+    }
+  } catch {
+    Stop-AllRun -IsError (Get-InsideHandoffStopReason -Reason ('재입장 처리 중 예외 - 기동을 보류하고 정지 ({0})' -f $_.Exception.Message))
+    $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+    return
+  }
+  if ($launchPlan.Kind -eq 'finish-only') { Start-NextCycle -FinishOnlyHold $launchPlan.Hold }
+  elseif ($launchPlan.Kind -eq 'next-owner') { Start-NextCycle -FromInsideHandoff }
+}
+
+function Complete-FinishOnlyCycle {
+  # 마무리 실행(finish-only) 기동이 끝났을 때 (설계 v11 R1 3.7 표 · 구현 명세 ① 2.6). 정지는 마무리 실행을 띄울 때 이미 정했으므로 다음 회차
+  # 판단(Invoke-NextCycleDecision)·커스텀 사슬을 거치지 않고 보류 사유로 멈춥니다 - 진행 저장 실패 보류는 디스크 진행이 늦어 일반 사슬이 다음
+  # 항목을 잘못 고를 수 있습니다. 계상 +1·완료 줄(위치 = 보류 위치)은 타이머 공통 구간이 이미 했습니다.
+  #  - 코드 0·11 커스텀: 대기열에 finish-only-complete(owner = 보류 Owner - 디스크 위치가 아님) → 대기열 순서 반영(Invoke-AbyssPendingAdvance
+  #    -Caller finish - 대기열을 비우면 완료 마커 정리까지. 기록·반영 실패면 대기열·마커 보존 + 오류 정지('사용 중' 이면 잠금 파일 안내),
+  #    마커 정리 실패는 그 함수의 [경고]) →
+  #    끝 처리 두 호출: ⓐ 이번 기동 nonce done(커스텀 0·11 이라 소비 없음) ⓑ -ConsumeOnly 로 보류 Owner 의 미적용 cleared 소비(명세 리뷰 3
+  #    확인 라운드 P1 - 한 호출로는 둘 중 하나가 빠짐) → 바퀴 완주 보류면 진행 초기화 뒤 '지정 바퀴 완료', 그 밖은 보류 사유로 정지
+  #  - 코드 0·11 비커스텀: 끝 처리(이번 실행의 미적용 cleared 소비 · nonce done) → 보류 사유로 정지
+  #  - 코드 10(안전망 - 정상 경로에는 없음): 이 함수는 기록을 바꾸지 않고 보류 사유로 정지합니다. 끝 처리(소비·nonce done)는 코드 10 갈래
+  #    첫 문장이 이미 했습니다(설계 R2 3.7 · R1 H31) - nonce 를 launched 로 두면 다음 수동 시작이 같은 nonce 를 다시 받아 선택 화면 시작에서
+  #    (selection-overlay) 정지가 반복됩니다
+  # 끝 처리가 $false 면 그 함수 안에서 이미 오류 정지했으므로 그대로 끝냅니다. 예외를 밖으로 내지 않습니다(명세 5절 A4)
+  param([int]$ExitCode)
+  try {
+    $hold = $script:finishOnlyHold
+    $holdReason = [string]$hold.Reason
+    $holdIsError = [bool]$hold.IsError
+    if (@(0, 11) -contains $ExitCode) {
+      if ($script:customActive) {
+        # 대기열 기록·반영이 '사용 중' 으로 실패했으면 정지 문구 끝에 잠금 파일 안내(대기열 함수가 남긴 태그 - 단계 2.6 구현 리뷰)
+        if (-not (Add-AbyssPendingEntry -Stage 'finish-only-complete' -Owner $hold.Owner -Generation $hold.Owner.generation -Nonce ([string]$script:lastLaunchNonce))) {
+          Stop-AllRun -IsError (Get-AbyssPendingStopReason -Reason '마무리 실행 완료 기록 저장 실패 - 대기열·마커를 보존하고 정지')
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          return
+        }
+        if (-not (Invoke-AbyssPendingAdvance -Caller 'finish')) {
+          Stop-AllRun -IsError (Get-AbyssPendingStopReason -Reason '마무리 실행 진행 반영 실패 - 대기열·마커를 보존하고 정지')
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          return
+        }
+        if (-not (Complete-AbyssExitJournal -ExitCode $ExitCode -Context $hold.Owner)) { return }
+        if (-not (Complete-AbyssExitJournal -ExitCode $ExitCode -Context $hold.Owner -ConsumeOnly)) { return }
+        if ([string]$hold.Kind -eq 'lap-complete') {
+          # 완주 정지 = 진행 기록 자동 삭제(타이머 커스텀 사슬의 바퀴 완주와 같은 성공·실패 문구)
+          if (Reset-CustomProgress) {
+            Stop-AllRun '지정 바퀴 완료'
+          } else {
+            Stop-AllRun -IsError '지정 바퀴 완료 후 진행 초기화 저장 실패'
+            $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          }
+          return
+        }
+      } elseif (-not (Complete-AbyssExitJournal -ExitCode $ExitCode)) {
+        return
+      }
+    }
+    if ($holdIsError) {
+      Stop-AllRun -IsError $holdReason
+      $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+    } else {
+      Stop-AllRun $holdReason
+    }
+  } catch {
+    Stop-AllRun -IsError ('마무리 실행 완주 처리 중 예외 - 정지 ({0})' -f $_.Exception.Message)
+    $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+  }
+}
+
+function Get-Code4JournalPlan {
+  # 코드 4(조건 정지)의 완료 기록 계상 결정 (순수 - 구현 명세 ① 2.7 ③ · 설계 v10 6.1 'GUI 계상 규칙(코드 4)' ①~⑤). 실행은 Invoke-Code4Accounting.
+  #  ① 커스텀 + 지금 항목의 유효한 완료 마커(-MarkerValid) → 'marker' - 예전 마커 경로로 1회(그 판의 클리어 기록은 끝 처리가 소비만)
+  #  기록 규칙(②③④)은 어비스 완료 기록 실행(-InRange)에서만 보고, 잠금 읽기(-ReadStatus)가 'ok' 가 아니면 'held'(셋 다 보류 - 부른 쪽이 오류 정지)
+  #  ②③ 지금 owner(-Owner: 커스텀 = 진입 컨텍스트의 5필드 + 세대 / 비커스텀 = 이번 실행 id)의 유효한 클리어 기록 → 'journal'. 유효 = 단계가
+  #     '클리어 이상' ∧ owner 일치(커스텀 5필드 + 세대 · 비커스텀 runId) ∧ nonce 가 applied 밖. 여럿이면 가장 최근(배열 뒤쪽)의 nonce.
+  #     커스텀인데 진입 컨텍스트를 못 읽었으면(-Owner $null) 대조하지 않습니다 - 기록을 그대로 남겨 다음 시작이 이어받게(명세 5절 B13)
+  #  ④ 유효한 클리어 기록 없음 + 사유 표지 ' (post-clear)'(-PostClear) → 'post-clear' - 표지로 1회(커스텀도 계상만, 전진 없음 - 명세 5절 B2)
+  #  ⑤ 그 밖 → 'none'(계상 0)
+  # 반환 @{ Rule; Nonce } - Nonce = 'journal' 이 고른 클리어 기록의 nonce(그 밖 빈 값)
+  param([bool]$MarkerValid, [bool]$InRange, [string]$ReadStatus = '', $Journal = $null, $Owner = $null, $Generation = 0, [bool]$PostClear = $false)
+  if ($MarkerValid) { return @{ Rule = 'marker'; Nonce = '' } }
+  if (-not $InRange) { return @{ Rule = 'none'; Nonce = '' } }
+  if ($ReadStatus -ne 'ok') { return @{ Rule = 'held'; Nonce = '' } }
+  $clearedNonce = ''
+  if ($null -ne $Owner) {
+    $appliedNonces = @(@($Journal.applied) | ForEach-Object { [string]$_ })
+    foreach ($entry in @($Journal.entries)) {
+      if ($null -eq $entry) { continue }
+      $entryNonce = [string]$entry.nonce
+      if (-not $entryNonce -or $appliedNonces -contains $entryNonce) { continue }
+      if ((Get-AbyssJournalStageRank -Stage ([string]$entry.stage)) -lt 1) { continue }
+      if (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $Owner -Generation $Generation) { $clearedNonce = $entryNonce }
+    }
+  }
+  if ($clearedNonce) { return @{ Rule = 'journal'; Nonce = $clearedNonce } }
+  if ($PostClear) { return @{ Rule = 'post-clear'; Nonce = '' } }
+  return @{ Rule = 'none'; Nonce = '' }
+}
+
+function Invoke-Code4Accounting {
+  # 코드 4(조건 정지)의 계상 - 완료 마커와 어비스 완료 기록(handoff journal)으로 끝난 판을 셀지 정하고 실행합니다 (구현 명세 ① 2.7 · 설계
+  # v10 6.1 'GUI 계상 규칙(코드 4)' · 명세 5절 A5 ③·B1·B2·B3·B13). 타이머 코드 4 갈래의 첫 문장이 부르고, 사유 계산·끝 정지는 타이머가 합니다.
+  # 예전 갈래의 마커 경로 본문(조건식·완료 줄 원문 그대로)도 여기로 옮겼습니다 - 타이머 스크립트블록은 이름으로 추출할 수 없어 회귀
+  # (tests\test_abyss_handoff_gui.ps1)가 마커 경로까지 이 함수 이름으로 실행합니다.
+  #  0 보류: 커스텀 재개(resume) 기동이 재전달 표지(사용 중·선택 화면·ESC 메뉴)로 끝났으면 아무것도 하지 않습니다 - 계상·전진·마커 정리·
+  #    applied·done 0. 마커 owner 와 재입장 요청 기록이 그대로 남아 다음 수동 시작의 재개가 그 판을 확정합니다(설계 v10 6.1 '보류' · 명세
+  #    5절 B1 - 사용 중 표지도 포함: 마커 경로로 소비·전진하면 재입장 요청 기록이 owner 불일치 고아로 남음)
+  #  1 진입 컨텍스트 i: 커스텀이면 지금 진행 위치를 한 번 읽습니다(전진 전 값). 마커 경로의 완료 줄·PREV, 기록 대조 owner, 소비 owner 가 이 값입니다
+  #    - 전진 뒤 위치로 소비하면 끝난 판(i)의 클리어 기록이 남습니다. 못 읽었으면 이 처리 안에서 다시 읽지 않습니다(명세 5절 B13 - 범위 안이고
+  #    마커 경로가 세지 않았으면 대조를 건너뛴다는 [경고] 1줄, 아래 4 의 읽기 실패로 멈출 때도 그 정지 앞에)
+  #  2 어비스 완료 기록 실행(Test-AbyssHandoffRunActive)이면 잠금 읽기 1번 → 결정 Get-Code4JournalPlan
+  #  3 실행 - 'marker': 예전 마커 경로 그대로(+1 · 완료 줄 · PREV · 전진 · 마커 정리) / 'journal': +1 · 완료 줄 · (커스텀) 전진 - 전진 저장이
+  #    실패하면 기록을 건드리지 않고 오류 정지(다음 시작이 그 기록으로 마무리를 복구) / 'post-clear': +1 + [경고] / 'none': 0
+  #  4 읽기 실패(사용 중·손상·읽기 실패·예외)면 기록 규칙은 보류하고(마커 경로는 마커로 셈 - 설계 v10 6.1 'locked' 호출부 규칙) 오류 정지 - 코드 4
+  #    사유는 워커 [완료] 줄로 창에 이미 있습니다(명세 5절 B3). 문구는 넷 다 실제 상태(계상 보류 · 마커 경로가 셌으면 진행은 반영됨)와 보존 범위를 적습니다
+  #  5 끝 처리 Complete-AbyssExitJournal -ExitCode 4 -Context i: 지금 owner 의 미적용 클리어 기록 소비 + 이번 기동 nonce done. 재전달 표지가
+  #    있으면 nonce 를 열어 둡니다(-KeepLaunched - 다음 시작이 같은 항목을 다시 받음). i 를 못 읽었으면 $null 을 그대로 넘겨 소비를 건너뜁니다
+  # 반환 $true = 이어서 타이머가 사유대로 정지 / $false = 이 함수 안에서 오류 정지까지 함(타이머는 return - 정지 두 번 금지).
+  # 예외를 밖으로 내지 않습니다(명세 5절 A4) - 타이머 종료 처리는 $script:worker = $null 뒤라 예외가 나가면 정지도 기동도 없이 남습니다
+  try {
+    $doneMarkers = Get-WorkerDoneMarkers -Reason ([string]$script:lastWorkerDoneReason)
+    $relayMarker = [bool]($doneMarkers.Locked -or $doneMarkers.SelectionOverlay -or $doneMarkers.MenuOverlay)
+    if ($script:customActive -and ([string]$script:lastLaunchKind -eq 'resume') -and $relayMarker) { return $true }
+    $finishedContext = $null
+    if ($script:customActive) { $finishedContext = Get-CustomCurrentContext }
+    # 마커 경로 조건 = 예전 코드 4 갈래의 조건식 그대로 - 파일 존재가 아니라 **지금 항목의 유효한 소유자 마커**인지로 판단합니다
+    # (무효화된 '{}' 잔존 파일을 완료로 오계상하던 구멍 - 2026-08-09 6차 점검)
+    $markerValid = [bool]($script:customActive -and -not $script:customMarkerIgnore -and (Test-CustomMarkerValidForCurrent))
+    $inRange = [bool](Test-AbyssHandoffRunActive)
+    $readStatus = ''
+    $readDetail = ''
+    $journal = $null
+    if ($inRange) {
+      $readWarnings = @()
+      try {
+        $journalRead = Read-AbyssJournal -Path $abyssJournalPath
+        $readStatus = [string]$journalRead.Status
+        $journal = $journalRead.Journal
+        $readWarnings = @($journalRead.Warnings)
+      } catch {
+        # 읽기 예외도 읽지 못한 것과 같게 - 기록 규칙 보류 + 오류 정지(아래 4)
+        $readStatus = 'error'
+        $readDetail = $_.Exception.Message
+      }
+      # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+      foreach ($readWarning in $readWarnings) { Add-GuiLog ([string]$readWarning) }
+    }
+    $journalOwner = $null
+    $journalGeneration = 0
+    if (-not $script:customActive) {
+      $journalOwner = @{ runId = [string]$script:runId }
+    } elseif ($null -ne $finishedContext) {
+      $journalOwner = Get-CustomCanonicalOwner -Context $finishedContext
+      $journalGeneration = [int]$finishedContext.Generation
+    }
+    $plan = Get-Code4JournalPlan -MarkerValid $markerValid -InRange $inRange -ReadStatus $readStatus -Journal $journal -Owner $journalOwner `
+      -Generation $journalGeneration -PostClear ([bool]$doneMarkers.PostClear)
+    $markerCounted = $false
+    if ($plan.Rule -eq 'marker') {
+      # 커스텀 + 완료 마커: 클리어 확정(결과 화면 도달) 후 마무리 단계에서 조건 정지된 판이므로
+      # 완료로 계상하고 전진한 '뒤' 정지합니다 (전진 없이 정지하면 다음 시작 때 같은 은동전 판을
+      # 한 번 더 돌아 이중 소모 - 요청사항 확정 스펙)
+      $script:completedCycles++
+      if ($finishedContext) { Add-GuiLog "[커스텀] $($finishedContext.Position) 항목 완료" }
+      else { Add-GuiLog "=== $($script:completedCycles)회차 완료 ===" }
+      if ($finishedContext) { $script:customPrevItem = Format-CustomItemToken -Item $finishedContext.Item }
+      $stoppedProgress = Step-CustomProgress
+      if (-not $stoppedProgress) {
+        Stop-AllRun -IsError '조건 정지 판의 커스텀 진행 기록 저장 실패 - 완료 마커를 보존하고 정지'
+        $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+        return $false
+      }
+      # 전진에 성공했으면 이 마커는 소임을 다했습니다. 남겨 두면 나중에 진행 기록이
+      # 초기화될 때(업데이트 이전·진행 초기화 버튼) 마커가 progress 보다 앞선 상태가
+      # 되어 '마무리 복구'가 잘못 발동합니다 (2026-08-09 감사 - 근본 원인 제거).
+      # 삭제 확인 + '{}' 무효화 폴백은 코드 0 경로와 같은 계약입니다 (파일이 잠겨 삭제가
+      # 실패해도 다음 시작에서 유효 마커로 부활하지 않게 함 - 리뷰 조건).
+      if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
+        Add-GuiLog '[경고] 완료 마커 파일을 정리하지 못했습니다 - 다음 시작 때 다시 정리합니다.'
+      }
+      $markerCounted = $true
+    } elseif ($plan.Rule -eq 'journal') {
+      # 완료 마커 없이(못 썼거나 이번 실행이 무시 중) 이 판의 클리어 기록으로 1회 계상(설계 v10 6.1 ②③). 커스텀은 전진까지 - 저장이 실패하면
+      # 기록을 건드리지 않고 멈춥니다(소비는 아래 끝 처리가 전진 성공 뒤에만 - 다음 수동 시작이 남은 기록으로 그 판의 마무리를 복구)
+      $script:completedCycles++
+      if ($script:customActive) {
+        Add-GuiLog "[커스텀] $($finishedContext.Position) 항목 완료"
+        if (-not (Step-CustomProgress)) {
+          Stop-AllRun -IsError '조건 정지 판의 커스텀 진행 기록 저장 실패 - 완료 기록을 보존하고 정지'
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          return $false
+        }
+      } else {
+        Add-GuiLog "=== $($script:completedCycles)회차 완료 ==="
+      }
+    } elseif ($plan.Rule -eq 'post-clear') {
+      # 유효한 클리어 기록 없이 사유 표지만 있음 - 표지로 1회 계상하고 그 사실을 알립니다(설계 v10 6.1 ④ · 커스텀도 전진 없음 - 명세 5절 B2)
+      $script:completedCycles++
+      Add-GuiLog '[경고] 완료 기록 없이 계상(사유 표지)'
+    }
+    # 진입 컨텍스트를 못 읽어 기록 대조를 건너뛴 사실(명세 5절 B13)은 아래 읽기 실패 정지보다 먼저 남깁니다 - 읽기도 실패해 멈추는 판에서도 대조를
+    # 건너뛴 이유가 창에 남게(단계 2.7·2.8 구현 리뷰 P3). 조건은 그대로: 범위 안 ∧ 마커 경로가 세지 않음(셌으면 '다음 시작에서 이어받음' 이 틀린 안내)
+    if ($script:customActive -and $inRange -and ($null -eq $finishedContext) -and -not $markerCounted) {
+      Add-GuiLog '[경고] 커스텀 진행 위치를 읽지 못해 완료 기록 대조를 건너뜁니다 - 다음 시작에서 이어받습니다'
+    }
+    if ($inRange -and ($readStatus -ne 'ok')) {
+      # 기록 규칙은 보류했습니다. 정지 문구의 뒷부분은 실제 상태로 고릅니다 - 마커 경로가 셌으면 진행은 반영됐고 완료 표시(소비·done)만 못
+      # 남김, 아니면 계상 보류(커스텀은 마커도 그대로). 코드 4 는 다음 기동이 없어 '기동' 을 적지 않습니다(단계 2.6 구현 리뷰의 '실제 상태' 기준).
+      # 손상도 사용 중처럼 이 상태·보존 범위를 적고 파일 위치 안내를 뒤에 붙입니다(단계 2.7·2.8 구현 리뷰 P3 - '파일을 보존하고 정지' 만으로는 계상을
+      # 보류했는지 마커 경로가 셌는지 알 수 없었음)
+      if ($markerCounted) { $heldWhat = '완료 표시를 남기지 못하고 정지 (진행은 반영됨)' }
+      elseif ($script:customActive) { $heldWhat = '계상을 보류하고 정지 (기록·마커 보존)' }
+      else { $heldWhat = '계상을 보류하고 정지 (기록 보존)' }
+      if ($readStatus -eq 'locked') {
+        $readFailText = ('완료 기록 파일이 사용 중 - {0} {1}' -f $heldWhat, (Get-AbyssJournalLockedGuide))
+      } elseif ($readStatus -eq 'corrupt') {
+        $readFailText = ('완료 기록 파일 손상 - {0} {1}' -f $heldWhat, (Get-AbyssJournalCorruptGuide))
+      } else {
+        $readFailText = ('완료 기록 파일을 읽지 못해 {0}' -f $heldWhat)
+        if ($readDetail) { $readFailText += (' (예외: {0})' -f $readDetail) }
+      }
+      Stop-AllRun -IsError $readFailText
+      $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+      return $false
+    }
+    if (-not (Complete-AbyssExitJournal -ExitCode 4 -Context $finishedContext -KeepLaunched:$relayMarker)) { return $false }
+    return $true
+  } catch {
+    Stop-AllRun -IsError ('조건 정지 판의 완료 기록 처리 중 예외 - 정지 ({0})' -f $_.Exception.Message)
+    $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+    return $false
+  }
+}
+
+function Get-Code4StopPlan {
+  # 코드 4 끝 정지의 사유·심각도 (순수 - 설계 v11 R1 3.7 표 4행 · 구현 명세 ① 2.7 ⑥) → @{ Reason; IsError }.
+  # 마무리 실행(finish-only) 기동을 오류 보류(진행 저장 실패 - 보류 IsError)로 띄운 판이 코드 4 로 끝나면, 이미 알려진 오류를 정상 정지로 덮지
+  # 않게 코드 4 사유 끝에 보류 사유를 붙여 오류 정지로 합니다(설계 리뷰 1차 P2-4 - Stop-AllRun 은 호출부가 아는 오류 여부로 -IsError 를 정하는
+  # 계약). 그 밖(일반 기동·비오류 보류)은 지금처럼 코드 4 사유 그대로 정상 정지. 완료 기록 실패는 입력이 아닙니다 - Invoke-Code4Accounting 이
+  # 먼저 정지하고 타이머가 return 합니다(명세 5절 B3)
+  param([string]$Code4Reason, [string]$LaunchKind = '', $Hold = $null)
+  if (($LaunchKind -eq 'finish-only') -and ($null -ne $Hold) -and [bool]$Hold.IsError) {
+    return @{ Reason = ('{0} (마무리 실행 전 오류: {1})' -f $Code4Reason, [string]$Hold.Reason); IsError = $true }
+  }
+  return @{ Reason = $Code4Reason; IsError = $false }
+}
+
+function Close-AbyssLaunchNonceOnStop {
+  # 코드 1 라우팅이 정지하기로 정한 경로의 끝 처리 - 이번 기동에 넘긴 nonce($script:lastLaunchNonce) 항목을 launchState done 으로 닫습니다 (설계 v10 6.1
+  # 'GUI 계상 규칙' 끝 문단 - 같은 처리 끝에 이번 기동의 nonce 를 done 으로, 같은 nonce 를 다시 넘기는 재기동이면 유지 · 구현 명세 ① 2.8 ③ · 단계 2.7·2.8
+  # 구현 리뷰 P2). 부르는 자리 = 라우팅 안의 정지 넷(비커스텀 재입장 오류 상한 · 재개 1회 뒤 또 오류 · 재개 기능 꺼짐 · 안전 중지)과 타이머 예전 처리
+  # recover 갈래의 안전 중지 한 곳(라우팅 항목 없음 -RoutedNonce '' - 단계 2.7·2.8 구현 리뷰 확인 라운드)의 Stop-AllRun 바로 앞 - 정지가 기동 종류·
+  # nonce 를 비우므로 그 앞이어야 합니다. 예전 처리 retry 갈래의 안전 중지는 부르지 않습니다(열어 둠 - 그 자리 주석 · 구현 리뷰 확인). 예전 처리의
+  # 오류 정지 두 곳(같은 항목 3회째 · 그 밖 오류)은 끝 처리 함수(Complete-AbyssExitJournal)가 합니다.
+  #  - 넘긴 nonce 가 없으면 journal 을 열지 않습니다
+  #  - 넘긴 nonce 가 라우팅한 항목(-RoutedNonce)이면 닫지 않습니다(journal 접근 0) - 그 항목은 다음 수동 시작의 몫입니다(재입장은 시작 게이트 S0 반영 뒤
+  #    첫 기동의 후보 고르기 next - done 이면 후보에서 빠짐, 재입장 요청은 S3 의 수동 재개). 재입장 실행부 필수 기록의 '같은 nonce 면 열어 둠' 과 같은 기준
+  #  - 이미 done 이면 그 항목을 건드리지 않습니다(워커가 남긴 reason·screen 보존 - 끝 처리 ② 와 같은 mutation 모양)
+  #  - 소비(applied)는 하지 않습니다 - 오류 종료는 클리어 기록을 다음 시작의 복구 근거로 남깁니다(명세 5절 A6ⓐ)
+  # 실패(사용 중·손상·저장 실패·예외)는 [경고] 한 줄로 끝냅니다 - 부른 쪽이 이미 정지하기로 정한 경로라 정지 사유를 바꾸지 않고 정지를 두 번 하지 않습니다
+  # (닫지 못한 nonce 는 launched 로 남음). 반환값 없음(라우팅의 반환 문자열에 섞이지 않게). 예외를 밖으로 내지 않습니다(명세 5절 A4)
+  param([string]$RoutedNonce = '')
+  try {
+    $launchNonce = [string]$script:lastLaunchNonce
+    if ((-not $launchNonce) -or ($launchNonce -eq $RoutedNonce)) { return }
+    # mutator 는 클로저로 만듭니다 - 클로저가 아니면 저장 함수의 지역 변수가 같은 이름의 이 함수 변수를 가립니다(동적 스코프 - 실측). 클로저 안에서는
+    # $script: 를 읽지 않고 위 지역 변수만 쓰며, 부르는 함수는 최상위 함수뿐입니다(명세 ① 2.0 체크리스트 5·6)
+    $mutator = {
+      param($journal, $change)
+      foreach ($entry in @($journal.entries)) {
+        if ($null -eq $entry -or [string]$entry.nonce -ne $launchNonce -or [string]$entry.launchState -eq 'done') { continue }
+        Set-AbyssJournalProperty -Object $entry -Name 'launchState' -Value 'done'
+        $change.Changed = $true
+      }
+    }.GetNewClosure()
+    $update = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+    # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+    foreach ($updateWarning in @($update.Warnings)) { Add-GuiLog ([string]$updateWarning) }
+    $updateTag = [string]$update.Tag
+    if (($updateTag -ne 'changed') -and ($updateTag -ne 'unchanged')) {
+      Add-GuiLog ('[경고] 이번 기동의 완료 표시를 남기지 못했습니다({0}) - 정지는 그대로 합니다' -f (Get-AbyssJournalTagText -Tag $updateTag))
+    }
+  } catch {
+    Add-GuiLog ('[경고] 이번 기동의 완료 표시를 남기지 못했습니다(예외: {0}) - 정지는 그대로 합니다' -f $_.Exception.Message)
+  }
+}
+
+function Invoke-Code1JournalRouting {
+  # 코드 1(오류 종료)의 어비스 완료 기록 라우팅 (구현 명세 ① 2.8 · 설계 v10 6.1 'GUI 코드 1 라우팅' · v11 R1 4 · 명세 5절 A5·A6·A10·B4).
+  # 타이머 코드 1 갈래가 마무리 실행 판별 바로 뒤에서 한 줄로 부르고, 반환으로 그 뒤를 정합니다:
+  #  'handled'        - 이 함수 안에서 끝냄(오류 정지 · 재입장 실행부 · 재개 기동) → 타이머는 return
+  #  'legacy'         - 예전 처리 그대로(커스텀 오류 대응 recover/retry/3회째 정지 · 비커스텀 오류 정지)
+  #  'legacy-cleared' - 예전 처리 + 이 판의 미적용 클리어 기록을 완료 마커처럼 마무리 복구 근거로 씀(명세 5절 A10 - 다음 시작 S3 의 '마커 등가'
+  #                     와 같은 근거: 완료 마커를 못 쓴 판이 같은 항목을 처음부터 다시 돌지 않게)
+  # 코드 1 이 아니거나(그 밖 크래시 코드 - 명세 5절 B4) 어비스 완료 기록 실행(Test-AbyssHandoffRunActive)이 아니면 journal 을 열지 않고 'legacy'.
+  #  1 지금 owner - 커스텀은 지금 진행 위치(코드 1 은 진행 전진 전이라 끝난 판 i)의 5필드 + 세대, 비커스텀은 이번 실행 id. 진행 위치를 못
+  #    읽으면 시작 게이트의 마커 대조와 같은 재시도(200ms × 3 - 설정 파일 일시 공유 위반이 대부분)
+  #  2 잠금 읽기 1번 - 사용 중·손상·읽기 실패·예외면 계상·기동(재입장 이어받기·자동 재시작·재개)을 보류하고 오류 정지(설계 v10 6.1 읽기 계약의
+  #    호출부 규칙 - 파일 보존). 못 한 일은 실제 상태로 - 계상·기동 전이고 커스텀은 마커도 그대로(단계 2.6 구현 리뷰 기준 - 손상도 사용 중처럼 이 상태·
+  #    보존 범위를 적고 파일 위치 안내는 뒤에, 단계 2.7·2.8 구현 리뷰 P3)
+  #  3 커스텀인데 재시도 뒤에도 진행 위치가 없으면: 어비스 커스텀의 미적용 '클리어 이상' 기록이 있으면 주인을 가릴 수 없어 지우지 않고 오류 정지,
+  #    없으면 'legacy'(명세 리뷰 3 P2 - 시작 게이트의 '판단 불가면 지우지 않고 멈춤' 과 같은 계약. 그냥 흘리면 예전 처리가 같은 항목을 재시작)
+  #  4 지금 owner 의 미적용 '클리어 이상' 기록을 단계로 가름(여럿이면 앞선 단계 - reentered > 재입장 요청 > 클리어, 같은 단계는 가장 최근):
+  #    reentered    - '다시 하기'로 다음 판에 들어간 뒤 죽음: (비커스텀) 재입장 오류 연속 +1 - 3회째면 실행부 앞에서 오류 정지(설계 R1 H48 - 죽음이
+  #                   되풀이되는 환경에서 기동을 이어 가지 않음) → +1·완료 줄 → 재입장 실행부(커스텀 전진·필수 기록·다음 판 기동, 진행 저장
+  #                   실패면 대기열 code1-routed)
+  #    retry-attempt·retry-clicked - 재입장 요청 뒤 죽음(던전 안일 수 있음): 자동 재개는 한 번뿐(resumeAttempts ≥ 1 이면 정지). 이 빌드는 재개
+  #                   기능이 꺼져($script:abyssPartyRetryEnabled) 기록을 보존하고 정지. 켜진 빌드: 안전 중지면 재개 없이 정지 / resumeAttempts +1
+  #                   기록 → 재개(resume) 기동 1회(마커는 정리하지 않고 넘김 -PreserveMarker - 설계 v10 6.1)
+  #    클리어(cleared·post-clear-stop) → 'legacy-cleared' / 없음 → 'legacy'
+  # 소비(applied)는 하지 않습니다 - 미적용 기록이 다음 시작의 마무리 복구 근거로 남습니다(명세 5절 A6ⓐ). 기동(실행부·재개)은 try 밖 마지막 한 번 -
+  # 기동 뒤 예외가 방금 띄운 워커를 정지로 죽이지 않게(설계 R1 3.4 와 같은 이유). 예외를 밖으로 내지 않습니다(명세 5절 A4 - 잡아서 오류 정지)
+  # 정지 경로의 끝 처리(단계 2.7·2.8 구현 리뷰 P2): 4 의 정지 넷(재입장 오류 상한 · 재개 1회 뒤 · 재개 기능 꺼짐 · 안전 중지)은 정지 바로 앞에서 이번 기동
+  # nonce 를 done 으로 닫습니다(Close-AbyssLaunchNonceOnStop - 라우팅한 항목과 같은 nonce 면 닫지 않음 · 닫기 실패는 [경고] 뒤 그대로 정지). 쓰지 않는
+  # 정지 = 2 의 읽기 실패(기록 불가) · 3 의 주인 확인 불가(어느 항목이 이어받을 몫인지 몰라 파일 무변경) · 재개 횟수 기록 실패(방금 저장이 실패함) · 예외
+  param([int]$ExitCode)
+  $routePlan = $null
+  try {
+    if (($ExitCode -ne 1) -or -not (Test-AbyssHandoffRunActive)) { return 'legacy' }
+    $isCustom = [bool]$script:customActive
+    $keptText = $(if ($isCustom) { '기록·마커 보존' } else { '기록 보존' })
+    $finishedContext = $null
+    $routeOwner = @{ runId = [string]$script:runId }
+    $routeGeneration = 0
+    if ($isCustom) {
+      $finishedContext = Get-CustomCurrentContext
+      for ($contextTry = 1; $contextTry -le 3 -and -not $finishedContext; $contextTry++) {
+        Start-Sleep -Milliseconds 200
+        $finishedContext = Get-CustomCurrentContext
+      }
+      $routeOwner = $null
+      if ($null -ne $finishedContext) {
+        $routeOwner = Get-CustomCanonicalOwner -Context $finishedContext
+        $routeGeneration = [int]$finishedContext.Generation
+      }
+    }
+    $readStatus = ''
+    $readDetail = ''
+    $journal = $null
+    $readWarnings = @()
+    try {
+      $journalRead = Read-AbyssJournal -Path $abyssJournalPath
+      $readStatus = [string]$journalRead.Status
+      $journal = $journalRead.Journal
+      $readWarnings = @($journalRead.Warnings)
+    } catch {
+      # 읽기 예외도 읽지 못한 것과 같게 - 아래 오류 정지
+      $readStatus = 'error'
+      $readDetail = $_.Exception.Message
+    }
+    # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+    foreach ($readWarning in $readWarnings) { Add-GuiLog ([string]$readWarning) }
+    if ($readStatus -ne 'ok') {
+      $heldWhat = ('계상·기동을 보류하고 정지 ({0})' -f $keptText)
+      if ($readStatus -eq 'locked') {
+        $readFailText = ('완료 기록 파일이 사용 중 - {0} {1}' -f $heldWhat, (Get-AbyssJournalLockedGuide))
+      } elseif ($readStatus -eq 'corrupt') {
+        $readFailText = ('완료 기록 파일 손상 - {0} {1}' -f $heldWhat, (Get-AbyssJournalCorruptGuide))
+      } else {
+        $readFailText = ('완료 기록 파일을 읽지 못해 {0}' -f $heldWhat)
+        if ($readDetail) { $readFailText += (' (예외: {0})' -f $readDetail) }
+      }
+      Stop-AllRun -IsError (Get-AbyssExitStopReason -Reason $readFailText -WorkerReason ([string]$script:lastWorkerDoneReason))
+      $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+      return 'handled'
+    }
+    $appliedNonces = @(@($journal.applied) | ForEach-Object { [string]$_ })
+    if ($isCustom -and ($null -eq $routeOwner)) {
+      $ownerlessCount = 0
+      foreach ($entry in @($journal.entries)) {
+        if ($null -eq $entry -or [string]$entry.section -ne 'abyssCustomRepeat') { continue }
+        $entryNonce = [string]$entry.nonce
+        if (-not $entryNonce -or $appliedNonces -contains $entryNonce) { continue }
+        if ((Get-AbyssJournalStageRank -Stage ([string]$entry.stage)) -ge 1) { $ownerlessCount++ }
+      }
+      if ($ownerlessCount -eq 0) { return 'legacy' }
+      Stop-AllRun -IsError '설정 파일을 읽지 못해 완료 기록의 주인을 확인할 수 없습니다 - 기록을 지우지 않고 정지 (자동 재시작 없음)'
+      $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+      return 'handled'
+    }
+    $reenteredEntry = $null
+    $retryEntry = $null
+    $clearedSeen = $false
+    foreach ($entry in @($journal.entries)) {
+      if ($null -eq $entry) { continue }
+      $entryNonce = [string]$entry.nonce
+      if (-not $entryNonce -or $appliedNonces -contains $entryNonce) { continue }
+      if ((Get-AbyssJournalStageRank -Stage ([string]$entry.stage)) -lt 1) { continue }
+      if (-not (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $routeOwner -Generation $routeGeneration)) { continue }
+      $entryStage = [string]$entry.stage
+      if ($entryStage -eq 'reentered') { $reenteredEntry = $entry }
+      elseif (($entryStage -eq 'retry-attempt') -or ($entryStage -eq 'retry-clicked')) { $retryEntry = $entry }
+      else { $clearedSeen = $true }
+    }
+    if ($null -ne $reenteredEntry) {
+      if (-not $isCustom) {
+        # 비커스텀 재입장 오류 연속 상한(설계 v10 6.1 '상한 2 → 3회째 정지' · 명세 5절 B4) - 0 으로 되돌리는 곳은 코드 0·11 의 끝 처리·실행부
+        $script:abyssErrorStreak++
+        if ($script:abyssErrorStreak -ge 3) {
+          Close-AbyssLaunchNonceOnStop -RoutedNonce ([string]$reenteredEntry.nonce)
+          Stop-AllRun -IsError (Get-InsideHandoffStopReason -Reason '오류 종료(코드 1) - 재입장한 판에서 3회 연속 오류라 이어 가지 않고 정지 (로그 확인)')
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          return 'handled'
+        }
+      }
+      # 끝난 판(i)의 계상 1회·완료 줄 - 코드 0·11 공통 구간과 같은 모양(마무리 복구 회차는 이 줄 대신 실행부의 '마무리 복구 완료' 줄)
+      $script:completedCycles++
+      if (-not $isCustom) {
+        Add-GuiLog "=== $($script:completedCycles)회차 완료 ==="
+      } elseif (-not $script:customRecoveryPending) {
+        Add-GuiLog "[커스텀] $($finishedContext.Position) 항목 완료"
+      }
+      $routePlan = @{ Kind = 'inside-handoff'; Context = $finishedContext
+        Handoff = @{ Kind = 'inside-handoff'; Nonce = [string]$reenteredEntry.nonce; Source = 'journal'; Reason = '' } }
+    } elseif ($null -ne $retryEntry) {
+      $retryNonce = [string]$retryEntry.nonce
+      if ([int](Get-AbyssJournalField -Object $retryEntry -Name 'resumeAttempts').Value -ge 1) {
+        # 재개한 판도 죽었으면 자동으로 더 하지 않습니다(설계 v10 6.1 - 다음 수동 시작이 한 번 더 허용)
+        Close-AbyssLaunchNonceOnStop -RoutedNonce $retryNonce
+        Stop-AllRun -IsError '재입장 요청 뒤 재개한 판도 오류 종료 - 자동 재개는 한 번뿐이라 완료 기록을 보존하고 정지 (캐릭터가 던전 안일 수 있습니다)'
+        $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+        return 'handled'
+      }
+      if (-not $script:abyssPartyRetryEnabled) {
+        Close-AbyssLaunchNonceOnStop -RoutedNonce $retryNonce
+        Stop-AllRun -IsError '재입장 요청 뒤 오류 종료 - 재개 기능이 꺼져 있어 완료 기록을 보존하고 정지 (캐릭터가 던전 안일 수 있습니다)'
+        $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+        return 'handled'
+      }
+      if ($script:stopRequested) {
+        Add-GuiLog '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 다음 시작에서 재개)'
+        Close-AbyssLaunchNonceOnStop -RoutedNonce $retryNonce
+        Stop-AllRun '안전 중지'
+        return 'handled'
+      }
+      # 재개 횟수 +1 을 먼저 남깁니다(잠금 아래 한 mutation - 재개도 죽으면 위 '한 번뿐' 이 막음). 클로저(-Expect·-Mutator)는 $script: 를 읽지 않고
+      # 위 지역 변수만 쓰며 부르는 함수는 최상위 함수뿐입니다(명세 ① 2.0 체크리스트 5·6)
+      $expect = {
+        param($journal)
+        return [bool](@(@($journal.entries) | Where-Object { ($null -ne $_) -and ([string]$_.nonce -eq $retryNonce) -and
+              (([string]$_.stage -eq 'retry-attempt') -or ([string]$_.stage -eq 'retry-clicked')) }).Count -gt 0)
+      }.GetNewClosure()
+      $mutator = {
+        param($journal, $change)
+        foreach ($entry in @($journal.entries)) {
+          if ($null -eq $entry -or [string]$entry.nonce -ne $retryNonce) { continue }
+          Set-AbyssJournalProperty -Object $entry -Name 'resumeAttempts' -Value (([int](Get-AbyssJournalField -Object $entry -Name 'resumeAttempts').Value) + 1)
+          $change.Changed = $true
+        }
+      }.GetNewClosure()
+      $attemptRecord = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+      foreach ($recordWarning in @($attemptRecord.Warnings)) { Add-GuiLog ([string]$recordWarning) }
+      $recordTag = [string]$attemptRecord.Tag
+      if ($recordTag -ne 'changed') {
+        # 실패 문구의 뒷부분은 실제 상태 - 재개(기동)를 보류했고 기록(커스텀은 마커도)은 그대로입니다. 손상도 사용 중처럼 이 상태·보존 범위를 적고
+        # 파일 위치 안내를 뒤에 붙입니다(위 2 의 읽기 손상 문구와 같은 규칙 - 단계 2.7·2.8 구현 리뷰 확인 라운드)
+        if ($recordTag -eq 'locked') {
+          $recordFail = ('완료 기록 파일이 사용 중 - 재개를 보류하고 정지 ({0}) {1}' -f $keptText, (Get-AbyssJournalLockedGuide))
+        } elseif ($recordTag -eq 'corrupt') {
+          $recordFail = ('완료 기록 파일 손상 - 재개를 보류하고 정지 ({0}) {1}' -f $keptText, (Get-AbyssJournalCorruptGuide))
+        } else {
+          $recordFail = ('재개 기록 저장 실패 - 재개를 보류하고 정지 ({0})' -f $keptText)
+        }
+        Stop-AllRun -IsError $recordFail
+        $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+        return 'handled'
+      }
+      if ($isCustom) {
+        # 같은 항목 3회째 정지 규칙이 이어지게 오류 연속을 셉니다. 재개는 재시작·마무리 복구가 아닙니다(RESTART·RECOVERY 빈 값 - 설계 v10 6.1)
+        $script:customErrorStreak++
+        $script:customRestart = $false
+        $script:customRecoveryPending = $false
+      }
+      Add-GuiLog '[경고] 오류 종료(코드 1) - 재입장 요청 뒤라 그 판을 이어받는 재개를 한 번 시작합니다'
+      $routePlan = @{ Kind = 'resume'; Nonce = $retryNonce }
+    } elseif ($clearedSeen) {
+      return 'legacy-cleared'
+    } else {
+      return 'legacy'
+    }
+  } catch {
+    Stop-AllRun -IsError ('오류 종료 판의 완료 기록 처리 중 예외 - 자동 재시작하지 않고 정지 ({0})' -f $_.Exception.Message)
+    $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+    return 'handled'
+  }
+  if ($routePlan.Kind -eq 'inside-handoff') {
+    $null = Invoke-InsideHandoffExit -ExitCode $ExitCode -Handoff $routePlan.Handoff -FinishedContext $routePlan.Context
+  } elseif ($routePlan.Kind -eq 'resume') {
+    $null = Start-NextCycle -PreserveMarker -ResumeNonce $routePlan.Nonce
+  }
+  return 'handled'
 }
 
 # --- 타이머: 워커 상태 + 로그 tail ---
@@ -8641,6 +10983,9 @@ $timer.Add_Tick({
       # '연속 준비 실행' 카운터는 코드 10 이 아닌 모든 종료에서 초기화합니다 (2026-08-01 전수
       # 점검: 기존에는 코드 0 에서만 초기화해 10→1(재시작)→10→1→10 교차도 '3회 연속'으로 오판)
       if ($exitCode -ne 10) { $script:preparedStreak = 0 }
+      # 공통 최종 수집 - 모든 종료 코드에 한 번, 코드별 갈래 앞 (구현 명세 ① 2.4 · 설계 v10 6.1 종료 처리 순서). 아래 갈래가 읽는 [완료]
+      # 사유(코드 10 거점 퇴장 판별·코드 4 상태줄)는 이 수집까지 끝낸 값이고, 코드 0·11·1·2·3 도 워커의 마지막 줄이 창에 뜹니다
+      Invoke-ExitLogFinalCollect
       if (($exitCode -eq 0) -or ($exitCode -eq 11)) {
         # 코드 11 = 이어 감 인계 (시간 지정 '그 판까지' 설계 1.3): 시간 지정에서 워커가 지정 시각 전에 다음 판으로 이어 가기로
         # 정하고 끝냈다는 뜻입니다. 계상·커스텀 처리는 코드 0 과 같고, 다음 회차 판단에서 지정 시각만 보지 않습니다.
@@ -8651,8 +10996,10 @@ $timer.Add_Tick({
         if ($script:customActive) {
           $finishedContext = Get-CustomCurrentContext
           # 복구 회차는 아래의 전용 성공 문구만 표시합니다. 정상 회차는 바퀴/항목 위치로 완료를 표시합니다.
+          # 마무리 실행 기동이면 위치는 보류 위치(끝난 그 판)입니다 - 진행 저장 실패 보류면 디스크는 앞 판에 머물러 있습니다(설계 v11 R1 3.7)
           if (-not $script:customRecoveryPending) {
-            if ($finishedContext) { Add-GuiLog "[커스텀] $($finishedContext.Position) 항목 완료" }
+            if ($script:lastLaunchKind -eq 'finish-only') { Add-GuiLog "[커스텀] $([string]$script:finishOnlyHold.Position) 항목 완료" }
+            elseif ($finishedContext) { Add-GuiLog "[커스텀] $($finishedContext.Position) 항목 완료" }
             else { Add-GuiLog "=== $($script:completedCycles)회차 완료 ===" }
           }
         } else {
@@ -8662,6 +11009,23 @@ $timer.Add_Tick({
           $cycleDoneSuffix = $(if ($exitCode -eq 11) { ' (다음 판으로 이어 감)' } else { '' })
           Add-GuiLog "=== $($script:completedCycles)회차 완료$cycleDoneSuffix ==="
         }
+        # 완료 기록(handoff) - 계상 +1·완료 줄 뒤, 아래 사슬 앞 (설계 v11 R1 3.3 · 구현 명세 ① 2.6): 재입장 판별 → 기록 오류면 진행 전진·기동
+        # 보류 정지 / 재입장이면 실행부 / 마무리 실행 기동이 끝났으면 완주 처리 - 셋 다 return 으로 아래 사슬을 건너뜁니다 → 일반 끝 처리 한 줄
+        $handoffExit = Read-AbyssExitHandoff -ExitCode $exitCode -Context $finishedContext
+        if ($handoffExit.Kind -eq 'journal-error') {
+          Stop-AllRun -IsError $handoffExit.Reason
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          return
+        }
+        if ($handoffExit.Kind -eq 'inside-handoff') {
+          Invoke-InsideHandoffExit -ExitCode $exitCode -Handoff $handoffExit -FinishedContext $finishedContext
+          return
+        }
+        if ($script:lastLaunchKind -eq 'finish-only') {
+          Complete-FinishOnlyCycle -ExitCode $exitCode
+          return
+        }
+        if (-not (Complete-AbyssExitJournal -ExitCode $exitCode -Context $finishedContext)) { return }
         if ($script:customActive) {
           # 커스텀 반복: 정상 판 또는 완료 후 마무리 복구가 코드 0에 도달한 시점에만 한 번 계상합니다.
           # 마커를 먼저 소비해 완주 정지/GUI 재시작에서도 같은 판을 다시 복구하지 않게 합니다.
@@ -8680,6 +11044,9 @@ $timer.Add_Tick({
             return
           }
           $script:customRecoveryPending = $false
+          # 진행 전진에 성공한 뒤에만 끝난 판(전진 전 컨텍스트)의 완료 기록 cleared 를 소비합니다 - 전진 저장이 실패하면 위 갈래에서 멈춰 그 기록이
+          # 남고, 다음 시작이 그것으로 마무리를 복구합니다(명세 리뷰 3 P1). 실패면 함수 안에서 오류 정지(마커는 아직 정리 전 - 진행과 맞지 않아 폐기됨)
+          if (-not (Complete-AbyssExitJournal -ExitCode $exitCode -Context $finishedContext -ConsumeOnly)) { return }
           # 삭제 실패 파일이 다음 수동 시작에서 유효 마커로 복구되지 않도록 소유자 형식을 무효화합니다.
           # 실패하면 묘비가 남고, 다음 회차 준비(Clear-CustomMarkerFile)가 다시 정리합니다.
           if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
@@ -8714,20 +11081,15 @@ $timer.Add_Tick({
           Invoke-NextCycleDecision -ExitCode $exitCode
         }
       } elseif ($exitCode -eq 10) {
+        if (-not (Complete-AbyssExitJournal -ExitCode $exitCode)) { return }
+        if ($script:lastLaunchKind -eq 'finish-only') { Complete-FinishOnlyCycle -ExitCode $exitCode; return }
+        # 위 두 줄(설계 v11 R2 3.7 · R1 3.7): 완료 기록 끝 처리는 다음 기동(아래 Invoke-NextCycleDecision 안) 앞 - 이번 기동에 넘긴 nonce 를 열어
+        # 두면 다음 기동이 같은 항목을 다시 넘깁니다. 마무리 실행 기동의 코드 10 은 그 판으로 끝내고 보류 사유로 멈춥니다(재입장·연속 수 미경유)
         # 준비 실행(화면 복귀만 수행, 던전 미실행): 회차로 세지 않고 곧바로 본 회차를 시작합니다.
         # 이렇게 해야 횟수 지정 모드에서 실제 던전 실행 횟수가 요청보다 적어지지 않습니다.
         # 거점 부활 상한 퇴장(2026-09-25 사용자 확정 "계속 돌리는 게 맞아")도 같은 코드 10 이지만 화면 오판이 아니라 실제로 입장·전투한
-        # 판이라 '준비 실행 3회 연속' 상한을 소모하지 않고 몇 판이든 새 파티로 재입장합니다. 판별은 워커의 [완료] 사유 - 타이머 tail 과
-        # 종료 사이의 경쟁으로 마지막 줄을 못 봤을 수 있어 코드 4 상태줄과 같은 계약으로 잔여 로그를 먼저 수집합니다.
-        $tailLines = @()
-        $tailLines += @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))
-        $tailLines += @(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))   # 복구 로그도 - 코드 4·최종 수집과 같은 계약 (구현 리뷰 2차 P2)
-        foreach ($tailLine in $tailLines) {
-          if ($null -eq $tailLine) { continue }
-          if ($tailLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
-          $displayLine = Convert-WorkerLogLineForGui -Line $tailLine -CustomActive $script:customActive
-          if ($null -ne $displayLine) { Add-ColoredLogLine ('  ' + $displayLine) }
-        }
+        # 판이라 '준비 실행 3회 연속' 상한을 소모하지 않고 몇 판이든 새 파티로 재입장합니다. 판별은 워커의 [완료] 사유 - 갈래 앞의 공통
+        # 최종 수집(Invoke-ExitLogFinalCollect)이 두 로그의 마지막 줄까지 읽은 값입니다(이 갈래의 잔여 수집 사본은 그리로 합침 - 2026-10-09).
         if (Test-CheckpointLeaveReason -Reason $script:lastWorkerDoneReason) {
           $script:preparedStreak = 0
           Add-GuiLog '[안내] 사망 화면에서 던전을 나왔습니다(거점 부활 상한 또는 부활 불가 대기 초과) - 회차로 세지 않고 새 파티로 재입장합니다'
@@ -8753,45 +11115,12 @@ $timer.Add_Tick({
         $lblStatus.ForeColor = [System.Drawing.Color]::SteelBlue
       } elseif ($exitCode -eq 4) {
         # 조건 충족에 의한 정상 정지 (예: 은동전 소진 + '소진 시 계속' 옵션 꺼짐)
-        # 파일 존재가 아니라 **지금 항목의 유효한 소유자 마커**인지로 판단합니다
-        # (무효화된 '{}' 잔존 파일을 완료로 오계상하던 구멍 - 2026-08-09 6차 점검)
-        if ($script:customActive -and -not $script:customMarkerIgnore -and (Test-CustomMarkerValidForCurrent)) {
-          # 커스텀 + 완료 마커: 클리어 확정(결과 화면 도달) 후 마무리 단계에서 조건 정지된 판이므로
-          # 완료로 계상하고 전진한 '뒤' 정지합니다 (전진 없이 정지하면 다음 시작 때 같은 은동전 판을
-          # 한 번 더 돌아 이중 소모 - 요청사항 확정 스펙)
-          $script:completedCycles++
-          $finishedContext = Get-CustomCurrentContext
-          if ($finishedContext) { Add-GuiLog "[커스텀] $($finishedContext.Position) 항목 완료" }
-          else { Add-GuiLog "=== $($script:completedCycles)회차 완료 ===" }
-          if ($finishedContext) { $script:customPrevItem = Format-CustomItemToken -Item $finishedContext.Item }
-          $stoppedProgress = Step-CustomProgress
-          if (-not $stoppedProgress) {
-            Stop-AllRun -IsError '조건 정지 판의 커스텀 진행 기록 저장 실패 - 완료 마커를 보존하고 정지'
-            $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
-            return
-          }
-          # 전진에 성공했으면 이 마커는 소임을 다했습니다. 남겨 두면 나중에 진행 기록이
-          # 초기화될 때(업데이트 이전·진행 초기화 버튼) 마커가 progress 보다 앞선 상태가
-          # 되어 '마무리 복구'가 잘못 발동합니다 (2026-08-09 감사 - 근본 원인 제거).
-          # 삭제 확인 + '{}' 무효화 폴백은 코드 0 경로와 같은 계약입니다 (파일이 잠겨 삭제가
-          # 실패해도 다음 시작에서 유효 마커로 부활하지 않게 함 - 리뷰 조건).
-          if (-not (Clear-CustomMarkerFile -Path $customMarkerFile)) {
-            Add-GuiLog '[경고] 완료 마커 파일을 정리하지 못했습니다 - 다음 시작 때 다시 정리합니다.'
-          }
-        }
-        # 종료 직전 기록된 [완료] 사유를 놓치지 않게 잔여 로그를 한 번 더 수집합니다
-        # (타이머 tail 과 종료 사이의 경쟁 방지 - 리뷰 조건)
-        $finalLines = @()
-        $finalLines += @(Read-NewLogLines -Path $workerLog -Offset ([ref]$script:logOffset))
-        $finalLines += @(Read-NewLogLines -Path $workerRecoveryLog -Offset ([ref]$script:recoveryLogOffset))
-        foreach ($finalLine in $finalLines) {
-          if ($null -eq $finalLine) { continue }
-          if ($finalLine -match '\[완료\]\s*(.+)') { $script:lastWorkerDoneReason = $Matches[1].Trim() }
-          $displayLine = Convert-WorkerLogLineForGui -Line $finalLine -CustomActive $script:customActive
-          if ($null -ne $displayLine) { Add-ColoredLogLine ('  ' + $displayLine) }
-        }
+        # 계상(커스텀 완료 마커 경로 · 어비스 완료 기록 규칙)은 Invoke-Code4Accounting 이 합니다 - 예전 이 자리의 마커 경로 본문을 조건식·완료 줄
+        # 원문 그대로 그 함수로 옮겼습니다(구현 명세 ① 2.7 - 회귀가 이름으로 실행). 거짓이면 함수 안에서 오류 정지까지 했으므로 여기서 멈춥니다
+        if (-not (Invoke-Code4Accounting)) { return }
         # 상태줄에 실제 정지 사유 표시 - 범용 문구('공물 소진 등')가 실제 이유와 달라 오해를
-        # 만든 실사례(2026-08-02) 반영. 사유를 못 잡은 경우에만 기존 범용 문구 폴백
+        # 만든 실사례(2026-08-02) 반영. 사유를 못 잡은 경우에만 기존 범용 문구 폴백. 종료 직전에 쓰인 [완료] 줄은 갈래 앞의 공통 최종
+        # 수집이 이미 읽었습니다(타이머 tail 과 종료 사이 경쟁 방지 - 이 자리의 잔여 수집 사본은 그리로 합침, 2026-10-09)
         $code4Reason = ''
         if ($script:lastWorkerDoneReason) {
           $code4Reason = ($script:lastWorkerDoneReason -replace '\s+', ' ').Trim()
@@ -8807,15 +11136,34 @@ $timer.Add_Tick({
         } else {
           $code4Reason = '조건 충족으로 정지 - 은동전 소진 등 (자세한 내용은 로그 참고)'
         }
-        Stop-AllRun $code4Reason
-        $lblStatus.ForeColor = [System.Drawing.Color]::SteelBlue
+        # 끝 정지의 사유·심각도 - 마무리 실행 기동이 오류 보류(진행 저장 실패)로 띄운 판이면 그 오류를 정상 정지로 덮지 않습니다(설계 v11 R1 3.7 표 4행)
+        $code4Plan = Get-Code4StopPlan -Code4Reason $code4Reason -LaunchKind $script:lastLaunchKind -Hold $script:finishOnlyHold
+        if ($code4Plan.IsError) {
+          Stop-AllRun -IsError $code4Plan.Reason
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+        } else {
+          Stop-AllRun $code4Plan.Reason
+          $lblStatus.ForeColor = [System.Drawing.Color]::SteelBlue
+        }
       } else {
+        # 마무리 실행(finish-only) 기동의 오류 종료(코드 1 과 그 밖 코드)는 자동 재시작하지 않고 멈춥니다(설계 v11 R1 3.7 표 마지막 행 · dev:892) -
+        # 아래 recover/retry 재기동은 마무리 실행 env 없는 워커를 디스크 진행 위치로 띄워 끝난 판에 붙입니다. 끝 처리를 지나지 않아 이번 기동
+        # nonce 는 launched 로 남고 대기열·마커도 그대로입니다(다음 수동 시작이 그 판을 이어받음)
+        if ($script:lastLaunchKind -eq 'finish-only') {
+          Stop-AllRun -IsError "마무리 실행 중 오류 종료(코드 $exitCode) - 자동 재시작하지 않고 정지 (진행 기록 보존, 캐릭터가 던전 안일 수 있습니다)"
+          $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
+          return
+        }
+        # 어비스 완료 기록 라우팅(구현 명세 ① 2.8 - 판단은 Invoke-Code1JournalRouting): 함수 안에서 끝냈으면(오류 정지·재입장 실행부·재개) 여기서
+        # 멈추고, 아니면 아래 예전 처리. 'legacy-cleared' = 이 판의 미적용 클리어 기록을 완료 마커처럼 마무리 복구 근거로 씀(명세 5절 A10)
+        $code1Route = Invoke-Code1JournalRouting -ExitCode $exitCode
+        if ($code1Route -eq 'handled') { return }
         if ($script:customActive -and $exitCode -eq 1) {
           # 커스텀 오류(코드 1): 완료 마커가 있으면 진행도를 먼저 넘기지 않고 같은 항목의 마무리만
           # 복구합니다. 복구 워커가 코드 0으로 끝난 뒤 위 정상 분기에서 딱 한 번 전진합니다.
           # 마커가 없으면 같은 항목 전체를 2회까지 자동 재시작합니다.
           $markerExists = ($script:customRecoveryPending -or
-            ((-not $script:customMarkerIgnore) -and (Test-CustomMarkerValidForCurrent)))
+            ((-not $script:customMarkerIgnore) -and (Test-CustomMarkerValidForCurrent)) -or ($code1Route -eq 'legacy-cleared'))
           $errorAction = Get-CustomErrorAction -MarkerExists $markerExists -ErrorStreak $script:customErrorStreak
           if ($errorAction -eq 'recover') {
             $script:customErrorStreak++
@@ -8824,6 +11172,11 @@ $timer.Add_Tick({
             $script:customRecoveryPending = $true
             $script:customRestart = $true
             if ($script:stopRequested) {
+              # 안전 중지는 재기동 대신 멈추는 정지 경로라 이번 기동 nonce 를 done 으로 닫습니다(설계 v10 6.1 dev:883 '같은 처리 끝에 이번 기동 nonce
+              # done' · 구현 명세 ① 2.8 ③ - 단계 2.7·2.8 구현 리뷰 확인 라운드). 예전 처리는 이 owner 에 재입장·재입장 요청 항목이 없을 때만 오므로 열어
+              # 둘 라우팅 항목이 없어 -RoutedNonce 를 비웁니다 - 다음 시작의 복구 근거는 완료 마커·미적용 클리어 기록입니다(코드 1 은 소비하지 않음).
+              # 넘긴 nonce 가 없으면 journal 을 열지 않고, 닫기 실패는 [경고] 한 줄 뒤 이 정지를 그대로 한 번 합니다
+              Close-AbyssLaunchNonceOnStop -RoutedNonce ''
               Stop-AllRun '안전 중지'
             } else {
               Add-GuiLog '[커스텀] 이전 완료 항목의 마무리를 복구합니다.'
@@ -8835,6 +11188,9 @@ $timer.Add_Tick({
             $script:customRestart = $true
             $script:customPrevItem = ''
             if ($script:stopRequested) {
+              # 안전 중지여도 이번 기동 nonce 는 닫지 않고 열어 둡니다(위 recover 갈래와 다름 - 단계 2.7·2.8 구현 리뷰 확인): 이 갈래는 이 owner 에 완료 마커도
+              # 미적용 클리어 기록도 없는 판(판 도중 오류)이라 열린 nonce(예: next 로 넘긴 재입장 항목)가 다음 수동 시작의 유일한 이어받기 근거입니다. 닫으면
+              # 후보 고르기에서 빠져(none) 던전 안 정리 뒤 같은 항목을 처음부터 다시 합니다(유료 판 한 번 더). 아래 재시작도 같은 nonce 를 다시 고릅니다(dev:891)
               Stop-AllRun '안전 중지'
             } else {
               # ★ 태그는 [안내]가 아니라 [경고]입니다. 6차에서 '태그 우선'으로 바꾼 뒤로는
@@ -8846,10 +11202,15 @@ $timer.Add_Tick({
               Start-NextCycle
             }
           } else {
+            # 정지 경로의 끝 처리 - 이번 기동 nonce 를 done 으로(위 두 경로의 재기동은 같은 항목을 다시 넘기므로 그대로 - 설계 v10 6.1, 그 안의 안전
+            # 중지는 recover 만 정지 앞에서 닫고 retry 는 열어 둠). 오류 종료는 클리어 기록을 소비하지 않습니다(다음 시작의 복구 근거 - 명세 5절 A6ⓐ).
+            # 거짓이면 함수 안에서 오류 정지까지 했습니다
+            if (-not (Complete-AbyssExitJournal -ExitCode $exitCode)) { return }
             Stop-AllRun -IsError '오류 종료(코드 1) - 같은 항목 3회 연속 실패 (로그 확인)'
             $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
           }
         } else {
+          if (-not (Complete-AbyssExitJournal -ExitCode $exitCode)) { return }
           Stop-AllRun -IsError "오류 종료(코드 $exitCode) - 로그 확인"
           $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
         }
@@ -8862,6 +11223,353 @@ $timer.Add_Tick({
       try { Add-GuiLog "[오류] 내부 타이머(워커 감시) 처리 중 예외 - 자동화는 계속 시도합니다: $($_.Exception.Message)" } catch { }
     }
   })
+
+# --- 시작 게이트의 어비스 완료 기록 (구현 명세 ① 2.9 · 설계 v10 6.3 dev:941~948) ---
+# 어비스 커스텀 시작은 앞 세션이 남긴 완료 기록(journal)을 두 자리에서 이어받습니다 - S0(진행을 읽은 직후·지문 검사 앞: 대기열·계상 전 재입장을 진행에
+# 반영)와 S3(묘비 소비 뒤·마커 게이트 앞: 지금 진행의 미적용 클리어·재입장 요청 기록으로 마무리 복구·재개를 예약). 앱 기동 때는 이어받을 수 없는
+# 지난 기록을 정리합니다(Invoke-AbyssJournalStaleCleanup). 이 묶음의 함수는 예외를 밖으로 내지 않습니다 - 시작 버튼 처리기에는 try 가 없어 예외가
+# 나가면 모달 오류 창이 뜹니다(명세 5절 A4). 시작 거부는 파일을 바꾸지 않고, 사유는 [오류] 한 줄입니다.
+
+function Set-CustomRecoveryReservation {
+  # 시작 게이트의 마무리 복구 예약 - 마커 게이트(완료 마커 소유자 = 지금 진행)와 S3(지금 진행의 미적용 클리어 기록 = 마커와 같은 근거, dev:947 '마커 등가')가
+  # 같은 문장을 쓰도록 한 곳에 둡니다(명세 ① 2.9 S3 - 복구 시작 안내는 GUI 전체 두 곳 그대로: 여기와 코드 1 의 마무리 복구). 첫 기동이 RECOVERY·RESTART
+  # 를 켜 그 항목에 다시 입장하지 않고 마무리만 하며, 그 워커의 코드 0 이 정상 사슬에서 한 번 전진합니다. PREV = 그 항목(같은 항목을 이어 감)
+  param($Context)
+  $script:customRecoveryPending = $true
+  $script:customRestart = $true
+  $script:customPrevItem = Format-CustomItemToken -Item $Context.Item
+  Add-GuiLog '[커스텀] 이전 완료 항목의 마무리를 복구합니다.'
+}
+
+function Get-AbyssStartJournalRefusal {
+  # 시작 게이트 S0·S3 의 시작 거부 [오류] 줄 (명세 ① 2.9 · 5절 A11·B10·C11) - 두 자리가 같은 글자를 쓰도록 여기 한 곳에 둡니다. 사용 중 문구 끝에는
+  # 다른 '사용 중' 정지와 같은 잠금 파일 안내(Get-AbyssJournalLockedGuide - 단계 2.4~2.5a 구현 리뷰 조건)를 붙입니다(설계 제안의 괄호 '계속되면 다른
+  # 프로세스 확인' 은 그 안내와 겹쳐 안내로 바꿈 - 명세 2.9 '.lock 안내' 문단의 권고). 손상은 파일 위치 안내(사용자가 옮긴 뒤 시작 - 명세 5절 C11).
+  #  -Status corrupt · locked · no-owner(진행 위치를 끝내 못 읽었는데 어비스 커스텀의 미적용 '클리어 이상' 기록이 있음 - 마커 게이트의 '판단 불가면 지우지
+  #          않음' 과 같은 글자, 명세 5절 A11) · retry-off(재입장 요청 뒤 끝난 판의 기록인데 재개 기능이 꺼진 빌드 - 남아 있는 한 매번 거부되므로 해제
+  #          방법을 적음, 명세 5절 B10) · 그 밖(io-failed·읽기 예외) = 읽기 실패(-Detail 이 있으면 끝에 '(예외: …)')
+  param([string]$Status, [string]$Detail = '')
+  if ($Status -eq 'corrupt') { return ('[오류] 완료 기록 파일 손상 - 파일을 보존하고 시작하지 않습니다 ' + (Get-AbyssJournalCorruptGuide)) }
+  if ($Status -eq 'locked') { return ('[오류] 완료 기록 파일이 사용 중입니다 - 잠시 뒤 다시 시작해 주세요 ' + (Get-AbyssJournalLockedGuide)) }
+  if ($Status -eq 'no-owner') {
+    return '[오류] 설정 파일을 읽지 못해 이전 완료 기록의 주인을 확인할 수 없습니다 - 완료 기록을 지우지 않고 시작을 멈춥니다. 잠시 뒤 다시 시작해 주세요 (계속 반복되면 config.json 을 확인해 주세요).'
+  }
+  if ($Status -eq 'retry-off') {
+    return '[오류] 재입장 요청 뒤 끝난 판의 기록이 남아 있지만 이 버전은 그 판을 재개할 수 없어 시작하지 않습니다 - 캐릭터가 던전 안이면 그 판을 직접 마친 뒤 어비스 커스텀 [진행 초기화](진행은 처음부터)로 기록을 지우고 시작해 주세요'
+  }
+  $readFailText = '[오류] 완료 기록 파일을 읽지 못해 시작하지 않습니다 - 잠시 뒤 다시 시작해 주세요'
+  if ($Detail) { $readFailText += (' (예외: {0})' -f $Detail) }
+  return $readFailText
+}
+
+function Read-AbyssStartJournal {
+  # 시작 게이트 S0·S3 의 완료 기록 잠금 읽기 1번 → @{ Status; Journal; Detail }. Status = 저장소 읽기 결과(ok/locked/corrupt/io-failed), 읽기 예외는
+  # 'error' + Detail(메시지) - 읽지 못한 것과 같은 시작 거부입니다. 저장소가 잠금 아래 직전본·임시본으로 복구했으면 그 경고를 GUI 로그로 남깁니다(로그는
+  # 호출부 몫 - 저장소 계약)
+  try {
+    $journalRead = Read-AbyssJournal -Path $abyssJournalPath
+  } catch {
+    return @{ Status = 'error'; Journal = $null; Detail = $_.Exception.Message }
+  }
+  foreach ($readWarning in @($journalRead.Warnings)) { Add-GuiLog ([string]$readWarning) }
+  return @{ Status = [string]$journalRead.Status; Journal = $journalRead.Journal; Detail = '' }
+}
+
+function Invoke-AbyssStartJournalAdvance {
+  # 시작 게이트 S0 (설계 v10 6.3 dev:944 · 명세 ① 2.9 · 0.5 J6) - 어비스 커스텀 시작에서 진행 기록을 읽은 직후·지문 검사(S1) 앞에 부릅니다. S1·S2 가 이
+  # 함수가 바꾼 진행으로 판정해야 마지막 바퀴 마지막 판의 완주 기록이 남아 있어도 추가 회차 없이 완주가 성립합니다(dev:945). 어비스 커스텀 시작이 아니면
+  # journal 을 열지 않습니다.
+  #  1 잠금 읽기 - 손상·사용 중·읽기 실패면 시작하지 않습니다(파일 무변경 - 설계 v10 6.1 읽기 계약 'S0 locked → 시작 금지', 손상은 보존·위치 안내)
+  #  2 대기열 반영(Invoke-AbyssPendingAdvance -Caller start - 원소마다 [경고] 한 줄, 마커는 지우지 않음). 실패면 시작하지 않습니다(대기열·마커 보존,
+  #    '사용 중' 이면 잠금 파일 안내 - Get-AbyssPendingStopReason)
+  #  3 지금 진행(디스크)의 owner 의 미적용 reentered - '다시 하기'로 다음 판에 들어간 뒤 GUI 가 그 판을 계상·전진하기 전에 끝난 경우 - 를 대기열 원소처럼
+  #    진행 전진 → applied 로 반영합니다(launchState 는 그대로 - 첫 기동의 후보 고르기가 이 항목을 next 로 넘겨 다음 판 던전 안의 캐릭터를 이어받음).
+  #    첫 읽기에 미적용 reentered 가 없으면 진행 위치를 읽지 않습니다. 진행 위치는 마커 게이트와 같은 재시도(200ms × 3 - 설정 파일 일시 공유 위반)로 읽고,
+  #    끝내 못 읽었는데 미적용 reentered 가 있으면 주인을 가릴 수 없어 시작하지 않습니다(명세 5절 A11 과 같은 계약 - 그냥 넘기면 S3 가 진행 i 에서 그
+  #    기록을 알아보지 못해 이미 들어간 다음 판 대신 같은 항목을 다시 돕니다)
+  # 파일 순서 = config(전진) → journal(applied). 사이에서 끊겨도 다음 시작에서는 진행이 이미 다음 칸이라 owner 가 달라 다시 전진하지 않습니다. '계상' 은
+  # 진행 전진·applied 뿐입니다(세션 회차 수는 실행 시작이 0 으로 - 명세 5절 C13).
+  # 반환 @{ Ok; ConfigChanged } - Ok 거짓 = 시작하지 않음(사유 [오류] 줄은 이 함수가 남김) / ConfigChanged = 진행을 바꿨을 수 있음(부른 쪽이 진행을 다시 읽음)
+  $startSection = 'abyssCustomRepeat'
+  $configChanged = $false
+  try {
+    if (-not ($script:customActive -and ($script:customConfigSection -eq $startSection))) { return @{ Ok = $true; ConfigChanged = $false } }
+    $firstRead = Read-AbyssStartJournal
+    if ($firstRead.Status -ne 'ok') {
+      Add-GuiLog (Get-AbyssStartJournalRefusal -Status $firstRead.Status -Detail $firstRead.Detail)
+      return @{ Ok = $false; ConfigChanged = $false }
+    }
+    # 대기열 원소가 있었으면 그 반영이 진행을 바꿨을 수 있습니다(건너뛴 원소만이어도 다시 읽게 둠 - 다시 읽기는 싸고 판정이 단순)
+    if (@($firstRead.Journal.pending).Count -gt 0) { $configChanged = $true }
+    if (-not (Invoke-AbyssPendingAdvance -Caller 'start')) {
+      Add-GuiLog ('[오류] ' + (Get-AbyssPendingStopReason -Reason '이전 세션의 완료 기록 대기열을 반영하지 못해 시작하지 않습니다 - 대기열·마커를 보존합니다'))
+      return @{ Ok = $false; ConfigChanged = $configChanged }
+    }
+    $firstApplied = @(@($firstRead.Journal.applied) | ForEach-Object { [string]$_ })
+    $firstReentered = @(@($firstRead.Journal.entries) | Where-Object { ($null -ne $_) -and ([string]$_.section -eq $startSection) -and
+        ([string]$_.stage -eq 'reentered') -and ($firstApplied -notcontains [string]$_.nonce) })
+    if ($firstReentered.Count -eq 0) { return @{ Ok = $true; ConfigChanged = $configChanged } }
+    # 대기열 반영이 같은 nonce 를 적용했을 수 있어(재입장 실행부의 진행 저장 실패 원소) 다시 읽고 고릅니다
+    $secondRead = Read-AbyssStartJournal
+    if ($secondRead.Status -ne 'ok') {
+      Add-GuiLog (Get-AbyssStartJournalRefusal -Status $secondRead.Status -Detail $secondRead.Detail)
+      return @{ Ok = $false; ConfigChanged = $configChanged }
+    }
+    $secondApplied = @(@($secondRead.Journal.applied) | ForEach-Object { [string]$_ })
+    $reenteredEntries = @(@($secondRead.Journal.entries) | Where-Object { ($null -ne $_) -and ([string]$_.section -eq $startSection) -and
+        ([string]$_.stage -eq 'reentered') -and ($secondApplied -notcontains [string]$_.nonce) })
+    if ($reenteredEntries.Count -eq 0) { return @{ Ok = $true; ConfigChanged = $configChanged } }
+    $startContext = Get-CustomCurrentContext -SectionName $startSection
+    for ($contextTry = 1; $contextTry -le 3 -and -not $startContext; $contextTry++) {
+      Start-Sleep -Milliseconds 200
+      $startContext = Get-CustomCurrentContext -SectionName $startSection
+    }
+    if ($null -eq $startContext) {
+      Add-GuiLog (Get-AbyssStartJournalRefusal -Status 'no-owner')
+      return @{ Ok = $false; ConfigChanged = $configChanged }
+    }
+    $startOwner = Get-CustomCanonicalOwner -Context $startContext
+    $startGeneration = [int]$startContext.Generation
+    $targetEntry = $null
+    foreach ($entry in $reenteredEntries) {
+      if (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $startOwner -Generation $startGeneration) { $targetEntry = $entry }
+    }
+    # 지금 진행과 맞지 않는 지난 재입장 기록은 건너뜁니다 - 다음 판 기동의 후보 고르기(nextOwner)와 앱 기동 때 정리가 다룹니다
+    if ($null -eq $targetEntry) { return @{ Ok = $true; ConfigChanged = $configChanged } }
+    $configChanged = $true
+    # Step-CustomProgress 는 실패 사유를 스스로 [오류]/[경고] 로 남깁니다
+    if ($null -eq (Step-CustomProgress -SectionName $startSection)) {
+      Add-GuiLog '[오류] 이전 세션의 재입장 완료 기록을 진행에 반영하지 못해 시작하지 않습니다 - 완료 기록을 보존합니다'
+      return @{ Ok = $false; ConfigChanged = $configChanged }
+    }
+    Add-GuiLog ('[경고] 이전 세션의 미반영 완료 기록으로 진행을 전진({0})' -f [string]$startContext.Position)
+    # applied 표시 - 같은 nonce 가 이미 있으면 그대로(쓰기 0). mutator 는 클로저로 만들고 $script: 를 읽지 않습니다(명세 ① 2.0 체크리스트 5·6)
+    $targetNonce = [string]$targetEntry.nonce
+    $mutator = {
+      param($journal, $change)
+      if ((@(@($journal.applied) | ForEach-Object { [string]$_ })) -notcontains $targetNonce) {
+        $journal.applied = @(@($journal.applied) + $targetNonce)
+        $change.Changed = $true
+      }
+    }.GetNewClosure()
+    $mark = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+    foreach ($markWarning in @($mark.Warnings)) { Add-GuiLog ([string]$markWarning) }
+    $markTag = [string]$mark.Tag
+    if ($markTag -ne 'changed' -and $markTag -ne 'unchanged') {
+      # 진행은 이미 다음 칸이라 다음 시작이 이 기록으로 다시 전진하지 않고(owner 다름), 첫 기동의 후보 고르기가 이 항목을 next 로 이어받습니다
+      $markFail = ('[오류] 이전 세션의 재입장 완료 기록에 반영 표시를 남기지 못해 시작하지 않습니다({0}) - 진행은 반영됐습니다' -f (Get-AbyssJournalTagText -Tag $markTag))
+      if ($markTag -eq 'locked') { $markFail += (' ' + (Get-AbyssJournalLockedGuide)) }
+      Add-GuiLog $markFail
+      return @{ Ok = $false; ConfigChanged = $configChanged }
+    }
+    return @{ Ok = $true; ConfigChanged = $configChanged }
+  } catch {
+    Add-GuiLog ('[오류] 완료 기록 확인 중 예외 - 시작하지 않습니다 ({0})' -f $_.Exception.Message)
+    return @{ Ok = $false; ConfigChanged = $configChanged }
+  }
+}
+
+function Get-AbyssStartJournalAction {
+  # 시작 게이트 S3 판정 (설계 v10 6.3 dev:947 · 명세 ① 2.9 · 5절 A11·B10) - 묘비 소비 뒤·마커 게이트 앞에서 부릅니다. 어비스 커스텀 시작이 아니면
+  # journal 을 열지 않고 none.
+  #  1 잠금 읽기를 다시 합니다 - S0 뒤의 지문 검사·완주 초기화(S1)·새 순열(S2)이 진행을 처음부터로 되돌리며 기록을 지웠을 수 있습니다. 손상·사용 중·
+  #    읽기 실패면 refuse(S0 와 같은 글자 - 파일 무변경, 설계 v10 6.1 'S0·S3 locked → 시작 금지')
+  #  2 지금 진행 위치를 마커 게이트와 같은 재시도(200ms × 3)로 읽습니다. 끝내 못 읽으면 어비스 커스텀의 미적용 '클리어 이상' 기록이 하나라도 있을 때
+  #    refuse(주인을 가릴 수 없어 지우지 않고 멈춤 - 명세 5절 A11: 그냥 흘리면 마커 없는 클리어 판은 마커 게이트도 건너뛰어 같은 항목을 다시 돕니다),
+  #    없으면 none(마커 게이트가 자기 재시도로 판단)
+  #  3 지금 owner(5필드 + 진행 세대)의 미적용 기록: 재입장 요청(retry-attempt·retry-clicked) → 재개 기능이 꺼진 빌드면 refuse(명세 5절 B10 - 이 빌드의
+  #    워커에는 재개 코드가 없음), 켜졌으면 resume(수동 1회) / 클리어(cleared·post-clear-stop - 재입장 요청 전) → recover(완료 마커가 없어도 마커와 같은
+  #    근거 - dev:947 '마커 등가') / 없음 → none. 같은 단계가 여럿이면 가장 최근(배열 뒤쪽). reentered 는 S0 몫이라 보지 않습니다(S0 가 반영했거나
+  #    그 실패로 시작이 이미 멈춤)
+  # 반환 @{ Action(none / recover / resume / refuse); Nonce; Reason; Context } - Reason = refuse 의 [오류] 줄, Context = 읽은 진행 컨텍스트(복구 예약의 PREV)
+  $startSection = 'abyssCustomRepeat'
+  try {
+    if (-not ($script:customActive -and ($script:customConfigSection -eq $startSection))) { return @{ Action = 'none'; Nonce = ''; Reason = ''; Context = $null } }
+    $gateRead = Read-AbyssStartJournal
+    if ($gateRead.Status -ne 'ok') {
+      return @{ Action = 'refuse'; Nonce = ''; Reason = (Get-AbyssStartJournalRefusal -Status $gateRead.Status -Detail $gateRead.Detail); Context = $null }
+    }
+    $gateContext = Get-CustomCurrentContext -SectionName $startSection
+    for ($contextTry = 1; $contextTry -le 3 -and -not $gateContext; $contextTry++) {
+      Start-Sleep -Milliseconds 200
+      $gateContext = Get-CustomCurrentContext -SectionName $startSection
+    }
+    $appliedNonces = @(@($gateRead.Journal.applied) | ForEach-Object { [string]$_ })
+    if ($null -eq $gateContext) {
+      $ownerlessCount = 0
+      foreach ($entry in @($gateRead.Journal.entries)) {
+        if ($null -eq $entry -or [string]$entry.section -ne $startSection) { continue }
+        $entryNonce = [string]$entry.nonce
+        if (-not $entryNonce -or $appliedNonces -contains $entryNonce) { continue }
+        if ((Get-AbyssJournalStageRank -Stage ([string]$entry.stage)) -ge 1) { $ownerlessCount++ }
+      }
+      if ($ownerlessCount -gt 0) { return @{ Action = 'refuse'; Nonce = ''; Reason = (Get-AbyssStartJournalRefusal -Status 'no-owner'); Context = $null } }
+      return @{ Action = 'none'; Nonce = ''; Reason = ''; Context = $null }
+    }
+    $gateOwner = Get-CustomCanonicalOwner -Context $gateContext
+    $gateGeneration = [int]$gateContext.Generation
+    $retryEntry = $null
+    $clearedEntry = $null
+    foreach ($entry in @($gateRead.Journal.entries)) {
+      if ($null -eq $entry) { continue }
+      $entryNonce = [string]$entry.nonce
+      if (-not $entryNonce -or $appliedNonces -contains $entryNonce) { continue }
+      $entryStage = [string]$entry.stage
+      if (((Get-AbyssJournalStageRank -Stage $entryStage) -lt 1) -or ($entryStage -eq 'reentered')) { continue }
+      if (-not (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $gateOwner -Generation $gateGeneration)) { continue }
+      if (($entryStage -eq 'retry-attempt') -or ($entryStage -eq 'retry-clicked')) { $retryEntry = $entry } else { $clearedEntry = $entry }
+    }
+    if ($null -ne $retryEntry) {
+      if (-not $script:abyssPartyRetryEnabled) { return @{ Action = 'refuse'; Nonce = ''; Reason = (Get-AbyssStartJournalRefusal -Status 'retry-off'); Context = $null } }
+      return @{ Action = 'resume'; Nonce = [string]$retryEntry.nonce; Reason = ''; Context = $gateContext }
+    }
+    if ($null -ne $clearedEntry) { return @{ Action = 'recover'; Nonce = [string]$clearedEntry.nonce; Reason = ''; Context = $gateContext } }
+    return @{ Action = 'none'; Nonce = ''; Reason = ''; Context = $gateContext }
+  } catch {
+    return @{ Action = 'refuse'; Nonce = ''; Reason = ('[오류] 완료 기록 확인 중 예외 - 시작하지 않습니다 ({0})' -f $_.Exception.Message); Context = $null }
+  }
+}
+
+function Invoke-AbyssStartJournalAction {
+  # 시작 게이트 S3 판정(Get-AbyssStartJournalAction)을 적용합니다 (명세 ① 2.9 · 5절 B10) → $true = 시작을 이어 감 / $false = 시작하지 않음(사유 [오류] 줄을
+  # 이 함수가 남김 - 부른 쪽은 커스텀 실행을 끄고 return).
+  #  refuse  - 사유 한 줄
+  #  recover - 마무리 복구 예약(Set-CustomRecoveryReservation - 마커 게이트와 같은 문장)
+  #  resume  - 재입장 재개 수동 1회 예약(재개 기능이 켜진 빌드 - 이 빌드에서는 판정이 refuse 라 진리표로만). 수동 재개도 그 기록의 재개 횟수를 +1 합니다 -
+  #            재개한 판이 또 오류로 끝나면 자동 재개 없이 멈추게(명세 5절 B10 · 코드 1 라우팅의 '한 번뿐' 과 같은 기록). 예약은 첫 기동이 쓰고 비웁니다
+  #  none    - 아무것도 하지 않음(마커 게이트가 판단)
+  # 예외를 밖으로 내지 않습니다(명세 5절 A4)
+  param($Plan)
+  try {
+    $planAction = [string]$Plan.Action
+    if ($planAction -eq 'refuse') {
+      Add-GuiLog ([string]$Plan.Reason)
+      return $false
+    }
+    if ($planAction -eq 'recover') {
+      Set-CustomRecoveryReservation -Context $Plan.Context
+      return $true
+    }
+    if ($planAction -ne 'resume') { return $true }
+    # 재개 횟수 +1 - 클로저(-Expect·-Mutator)는 $script: 를 읽지 않고 위 지역 변수만 씁니다(명세 ① 2.0 체크리스트 5·6 · 코드 1 라우팅과 같은 모양)
+    $resumeNonce = [string]$Plan.Nonce
+    $expect = {
+      param($journal)
+      return [bool](@(@($journal.entries) | Where-Object { ($null -ne $_) -and ([string]$_.nonce -eq $resumeNonce) -and
+            (([string]$_.stage -eq 'retry-attempt') -or ([string]$_.stage -eq 'retry-clicked')) }).Count -gt 0)
+    }.GetNewClosure()
+    $mutator = {
+      param($journal, $change)
+      foreach ($entry in @($journal.entries)) {
+        if ($null -eq $entry -or [string]$entry.nonce -ne $resumeNonce) { continue }
+        Set-AbyssJournalProperty -Object $entry -Name 'resumeAttempts' -Value (([int](Get-AbyssJournalField -Object $entry -Name 'resumeAttempts').Value) + 1)
+        $change.Changed = $true
+      }
+    }.GetNewClosure()
+    $attemptRecord = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+    foreach ($recordWarning in @($attemptRecord.Warnings)) { Add-GuiLog ([string]$recordWarning) }
+    $attemptTag = [string]$attemptRecord.Tag
+    if ($attemptTag -ne 'changed') {
+      if (($attemptTag -eq 'locked') -or ($attemptTag -eq 'corrupt')) { Add-GuiLog (Get-AbyssStartJournalRefusal -Status $attemptTag) }
+      else { Add-GuiLog '[오류] 재개 기록 저장 실패 - 시작하지 않습니다 (기록 보존)' }
+      return $false
+    }
+    $script:customResumePending = $true
+    $script:customResumeNonce = $resumeNonce
+    Add-GuiLog '[경고] 이전 세션에서 재입장 요청 뒤 끝난 판을 이어받는 재개를 한 번 시작합니다'
+    return $true
+  } catch {
+    Add-GuiLog ('[오류] 완료 기록 확인 중 예외 - 시작하지 않습니다 ({0})' -f $_.Exception.Message)
+    return $false
+  }
+}
+
+function Invoke-AbyssJournalStaleCleanup {
+  # 어비스 완료 기록 stale 정리 - 앱 기동 때 설정 이전 뒤 한 번 (명세 ① 2.9 · 5절 A7 · 설계 v10 6.1 'GUI 시작 시 정리'). 저장 1회(잠금 아래 한 mutation):
+  #  ① 비커스텀 항목(섹션이 어비스 커스텀이 아닌 것) 전부 - 비커스텀 owner 는 시작 버튼마다 새로 나는 실행 id 라 앱 기동에는 이어받을 실행이 없습니다
+  #  ② 어비스 커스텀 항목·대기열 원소 중 진행 세대가 지금 설정의 어비스 섹션 세대(progressGeneration - 키 없음·해석 실패 = 0, 진행 컨텍스트와 같은 규칙)와
+  #     다른 것 - 진행 초기화 전의 기록은 처음부터 다시 시작한 진행과 다시 맞지 않습니다. 설정을 못 읽으면(읽기 실패·어비스 섹션 없음) 세대를 알 수
+  #     없어 이 기준을 건너뜁니다(커스텀 기록을 지우지 않음 - 명세 5절 A7 ⑤)
+  #  ③ 그래도 항목이 20건을 넘으면 지워도 되는 항목(applied 에 있음 ∧ launchState 가 launched 아님 ∧ 대기열이 그 nonce 를 가리키지 않음 ∧ 재입장
+  #     (reentered)이면 done - 다음 기동의 이어받기 후보는 남김)을 오래된 것(배열 앞 - 항목은 끝에만 덧붙음)부터 20건이 될 때까지
+  #  ④ applied 는 남은 항목의 nonce 와의 교집합 - 항목을 남긴 채 applied 에서 nonce 만 빼면 그 클리어 기록이 미적용으로 되살아나 두 번 계상됩니다
+  # 지울 것이 없으면 바꾸지 않습니다(이 호출의 논리 변경 쓰기 0 · 파일이 없으면 생성 0). 실패(사용 중·손상·기록 실패·예외)는 [경고] 한 줄로 끝내고 앱
+  # 기동을 계속합니다 - 이 시점에는 실행 중인 것이 없고, 손상·사용 중은 어비스 자동화를 시작할 때 시작 게이트·기동이 다시 막습니다. 예외를 밖으로 내지
+  # 않습니다(명세 5절 A4 - 앱 기동 문장이라 예외가 나가면 창이 뜨기 전에 멈춤)
+  try {
+    $staleSection = 'abyssCustomRepeat'
+    $staleLimit = 20
+    $knowGeneration = $false
+    $wantGeneration = 0
+    $staleConfig = Read-Config
+    if ($staleConfig -and $staleConfig.PSObject.Properties[$staleSection] -and $staleConfig.$staleSection) {
+      $knowGeneration = $true
+      $staleNode = $staleConfig.$staleSection
+      if ($staleNode.PSObject.Properties['progressGeneration']) { try { $wantGeneration = [int]$staleNode.progressGeneration } catch { $wantGeneration = 0 } }
+    }
+    # mutator 는 클로저로 만듭니다 - 클로저가 아니면 저장 함수의 지역 변수가 같은 이름의 이 함수 변수를 가립니다(동적 스코프 - 실측). 클로저 안에서는
+    # $script: 를 읽지 않고 위 지역 변수만 쓰며 함수를 부르지 않습니다(명세 ① 2.0 체크리스트 5·6)
+    $mutator = {
+      param($journal, $change)
+      $cleanupChanged = $false
+      $keptPending = @()
+      foreach ($element in @($journal.pending)) {
+        $elementGeneration = -1
+        try { $elementGeneration = [int]$element.generation } catch { $elementGeneration = -1 }
+        if ($knowGeneration -and ($elementGeneration -ne $wantGeneration)) { $cleanupChanged = $true; continue }
+        $keptPending += $element
+      }
+      $pendingNonces = @($keptPending | ForEach-Object { [string]$_.nonce })
+      $keptEntries = @()
+      foreach ($entry in @($journal.entries)) {
+        if ([string]$entry.section -ne $staleSection) { $cleanupChanged = $true; continue }
+        $entryGeneration = -1
+        try { $entryGeneration = [int]$entry.generation } catch { $entryGeneration = -1 }
+        if ($knowGeneration -and ($entryGeneration -ne $wantGeneration)) { $cleanupChanged = $true; continue }
+        $keptEntries += $entry
+      }
+      if ($keptEntries.Count -gt $staleLimit) {
+        $appliedNow = @(@($journal.applied) | ForEach-Object { [string]$_ })
+        $overflow = $keptEntries.Count - $staleLimit
+        $cappedEntries = @()
+        foreach ($entry in $keptEntries) {
+          $entryNonce = [string]$entry.nonce
+          # 재입장 항목은 done 이 될 때까지 다음 기동이 이어받을 후보입니다(Resolve-HandoffEnvForContext 의 next - applied 를 보지 않음). 시작 게이트 S0 는
+          # 계상 전에 끝난 재입장을 진행에 반영하며 applied 만 남기고 launchState 는 그대로 두므로(dev:944), 첫 기동 전에 앱이 다시 켜지면 그 항목이 아래
+          # 조건을 다 만족합니다 - 지우면 다음 시작이 이어받을 기록 없이 다음 판 던전 안에서 시작해 그 항목을 다시 돕니다(dev:906 · 단계 2.7~2.9 구현 검증)
+          if (([string]$entry.stage -eq 'reentered') -and ([string]$entry.launchState -ne 'done')) { $cappedEntries += $entry; continue }
+          if (($overflow -gt 0) -and ($appliedNow -contains $entryNonce) -and ([string]$entry.launchState -ne 'launched') -and ($pendingNonces -notcontains $entryNonce)) {
+            $overflow--
+            $cleanupChanged = $true
+            continue
+          }
+          $cappedEntries += $entry
+        }
+        $keptEntries = $cappedEntries
+      }
+      $keptNonces = @($keptEntries | ForEach-Object { [string]$_.nonce })
+      $keptApplied = @()
+      foreach ($appliedNonce in @($journal.applied)) {
+        if ($keptNonces -contains [string]$appliedNonce) { $keptApplied += $appliedNonce } else { $cleanupChanged = $true }
+      }
+      if (-not $cleanupChanged) { return }
+      # 남길 항목·원소는 읽은 객체 그대로 담습니다 - 고정 필드로 다시 만들면 모르는 필드가 사라집니다(저장소 계약)
+      $journal.entries = $keptEntries
+      $journal.pending = $keptPending
+      $journal.applied = $keptApplied
+      $change.Changed = $true
+    }.GetNewClosure()
+    $cleanup = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator
+    # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+    foreach ($cleanupWarning in @($cleanup.Warnings)) { Add-GuiLog ([string]$cleanupWarning) }
+    $cleanupTag = [string]$cleanup.Tag
+    if ($cleanupTag -ne 'changed' -and $cleanupTag -ne 'unchanged') {
+      Add-GuiLog ('[경고] 지난 완료 기록 정리 실패({0}) - 기록을 그대로 두고 계속합니다' -f (Get-AbyssJournalTagText -Tag $cleanupTag))
+    }
+  } catch {
+    Add-GuiLog ('[경고] 지난 완료 기록 정리 실패(예외: {0}) - 기록을 그대로 두고 계속합니다' -f $_.Exception.Message)
+  }
+}
 
 # --- 버튼 이벤트 ---
 function Invoke-StartAutomation {
@@ -9025,6 +11733,26 @@ function Invoke-StartAutomation {
       }
       $crProgress = $null
       if ($crNode.PSObject.Properties['progress'] -and $crNode.progress) { $crProgress = $crNode.progress }
+      # 시작 게이트 S0(어비스 커스텀 - 구현 명세 ① 2.9): 앞 세션이 남긴 완료 기록(대기열·계상 전 재입장)을 진행에 먼저 반영합니다. 진행이 바뀌었을 수
+      # 있으면 아래 지문 검사·완주 판정(S1)이 바뀐 진행으로 판정하도록 다시 읽습니다 - 마지막 판의 완주 기록이 남아 있어도 추가 회차 없이 완주(dev:945)
+      $startAdvance = Invoke-AbyssStartJournalAdvance
+      if (-not $startAdvance.Ok) {
+        $script:customActive = $false
+        return
+      }
+      if ($startAdvance.ConfigChanged) {
+        $crCfg = Read-Config
+        $crNode = $null
+        if ($crCfg -and $crCfg.PSObject.Properties[$script:customConfigSection]) { $crNode = $crCfg.$script:customConfigSection }
+        if (-not $crNode) {
+          # 방금 읽은 설정을 다시 못 읽는 일시 실패(2026-08-10 8차 점검이 본 설정 파일 공유 위반) - 바뀐 진행을 모른 채 지문·완주 검사를 건너뛰지 않게 멈춥니다
+          Add-GuiLog '[오류] 설정 파일을 다시 읽지 못해 시작하지 않습니다 - 잠시 뒤 다시 시작해 주세요'
+          $script:customActive = $false
+          return
+        }
+        $crProgress = $null
+        if ($crNode.PSObject.Properties['progress'] -and $crNode.progress) { $crProgress = $crNode.progress }
+      }
       if ($crProgress) {
         # 이어가기 안전장치: 리스트가 하나라도 바뀌었으면(지문 불일치) 무조건 처음부터 (요청사항 확정)
         $savedFingerprint = ''
@@ -9069,6 +11797,9 @@ function Invoke-StartAutomation {
       $script:customPrevItem = ''
       $script:customRestart = $false
       $script:customRecoveryPending = $false
+      # 재입장 재개 수동 1회 예약은 이 아래 시작 게이트(S3)만 정합니다 - 앞 실행의 예약이 남지 않게 여기서 비웁니다(명세 ① 2.5 ③)
+      $script:customResumePending = $false
+      $script:customResumeNonce = ''
     }
     $cleanup = Stop-ExistingAutomation
     if ($cleanup.Killed -gt 0) {
@@ -9091,44 +11822,49 @@ function Invoke-StartAutomation {
         Add-GuiLog '[경고] 이전 완료 기록 파일이 잠겨 있어 이번 시작에서는 무시합니다 - 완료 계상은 정상 종료 코드로만 이뤄집니다.'
       }
     }
-    if ($script:customActive -and -not $markerStaleBlocked -and (Test-Path -LiteralPath $customMarkerFile)) {
-      # GUI/워커가 클리어 뒤 마무리 중 종료됐어도 구조화 마커의 소유자가 현재 progress 와
-      # 정확히 같으면 그 항목을 다시 입장하지 않고 마무리 복구부터 이어갑니다.
-      # ★ '컨텍스트를 못 읽음'은 **'마커가 틀렸다'가 아니라 '판단 불가'** 입니다.
-      #   Get-CustomCurrentContext 는 부를 때마다 Read-Config 로 디스크를 다시 읽습니다.
-      #   그 읽기가 한 번 실패하면 $null 인데, 여기서 $null 을 '불일치'로 처리하면 아래
-      #   else 가 **정당한 완료 마커를 디스크에서 지웁니다.** 그러면 이미 클리어가 확정된 판의
-      #   마무리 복구가 영영 불가능해져 그 항목을 처음부터 다시 돌립니다 = 재화 이중 소모.
-      #   종료 코드 경로(2026-08-09 7차)는 계상만 건너뛰고 마커는 보존하는데, 이쪽은
-      #   **되돌릴 수 없어 더 파괴적**입니다 (2026-08-10 8차 점검 - 7차가 만든 계약 비대칭).
-      #   → 먼저 짧게 재시도하고(일시 공유 위반이 대부분), 그래도 못 읽으면 **아무것도 지우지
-      #     않고 시작 자체를 멈춥니다.** 여기서 그냥 진행하면 바로 뒤 Start-NextCycle 의
-      #     마커 정리가 같은 파일을 지워 버리므로 '보존 후 무시'는 성립하지 않습니다.
-      $resumeContext = Get-CustomCurrentContext
-      for ($ctxTry = 1; $ctxTry -le 3 -and -not $resumeContext; $ctxTry++) {
-        Start-Sleep -Milliseconds 200
+    # 시작 게이트 S3(명세 ① 2.9) - 복구·재개를 예약하면 마커 게이트를 건너뜀
+    $startJournal = Get-AbyssStartJournalAction
+    if (-not (Invoke-AbyssStartJournalAction -Plan $startJournal)) { $script:customActive = $false; return }
+    if ($startJournal.Action -eq 'none') {
+      if ($script:customActive -and -not $markerStaleBlocked -and (Test-Path -LiteralPath $customMarkerFile)) {
+        # GUI/워커가 클리어 뒤 마무리 중 종료됐어도 구조화 마커의 소유자가 현재 progress 와
+        # 정확히 같으면 그 항목을 다시 입장하지 않고 마무리 복구부터 이어갑니다.
+        # ★ '컨텍스트를 못 읽음'은 **'마커가 틀렸다'가 아니라 '판단 불가'** 입니다.
+        #   Get-CustomCurrentContext 는 부를 때마다 Read-Config 로 디스크를 다시 읽습니다.
+        #   그 읽기가 한 번 실패하면 $null 인데, 여기서 $null 을 '불일치'로 처리하면 아래
+        #   else 가 **정당한 완료 마커를 디스크에서 지웁니다.** 그러면 이미 클리어가 확정된 판의
+        #   마무리 복구가 영영 불가능해져 그 항목을 처음부터 다시 돌립니다 = 재화 이중 소모.
+        #   종료 코드 경로(2026-08-09 7차)는 계상만 건너뛰고 마커는 보존하는데, 이쪽은
+        #   **되돌릴 수 없어 더 파괴적**입니다 (2026-08-10 8차 점검 - 7차가 만든 계약 비대칭).
+        #   → 먼저 짧게 재시도하고(일시 공유 위반이 대부분), 그래도 못 읽으면 **아무것도 지우지
+        #     않고 시작 자체를 멈춥니다.** 여기서 그냥 진행하면 바로 뒤 Start-NextCycle 의
+        #     마커 정리가 같은 파일을 지워 버리므로 '보존 후 무시'는 성립하지 않습니다.
+        # 바깥 if: 위 S3 가 어비스 완료 기록으로 마무리 복구·재개를 예약했으면 이 마커 대조를 건너뜁니다(구현 명세 ① 2.9 - 이 조건식 원문은 그대로).
         $resumeContext = Get-CustomCurrentContext
-      }
-      $markerOwner = Read-CustomMarkerOwner
-      if ($markerOwner -and -not $resumeContext) {
-        Add-GuiLog '[오류] 설정 파일을 읽지 못해 이전 완료 기록의 주인을 확인할 수 없습니다 - 완료 기록을 지우지 않고 시작을 멈춥니다. 잠시 뒤 다시 시작해 주세요 (계속 반복되면 config.json 을 확인해 주세요).'
-        $script:customActive = $false
-        return
-      }
-      if (Test-CustomMarkerOwnerMatchesContext -Owner $markerOwner -Context $resumeContext) {
-        $script:customRecoveryPending = $true
-        $script:customRestart = $true
-        $script:customPrevItem = Format-CustomItemToken -Item $resumeContext.Item
-        Add-GuiLog '[커스텀] 이전 완료 항목의 마무리를 복구합니다.'
-      } else {
-        # 구버전 타임스탬프/부분 파일/다른 리스트·위치의 마커는 오계상 방지를 위해 폐기합니다.
-        # 무효화는 단일 계약을 거칩니다 - 맨 Remove-Item 은 실패 시 묘비를 남기지 않아
-        # 그 시점의 실패가 디스크에 기록되지 않습니다 (2026-08-09 재점검).
-        if (Clear-CustomMarkerFile -Path $customMarkerFile) {
-          Add-GuiLog '[안내] 현재 진행 위치와 맞지 않는 이전 완료 마커를 정리했습니다.'
+        for ($ctxTry = 1; $ctxTry -le 3 -and -not $resumeContext; $ctxTry++) {
+          Start-Sleep -Milliseconds 200
+          $resumeContext = Get-CustomCurrentContext
+        }
+        $markerOwner = Read-CustomMarkerOwner
+        if ($markerOwner -and -not $resumeContext) {
+          Add-GuiLog '[오류] 설정 파일을 읽지 못해 이전 완료 기록의 주인을 확인할 수 없습니다 - 완료 기록을 지우지 않고 시작을 멈춥니다. 잠시 뒤 다시 시작해 주세요 (계속 반복되면 config.json 을 확인해 주세요).'
+          $script:customActive = $false
+          return
+        }
+        if (Test-CustomMarkerOwnerMatchesContext -Owner $markerOwner -Context $resumeContext) {
+          # 예약 문장은 S3 의 '마커 등가' 복구와 같은 함수 하나(명세 ① 2.9 - 복구 시작 안내 개수 그대로)
+          Set-CustomRecoveryReservation -Context $resumeContext
         } else {
-          Add-GuiLog '[경고] 현재 진행 위치와 맞지 않는 완료 마커를 삭제하지 못했습니다 - 이번 회차는 마커를 무시합니다.'
-          $script:customMarkerIgnore = $true
+          # 구버전 타임스탬프/부분 파일/다른 리스트·위치의 마커는 오계상 방지를 위해 폐기합니다.
+          # 스키마 11 부터는 version 2 이하 마커(읽기 $null)와 진행 세대가 다른 마커(진행 초기화 전에 남은 것)도 여기로 옵니다.
+          # 무효화는 단일 계약을 거칩니다 - 맨 Remove-Item 은 실패 시 묘비를 남기지 않아
+          # 그 시점의 실패가 디스크에 기록되지 않습니다 (2026-08-09 재점검).
+          if (Clear-CustomMarkerFile -Path $customMarkerFile) {
+            Add-GuiLog '[안내] 현재 진행 위치와 맞지 않는 이전 완료 마커를 정리했습니다.'
+          } else {
+            Add-GuiLog '[경고] 현재 진행 위치와 맞지 않는 완료 마커를 삭제하지 못했습니다 - 이번 회차는 마커를 무시합니다.'
+            $script:customMarkerIgnore = $true
+          }
         }
       }
     }
@@ -9150,6 +11886,15 @@ function Invoke-StartAutomation {
     $script:stopRequested = $false
     $script:preparedStreak = 0
     $script:targetTime = $null
+    # 시작 버튼마다 새 실행 id (설계 v10 6.1 env 목록 - 비커스텀 어비스 완료 기록의 owner). 워커가 HONEYNOGI_RUN_ID 로 받아 기록하고,
+    # 앞 실행의 비커스텀 기록은 id 가 달라 이어받지 않습니다. 정지에서 지우지 않습니다 - 이 자리가 늘 덮어씁니다(명세 5절 C12)
+    $script:runId = [guid]::NewGuid().ToString('D')
+    $env:HONEYNOGI_RUN_ID = $script:runId
+    # 기동 종류·마무리 실행 보류·비커스텀 어비스 재입장 오류 연속은 실행마다 처음부터 (명세 ① 2.5 ③)
+    $script:lastLaunchKind = 'none'
+    $script:lastLaunchNonce = ''
+    $script:finishOnlyHold = $null
+    $script:abyssErrorStreak = 0
     if ($rbCount.Checked) { $script:targetCycles = [int]$numCount.Value } else { $script:targetCycles = 0 }
     if ($rbTime.Checked) {
       # 목표 시각 계산: 오늘 그 시각, 이미 지났으면 내일 그 시각.
@@ -9185,7 +11930,15 @@ function Invoke-StartAutomation {
     # 실행 중에는 화면 꺼짐/절전을 막습니다 (감지가 화면 렌더링에 의존)
     [Win32.PowerState]::SetThreadExecutionState($script:esKeepAwake) | Out-Null
     Set-UiRunning $true
-    Start-NextCycle
+    # 첫 기동 - 시작 게이트 S3 가 재입장 재개(수동 1회)를 예약했으면 그 항목을 잇는 재개 기동(마커는 정리하지 않고 넘김)으로 띄우고 예약을 비웁니다
+    # (구현 명세 ① 2.9 · 5절 B10 - 예약은 이 기동 하나에만. 재개 기능이 꺼진 이 빌드에서는 S3 가 시작을 거부해 예약이 생기지 않습니다)
+    if ($script:customResumePending) {
+      Start-NextCycle -PreserveMarker -ResumeNonce $script:customResumeNonce
+      $script:customResumePending = $false
+      $script:customResumeNonce = ''
+    } else {
+      Start-NextCycle
+    }
 }
 
 $btnStart.Add_Click({
@@ -9234,7 +11987,10 @@ $btnSafeStop.Add_Click({
         $lblStatus.Text = "$($script:completedCycles + 1)회차 실행 중...$statusSuffix (안전 중지 취소됨)"
       }
       $lblStatus.ForeColor = [System.Drawing.Color]::ForestGreen
-      Add-GuiLog '안전 중지 취소: 반복을 계속합니다.'
+      # 마무리 실행 중이면 취소해도 그 판을 마치고 멈춥니다 - 마무리 실행은 띄울 때 정지가 정해졌고 워커의 마지막 판 신호도 그대로입니다
+      # (명세 5절 B12 · 설계 v11 R1 9절 미결 3 (가)). 그때는 '반복을 계속합니다' 대신 그 사실을 알립니다
+      if ($script:lastLaunchKind -eq 'finish-only') { Add-GuiLog '안전 중지 취소: 마무리 중인 판은 끝까지 하고 멈춥니다 (취소는 다음 시작부터)' }
+      else { Add-GuiLog '안전 중지 취소: 반복을 계속합니다.' }
       return
     }
     $script:stopRequested = $true
@@ -9767,6 +12523,8 @@ $rbAbyssPartyMember.Add_CheckedChanged($updateCategoryPanels)
 # ----- 시작 -----
 # exe 업데이트로 좌표/구조가 바뀐 경우 사용자 설정만 옮겨 담아 config 를 자동 이전합니다
 $script:configMigrated = Update-ConfigToLatest
+# 어비스 완료 기록 stale 정리 - 설정 이전 뒤(이전이 올린 진행 세대까지 반영된 설정으로 고름 - 구현 명세 ① 2.9 · 5절 A7). 실패는 [경고] 한 줄뿐
+Invoke-AbyssJournalStaleCleanup
 Load-SettingsToUi
 & $updateClearHuman
 & $updateCategoryPanels
@@ -9896,6 +12654,13 @@ if ($script:configMigrated) {
       # 실패 사실 자체는 묘비 파일로 디스크에 남아, 시작 버튼을 누를 때 다시 처리됩니다.
       Add-GuiLog '[경고] 이전 완료 기록 파일을 지우지 못했습니다 (다른 프로그램이 사용 중일 수 있음) - 시작할 때 다시 정리하며, 그때도 안 되면 그 기록은 무시합니다.'
     }
+  }
+  # 10→11 구버전 완료 마커 무효화 결과 - 진행 기록이 없던(1바퀴 0번) 사용자가 주 대상이라 진행 초기화 안내 밖에 둡니다 (설계 v10 1.3)
+  if ($script:legacyMarkerClearedCount -ge 1) {
+    Add-GuiLog "[안내] 구버전 커스텀 완료 기록 $($script:legacyMarkerClearedCount)건을 무효화했습니다 (새 형식 세대 검사 도입 - 해당 항목은 처음부터 다시 진행합니다)"
+  }
+  if ($script:legacyMarkerClearFailed) {
+    Add-GuiLog '[경고] 구버전 커스텀 완료 기록 파일을 지우지 못했습니다 (다른 프로그램이 사용 중일 수 있음) - 그 모드를 시작할 때 다시 정리하며, 그때도 안 되면 그 기록은 무시합니다.'
   }
   if ($script:gatherWaitReset -gt 0) {
     Add-GuiLog "[안내] '진행 없음' 설정의 의미가 바뀌어(사이클 총 시간 → 진행이 멈춘 시간) 기존 값 $($script:gatherWaitReset)초를 기본값 600초로 되돌렸습니다. 이제 채집 수량이 늘어나는 동안은 오래 걸려도 멈추지 않습니다."

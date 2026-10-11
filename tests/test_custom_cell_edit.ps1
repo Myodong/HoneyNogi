@@ -112,9 +112,12 @@ Assert-Case '오버레이: 어비스 이벤트 연결은 리스트 생성 뒤 (�
 # ★ 9차 점검: 예전 단언은 낱말 'GetNewClosure' 를 세어 **주석 3건만으로 충족**됐습니다.
 #   실제 클로저 두 개를 통째로 지워도 52종이 전부 통과했습니다. 주석을 뺀 코드에서
 #   **실제 호출**만 세고 개수를 정확히 고정합니다.
+# 2026-10-08: 어비스 완료 기록 저장의 mutator 도 .GetNewClosure() 클로저입니다(구현 명세 ① 2.0 체크리스트 6 - 진행 초기화의
+#   완료 기록 폐기부터 GUI 에 생김). GUI 전체 개수는 셀 편집과 무관하게 늘어나므로, 세는 대상을 셀 편집의 예약 콜백 두 곳
+#   (BeginInvoke 에 넘기는 세션 캡처 클로저)의 모양으로 좁힙니다 - 둘 중 하나의 클로저만 지워도 여전히 FAIL 입니다.
 $guiCodeOnly = (($guiSource -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '오버레이: 예약 콜백은 세션을 클로저로 캡처 (실제 호출 2곳)' `
-  ([regex]::Matches($guiCodeOnly, '\.GetNewClosure\(\)').Count) 2
+  ([regex]::Matches($guiCodeOnly, 'BeginInvoke\(\[Action\] \(\{\s*(?:Invoke-CellEditApply -ExpectedSession \$commitSession|Open-CellEditDropDown -ExpectedSession \$openSession)\s*\}\.GetNewClosure\(\)\)\)').Count) 2
 Assert-Case '오버레이: 실행 시작 시 커밋된 편집은 완료, 미커밋만 폐기' `
   ($guiSource -match "pendingCellEdit[\s\S]{0,200}Applied[\s\S]{0,120}Invoke-CellEditApply") $true
 Assert-Case '오버레이: 커밋은 SelectionChangeCommitted + BeginInvoke 예약' `
