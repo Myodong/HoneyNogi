@@ -17,6 +17,10 @@
 #      09-21 프레임으로 재생 - 퇴장 로딩·필드 도착·입장 로딩·던전 도착·컷신은 unknown, 던전 안 추적기 오독·입장 과도는 field(필드의 증거가 아님),
 #      재매칭은 HUD 가 보여도 matching. 전이 열 재생(가~자)은 '끊김 없이 관측된 퇴장 전이' 로만 'left' 가 나옴을 실제 판독문으로 확인하고,
 #      선택 화면 오버레이 두 장에서 나가기 헬퍼는 'selection'(누르지 않음 - 워커가 연 화면인지는 복귀 루프의 출처가 판정)
+#   ④ ③ 짝 찾기(2026-10 구현 단위 ③): 전 프레임에서 Find-AbyssRewardButtonPair 의 짝 판독문 = 하단 판독문(같은 영역·배율·엔진), 짝은 라벨 표
+#      $pairExpect 와 한 키로 대조 - 3버튼 보상 7장(D2·L4+1·O00·D1·L2-pre 짝 둘 / L4 Retry 만 / G3 Other 만)과 1908 렌더 2장(창 DPI 96·144)은 라벨별 짝,
+#      그 밖 전 범주는 짝 0(오탐 0). 갈래에는 서명 단언만 둡니다 - 선택 화면 오버레이 2장·네트워크 불안정 팝업 1장은 3버튼 서명 거짓,
+#      1908 렌더 2장은 서명 참·패널 none (순수 진리표·화면 함수 계약은 tests\test_abyss_reward_pair_finder.ps1)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
@@ -115,7 +119,8 @@ $f29 = '20260929_⑥a_실기1_파티원2인\frames'        # ⑥a 실기 1 (09-2
 $w29 = '20260929_⑥a_실기1_파티원2인\worker_logs'   # 같은 실기의 워커 오류 캡처 (던전 안 추적기 오독)
 # 라벨|종류|경로 (라벨은 설계 4.3·실기 -1 판독문표의 라벨 그대로, 09-29 프레임은 '0929-시각'). 한 줄에 범주 하나 (⑥e 설계 5.3).
 # 종류: ready / ready-field / entry / member / entry-occluded / item-popup / popup / popup-drop / reward3 / matching / member-matching / overlay /
-#       inside / inside-misread / inside-cutscene / field / field-arrival / leave-loading / entry-loading / dungeon-arrival / entry-misread / prompt
+#       inside / inside-misread / inside-cutscene / field / field-arrival / leave-loading / entry-loading / dungeon-arrival / entry-misread / prompt /
+#       net-popup / reward3-render (구현 단위 ③ 짝 찾기 - 네트워크 불안정 팝업 '다시 시도하기' · 1908 창 두 렌더의 3버튼 보상)
 $frames = @(
   "L1|ready|$live\cap_225515_580_1272x717.png", "L3|ready|$live\cap_230059_611_1272x717.png", "L3c|ready|$live\cap_230435_362_1272x717.png",
   "L5p|ready|$live\cap_230533_423_1272x717.png", "M1|ready|$live\cap_230954_767_1272x717.png", "M2|ready|$live\cap_231452_829_1272x717.png",
@@ -135,6 +140,7 @@ $frames = @(
   "L5|popup|$live\cap_230531_299_1272x717.png", "L5+1|popup|$live\cap_230532_362_1272x717.png",
   "L2+1|popup-drop|$live\cap_230058_549_1272x717.png",
   "D2|reward3|$p4l\cap_211713_987_1272x717.png", "L4|reward3|$live\cap_230444_675_1272x717.png", "L4+1|reward3|$live\cap_230445_737_1272x717.png",
+  "O00|reward3|20260918_다른던전가기_00_보상화면_클릭직전_1272x717.png", "D1|reward3|$p4l\cap_211718_175_1272x717.png", "G3|reward3|$p2l\cap_182611_831_1272x717.png", "L2-pre|reward3|$live\cap_230054_361_1272x717.png",
   "F1|matching|$p2m\cap_185218_142_1272x717.png", "F2|matching|$p2m\cap_184351_237_1272x717.png",
   "0921-184830|member-matching|$p2m\cap_184830_364_1272x717.png", "0921-184832|member-matching|$p2m\cap_184832_455_1272x717.png", "0921-184833|member-matching|$p2m\cap_184833_518_1272x717.png", "0921-184835|member-matching|$p2m\cap_184835_642_1272x717.png", "0921-184837|member-matching|$p2m\cap_184837_767_1272x717.png", "0921-184838|member-matching|$p2m\cap_184838_830_1272x717.png", "0921-184841|member-matching|$p2m\cap_184841_956_1272x717.png", "0921-185218|member-matching|$p2m\cap_185218_142_1272x717.png", "0921-185219|member-matching|$p2m\cap_185219_205_1272x717.png", "0921-185220|member-matching|$p2m\cap_185220_267_1272x717.png", "0921-185221|member-matching|$p2m\cap_185221_331_1272x717.png", "0921-185222|member-matching|$p2m\cap_185222_392_1272x717.png", "0921-185223|member-matching|$p2m\cap_185223_456_1272x717.png", "0921-185224|member-matching|$p2m\cap_185224_519_1272x717.png", "0921-185225|member-matching|$p2m\cap_185225_581_1272x717.png", "0921-185226|member-matching|$p2m\cap_185226_643_1272x717.png", "0921-185227|member-matching|$p2m\cap_185227_706_1272x717.png", "0921-185230|member-matching|$p2m\cap_185230_831_1272x717.png", "0921-185231|member-matching|$p2m\cap_185231_893_1272x717.png", "0921-185232|member-matching|$p2m\cap_185232_956_1272x717.png", "0921-185234|member-matching|$p2m\cap_185234_018_1272x717.png", "0921-185235|member-matching|$p2m\cap_185235_081_1272x717.png",
   "S1|overlay|20260918_다른던전가기_01_어비스선택오버레이_3카드_X_1272x717.png", "O3|overlay|$p2l\cap_183211_892_1272x717.png",
@@ -148,7 +154,9 @@ $frames = @(
   "0929-210549|entry-loading|$f29\cap_210549_055_1272x717.png", "0929-210550|entry-loading|$f29\cap_210550_087_1272x717.png", "0929-210551|entry-loading|$f29\cap_210551_119_1272x717.png", "0929-211239|entry-loading|$f29\cap_211239_838_1272x717.png", "0929-211240|entry-loading|$f29\cap_211240_867_1272x717.png", "0929-211241|entry-loading|$f29\cap_211241_933_1272x717.png", "0929-211605|entry-loading|$f29\cap_211605_774_1272x717.png", "0929-211606|entry-loading|$f29\cap_211606_805_1272x717.png", "0929-211607|entry-loading|$f29\cap_211607_838_1272x717.png", "0929-212038|entry-loading|$f29\cap_212038_525_1272x717.png", "0929-212039|entry-loading|$f29\cap_212039_588_1272x717.png", "0929-212040|entry-loading|$f29\cap_212040_618_1272x717.png", "0929-212947|entry-loading|$f29\cap_212947_775_1272x717.png", "0929-212948|entry-loading|$f29\cap_212948_806_1272x717.png", "0929-212949|entry-loading|$f29\cap_212949_839_1272x717.png", "0921-184843|entry-loading|$p2m\cap_184843_018_1272x717.png", "0921-185237|entry-loading|$p2m\cap_185237_205_1272x717.png",
   "0929-210552|dungeon-arrival|$f29\cap_210552_151_1272x717.png", "0929-211608|dungeon-arrival|$f29\cap_211608_902_1272x717.png", "0929-212950|dungeon-arrival|$f29\cap_212950_869_1272x717.png",
   "0921-185241|entry-misread|$p2m\cap_185241_363_1272x717.png", "0921-185242|entry-misread|$p2m\cap_185242_423_1272x717.png", "0921-185243|entry-misread|$p2m\cap_185243_493_1272x717.png", "0929-211242|entry-misread|$f29\cap_211242_966_1272x717.png",
-  "S4|prompt|$p2m\cap_185217_080_1272x717.png", "S7|prompt|$p4m\cap_212537_925_1272x717.png"
+  "S4|prompt|$p2m\cap_185217_080_1272x717.png", "S7|prompt|$p4m\cap_212537_925_1272x717.png",
+  "NET1|net-popup|..\공통\20260917_Log폴더_덮어쓰기_보존_원본사본\error_20260902_h02m53s39.png",
+  "1008-090150|reward3-render|20261008_메뉴아이콘_실기3_콘솔전환\frames\cap_090150_009_1908x1076.png", "1001-132837|reward3-render|20261001_⑥e_실기\frames2\cap_132837_833_1908x1076.png"
 )
 # 전이 열 재생(아래 2b)이 쓰는 프레임 중 범주 목록 밖의 것 - 보존 캡처가 모두 있어야 재생합니다
 $transitionOnly = @("$f29\cap_210519_527_1272x717.png", "$f29\cap_210526_902_1272x717.png", "$f29\cap_210635_996_1272x717.png", "$f29\cap_210638_152_1272x717.png",
@@ -169,11 +177,12 @@ $ocrKoreanEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Obj
 $ocrEnglishEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language('en-US')))
 if (-not $ocrKoreanEngine -or -not $ocrEnglishEngine) { 'SKIP ko/en-US OCR 엔진을 만들 수 없어 캡처 재생을 건너뜁니다'; if ($fails -gt 0) { exit 1 }; exit 0 }
 
-# 운영 함수는 소스에서 그대로 (OCR 브리지 + 영역 판독 + 판정 + 알려진 화면 + 나가기 헬퍼 + 글자 좌표 탐색 + 퀘스트 보상 닫기)
+# 운영 함수는 소스에서 그대로 (OCR 브리지 + 영역 판독 + 판정 + 알려진 화면 + 나가기 헬퍼 + 글자 좌표 탐색 + 퀘스트 보상 닫기 + 보상 화면 짝 찾기(구현 단위 ③))
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-OcrOnBitmap', 'Await-WinRt', 'Get-GameRegionOcrText',
     'Get-GameOcrText', 'Get-GameRegionOcrWords', 'Test-HomeEndEscHud', 'Test-InDungeonQuest', 'Test-DungeonClearPrompt', 'Get-AbyssPanelKind',
     'Test-AbyssEntryWaiting', 'Test-AbyssMemberReward', 'Test-AbyssSelectionScreen', 'Test-KnownScreen', 'Select-AbyssExitWord',
-    'Find-AbyssExitButtonPoint', 'Invoke-AbyssExitClick', 'Find-GameTextPoint', 'Close-QuestRewardScreen')) {
+    'Find-AbyssExitButtonPoint', 'Invoke-AbyssExitClick', 'Find-GameTextPoint', 'Close-QuestRewardScreen',
+    'Select-AbyssRewardButtonPair', 'Find-AbyssRewardButtonPair')) {
   Invoke-Expression $definition
 }
 # ⑥e 파티원 순수 판정 (분류·보상 위 판별·재펼침 앵커·나가기 단어·퇴장 전이 표 - 설계 2.1) - 운영 함수 그대로
@@ -186,7 +195,8 @@ $config = $null
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
 foreach ($sourceVar in @('rgClearExit', 'rgAbyssMenu', 'rgPartyEnterBtn', 'rgHomeEndEsc', 'rgQuestTracker', 'rgAbyssCards', 'rgAbyssSelect',
-    'rgClearScore', 'rgDgEnterBtn', 'allDungeonKeywords', 'ptMemberPanelCollapse', 'memberFieldSettleSeconds')) {
+    'rgClearScore', 'rgDgEnterBtn', 'allDungeonKeywords', 'ptMemberPanelCollapse', 'memberFieldSettleSeconds',
+    'abyssRetryPairBandX', 'abyssOtherPairBandX', 'abyssPairMaxDy')) {
   $assign = $sourceAst.Find({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq ('$' + $sourceVar)) }, $true)
   if (-not $assign) { "FAIL 본체에서 `$$sourceVar 정의를 찾지 못했습니다"; exit 1 }
   Invoke-Expression $assign.Extent.Text
@@ -292,6 +302,23 @@ function Add-Stat { param([string]$Key, [bool]$Ok) if (-not $stats.ContainsKey($
 # 기존 범주(⑥a)와 헬퍼·알려진 화면을 보는 범주만 무거운 판정 묶음(접힌 패널·파티원 보상 게임 상태·선택 화면·알려진 화면)을 돌립니다 (재생 시간)
 $legacyKinds = @('ready', 'entry', 'member', 'popup', 'popup-drop', 'reward3', 'matching', 'overlay', 'inside', 'field', 'prompt', 'entry-occluded', 'item-popup')
 $fieldOverReward = @('L1', 'M1', 'B3', 'E1')   # 기존 준비 패널 15장 중 필드·상세 위 4장 (나머지 11장은 보상 위 - ⑥e 설계 5.3)
+# 구현 단위 ③ 짝 찾기 (명세 3.3): 라벨별 기대 'Retry / Other' (점 = 기준 좌표 'X,Y', 없음 = 'null'). 표에 없는 라벨은 'null / null' 이 기대입니다 -
+# 새 프레임을 목록에 더해도 짝이 생기면 바로 드러납니다. 짝 단언은 루프 안 한 키($pairExpectKey)뿐이고 갈래에는 서명 단언만 둡니다
+# (같은 키로 갈래에 또 넣으면 Add-Stat 이 그 프레임의 All 을 두 번 세고, 다른 키면 같은 단언이 둘이 됨)
+$pairExpect = @{
+  'D2' = '636,654 / 778,654'; 'L4+1' = '636,654 / 778,654'; 'O00' = '636,654 / 778,654'; 'D1' = '636,654 / 778,654'; 'L2-pre' = '636,654 / 778,654'
+  'L4' = '636,654 / null'                 # '다른' 탈락 프레임 (커서가 '다른' 위)
+  'G3' = 'null / 778,654'                 # '다시' 탈락 프레임 (커서가 '다시' 위 - 09-26 판독문표 Note '다시 하기 직후')
+  '1008-090150' = '636,662 / 767,662'     # 1908 창 DPI 96 · 150% 모니터 (10-08 콘솔 전환 전)
+  '1001-132837' = '636,660 / 765,660'     # 1908 창 DPI 144 (10-01 ⑥e 실기)
+}
+$pairTextKey = '③ 짝 판독문 = 하단 판독문 (Find-AbyssRewardButtonPair - 같은 영역·배율·엔진의 한 판독, 공백 제거)'
+$pairExpectKey = '③ 짝 → 라벨별 기대 (3버튼 보상 7장·1908 렌더 2장은 표 · 그 밖 전 프레임 null / null)'
+$pairOverlayKey = '③ 선택 화면 오버레이 → 3버튼 서명 거짓 (짝 null 은 짝 키)'
+$pairNetKey = '③ 네트워크 불안정 팝업 → 3버튼 서명 거짓 (짝 null 은 짝 키)'
+$pairRenderKey = '③ 1908 렌더 3버튼 보상 → 3버튼 서명 참, 패널 none (짝은 짝 키의 표)'
+function Format-PairPoint { param($Point) if ($null -eq $Point) { 'null' } else { "$($Point.X),$($Point.Y)" } }
+$pairMismatchNotes = @()
 foreach ($entryLine in $frames) {
   $parts = $entryLine.Split('|'); $script:frameLabel = $parts[0]; $kind = $parts[1]
   $kindCounts[$kind] = [int]$kindCounts[$kind] + 1
@@ -303,6 +330,13 @@ foreach ($entryLine in $frames) {
   $sigHits = @((Test-AbyssRewardText -Text $bottomNow), (Test-AbyssMemberRewardText -Text $bottomNow), (Test-AbyssEntryWaitingText -Text $bottomNow), (Test-AbyssFewMembersPopupText -Text $bottomNow)) | Where-Object { $_ }
   $sigNone = (@($sigHits).Count -eq 0)
   $overNow = Test-AbyssPanelOverRewardText -Text $bottomNow
+  # 구현 단위 ③: 보상 화면 짝 찾기 - 전 프레임 (판독문 동일 · 라벨별 짝, 표에 없는 라벨은 짝 0 = 오탐 0)
+  $pairNow = Find-AbyssRewardButtonPair -Game $null
+  Add-Stat $pairTextKey ([string]$pairNow.Text -ceq $bottomNow)
+  $pairActual = '{0} / {1}' -f (Format-PairPoint $pairNow.Retry), (Format-PairPoint $pairNow.Other)
+  $pairExpected = $(if ($pairExpect.ContainsKey($script:frameLabel)) { $pairExpect[$script:frameLabel] } else { 'null / null' })
+  Add-Stat $pairExpectKey ($pairActual -eq $pairExpected)
+  if ($pairActual -ne $pairExpected) { $pairMismatchNotes += ('{0}={1} (기대 {2})' -f $script:frameLabel, $pairActual, $pairExpected) }
   if ($legacyKinds -contains $kind) {
     $entryNow = Test-AbyssEntryWaiting -Game $null
     $memberNow = Test-AbyssMemberRewardText -Text $bottomNow   # 하단 서명만 (알려진 화면 등록과 같은 판정)
@@ -407,6 +441,8 @@ foreach ($entryLine in $frames) {
       $helper = Invoke-AbyssExitClick -Game $null -LogPrefix '[재생]' -Context '나가기 클릭'
       $selectionLogs = @($script:logs | Where-Object { $_ -match '워커가 연 화면인지 알 수 없어' }).Count
       Add-Stat "선택 화면 오버레이 → 나가기 헬퍼 selection, 클릭 0, 안내 로그 1 (gone 아님)" (($helper.Result -eq 'selection') -and ($script:clicks.Count -eq 0) -and ($selectionLogs -eq 1))
+      # 구현 단위 ③ (명세 3.3 PR3): 두 장 모두 하단 판독 '' - 3버튼 서명 거짓을 자기 키로 (짝 null 은 위 짝 키가 봄)
+      Add-Stat $pairOverlayKey (-not (Test-AbyssRewardText -Text $bottomNow))
     }
     'inside' { Add-Stat '던전 안(실사고 X1·X2) → HUD 참 + 추적기 참, 패널·보상 서명 거짓' ((Test-HomeEndEscHud -Game $null) -and (Test-InDungeonQuest -Game $null) -and $panelKind -eq 'none' -and (-not ($memberNow -or $entryNow))) }
     'inside-misread' {
@@ -429,6 +465,15 @@ foreach ($entryLine in $frames) {
       Add-Stat '입장 과도 추적기 오독 → HUD 참, 추적기 거짓, 분류 field' ($sample.Hud -and (-not $sample.Quest) -and $sample.Screen -eq 'field')
     }
     'prompt' { Add-Stat "클리어 S → 클리어 판정 참, HUD·추적기 '' (거짓), 알려진 화면 참" ((Test-DungeonClearPrompt -Game $null) -and (-not (Test-HomeEndEscHud -Game $null)) -and (-not (Test-InDungeonQuest -Game $null)) -and $knownNow) }
+    'net-popup' {
+      # 구현 단위 ③ (명세 3.3 PR4′): 네트워크 불안정 팝업('시작 화면으로' / '다시 시도하기') - '다세'@702 는 retry 대역 안이지만 '시도하기'@763 이
+      # 대역 밖이라 짝 0 (위 짝 키). 이 갈래는 3버튼 서명 거짓만 자기 키로 봅니다 (무거운 판정 묶음 밖 - $legacyKinds 아님)
+      Add-Stat $pairNetKey (-not (Test-AbyssRewardText -Text $bottomNow))
+    }
+    'reward3-render' {
+      # 구현 단위 ③ (명세 3.3 PR5): 1908 창 두 렌더(DPI 96 · 144)의 3버튼 보상 - 서명 참 · 패널 none (짝 좌표는 위 짝 키의 표 $pairExpect)
+      Add-Stat $pairRenderKey ((Test-AbyssRewardText -Text $bottomNow) -and $panelKind -eq 'none')
+    }
   }
 }
 
@@ -494,12 +539,19 @@ foreach ($key in ($stats.Keys | Sort-Object)) {
   $badNote = $(if ($s.Bad.Count -gt 0) { ' / 불일치: ' + ($s.Bad -join ',') } else { '' })
   Check-Equal ("$key ($($s.Ok)/$($s.All)$badNote)") $s.Ok $s.All
 }
+# 구현 단위 ③: 짝이 기대와 다른 프레임의 실제 값 (불일치가 있을 때만 - 위 FAIL 줄의 라벨에 값을 붙여 보여 줌)
+if ($pairMismatchNotes.Count -gt 0) { '참고 ③ 짝 불일치: ' + ($pairMismatchNotes -join ' | ') }
 $coverage = @('준비 패널 → 패널 종류 ready', '접힌 패널 → 판정 참, 패널 종류 none', '파티원 보상 → 판정 참, 3버튼 거짓, 패널 none, 접힌 패널 거짓', '권장 인원 팝업 → 판정 참, 3버튼 거짓') |
   ForEach-Object { if ($stats.ContainsKey($_)) { $stats[$_].All } else { 0 } }
 # ⑥e 설계 5.3: 준비 패널 15+8 · 접힌 패널 3+7 · 파티원 보상 5+3 · 팝업 5
 Check-Equal '재생 범위: 준비 패널 23 · 접힌 패널 10 · 파티원 보상 8 · 팝업 5 프레임을 모두 거침' ($coverage -join '/') '23/10/8/5'
 $newKinds = @('ready-field', 'entry-occluded', 'item-popup', 'leave-loading', 'field-arrival', 'inside-misread', 'field', 'entry-loading', 'dungeon-arrival', 'entry-misread', 'inside-cutscene', 'member-matching')
 Check-Equal '재생 범위(⑥e 새 범주): 필드 위 준비 4 · 가린 접힘 2 · 아이템 확인 1 · 퇴장 로딩 8 · 필드 도착 2 · 던전 안 오독 5 · 필드 6 · 입장 로딩 17 · 던전 도착 3 · 입장 과도 4 · 컷신 5 · 파티원 재매칭 22' (($newKinds | ForEach-Object { [int]$kindCounts[$_] }) -join '/') '4/2/1/8/2/5/6/17/3/4/5/22'
+# 구현 단위 ③ (명세 3.3 PR6): 짝 단언이 전 프레임을 돌았는지 - 판독문·짝 두 키의 All = 프레임 수, 범주 개수, 갈래 서명 키 All
+# (짝 단언을 'reward3' 갈래 안에만 두는 변이면 짝 키 All 이 7, 갈래의 서명 단언을 지우는 변이면 그 키 All 이 0 이 됩니다)
+$pairCoverage = @($pairTextKey, $pairExpectKey, $pairOverlayKey, $pairNetKey, $pairRenderKey) | ForEach-Object { if ($stats.ContainsKey($_)) { $stats[$_].All } else { 0 } }
+Check-Equal "재생 범위(③ 짝): 판독문·짝 키 All = 프레임 수 $($frames.Count) · 오버레이 서명 키 2 · 네트워크 팝업 서명 키 1 · 1908 렌더 키 2" ($pairCoverage -join '/') "$($frames.Count)/$($frames.Count)/2/1/2"
+Check-Equal '재생 범위(③ 범주): 3버튼 보상 7 · 선택 화면 오버레이 2 · 네트워크 불안정 팝업 1 · 1908 렌더 3버튼 보상 2' ((@('reward3', 'overlay', 'net-popup', 'reward3-render') | ForEach-Object { [int]$kindCounts[$_] }) -join '/') '7/2/1/2'
 Check-Equal '재생 중 나가기 헬퍼 진단 캡처(미검출 정지) 0회' $script:diagCalls 0
 
 if ($fails -gt 0) { "FAIL: $fails 건"; exit 1 }

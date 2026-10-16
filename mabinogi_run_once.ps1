@@ -658,6 +658,18 @@ $memberFieldSettleSeconds    = 6           # 나가기 없는 필드 모양의 '
 $memberSweepStreakLimit      = 3           # 스윕 참 연속 한도 - 유효 표본 없이 전송·커서 미확인 스윕이 3회째면 굶김 회전(판독 없이 마감만, ㉺). 관측된 겹친 팝업 2개(2026-08-01 - 시작부 스윕 2회 예산의 근거)를 넘는 연속만
 $ptMemberPanelCollapse       = @(492, 654) # 보상 위 펼친 준비 패널 밖 '나가기' 자리 = 접기 (09-26 파티장 L4·파티원 23:16:39 관측 - 펼친 패널 아래 '나가기' 판독 4/8 프레임이 정확히 이 자리). 필드 위 펼친 패널에서는 누르지 않음(미관측)
 
+# 어비스 보상 화면 짝 찾기(Select-AbyssRewardButtonPair · Find-AbyssRewardButtonPair - 구현 명세 ③ 2.1, 2026-10-16)의 판별 상수. config 가 아닌
+# 스크립트 상수라 coordsVersion·configSchemaVersion 은 그대로입니다. 대역은 '판별 gate' 이고 클릭점은 검출한 두 단어 중심의 중점입니다 (2026-09-21 설계 합의 B3).
+# 짝의 두 단어(머리·꼬리)가 모두 대역 안이어야 합니다 - 네트워크 불안정 팝업 '다시 시도하기' 는 '다세'@702 가 retry 대역 안, '시도하기'@763 이 밖이라
+# 머리만 보면 없는 짝 (732,618) 이 생깁니다 (09-02 오류 캡처 3장 재생 - 1810 창의 '다셔'@702 'kl도하기'@764 도 같음).
+# 실측 클릭점(보관 프레임을 워커와 같은 판독 경로로 재생): 1272 창 (636,654)·(778,654) / 1908 창 DPI 96 (636,662)·(767,662) / 1908 창 DPI 144 (636,660)·(765,660) /
+# RDP 콘솔 전환 1276x719 (636,652)·(776,652). 모든 렌더에서 머리·꼬리가 대역 안이고(경계까지 최소 29px - 1908 DPI 144 의 '다른'@749), 보상 화면 등장
+# 슬라이드로 y 가 652~683 을 움직여도 짝은 두 단어의 y 차만 봅니다.
+# 회귀 tests\test_abyss_reward_pair_finder.ps1 · tests\test_abyss_party_signatures.ps1 이 이 대입문을 소스에서 캡처하고 값(560·710 / 720·880 / 30)을 고정합니다.
+$abyssRetryPairBandX = @(560, 710)   # '다시|다세|다셔'·'하기' x - 실측 머리 614~616 · 꼬리 655~657 (1272·1270·1276·1908 창)
+$abyssOtherPairBandX = @(720, 880)   # '다른'·'던전' x - 실측 머리 749~762 · 꼬리 781~796
+$abyssPairMaxDy      = 30            # 짝 두 단어의 y 차 한도 - 실측 0~1, 안내문 줄과 버튼 줄 차 56~63
+
 # 입장 방식: solo = 혼자하기 / party = 함께하기 (우연한 만남 매칭 자동화 지원)
 $dungeonMode = [string](Get-ConfigValue $config @('dungeons', 'mode') 'solo')
 if ($dungeonMode -ne 'party') { $dungeonMode = 'solo' }
@@ -5994,6 +6006,71 @@ function Find-AbyssExitButtonPoint {
   $point = $null
   if ($selected) { $point = @{ X = [int]$selected.X; Y = [int]$selected.Y } }
   return @{ Text = $joined; Point = $point }
+}
+
+function Select-AbyssRewardButtonPair {
+  param([object[]]$Words)
+
+  # 어비스 보상 화면 '[Space] 다시 하기'·'다른 던전 가기' 버튼의 글자 짝을 고르는 **순수 판정** (진리표 대상 - 단어 목록을 값으로 받음, 구현 명세 ③ 2.1).
+  # 입력 = Get-GameRegionOcrWords 의 단어 목록(@{ Text; X; Y } - X·Y 는 기준 좌표). 같은 영역(clearAndExitText)·배율 3 실측(09-21 파티장 4인 D2, 1272 창):
+  # 나가기@475 / 다세@614·하기@657 (=다시 하기, 1908 창은 '다시'·'다셔') / 다른@761·던전@796·가기@832 - 모두 y 654.
+  #  ① 짝 = 머리('다시'·'다세'·'다셔' / '다른' 을 담은 단어) + 그 오른쪽의 **다른 단어**인 꼬리('하기' / '던전' 을 담은 단어). 머리·꼬리 x 가 모두 대역 안,
+  #     두 단어의 y 차 ≤ $abyssPairMaxDy (근거는 상수 주석). 조각은 3버튼 서명 Test-AbyssRewardText 와 같고 여기에 **자리**만 더합니다 - 화면 판정(서명·패널)은
+  #     호출부 몫입니다 ('나가기' 를 누른 직후 커서가 그 글자를 가려 서명이 거짓인 프레임에도 짝은 있음).
+  #  ② 한 단어로 붙은 판독('다세하기'·'다른던전')은 짝이 아닙니다 - 보관 프레임 24,034장 재생에서 버튼 글자가 붙은 판독 0건 (붙은 것은 게임 창을 가린
+  #     탐색기 파일 이름뿐 - 규칙 8, 실제로 나오면 그 판독 단어 목록으로 진리표 행을 더하고 다시 엽니다).
+  #  ③ 관측된 깨짐('다' 단독 · 'Ⅸl하기' · '다르'+'더전' · '다'+'전가기')은 조각에 넣지 않습니다 - 결측은 커서 가림(게임이 그린 커서가 그 버튼 글자 위 -
+  #     가린 자리마다 모양이 다름)과 머리 단어가 통째로 빠진 첫 프레임이라 조각으로 받을 근거가 없고, 넣으면 '3다취소'(권장 인원 팝업 소멸 중) 류 오탐 면만
+  #     넓어집니다. 한쪽이 $null 인 결측의 처리(재판독·폴백)는 호출부가 합니다.
+  #  ④ '가기' 는 쓰지 않습니다 - '나가기' 와 겹칩니다 (Select-AbyssExitWord 와 같은 이유).
+  #  ⑤ 쌍이 여럿이면 머리 x 가 가장 작은 쌍 → 꼬리 x 가 가장 작은 쌍 → 목록 앞 (정렬 없이 직접 비교 - 관측 프레임은 늘 1쌍이라 결정성만 고정).
+  #     클릭점 = 두 단어 중심의 중점, 기본 반올림(짝수 쪽: 635.5 → 636 · 778.5 → 778 - 실측 클릭점과 같음).
+  # 반환: @{ Retry = @{X;Y} 또는 $null; Other = @{X;Y} 또는 $null } - 점은 기준 좌표라 클릭은 Click-GamePoint 로만 합니다. 빈 목록·$null 이면 둘 다 $null.
+  $pair = @{ Retry = $null; Other = $null }
+  if (-not $Words) { return $pair }
+  foreach ($kind in @('Retry', 'Other')) {
+    if ($kind -eq 'Retry') { $headFragments = @('다시', '다세', '다셔'); $tailFragment = '하기'; $band = $abyssRetryPairBandX }
+    else { $headFragments = @('다른'); $tailFragment = '던전'; $band = $abyssOtherPairBandX }
+    $best = $null
+    foreach ($head in $Words) {
+      $headText = [string]$head.Text
+      $isHead = $false
+      foreach ($fragment in $headFragments) { if ($headText.Contains($fragment)) { $isHead = $true } }
+      if (-not $isHead) { continue }
+      $headX = [int]$head.X; $headY = [int]$head.Y
+      if ($headX -lt $band[0] -or $headX -gt $band[1]) { continue }
+      foreach ($tail in $Words) {
+        # 꼬리는 머리 오른쪽의 다른 단어 - 같은 단어(붙은 판독)·왼쪽 단어는 x 조건에서 빠지고, 대역 끝을 넘는 꼬리도 짝이 아닙니다
+        if (-not ([string]$tail.Text).Contains($tailFragment)) { continue }
+        $tailX = [int]$tail.X; $tailY = [int]$tail.Y
+        if ($tailX -le $headX -or $tailX -gt $band[1]) { continue }
+        if ([Math]::Abs($tailY - $headY) -gt $abyssPairMaxDy) { continue }
+        if ($null -eq $best -or $headX -lt $best.HeadX -or ($headX -eq $best.HeadX -and $tailX -lt $best.TailX)) {
+          $best = @{ HeadX = $headX; HeadY = $headY; TailX = $tailX; TailY = $tailY }
+        }
+      }
+    }
+    if ($best) { $pair[$kind] = @{ X = [int][Math]::Round(($best.HeadX + $best.TailX) / 2); Y = [int][Math]::Round(($best.HeadY + $best.TailY) / 2) } }
+  }
+  return $pair
+}
+
+function Find-AbyssRewardButtonPair {
+  param([System.Diagnostics.Process]$Game)
+
+  # 보상 화면 '다시 하기'·'다른 던전 가기' 짝을 글자로 찾습니다 - Test-ExitButton·Find-AbyssExitButtonPoint 와 같은 영역·배율·엔진의 **한 번의 판독**이라
+  # 호출부가 같은 판독문으로 3버튼 서명·접힌 패널을 보고 같은 판독의 점을 누를 수 있습니다 (구현 명세 ③ 2.1 - 호출 배선은 구현 단위 ⑤, 지금은 호출 0).
+  # 반환: @{ Text = 공백 뺀 판독문; Retry; Other } (점은 @{X;Y} 기준 좌표 또는 $null - 클릭은 Click-GamePoint 로만, 화면 좌표 클릭에 그대로 넘기지 않음).
+  # 캡처가 성공하면 Text 는 같은 프레임의 Get-GameOcrText 판독문과 같습니다 (보관 프레임 960장 재생에서 글자 단위 일치).
+  # 캡처 실패(창 사각형 실패 포함 - Get-GameOcrText 와 달리 throw 없음)면 Get-GameRegionOcrWords 가 빈 배열 → Text '' · 두 점 $null 이고, 캡처는 성공했는데
+  # 판독이 빈 화면(선택 오버레이·로딩)도 반환이 같습니다 - 실패 여부는 호출부가 캡처 실패 플래그·일련번호로 봅니다 (규칙 15 - 이 함수는 플래그를 읽거나
+  # 풀지 않음, 나가기 헬퍼와 같은 계약). 클릭·대기·로그·커서 이동 없음 - 판독 전 커서 대피(클릭한 버튼 글자를 커서가 가리면 그 쪽 짝이 빠짐)는 회전을
+  # 아는 호출부가 합니다.
+  $words = @(Get-GameRegionOcrWords -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
+      -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -Scale 3 -Engine $ocrKoreanEngine)
+  $joined = (($words | ForEach-Object { [string]$_.Text }) -join '') -replace '\s', ''
+  $pair = Select-AbyssRewardButtonPair -Words $words
+  return @{ Text = $joined; Retry = $pair.Retry; Other = $pair.Other }
 }
 
 function Invoke-AbyssExitClick {
