@@ -1368,6 +1368,25 @@ function Read-NewLogLines {
   }
 }
 
+function Remove-WorkerDoneMarkerTails {
+  # 워커 줄 끝의 판별 표지 꼬리를 화면 표시용으로 지웁니다 (순수 - 구현 명세 ② 2.7 G3 · 구현 명세 ① 5절 B8 · 2026-10-08 사용자 결정 Q9 '새 표지 꼬리는
+  # GUI 로그에서 숨김'). 부르는 곳 = 로그 줄 변환(Convert-WorkerLogLineForGui)과 타이머 코드 4 상태줄 사유 가공(지역 사본) 두 곳입니다. 판별
+  # (Get-WorkerDoneMarkers)은 이 변환 전 원문($script:lastWorkerDoneReason)으로 하므로 지워도 재전달·보류·거점 퇴장 판별과 닿지 않고, 워커 파일 원본도 그대로입니다.
+  # 지우는 꼬리 = 아래 6종 중 하나가 줄 끝에 있을 때만입니다(앞 공백 + 괄호 + 정확한 낱말(대소문자 구분) + 닫는 괄호 - 뒤 공백은 함께 지움). 뒤에 글자가 더
+  # 붙은 꼴·앞 공백 없는 괄호·비슷한 낱말·문장 중간 인용은 그대로 두고, 줄 끝의 꼬리 하나만 지웁니다.
+  #  ' (selection-overlay)' · ' (menu-overlay)' : 이어받기 시작의 선택 화면(상세 화면 포함)·ESC 메뉴 1회 정지 - 재전달 표지
+  #  ' (locked)'                               : 시작 때 완료 기록을 읽지 못한 정지 - 재전달 표지
+  #  ' (start-unknown)'                        : 이어받기 시작 화면을 확인하지 못한 정지 - 재전달 표지
+  #  ' (ownFreshEntry)'                        : 받은 항목 없이 새 입장을 확인한 진행 줄(정지 아님)
+  #  ' (release)'                              : 놓아줌 - 워커가 그 항목의 판이 끝났다고 정한 정지
+  # ' (post-clear)' 는 넣지 않습니다 - 그 표지의 화면 숨김은 그 표지를 실제로 내는 뒤 단위 몫입니다(이 빌드에서는 생기지 않는 재개 기능 꺼짐 정지 줄에만 있음).
+  # (문자열 가공뿐인 순수 함수라 실패 경로가 없습니다)
+  param([AllowEmptyString()][string]$Text)
+  $markerTails = @(' (selection-overlay)', ' (menu-overlay)', ' (locked)', ' (start-unknown)', ' (ownFreshEntry)', ' (release)')
+  $tailPattern = '(?:' + (@($markerTails | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')\s*$'
+  return ($Text -creplace $tailPattern, '')
+}
+
 function Convert-WorkerLogLineForGui {
   param(
     [AllowEmptyString()][string]$Line,
@@ -1396,6 +1415,20 @@ function Convert-WorkerLogLineForGui {
   # 같은 원칙). 워커는 커스텀·비커스텀 모두 이 줄을 써서 모드와 무관하고, 같은 기록의 저장 실패 [경고] 줄은 사용자가 알아야 해서 그대로 보입니다.
   # 워커 문구와 정확히 같을 때만(시각 접두는 있어도 없어도) 숨깁니다 - 원본 로그 파일은 그대로입니다.
   if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[어비스\] 클리어 완료 기록 저장 \(결과 화면 도달\)\s*$') { return $null }
+  # 어비스 이어받기·자기 항목 기록·파티원 계측의 개발자 메모 줄 7종도 화면에서는 숨깁니다 (구현 명세 ② 2.7 G3 · 설계 R2 M9 · v11 R4 3.7 · 명세 J10·E10 - 위 줄과 같은
+  # 원칙). 위 줄처럼 시각 접두(있어도 없어도) 뒤의 태그부터 줄 끝까지 워커 문구와 같을 때만 숨기고, 숫자·화면 이름·사유 같은 값 자리만 넓게 받습니다(머리·끝 앵커).
+  # 같은 기록의 실패 [경고] 줄 · 필드 확정 결과 줄('이어받기 시작: 던전 밖(HUD) 확인') · 입장 대기 시작 줄 · '이미 보낸 키' 줄은 그대로 보입니다. 원본 로그 파일은 그대로입니다.
+  #  ① 던전을 나온 판의 열쇠 기록 닫기 성공(워커 Close-AbyssKeyEntryOnLeave)  ② own 던전 밖 시작의 받은 항목 닫기 성공(Close-AbyssOwnEntryBeforeEntry)
+  #  ③ 이어받기 입장 대기의 입장 계측  ④ 이어받기 시작 직후 계측  ⑤ 파티원 입장 계측(워커는 -f 형식 문자열)  ⑥ 자기 항목 기록 성공(입장 직후 키 전)
+  #  ⑦ 파티원 퇴장 절차의 계측(Invoke-AbyssMemberLeave · -f 형식 문자열 · 테스트 H13 - 구현 리뷰 2.7 조건 · 명세 B12 (가)): 값 자리는 숫자 셋만 받습니다 -
+  #     표본 수(정수) · 첫 필드 모양 표본부터 초(Math.Round 한 자리 - 벽시계 차라 시계가 뒤로 맞춰지면 음수) · 필드 모양 확정 폭 초
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[어비스\] 던전을 나온 판의 기록을 닫았습니다 - 다음 시작은 새 판으로 들어갑니다 \([^()]*\)\s*$') { return $null }
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[어비스\] 시작 화면이 던전 밖이라 이어받던 판의 기록을 닫았습니다 - 새 판으로 들어갑니다 \(abandoned-pre-entry-start · [^()]*\)\s*$') { return $null }
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[어비스\] 입장 계측 - 던전 안 2연속 앞 로딩\(알 수 없음\) .* \(필드 확정 폭 [0-9.]+초 계측 - 판정에 쓰지 않음\)\s*$') { return $null }
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[어비스\] 이어받기 시작 계측 - 던전 안 2연속 앞 알 수 없음 .* \(판정에 쓰지 않음\)\s*$') { return $null }
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[파티원\] 입장 계측 - 던전 안 2연속 앞 로딩\(알 수 없음\) .* \(필드 모양 확정 폭 [0-9.]+초 계측 - 판정에 쓰지 않음\)\s*$') { return $null }
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[어비스\] 입장 기록 저장 \(입장 직후 키 전\)\s*$') { return $null }
+  if ($Line -match '^\s*(?:\d{2}:\d{2}:\d{2}\s+)?\[파티원\] 필드 모양 [0-9]+표본 뒤 던전 안 표본\(퇴장 절차\) - 첫 필드 모양 표본부터 -?[0-9.]+초 \(필드 모양 확정 폭 [0-9.]+초 계측\)\s*$') { return $null }
   # 정상 워커 로그는 항상 시각(HH:mm:ss)으로 시작합니다. 숫자 단독 줄은 화면에서만 버립니다.
   # ※ 과거 이 줄의 주석은 원인을 '파일 교체 경계'로 적어 두었지만 **오진이었습니다**.
   #   진짜 원인은 타이머의 Read-NewLogLines 반환을 @() 로 감싸지 않아 새 줄이 1줄뿐인 틱에서
@@ -1437,6 +1470,9 @@ function Convert-WorkerLogLineForGui {
   # 하므로(타이머 tail·공통 최종 수집이 [완료] 사유를 원문에서 갱신) 숨겨도 판별과 닿지 않고, 워커 파일 원본도 그대로입니다. 줄 끝에서만,
   # nonce 가 GUID 글자(16진수·하이픈)일 때만 지웁니다. 이 줄은 코드 0·11 이라 [완료] 원문을 쓰는 코드 4 상태줄로는 가지 않습니다.
   $Line = $Line -replace ' \[terminal=InsideHandoff nonce=[0-9A-Fa-f-]+\]\s*$', ''
+  # 이어받기 정지·진행 줄 끝의 판별 표지 꼬리(' (selection-overlay)' 등 6종 - Remove-WorkerDoneMarkerTails)도 화면에서만 지웁니다 (구현 명세 ② 2.7 G3).
+  # 위 꼬리처럼 판별은 이 변환 전 원문으로 합니다. 정지 표지는 코드 4 상태줄 사유에도 남으므로 같은 함수를 타이머의 코드 4 사유 가공도 부릅니다
+  $Line = Remove-WorkerDoneMarkerTails -Text $Line
   # 좌표·판독 근거 같은 진단 꼬리는 파일에만 남기고 화면에서는 지웁니다 (2026-08-11 사용자
   # 요청 - "(Y=575, 근거 text)"·"(링크 탐색 530,390)" 은 쓰는 사람에게 의미가 없음).
   # 진단 키워드로 시작하는 **줄 끝 괄호 덩어리만** 지우므로 오류 사유 등 사용자에게 필요한
@@ -9300,7 +9336,7 @@ function Test-TimeAllowsNextCycle {
   # 시간 지정의 '새 회차 시작' 판단 (시간 지정 '그 판까지' 설계 2.1 · 생활 확장 설계 v3 2.1). 목표 시각이 없으면(시간 지정 아님) 늘 허용합니다.
   #  - 전투·생활: 지금 < 목표 시각 - 그 전에 시작한 판·사이클은 끝까지 합니다 (같은 시각이면 새 회차를 시작하지 않음).
   #          전투 워커가 지정 시각 전에 다음 판으로 이어 간 판은 종료 코드 11 로 받아 이 판단을 건너뜁니다 (Get-NextCycleAction).
-  #          생활 워커는 한 번에 한 사이클이고 지정 시각을 모릅니다 - 사이클이 끝난 뒤(코드 0) 여기서 한 번 정합니다 (어비스 혼자하기와 같음)
+  #          생활 워커는 한 번에 한 사이클이고 지정 시각을 모릅니다 - 사이클이 끝난 뒤(코드 0) 여기서 한 번 정합니다 (사냥터와 같음)
   #  - 기타: 지금 + 클리어 대기 <= 목표 시각 - 기존 그대로 (반복 설정이 숨겨져 해당 없음 - 숨은 시간 라디오가 남은 경우만 닿음)
   # 기타만 예외로 두는 이유: 시간 지정은 '진행 중인 회차는 끝까지, 새 회차만 안 함' 이 기본입니다 (2026-10-02 사용자 지시).
   # 대분류는 battle/life/etc 셋으로 정규화돼 있습니다 (Set-MainCategory)
@@ -9317,8 +9353,7 @@ function Test-AbyssMemberRunActive {
   # 시작 직전 Save-SettingsFromUi 가 이 라디오 값을 config 에 쓰고 워커는 그 config 로 판정합니다.
   # 대분류를 따로 보는 이유: 생활·기타로 전환해도 전투 라디오의 Checked 는 복귀 대비로 보존됩니다.
   # 실행 중에는 Set-UiRunning 이 대분류 버튼과 콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다.
-  # 쓰는 곳: Test-WorkerTimeJudgeActive(시간 지정 신호 - Start-NextCycle), Invoke-StartAutomation 의 시작 안내 1줄,
-  # Test-AbyssHandoffRunActive(어비스 완료 기록 범위 - 기동·종료 처리·시작 게이트가 함께 쓰는 술어).
+  # 쓰는 곳: Invoke-StartAutomation 의 시작 안내 1줄, Test-AbyssHandoffRunActive(어비스 완료 기록 범위 - 기동·종료 처리·시작 게이트가 함께 쓰는 술어).
   # (컨트롤 속성 읽기뿐인 순수 판정이라 실패 경로가 없습니다 - 같은 자리의 Get-CycleWaitSecondsForEstimate 와 같음)
   return (($script:mainCategory -eq 'battle') -and $rbCatAbyss.Checked -and $rbModeParty.Checked -and $rbAbyssPartyMember.Checked -and (-not $script:customActive))
 }
@@ -9334,14 +9369,16 @@ function Test-AbyssHandoffRunActive {
 }
 
 function Test-WorkerTimeJudgeActive {
-  # 이번 실행의 워커가 판 끝에서 지정 시각을 스스로 판단하는지 (시간 지정 '그 판까지' 설계 1.1·2.5).
-  # 던전·심층(결과 화면 - 결정 ① A)과 어비스 파티원(경계·시작 G)만 그렇습니다 - 이 워커들만 HONEYNOGI_UNTIL_TIME 을 받습니다.
-  # 어비스 혼자하기·파티장·사냥터는 판 끝에 다음 판을 확정하는 입력이 없어 GUI 의 '지금 < 지정 시각' 하나로 정합니다 (설계 5절).
+  # UNTIL 전달 대상 술어 - 이번 실행의 워커에 지정 시각(HONEYNOGI_UNTIL_TIME)을 넘기는지 (시간 지정 '그 판까지' 설계 2.5 · 설계 v11 R3 4.1 - 사용자 결정 10-08 Q3 (나)).
+  # 이름과 달리 받은 워커가 모두 스스로 판단하지는 않습니다 - 일부 경로(어비스 옛 나가기 경로 - 파티 찾기, ⑥d 전의 파티장 등)는 받기만 하고 GUI 가 판단합니다.
+  # 전투 · 비커스텀 · 던전·심층·어비스. 판 끝에서 다음 판을 워커가 확정하는 자리(던전·심층 결과 화면, 어비스 '다시 하기' 경로, 어비스 파티원 경계)는
+  # 이 값으로 스스로 판단하고, 받기만 하는 경로('다시 하기' 판단을 쓰지 않는 옛 나가기 경로)는 코드 0 을 내 GUI 가 '지금 < 지정 시각' 으로 판단합니다(무해).
+  # 사냥터·생활·기타·커스텀은 받지 않습니다. 어비스는 매칭·역할 라디오를 보지 않습니다.
   # 대분류를 따로 보는 이유: 생활·기타로 전환해도 전투 라디오의 Checked 는 보존됩니다 - 기타 워커는 UNTIL 을 받으면 그 시각에 뽑기를 마칩니다.
-  # 실행 중에는 Set-UiRunning 이 대분류·콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다 (Test-AbyssMemberRunActive 와 같음)
+  # 실행 중에는 Set-UiRunning 이 대분류·콘텐츠 라디오를 잠가 회차 사이에 값이 바뀌지 않습니다
   # (컨트롤 속성 읽기뿐인 순수 판정이라 실패 경로가 없습니다)
   return (($script:mainCategory -eq 'battle') -and (-not $script:customActive) -and
-    ($rbCatDungeon.Checked -or $rbCatDeep.Checked -or (Test-AbyssMemberRunActive)))
+    ($rbCatDungeon.Checked -or $rbCatDeep.Checked -or $rbCatAbyss.Checked))
 }
 
 function Get-TimeStartNotice {
@@ -9642,7 +9679,10 @@ function Set-HandoffLaunchEnv {
   } else {
     $resolveContext = Get-CustomCanonicalOwner -Context $CustomContext
   }
-  $resolved = Resolve-HandoffEnvForContext -Context $resolveContext -Restart ([bool]$script:customRestart) -ResumeNonce $ResumeNonce
+  # 오류 뒤 같은 항목 재시작 신호($script:customRestart)는 커스텀 기동에만 넘깁니다 (구현 명세 ② 2.7 G4 · 5절 A-2 R-5 (가)). 그 값은 커스텀 갈래에서만
+  # 비워져 커스텀이 재시작 상태로 멈춘 뒤 같은 앱에서 시작한 비커스텀에도 남는데, 그대로 넘기면 Resolve 가 own 을 먼저 골라 같은 실행 앞 판이 남긴 열린
+  # entered 를 이어받게 합니다 - 비커스텀은 own 이 없는 설계입니다(시작마다 새 실행 id · 설계 v10 6.1 dev:910 ③)
+  $resolved = Resolve-HandoffEnvForContext -Context $resolveContext -Restart ([bool]($script:customActive -and $script:customRestart)) -ResumeNonce $ResumeNonce
   $resolveStatus = [string]$resolved.Status
   if ($resolveStatus -eq 'locked' -or $resolveStatus -eq 'corrupt' -or $resolveStatus -eq 'error') {
     # 사유는 정지 전에 만듭니다 - Stop-AllRun 이 기동 종류를 비웁니다
@@ -9800,8 +9840,8 @@ function Start-NextCycle {
       "횟수 지정(${cycleNumber}/$($script:targetCycles)회차)"
     } else { '무한 반복' }
     # 마지막 판 신호: 횟수 지정의 마지막 회차만. 시간 지정은 마지막 판을 미리 알 수 없어 이 신호를 쓰지 않고
-    # 판 끝에서 정합니다 - 던전·심층·어비스 파티원은 워커가 지정 시각을 보고(아래 UNTIL), 그 밖의 전투는 GUI 가
-    # 회차 종료 때(Invoke-NextCycleDecision). 무한은 마지막이 없습니다. (Clear-CustomEnv 가 이전 값을 지웠으므로 명시 설정)
+    # 판 끝에서 정합니다 - 던전·심층·어비스 파티원·어비스 '다시 하기' 경로는 워커가 지정 시각을 보고(아래 UNTIL), 그 밖의 전투(사냥터·어비스 옛 나가기
+    # 경로 - 받기만)는 GUI 가 회차 종료 때(Invoke-NextCycleDecision). 무한은 마지막이 없습니다. (Clear-CustomEnv 가 이전 값을 지웠으므로 명시 설정)
     $env:HONEYNOGI_LAST_RUN = $(if (($null -eq $script:targetTime) -and ($script:targetCycles -gt 0) -and
         ($cycleNumber -ge $script:targetCycles)) { '1' } else { '' })
     # 비커스텀 마무리 실행: 그 판까지만 하고 끝내도록 위 계산 뒤에 '1' 로 덮어씁니다 (설계 v11 R1 3.7 - 워커는 마지막 판 신호가 1순위)
@@ -9810,11 +9850,11 @@ function Start-NextCycle {
   # 시간 지정의 목표 시각을 워커에 전달합니다 (HONEYNOGI_UNTIL_TIME). 매 회차 **먼저 지우고** 아래 조건일 때만 다시
   # 설정합니다 - GUI 프로세스에 남은 값이 다음 비시간 회차·다른 대분류 워커로 새는 것 방지 (커스텀 env 정리와 같은 이유).
   # 전체 타임스탬프인 이유는 자정 넘김(23:50 에 00:30 지정) 모호성 방지입니다.
-  # 받는 워커는 판 끝에서 지정 시각을 스스로 판단하는 전투 워커(던전·심층·어비스 파티원 - Test-WorkerTimeJudgeActive)뿐입니다
+  # 받는 워커는 전투 · 비커스텀의 던전·심층·어비스(Test-WorkerTimeJudgeActive - 설계 v11 R3 Q3)뿐입니다
   # (시간 지정 '그 판까지' 설계 2.5). 판 중간 정지용이 아니라 결과 화면·판 경계에서 '다음 판으로 이어 갈지'를 정하는 데 씁니다 -
   # 이어 가면 워커가 종료 코드 11 로 알리고 GUI 는 시각을 다시 보지 않고 이어받습니다 (판단 주체 하나 - 조건 4).
-  # 생활·어비스 혼자하기·파티장·사냥터에는 넘기지 않습니다 - 워커가 다음 회차를 확정하지 않으므로 GUI 가 회차가 끝난 뒤 판단합니다
-  # (설계 5절. 생활은 2026-10-02 사용자 지시로 사이클 중 정지를 없앴습니다 - 생활 확장 설계 v3 1·2.4). 기타 워커도 받지 않습니다(반복 설정 숨김).
+  # 어비스의 옛 나가기 경로(파티 찾기 등)는 받기만 하고 GUI 가 판단합니다. 생활·사냥터·기타에는 넘기지 않습니다 - 워커가 다음 회차를 확정하지 않으므로
+  # GUI 가 회차가 끝난 뒤 판단합니다 (설계 5절. 생활은 2026-10-02 사용자 지시로 사이클 중 정지를 없앴습니다 - 생활 확장 설계 v3 1·2.4). 기타 워커도 받지 않습니다(반복 설정 숨김).
   # 문자열은 InvariantCulture 로 만듭니다 (설계 리뷰 1차 P2): 워커 Get-LifeUntilDeadline 은 InvariantCulture 고정 형식으로
   # 해석하는데, 현재 문화권으로 만들면 th-TH 에서는 불기 연도('2569-10-02 21:20')가 경고 없이 '정상' 해석돼 지정 시각이 수백 년
   # 뒤가 되고(워커는 늘 '이어 감' → 코드 11 → GUI 도 시각을 다시 안 봄 = 시간으로 영영 안 멈춤), fi-FI 는 시간 구분자가 '.' 라
@@ -9997,13 +10037,21 @@ function Get-AbyssExitStopReason {
 function Get-WorkerDoneMarkers {
   # 워커 [완료] 사유의 표지 판별 (순수 - 구현 명세 ① 2.7 ① · 설계 v10 6.1 'GUI 계상 규칙' · v11 R1 3.2). 사유는 화면 변환 전 원문
   # ($script:lastWorkerDoneReason - 갈래 앞 공통 최종 수집까지 끝낸 값)이고, 코드 4 계상(Invoke-Code4Accounting)과 코드 0·11 재입장 판별
-  # (Get-AbyssExitHandoffKind)이 이 판별 하나를 씁니다. 표지 = 워커가 [완료] 사유에 붙이는 영문 꼬리:
+  # (Get-AbyssExitHandoffKind)이 이 판별 하나를 씁니다. 표지 = 워커가 [완료] 사유에 붙이는 영문 꼬리(앞 공백 + 괄호 + 그 낱말 + 닫는 괄호 - 창·상태줄에서는
+  # Remove-WorkerDoneMarkerTails 가 지웁니다. 클리어 뒤 표지와 재입장 꼬리는 그 함수 밖):
   #  - Locked            ' (locked)'            : 워커가 완료 기록을 읽지 못해 넘겨받은 항목을 쓰지 못한 기동 - 그 nonce 를 done 으로 닫지 않음(재전달)
-  #  - SelectionOverlay  ' (selection-overlay)' / MenuOverlay ' (menu-overlay)' : 선택 화면·ESC 메뉴에서 던전 안·밖을 몰라 조작 없이 멈춘
+  #  - SelectionOverlay  ' (selection-overlay)' / MenuOverlay ' (menu-overlay)' : 선택 화면(상세 화면 포함)·ESC 메뉴에서 던전 안·밖을 몰라 조작 없이 멈춘
   #                      기동 - 같은 재전달, 커스텀 재개(resume) 기동이면 계상 자체를 보류
+  #  - StartUnknown      ' (start-unknown)'     : 이어받기 시작 화면을 매칭 대기 한도 안에 확인하지 못해 조작 없이 멈춘 기동 - 같은 재전달·보류
+  #                      (구현 명세 ② 2.7 G2 · 설계 v11 R4 3.3 - 안·밖 불명이면 판 소유권을 바꾸는 기록 없이 넘긴 기록을 보존)
+  #  - Release           ' (release)'           : 놓아줌 - 워커가 그 항목의 판이 끝났다고 스스로 정한 정지(next 의 보상·클리어 화면 시작 · 이어받기 입장 대기 마감 ·
+  #                      새 판 기록 실패). 재전달 집합에 넣지 않고 지금처럼 닫습니다 - Test-AbyssKeepLaunchOnStop 의 열어 둠도 이 표지로 끕니다(구현 명세 ② J22)
   #  - PostClear         ' (post-clear)'        : 클리어 뒤 조건 정지 - 유효한 클리어 기록이 없을 때 이 표지로 1회 계상(설계 v10 6.1 ④)
   #  - InsideHandoffNonce : 재입장 완료 줄 꼬리 '[terminal=InsideHandoff nonce=<guid>]' 의 nonce(없으면 빈 값)
-  # 이 빌드의 워커는 이 표지들을 아직 내지 않습니다(재입장·재개·선택 화면 보류·클리어 뒤 정지 표지는 뒤 단위) - 판별 자리를 먼저 두고 진리표로 지킵니다
+  # 잠금 표지는 어비스 시작의 완료 기록 읽기(워커 Consume-Handoff)가, 선택 화면·ESC 메뉴·시작 화면 미확인·놓아줌 표지는 이어받기 기동(own·next)이 냅니다
+  # (구현 명세 ② 2.1·2.5). 재입장·재개·클리어 뒤 표지는 뒤 단위입니다 - 이 빌드에서는 생기지 않고, 판별 자리를 먼저 두어 진리표로 지킵니다.
+  # own·next 기동의 클리어 전 정지는 표지와 무관하게 넘긴 nonce 를 열어 둡니다(구현 명세 ② 5절 A-2 R-6 (나) - 코드 4·코드 1 정지 끝 처리가 부르는
+  # Test-AbyssKeepLaunchOnStop) - 그중 놓아줌 표지만 닫습니다
   param([string]$Reason)
   $markerText = [string]$Reason
   $handoffNonce = ''
@@ -10012,9 +10060,26 @@ function Get-WorkerDoneMarkers {
     Locked             = $markerText.Contains(' (locked)')
     SelectionOverlay   = $markerText.Contains(' (selection-overlay)')
     MenuOverlay        = $markerText.Contains(' (menu-overlay)')
+    StartUnknown       = $markerText.Contains(' (start-unknown)')
+    Release            = $markerText.Contains(' (release)')
     PostClear          = $markerText.Contains(' (post-clear)')
     InsideHandoffNonce = $handoffNonce
   }
+}
+
+function Test-AbyssKeepLaunchOnStop {
+  # 정지 끝 처리에서 이번 기동에 넘긴 nonce 를 열어 둘지 (순수 - 구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) · J22). own·next 기동(이어받은 판)의 클리어 전
+  # 정지면 참입니다 - 끝 처리가 그 nonce 를 done 으로 닫지 않아(Complete-AbyssExitJournal -KeepLaunched) 다음 시작이 같은 항목을 다시 받고, 이어받은 판의
+  # 입장 직후 키를 다시 보내지 않습니다(닫으면 다음 던전 안 시작이 이어받을 항목 없이 새 기록을 만들어 같은 판에 입장 직후 키(음식 포함)를 한 번 더 보냄). 안·밖 불명이면
+  # 판 소유권을 바꾸는 기록 없이 nonce 를 보존한다는 원칙(설계 v10 6.1 dev:530 v7 ② - 정지는 판정이 아니라 보류)과 같습니다.
+  #  -LaunchKind : 이번 기동 종류($script:lastLaunchKind - none / next / own / resume / finish-only)
+  #  -AfterClear : 클리어 근거 - 코드 4 = 이번 계상(완료 마커·완료 기록·클리어 뒤 표지 경로) / 코드 1 정지 = 복구 대기·유효 마커·이 판의 미적용 클리어 기록
+  #                (같은 항목 3회째 정지는 $markerExists, 그 밖 오류 정지는 라우팅의 'legacy-cleared') - 클리어한 판은 지금처럼 닫습니다
+  #  -Release    : 놓아줌 표지 ' (release)'(Get-WorkerDoneMarkers) - 워커가 그 항목의 판이 끝났다고 스스로 정한 정지는 지금처럼 닫습니다(코드 4 만 넘김)
+  # resume·finish-only·none 은 늘 거짓입니다(지금 그대로 - 그 기동의 클리어 전 정지는 뒤 단위 몫). 부르는 곳 = 코드 4 계상(Invoke-Code4Accounting)의 끝 처리와
+  # 타이머 코드 1 갈래의 정지 두 곳(같은 항목 3회째 · 그 밖 오류). 인자 값만 보는 순수 판정이라 실패 경로가 없습니다
+  param([string]$LaunchKind, [bool]$AfterClear, [bool]$Release = $false)
+  return [bool]((@('own', 'next') -contains $LaunchKind) -and -not $AfterClear -and -not $Release)
 }
 
 function Get-AbyssExitHandoffKind {
@@ -10111,7 +10176,9 @@ function Complete-AbyssExitJournal {
   # 종료 처리의 완료 기록 끝 처리 (설계 v10 6.1 'GUI 계상 규칙' 끝 문단 · v11 R1 3.3 · R2 3.7 · 구현 명세 ① 2.6) - 저장 1회(잠금 아래 한 mutation):
   #  ① 소비: 지금 owner 의 '클리어 이상'·미적용 항목 nonce 를 applied 에(그 판의 계상이 끝났다는 표시 - 다음 시작이 다시 세지 않음)
   #  ② 이번 기동에 넘긴 nonce($script:lastLaunchNonce) 항목을 launchState done 으로 - 이미 done 이면 그 항목을 건드리지 않습니다(워커가 남긴
-  #     reason·screen 보존). -KeepLaunched 면 하지 않습니다(재전달 예외 - 다음 시작이 같은 nonce 를 다시 받음)
+  #     reason·screen 보존). -KeepLaunched 면 하지 않습니다(재전달 예외 - 다음 시작이 같은 nonce 를 다시 받음). own·next 기동의 클리어 전 정지도 열어
+  #     둡니다 - 코드 4 계상의 끝 처리와 코드 1 정지 두 곳이 Test-AbyssKeepLaunchOnStop 으로 이 인자를 정합니다(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) -
+  #     놓아줌 표지 ' (release)' 만 지금처럼 닫음)
   # 소비하는 종료·안 하는 종료:
   #  - 커스텀 코드 0·11 은 -ConsumeOnly 가 아니면 소비하지 않고 ② 만 합니다 - 소비는 커스텀 사슬의 진행 전진(Step-CustomProgress) 성공 바로 뒤
   #    -ConsumeOnly 호출이 합니다. 전진 저장이 실패하면 미적용 cleared 가 남아 다음 시작이 그 판의 마무리 복구를 예약합니다(완료 마커를 못
@@ -10540,9 +10607,11 @@ function Invoke-Code4Accounting {
   # v10 6.1 'GUI 계상 규칙(코드 4)' · 명세 5절 A5 ③·B1·B2·B3·B13). 타이머 코드 4 갈래의 첫 문장이 부르고, 사유 계산·끝 정지는 타이머가 합니다.
   # 예전 갈래의 마커 경로 본문(조건식·완료 줄 원문 그대로)도 여기로 옮겼습니다 - 타이머 스크립트블록은 이름으로 추출할 수 없어 회귀
   # (tests\test_abyss_handoff_gui.ps1)가 마커 경로까지 이 함수 이름으로 실행합니다.
-  #  0 보류: 커스텀 재개(resume) 기동이 재전달 표지(사용 중·선택 화면·ESC 메뉴)로 끝났으면 아무것도 하지 않습니다 - 계상·전진·마커 정리·
+  #  0 보류: 커스텀 재개(resume) 기동이 재전달 표지(사용 중·선택 화면·ESC 메뉴·시작 화면 미확인)로 끝났으면 아무것도 하지 않습니다 - 계상·전진·마커 정리·
   #    applied·done 0. 마커 owner 와 재입장 요청 기록이 그대로 남아 다음 수동 시작의 재개가 그 판을 확정합니다(설계 v10 6.1 '보류' · 명세
-  #    5절 B1 - 사용 중 표지도 포함: 마커 경로로 소비·전진하면 재입장 요청 기록이 owner 불일치 고아로 남음)
+  #    5절 B1 - 사용 중 표지도 포함: 마커 경로로 소비·전진하면 재입장 요청 기록이 owner 불일치 고아로 남음). 시작 화면 미확인은 구현 명세 ② 2.7 G2 에서
+  #    더했습니다 - 재개 기동은 그 표지를 내지 않아 행동 차이는 없고, 넷이 같은 원칙(안·밖 불명이면 넘긴 기록 보존 - 설계 v11 R4 3.3)이라 한 집합으로 둡니다.
+  #    놓아줌 표지 ' (release)' 는 이 집합에 넣지 않습니다(구현 명세 ② J22 - 그 기록을 닫는 표지)
   #  1 진입 컨텍스트 i: 커스텀이면 지금 진행 위치를 한 번 읽습니다(전진 전 값). 마커 경로의 완료 줄·PREV, 기록 대조 owner, 소비 owner 가 이 값입니다
   #    - 전진 뒤 위치로 소비하면 끝난 판(i)의 클리어 기록이 남습니다. 못 읽었으면 이 처리 안에서 다시 읽지 않습니다(명세 5절 B13 - 범위 안이고
   #    마커 경로가 세지 않았으면 대조를 건너뛴다는 [경고] 1줄, 아래 4 의 읽기 실패로 멈출 때도 그 정지 앞에)
@@ -10552,12 +10621,14 @@ function Invoke-Code4Accounting {
   #  4 읽기 실패(사용 중·손상·읽기 실패·예외)면 기록 규칙은 보류하고(마커 경로는 마커로 셈 - 설계 v10 6.1 'locked' 호출부 규칙) 오류 정지 - 코드 4
   #    사유는 워커 [완료] 줄로 창에 이미 있습니다(명세 5절 B3). 문구는 넷 다 실제 상태(계상 보류 · 마커 경로가 셌으면 진행은 반영됨)와 보존 범위를 적습니다
   #  5 끝 처리 Complete-AbyssExitJournal -ExitCode 4 -Context i: 지금 owner 의 미적용 클리어 기록 소비 + 이번 기동 nonce done. 재전달 표지가
-  #    있으면 nonce 를 열어 둡니다(-KeepLaunched - 다음 시작이 같은 항목을 다시 받음). i 를 못 읽었으면 $null 을 그대로 넘겨 소비를 건너뜁니다
+  #    있거나 own·next 기동의 클리어 전 정지(이번 계상 'none')면 nonce 를 열어 둡니다(-KeepLaunched - 다음 시작이 같은 항목을 다시 받음 · own·next 는 구현
+  #    명세 ② 2.7 G5 · 5절 A-2 R-6 (나) - 이어받은 판의 입장 직후 키를 다시 보내지 않게). 계상한 판(마커·기록·클리어 뒤 표지)과 놓아줌 표지 ' (release)' 는
+  #    지금처럼 닫습니다. 소비(applied)는 열어 두어도 그대로 합니다. i 를 못 읽었으면 $null 을 그대로 넘겨 소비를 건너뜁니다
   # 반환 $true = 이어서 타이머가 사유대로 정지 / $false = 이 함수 안에서 오류 정지까지 함(타이머는 return - 정지 두 번 금지).
   # 예외를 밖으로 내지 않습니다(명세 5절 A4) - 타이머 종료 처리는 $script:worker = $null 뒤라 예외가 나가면 정지도 기동도 없이 남습니다
   try {
     $doneMarkers = Get-WorkerDoneMarkers -Reason ([string]$script:lastWorkerDoneReason)
-    $relayMarker = [bool]($doneMarkers.Locked -or $doneMarkers.SelectionOverlay -or $doneMarkers.MenuOverlay)
+    $relayMarker = [bool]($doneMarkers.Locked -or $doneMarkers.SelectionOverlay -or $doneMarkers.MenuOverlay -or $doneMarkers.StartUnknown)
     if ($script:customActive -and ([string]$script:lastLaunchKind -eq 'resume') -and $relayMarker) { return $true }
     $finishedContext = $null
     if ($script:customActive) { $finishedContext = Get-CustomCurrentContext }
@@ -10661,7 +10732,11 @@ function Invoke-Code4Accounting {
       $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
       return $false
     }
-    if (-not (Complete-AbyssExitJournal -ExitCode 4 -Context $finishedContext -KeepLaunched:$relayMarker)) { return $false }
+    # 이번 기동 nonce 를 열어 둘지(위 5): 재전달 표지 넷($relayMarker) 또는 own·next 기동의 클리어 전 정지(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) -
+    # Test-AbyssKeepLaunchOnStop). 클리어 근거 = 이번 코드 4 가 계상한 판(규칙 marker·journal·post-clear - 계상한 판은 지금처럼 닫음)이고, 놓아줌 표지
+    # ' (release)'(워커가 그 항목의 판이 끝났다고 정한 정지)도 지금처럼 닫습니다. 위 0 의 재개 보류는 $relayMarker 그대로입니다
+    $keepLaunched = [bool]($relayMarker -or (Test-AbyssKeepLaunchOnStop -LaunchKind ([string]$script:lastLaunchKind) -AfterClear ([string]$plan.Rule -ne 'none') -Release ([bool]$doneMarkers.Release)))
+    if (-not (Complete-AbyssExitJournal -ExitCode 4 -Context $finishedContext -KeepLaunched:$keepLaunched)) { return $false }
     return $true
   } catch {
     Stop-AllRun -IsError ('조건 정지 판의 완료 기록 처리 중 예외 - 정지 ({0})' -f $_.Exception.Message)
@@ -10689,7 +10764,8 @@ function Close-AbyssLaunchNonceOnStop {
   # 구현 리뷰 P2). 부르는 자리 = 라우팅 안의 정지 넷(비커스텀 재입장 오류 상한 · 재개 1회 뒤 또 오류 · 재개 기능 꺼짐 · 안전 중지)과 타이머 예전 처리
   # recover 갈래의 안전 중지 한 곳(라우팅 항목 없음 -RoutedNonce '' - 단계 2.7·2.8 구현 리뷰 확인 라운드)의 Stop-AllRun 바로 앞 - 정지가 기동 종류·
   # nonce 를 비우므로 그 앞이어야 합니다. 예전 처리 retry 갈래의 안전 중지는 부르지 않습니다(열어 둠 - 그 자리 주석 · 구현 리뷰 확인). 예전 처리의
-  # 오류 정지 두 곳(같은 항목 3회째 · 그 밖 오류)은 끝 처리 함수(Complete-AbyssExitJournal)가 합니다.
+  # 오류 정지 두 곳(같은 항목 3회째 · 그 밖 오류)은 끝 처리 함수(Complete-AbyssExitJournal)가 하고, 그 두 곳은 own·next 기동의 클리어 전 정지(클리어 근거
+  # 없음)면 nonce 를 열어 둡니다(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) - 위 두 안전 중지와 같은 기준). 이 함수를 부르는 정지들은 그대로 닫습니다.
   #  - 넘긴 nonce 가 없으면 journal 을 열지 않습니다
   #  - 넘긴 nonce 가 라우팅한 항목(-RoutedNonce)이면 닫지 않습니다(journal 접근 0) - 그 항목은 다음 수동 시작의 몫입니다(재입장은 시작 게이트 S0 반영 뒤
   #    첫 기동의 후보 고르기 next - done 이면 후보에서 빠짐, 재입장 요청은 S3 의 수동 재개). 재입장 실행부 필수 기록의 '같은 nonce 면 열어 둠' 과 같은 기준
@@ -11123,7 +11199,10 @@ $timer.Add_Tick({
         # 수집이 이미 읽었습니다(타이머 tail 과 종료 사이 경쟁 방지 - 이 자리의 잔여 수집 사본은 그리로 합침, 2026-10-09)
         $code4Reason = ''
         if ($script:lastWorkerDoneReason) {
-          $code4Reason = ($script:lastWorkerDoneReason -replace '\s+', ' ').Trim()
+          # 판별 표지 꼬리(' (selection-overlay)' 등 - Remove-WorkerDoneMarkerTails)는 상태줄·'[중단] 중지:' 줄에서 지웁니다 (구현 명세 ② 2.7 G3 · J11). 가공은
+          # 이 지역 사본에서만 하고 전역 사유는 원문 그대로 둡니다 - 재전달·보류(Invoke-Code4Accounting)·코드 10 거점 퇴장 판별이 원문을 읽습니다.
+          # 순서 = 꼬리 제거 → 공백 정규화 → 80자 자르기 (자른 뒤에 지우면 80자에 걸려 잘린 꼬리가 남음)
+          $code4Reason = ((Remove-WorkerDoneMarkerTails -Text $script:lastWorkerDoneReason) -replace '\s+', ' ').Trim()
           if ($code4Reason.Length -gt 80) { $code4Reason = $code4Reason.Substring(0, 80) + '…' }
           $code4Reason = "조건 정지: $code4Reason"
         } elseif ($script:mainCategory -eq 'etc') {
@@ -11203,14 +11282,19 @@ $timer.Add_Tick({
             }
           } else {
             # 정지 경로의 끝 처리 - 이번 기동 nonce 를 done 으로(위 두 경로의 재기동은 같은 항목을 다시 넘기므로 그대로 - 설계 v10 6.1, 그 안의 안전
-            # 중지는 recover 만 정지 앞에서 닫고 retry 는 열어 둠). 오류 종료는 클리어 기록을 소비하지 않습니다(다음 시작의 복구 근거 - 명세 5절 A6ⓐ).
+            # 중지는 recover 만 정지 앞에서 닫고 retry 는 열어 둠). 단 own·next 기동의 클리어 전 정지는 열어 둡니다(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) -
+            # Test-AbyssKeepLaunchOnStop): 클리어 근거 = 위 $markerExists(복구 대기 · 유효 마커 · 이 판의 미적용 클리어 기록)라 위 두 안전 중지와 같은 기준입니다
+            # (근거 있음 = 닫음, 없음 = 다음 시작이 같은 항목을 이어받게 열어 둠). 오류 종료는 클리어 기록을 소비하지 않습니다(다음 시작의 복구 근거 - 명세 5절 A6ⓐ).
             # 거짓이면 함수 안에서 오류 정지까지 했습니다
-            if (-not (Complete-AbyssExitJournal -ExitCode $exitCode)) { return }
+            if (-not (Complete-AbyssExitJournal -ExitCode $exitCode -KeepLaunched:(Test-AbyssKeepLaunchOnStop -LaunchKind ([string]$script:lastLaunchKind) -AfterClear $markerExists))) { return }
             Stop-AllRun -IsError '오류 종료(코드 1) - 같은 항목 3회 연속 실패 (로그 확인)'
             $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
           }
         } else {
-          if (-not (Complete-AbyssExitJournal -ExitCode $exitCode)) { return }
+          # 정지 경로의 끝 처리 - 위와 같이 own·next 기동의 클리어 전 정지면 이번 기동 nonce 를 열어 둡니다(구현 명세 ② 2.7 G5 · R-6 (나)). 클리어 근거 = 라우팅의
+          # 'legacy-cleared'(이 판의 미적용 클리어 기록)입니다 - 1 외 크래시 코드는 라우팅이 journal 을 읽지 않아 늘 거짓이라 own·next 면 열어 둡니다(불명이면
+          # 보존 - 클리어 뒤 판이었다면 다음 시작의 마무리 복구 기동이 같은 nonce 를 다시 넘기고 그 코드 0 끝 처리가 닫음)
+          if (-not (Complete-AbyssExitJournal -ExitCode $exitCode -KeepLaunched:(Test-AbyssKeepLaunchOnStop -LaunchKind ([string]$script:lastLaunchKind) -AfterClear ($code1Route -eq 'legacy-cleared')))) { return }
           Stop-AllRun -IsError "오류 종료(코드 $exitCode) - 로그 확인"
           $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
         }

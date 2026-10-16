@@ -24,6 +24,10 @@
 #   ⑦ 어비스 완료 기록 (2026-10-09 구현 명세 ① 2.10): 본류 마커 호출은 반환값을 버리는 [void] 모양(W5), 완료 기록(cleared) 호출은 마커 블록 바로 뒤 ·
 #      나가기 헬퍼 바로 앞의 별도 if 1곳(W3 - 조건 = 클리어·보상 문맥 ∧ 정리 전용 아님). 기록 내용은 test_abyss_journal_store X4, GUI 계상과의 결합은
 #      test_abyss_handoff_gui 결합 행
+#   ⑧ 코드 10 출구의 열쇠 닫기 (2026-10-13 구현 명세 ② 2.3): 복귀 루프 완료 블록의 첫 문장 = 열쇠 닫기 1문장('selection-proven'), '선택 화면 복귀 확인' 은
+#      그대로 1곳. 닫기 동작·호출부 개수는 test_after_entry_at_most_once
+#   ⑨ own 시작 분기의 완료 기록 (2026-10-13 구현 명세 ② 2.6 · P16): 보상·클리어 화면 시작 분기도 마커 줄 뒤·나가기 헬퍼 앞에서 own 만 기록 - 완료 기록
+#      호출 개수 4(정의 + 본류 + 시작 분기 2). 시작 분기 조건은 test_abyss_handoff_start, 행동은 test_after_entry_at_most_once
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
@@ -101,10 +105,14 @@ Check-Equal '배선: 클리어 감시 필드 증거는 HUD + 추적기 던전명
 Check-Equal "배선: 본류 마커는 clear/reward 문맥에서만" ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\[void\]\(Write-CustomClearMarker\)")) 'True'
 # 2.10 W3: 어비스 완료 기록(cleared)은 마커 블록 바로 뒤 · 나가기 헬퍼 바로 앞의 별도 if 이고, 조건 = 클리어·보상 문맥 ∧ 정리 전용 아님(커스텀·비커스텀
 #   모두 - 마커를 썼는지와 무관). 마커 블록 안에 넣으면 비커스텀·마커 실패 판이 빠지고, 헬퍼 뒤로 가면 나가기 위치 미발견 코드 4(클리어 뒤 정지)의 근거가
-#   사라집니다. 호출은 워커 전체에 1곳(보상·클리어 화면 시작 분기는 기록하지 않음 - 명세 J1)
-Check-Equal '배선(2.10 W3): 마커 블록 → 완료 기록 if(조건 = clear/reward ∧ 정리 전용 아님) → 나가기 헬퍼 순 · 호출 1곳' (
+#   사라집니다. 호출은 본류 1곳 + 아래 시작 분기 2곳
+# 2026-10-13 구현 명세 ② 2.6 (P16 · 3.4): 완료 기록 호출 개수 2 → 4(정의 + 본류 + 보상·클리어 화면 시작 분기 2). 시작 분기는 ② 부터 own 만 기록합니다 - 이어받은
+#   항목의 판을 보상·S 화면에서 마무리하는 own 수동·RESTART 시작이 마커 줄 뒤·나가기 헬퍼 앞에서 그 항목을 applied·done 으로 닫습니다(명세 J4 · 설계 R4 4.3 -
+#   본류와 같은 '마커 → 기록 → 헬퍼' 모양, Role none·next 갈래는 기록 0). 시작 분기의 조건(own ∧ 정리 전용 아님)은 test_abyss_handoff_start P16 이,
+#   행동(마커 + cleared + exit 0 → 계상 1)은 test_after_entry_at_most_once OK9·R2-C6 이 봅니다. 본류 정규식(위 조항)은 그대로입니다
+Check-Equal '배선(2.10 W3 · ② 2.6): 마커 블록 → 완료 기록 if(조건 = clear/reward ∧ 정리 전용 아님) → 나가기 헬퍼 순 · 호출 3곳(본류 1 + own 시작 분기 2)' (
   ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\[void\]\(Write-CustomClearMarker\)\s*\}\s*if \(\(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\) -and -not \(\`$script:customMode -and \`$script:customCleanupOnly\)\) \{\s*Add-AbyssJournalClearedEntry\s*\}\s*\[void\]\(Invoke-AbyssExitClick -Game \`$game ")) -and
-  ([regex]::Matches($src, 'Add-AbyssJournalClearedEntry').Count -eq 2)) 'True'
+  ([regex]::Matches($src, 'Add-AbyssJournalClearedEntry').Count -eq 4)) 'True'
 $ret = Body 'Return-ToAbyssSelection'
 Check-Equal '배선: 복귀 루프 - 재매칭·준비·접힌 준비 패널이면 대기 (선택 화면 판정보다 앞)' (($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -gt 0) -and ($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -lt $ret.IndexOf('if (Test-AbyssSelectionScreen -Game $Game) {')) -and ([bool]($ret -match '\$entryWaitingNow = \(\$panelKindNow -eq ''none''\) -and \(-not \$script:screenCaptureFailing\) -and \(Test-AbyssEntryWaiting -Game \$Game\)'))) 'True'
 # ⑥e 설계 2.13: 만료 판정 산술이 Get-YieldAdjustedDeadline → Get-FreezeAdjustedDeadline(양보 + 캡처 실패 누적 차분 - 같은 회전 실패 → 복구의 실패 시간도 뺌)
@@ -245,8 +253,11 @@ Check-Equal '배선(⑥e 2.13 ①): 복귀 루프 동결 블록 < 양보 게이�
 # ③ 선택 화면 출처 (P1-1 · 사용자 결정 D7): 선택 화면 양성은 던전 밖의 증명이 아닙니다(오버레이는 전투 중에도 열리고 HUD·추적기를 가림 - 09-20 23:25 실사고).
 #   완료는 '확정된 필드 → 워커 ESC → 메뉴 → 워커 어비스 클릭 전송' 이 끊김 없이 이어진 출처가 살아 있는 판독이 예약하고 회전 서두 한 곳에서 합니다
 #   (마감 경계에서 선택 화면이 나타나면 성공이 먼저 - ⑥a 구현 리뷰 2차 P1). 출처 없는 선택 화면은 누르지 않고 조정 마감이면 진단 + 코드 4
-Check-Equal '배선(⑥e 2.14 ③): 회전 서두 - turnNow 바로 뒤 필드 연속 이어받기 한 줄, 그 뒤 완료 블록(안전 중지 소비 → exit / 완료 로그 → return)이 동결 블록 앞, 완료 문자열·이어받기 줄 각 1곳' (
-  ([bool]($retLoop -match '\$turnNow = Get-Date\s*\$fieldSettleAlive = \$fieldSettleNext; \$fieldSettleNext = \$false\s*if \(\$selectionConfirmed\) \{\s*if \(Test-Path -LiteralPath \$safeStopFlagPath\) \{[\s\S]{0,600}?exit \$SafeStopExitCode\s*\}\s*Write-RunLog ''\[어비스\] 선택 화면 복귀 확인''\s*return\s*\}')) -and
+# 2026-10-13 구현 명세 ② 2.3 (3.4 · 설계 R2 3.3 ②): 완료 블록의 첫 문장은 코드 10 출구의 열쇠 닫기 정확히 1문장이고(호출부가 사유를 넘겼을 때만 -
+#   'left'·정리 전용, 화면 'selection-proven'), 그 바로 뒤가 예전 첫 문장(안전 중지 확인)입니다 - 이 블록의 두 출구(안전 중지 exit · 완료 return)를 함께
+#   덮습니다. 닫기 줄은 '선택 화면 복귀 확인' 글자를 쓰지 않아(닫기 함수 안 문구) 그 1곳 단언은 그대로입니다. 닫기 동작은 test_after_entry_at_most_once
+Check-Equal '배선(⑥e 2.14 ③ · ② 2.3): 회전 서두 - turnNow 바로 뒤 필드 연속 이어받기 한 줄, 그 뒤 완료 블록(열쇠 닫기 1문장 → 안전 중지 소비 → exit / 완료 로그 → return)이 동결 블록 앞, 완료 문자열·이어받기 줄 각 1곳' (
+  ([bool]($retLoop -match '\$turnNow = Get-Date\s*\$fieldSettleAlive = \$fieldSettleNext; \$fieldSettleNext = \$false\s*if \(\$selectionConfirmed\) \{\s*if \(\$LeaveEntryReason\) \{\s*Close-AbyssKeyEntryOnLeave -Reason \$LeaveEntryReason -Screen ''selection-proven''\s*\}\s*if \(Test-Path -LiteralPath \$safeStopFlagPath\) \{[\s\S]{0,600}?exit \$SafeStopExitCode\s*\}\s*Write-RunLog ''\[어비스\] 선택 화면 복귀 확인''\s*return\s*\}')) -and
   ($retLoop.IndexOf('if ($selectionConfirmed) {') -lt $retFreeze.Index) -and
   ([regex]::Matches($ret, '선택 화면 복귀 확인').Count -eq 1) -and ([regex]::Matches($ret, '\$fieldSettleAlive = \$fieldSettleNext; \$fieldSettleNext = \$false').Count -eq 1)) 'True'
 $retSel = [regex]::Match($retLoop, '(?s)if \(Test-AbyssSelectionScreen -Game \$Game\) \{(.*?)\r?\n    \}')

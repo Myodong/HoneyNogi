@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 $guiPath = Join-Path $root 'mabinogi_gui.ps1'
-Invoke-Expression ((Get-SourceFunctionDefinitions -Path $guiPath -Names @('Read-NewLogLines', 'Convert-WorkerLogLineForGui')) -join "`n")
+Invoke-Expression ((Get-SourceFunctionDefinitions -Path $guiPath -Names @('Read-NewLogLines', 'Convert-WorkerLogLineForGui', 'Remove-WorkerDoneMarkerTails')) -join "`n")
 
 $fails = 0
 function Check-Equal {
@@ -817,6 +817,422 @@ if ($clearedSuccessTexts.Count -eq 1 -and $clearedWarningTexts.Count -eq 1 -and 
   )
   foreach ($clearedKeep in $clearedKeepCases) {
     Check-Equal ('GUI W7(보존 근접 변형): {0}' -f $clearedKeep) (Convert-WorkerLogLineForGui $clearedKeep $false) $clearedKeep
+  }
+}
+
+# ── 이어받기 정지 표지 꼬리 · 개발자 메모 줄 숨김 (구현 명세 ② 2.7 G3 · 3.4 · 명세 ① B8 · 설계 R2 M9 · R4 3.7·Q-R4-14 · 명세 ② J10·J11·J22) ──
+# 워커 파일 원본과 판별(재전달·보류·코드 10 판별이 읽는 [완료] 사유)은 원문 그대로이고 창 줄에서만 정리합니다. 워커 문구는 사본을 박지 않고 전부 워커 AST 에서
+# 캡처합니다(확장 문자열의 변수 자리는 표본 값으로 채움) - 한쪽만 바뀌면(워커 문구·GUI 규칙) 개발자 메모가 창에 뜨므로(명세 ② 0.4 ⑤) 두 소스를 함께 지나는 단언입니다.
+#  ① 꼬리 6종 H1 ' (selection-overlay)' · H2 ' (menu-overlay)' · H3 ' (locked)' · H4 ' (start-unknown)' · H5 ' (ownFreshEntry)' · H12 ' (release)' (명세 ② 2.7 G3):
+#     Remove-WorkerDoneMarkerTails 가 줄 끝 꼬리 하나만 지우고(앞 공백 + 괄호 + 정확한 낱말 + 줄 끝) 본문은 그대로, 창 줄 변환도 같은 결과. 꼬리 없는 같은 줄 ·
+#     근접 변형(꼬리 뒤 글자 · 앞 공백 없음 · 비슷한 낱말 · 문장 중간 인용) · ' (post-clear)'(R6·⑤ 몫이라 넣지 않음)은 그대로
+#  ② 줄 전체 숨김 7규칙 H6 R2 닫기 성공 · H7 own 닫기 성공 · H8 [어비스] 입장 계측 · H9 [어비스] 이어받기 시작 계측 · H10 [파티원] 입장 계측 · H11 입장 기록 저장 ·
+#     H13 [파티원] 퇴장 절차 계측: 시각 접두 있음·없음 모두 숨김, 근접 변형(뒤에 글이 더 붙음 · 다른 태그 · 다른 줄 안에 인용)은 그대로. H10 은 파티원 경로라 혼자
+#     실기(G-H1)로 못 보는 줄이어서(명세 ② 4.3) 워커 -f 의 왼쪽 형식 문자열 원문을 표본 값으로 채워 실제 변환에 넣는 것으로 대신합니다. H13(파티원 P 계측 줄 -
+#     명세 ② 5절 B12 (가) · 구현 리뷰 2.7 조건)도 같은 파티원 경로라 같은 방법으로 보고, 값 자리를 숫자로만 받는 규칙이라 -f 오른쪽 값 원문을 고정하고 근접 변형
+#     ([어비스] 태그 · '(퇴장 절차)' 없음 · 다른 머리 낱말 · 문장 중간 인용)을 더 봅니다
+#  ③ 보존 줄(명세 ② 2.7 '보이는 그대로 둘 줄' · 3.4): [경고] 닫기 실패(R2·own) · cleared 저장 실패 · 필드 확정 결과 줄 · 키 '이미 보낸 키' 줄 · [안내] 복구 기동 ·
+#     B2 단계 시작 줄 · 이벤트 정리 안내 줄
+#  ④ 판별은 원문(명세 ② 2.7 · J11): 타이머 통상 tail 의 수집 식(기본·복구 로그)과 공통 최종 수집(Invoke-ExitLogFinalCollect)이 남기는 [완료] 사유에는 꼬리가
+#     남고 창 줄에서만 빠집니다. 코드 4 상태줄($code4Reason)의 꼬리 0 은 tests\test_abyss_handoff_gui.ps1 가 실제 타이머 틱으로 봅니다
+function Get-WorkerOwnerFunctionName {
+  # 워커 AST 노드를 품은 함수 이름 (함수 밖이면 '(최상위)')
+  param($Node)
+  $ownerFunction = $Node.Parent
+  while ($ownerFunction -and -not ($ownerFunction -is [System.Management.Automation.Language.FunctionDefinitionAst])) { $ownerFunction = $ownerFunction.Parent }
+  if ($ownerFunction) { return $ownerFunction.Name }
+  return '(최상위)'
+}
+
+function Get-EnclosingCommandName {
+  # 워커 AST 노드를 품은 가장 가까운 명령의 이름 (없으면 '(명령 없음)') - -f 식이 Write-RunLog 의 인자인지 볼 때 씁니다
+  param($Node)
+  $commandNode = $Node.Parent
+  while ($commandNode -and -not ($commandNode -is [System.Management.Automation.Language.CommandAst])) { $commandNode = $commandNode.Parent }
+  if ($commandNode) { return [string]$commandNode.GetCommandName() }
+  return '(명령 없음)'
+}
+
+function Expand-WorkerStringSample {
+  # 워커 문자열 노드(상수·확장) → 표본 값으로 채운 줄. 확장 문자열의 변수 자리(${이름} · $이름)는 -Values 의 같은 이름 값으로, 부분식 자리 $(…)는 -SubValue 로
+  # 바꿉니다. 식을 평가하지 않고 소스 글자만 바꿉니다 - 이 파일의 다른 절이 스크립트 범위에 둔 같은 이름 변수($LogPrefix 등)와 섞이지 않게. 자리는 뒤에서부터
+  # 소스 위치로 바꿔 이름이 겹쳐도 엇갈리지 않습니다. 채울 값이 없는 자리가 있거나 문자열 노드가 아니면 $null(호출부가 FAIL 로 찍음)
+  param($Node, [hashtable]$Values = @{}, $SubValue = $null)
+  if ($Node -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return [string]$Node.Value }
+  if (-not ($Node -is [System.Management.Automation.Language.ExpandableStringExpressionAst])) { return $null }
+  $sampleText = [string]$Node.Extent.Text
+  $baseOffset = $Node.Extent.StartOffset
+  foreach ($nestedNode in @($Node.NestedExpressions | Sort-Object { $_.Extent.StartOffset } -Descending)) {
+    $fillText = $null
+    if (($nestedNode -is [System.Management.Automation.Language.VariableExpressionAst]) -and $Values.ContainsKey([string]$nestedNode.VariablePath.UserPath)) {
+      $fillText = [string]$Values[[string]$nestedNode.VariablePath.UserPath]
+    } elseif (($nestedNode -is [System.Management.Automation.Language.SubExpressionAst]) -and ($null -ne $SubValue)) {
+      $fillText = [string]$SubValue
+    }
+    if ($null -eq $fillText) { return $null }
+    $relativeStart = $nestedNode.Extent.StartOffset - $baseOffset
+    $nestedLength = $nestedNode.Extent.EndOffset - $nestedNode.Extent.StartOffset
+    $sampleText = $sampleText.Substring(0, $relativeStart) + $fillText + $sampleText.Substring($relativeStart + $nestedLength)
+  }
+  # 바깥 큰따옴표를 뗍니다 - 이 절이 캡처하는 확장 문자열은 전부 한 줄 큰따옴표이고 이스케이프 글자가 없습니다
+  return $sampleText.Substring(1, $sampleText.Length - 2)
+}
+
+function Get-WorkerLogArgumentNodes {
+  # 워커 함수 하나의 Write-RunLog 첫 인자 문자열(상수·확장) 중 머리(-Prefix)·조각(-Fragment)이 맞는 것 → 목록 (열거용 - 호출부 @())
+  param([string]$FunctionName, [string]$Prefix = '', [string]$Fragment = '')
+  $functionAst = $workerAst.Find({ param($node)
+      $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $FunctionName }, $true)
+  if ($null -eq $functionAst) { return @() }
+  $foundNodes = @()
+  foreach ($logCall in @($functionAst.FindAll({ param($node)
+          $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Write-RunLog' -and $node.CommandElements.Count -ge 2 }, $true))) {
+    $logArgument = $logCall.CommandElements[1]
+    if (-not (($logArgument -is [System.Management.Automation.Language.StringConstantExpressionAst]) -or
+              ($logArgument -is [System.Management.Automation.Language.ExpandableStringExpressionAst]))) { continue }
+    $argumentValue = [string]$logArgument.Value
+    if ($Prefix -and -not $argumentValue.StartsWith($Prefix)) { continue }
+    if ($Fragment -and -not $argumentValue.Contains($Fragment)) { continue }
+    $foundNodes += $logArgument
+  }
+  return $foundNodes
+}
+
+# 표본 값에 쓰는 워커 상수 - 소스 대입 그대로(필드 확정 폭 W · 알 수 없음 연속 초 - 명세 ② 5절 B20 '새 상수 0' 이라 선분기·파티원이 같은 값을 씀)
+$hideConstants = @{}
+foreach ($hideConstantName in @('memberFieldSettleSeconds', 'memberUnknownOverlaySeconds')) {
+  $hideConstantAssign = @($workerAst.EndBlock.Statements | Where-Object {
+      ($_ -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq ('$' + $hideConstantName)) }) | Select-Object -First 1
+  if (($null -ne $hideConstantAssign) -and ($hideConstantAssign.Right -is [System.Management.Automation.Language.CommandExpressionAst]) -and
+      ($hideConstantAssign.Right.Expression -is [System.Management.Automation.Language.ConstantExpressionAst])) {
+    $hideConstants[$hideConstantName] = [string]$hideConstantAssign.Right.Expression.Value
+  }
+}
+Check-Equal '워커: 표본 값에 쓰는 소스 상수 2개(필드 확정 폭 W · 알 수 없음 연속 초) 캡처' $hideConstants.Count 2
+$hideSettleSeconds = [string]$hideConstants['memberFieldSettleSeconds']
+$hideUnknownSeconds = [string]$hideConstants['memberUnknownOverlaySeconds']
+
+# ① 꼬리 6종 - 워커에서 그 꼬리를 담은 문자열 노드 전부를 캡처합니다(명세 ② 2.7 G3 의 낱말 그대로)
+$doneTailKinds = [ordered]@{ H1 = ' (selection-overlay)'; H2 = ' (menu-overlay)'; H3 = ' (locked)'; H4 = ' (start-unknown)'; H5 = ' (ownFreshEntry)'; H12 = ' (release)' }
+# 꼬리별 워커 문자열 수 = 명세 ② 2.5 선분기 로그 줄 표 · 2.1 Consume-Handoff 표 그대로: H1 S9·S10·S13·S14 / H2 S11·S12 / H3 Consume-Handoff ③·④ / H4 S15·S16 /
+# H5 S6 / H12 S17 두 변형·S18·S20(본류 키 지점의 같은 생성 실패 줄은 꼬리 0 - 명세 ② P22). 뒤 단위가 표지 줄을 더하면 이 수를 함께 손볼 것
+$doneTailWant = [ordered]@{ H1 = 4; H2 = 2; H3 = 2; H4 = 2; H5 = 1; H12 = 4 }
+# 비슷한 낱말 - 그대로여야 함(꼬리 낱말 뒤 덧붙임 · 앞부분만 · 대소문자만 다름. 앞 둘은 ⑯ W9·W12 의 근접 낱말 '(start-unknown-x)'·'(start)'·'(released)'·
+# '(release-x)' 와 같은 모양, 셋째는 G3 의 '정확한 낱말' - 판별(Get-WorkerDoneMarkers 의 Contains)도 대소문자를 가립니다)
+$doneTailNearWords = @{
+  H1 = @(' (selection-overlay-x)', ' (selection)', ' (Selection-Overlay)'); H2 = @(' (menu-overlay-x)', ' (menu)', ' (Menu-Overlay)')
+  H3 = @(' (locked-x)', ' (lock)', ' (Locked)'); H4 = @(' (start-unknown-x)', ' (start)', ' (Start-Unknown)')
+  H5 = @(' (ownFreshEntry-x)', ' (ownFresh)', ' (ownfreshentry)'); H12 = @(' (released)', ' (release-x)', ' (Release)')
+}
+# 확장 문자열 표본 값 - 조정 매칭 대기(기본 300초) · B2 라벨(워커가 고르는 넷 중 하나)
+$doneTailFill = @{ timeoutPartyMatch = '300'; b2Label = '준비 패널' }
+$doneTailNodes = [ordered]@{}
+foreach ($doneTailId in @($doneTailKinds.Keys)) {
+  $doneTailText = $doneTailKinds[$doneTailId]
+  $doneTailNodes[$doneTailId] = @($workerAst.FindAll({ param($node)
+        ($node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+         $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and
+        ([string]$node.Value).Contains($doneTailText) }, $true))
+}
+Check-Equal '워커: 꼬리 6종을 담은 문자열 수 = 명세 ② 표 (H1 S9·S10·S13·S14 · H2 S11·S12 · H3 Consume-Handoff ③④ · H4 S15·S16 · H5 S6 · H12 S17 두 변형·S18·S20)' `
+  ((@($doneTailKinds.Keys) | ForEach-Object { '{0}={1}' -f $_, @($doneTailNodes[$_]).Count }) -join ' ') `
+  ((@($doneTailKinds.Keys) | ForEach-Object { '{0}={1}' -f $_, $doneTailWant[$_] }) -join ' ')
+$doneTailShapeProblems = @(foreach ($doneTailId in @($doneTailKinds.Keys)) {
+    foreach ($doneTailNode in @($doneTailNodes[$doneTailId])) {
+      $doneTailRole = (Get-TidyNodeFingerprint $doneTailNode).Split('|')[0]
+      if (($doneTailRole -ne 'log') -or -not ([string]$doneTailNode.Value).EndsWith($doneTailKinds[$doneTailId])) {
+        '{0}@{1}:{2}' -f $doneTailId, (Get-WorkerOwnerFunctionName $doneTailNode), $doneTailNode.Extent.StartLineNumber
+      }
+    }
+  })
+Check-Equal '워커: 꼬리 6종 문자열은 전부 Write-RunLog 첫 인자이고 그 꼬리로 끝남 (줄 끝 꼬리만 지우는 규칙의 전제)' ($doneTailShapeProblems -join ', ') ''
+# 문자열마다: 꼬리 제거 함수 = 본문 · 창 줄 = 시각 + 본문 · 꼬리 없는 같은 줄은 둘 다 그대로. 꼬리별 첫 문자열은 아래 근접 변형·판별 원문 단언의 표본입니다
+$doneTailSamples = [ordered]@{}
+foreach ($doneTailId in @($doneTailKinds.Keys)) {
+  $doneTailText = $doneTailKinds[$doneTailId]
+  foreach ($doneTailNode in @($doneTailNodes[$doneTailId])) {
+    $doneTailWhere = '{0} {1}:{2}' -f $doneTailId, (Get-WorkerOwnerFunctionName $doneTailNode), $doneTailNode.Extent.StartLineNumber
+    $doneTailRaw = Expand-WorkerStringSample -Node $doneTailNode -Values $doneTailFill
+    if (($null -eq $doneTailRaw) -or -not $doneTailRaw.EndsWith($doneTailText)) {
+      Check-Equal ('워커 {0}: 표본 값으로 채운 줄이 꼬리로 끝남 (채울 값이 없는 자리 확인)' -f $doneTailWhere) $false $true
+      continue
+    }
+    $doneTailBody = $doneTailRaw.Substring(0, $doneTailRaw.Length - $doneTailText.Length)
+    if (-not $doneTailSamples.Contains($doneTailId)) { $doneTailSamples[$doneTailId] = @{ Raw = $doneTailRaw; Body = $doneTailBody } }
+    Check-Equal ('GUI {0}: 꼬리 제거 함수 - 줄 끝 꼬리만 지우고 본문 그대로' -f $doneTailWhere) (Remove-WorkerDoneMarkerTails -Text $doneTailRaw) $doneTailBody
+    Check-Equal ('GUI {0}: 창 줄(시각 접두 · 커스텀) - 꼬리 0 · 본문 그대로' -f $doneTailWhere) `
+      (Convert-WorkerLogLineForGui ('12:00:00 ' + $doneTailRaw) $true) ('12:00:00 ' + $doneTailBody)
+    Check-Equal ('GUI {0}: 꼬리 없는 같은 줄 - 꼬리 제거 함수 그대로' -f $doneTailWhere) (Remove-WorkerDoneMarkerTails -Text $doneTailBody) $doneTailBody
+    Check-Equal ('GUI {0}: 꼬리 없는 같은 줄 - 창 줄 그대로' -f $doneTailWhere) `
+      (Convert-WorkerLogLineForGui ('12:00:00 ' + $doneTailBody) $false) ('12:00:00 ' + $doneTailBody)
+  }
+}
+# 근접 변형 - 그대로여야 함(꼬리별 첫 문자열로): 꼬리 뒤 글자(줄 끝 앵커) · 앞 공백 없음 · 비슷한 낱말 둘(정확한 낱말) · 문장 중간 인용(다른 줄 안에 인용된 표지 줄)
+foreach ($doneTailId in @($doneTailSamples.Keys)) {
+  $doneTailText = $doneTailKinds[$doneTailId]
+  $doneTailRaw = [string]$doneTailSamples[$doneTailId].Raw
+  $doneTailBody = [string]$doneTailSamples[$doneTailId].Body
+  $doneTailNearCases = @(
+    @{ Label = '꼬리 뒤 글자'; Line = ($doneTailRaw + ' 후속문구') },
+    @{ Label = '앞 공백 없음'; Line = ($doneTailBody + $doneTailText.TrimStart()) },
+    @{ Label = '문장 중간 인용'; Line = ("[안내] 인용: '" + $doneTailRaw + "' 줄을 확인했습니다") }
+  )
+  foreach ($doneTailNearWord in @($doneTailNearWords[$doneTailId])) {
+    $doneTailNearCases += @{ Label = ("비슷한 낱말 '{0}'" -f $doneTailNearWord.Trim()); Line = ($doneTailBody + $doneTailNearWord) }
+  }
+  foreach ($doneTailNear in $doneTailNearCases) {
+    Check-Equal ('GUI {0}(보존 근접 변형 - {1}): 꼬리 제거 함수 그대로' -f $doneTailId, $doneTailNear.Label) `
+      (Remove-WorkerDoneMarkerTails -Text $doneTailNear.Line) $doneTailNear.Line
+    Check-Equal ('GUI {0}(보존 근접 변형 - {1}): 창 줄 그대로' -f $doneTailId, $doneTailNear.Label) `
+      (Convert-WorkerLogLineForGui ('12:00:00 ' + $doneTailNear.Line) $false) ('12:00:00 ' + $doneTailNear.Line)
+  }
+}
+# ' (post-clear)' 는 꼬리 목록에 넣지 않습니다(명세 ② 2.7 G3 - R6·⑤ 몫, 5절 C4). ② 빌드의 그 꼬리 줄은 S19(재입장 재개 꺼짐 정지) 하나입니다
+$postClearNodes = @($workerAst.FindAll({ param($node)
+      ($node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+       $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and ([string]$node.Value).Contains(' (post-clear)') }, $true))
+Check-Equal "워커: ' (post-clear)' 를 담은 문자열 = S19 1 (R6·⑤ 가 그 꼬리 줄을 더하거나 숨기면 이 절을 함께 손볼 것)" $postClearNodes.Count 1
+foreach ($postClearNode in $postClearNodes) {
+  $postClearRaw = Expand-WorkerStringSample -Node $postClearNode
+  Check-Equal "GUI: ' (post-clear)' 꼬리는 꼬리 제거 함수가 지우지 않음" (Remove-WorkerDoneMarkerTails -Text $postClearRaw) $postClearRaw
+  Check-Equal "GUI: ' (post-clear)' 꼬리 줄은 창 줄 그대로" (Convert-WorkerLogLineForGui ('12:00:00 ' + $postClearRaw) $true) ('12:00:00 ' + $postClearRaw)
+}
+
+# ② 줄 전체 숨김 7규칙 - 계측 줄의 필드 모양 구간 꼬리는 워커 원문(선분기의 확장 문자열 · 파티원 관측 루프의 -f 형식)을 표본 1.4초로 채웁니다
+$hideHandoffStartAst = $workerAst.Find({ param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-AbyssHandoffStart' }, $true)
+$hideAbyssFieldPart = $null
+if ($null -ne $hideHandoffStartAst) {
+  $hideAbyssFieldPartNodes = @($hideHandoffStartAst.FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and ([string]$node.Value).StartsWith(', 첫 필드 모양 표본부터 던전 안 ') }, $true))
+  if ($hideAbyssFieldPartNodes.Count -ge 1) { $hideAbyssFieldPart = Expand-WorkerStringSample -Node $hideAbyssFieldPartNodes[0] -SubValue '1.4' }
+}
+Check-Equal "워커: 선분기 계측 줄의 필드 모양 구간 꼬리(', 첫 필드 모양 표본부터 던전 안 …초') 캡처" ([bool]$hideAbyssFieldPart) $true
+# H10 - 파티원 관측 루프의 '입장 계측' 줄은 -f 식입니다(Write-RunLog 의 괄호 인자). 왼쪽 형식 문자열 원문과 같은 함수의 필드 모양 구간 꼬리 형식을 캡처합니다
+$hideMemberMeasureFormats = @($workerAst.FindAll({ param($node)
+      ($node -is [System.Management.Automation.Language.BinaryExpressionAst]) -and ($node.Operator -eq [System.Management.Automation.Language.TokenKind]::Format) -and
+      ($node.Left -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and ([string]$node.Left.Value).StartsWith('[파티원] 입장 계측 - ') }, $true))
+Check-Equal "워커 H10: '[파티원] 입장 계측 - ' -f 식 = Write-RunLog 인자 1곳" `
+  ((@($hideMemberMeasureFormats) | ForEach-Object { Get-EnclosingCommandName $_ }) -join ',') 'Write-RunLog'
+$hideMemberFieldPartFormat = $null
+if ($hideMemberMeasureFormats.Count -eq 1) {
+  $hideMemberOwnerName = Get-WorkerOwnerFunctionName $hideMemberMeasureFormats[0]
+  $hideMemberOwnerAst = $workerAst.Find({ param($node)
+      $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $hideMemberOwnerName }, $true)
+  if ($null -ne $hideMemberOwnerAst) {
+    $hideMemberFieldPartFormats = @($hideMemberOwnerAst.FindAll({ param($node)
+          ($node -is [System.Management.Automation.Language.BinaryExpressionAst]) -and ($node.Operator -eq [System.Management.Automation.Language.TokenKind]::Format) -and
+          ($node.Left -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and ([string]$node.Left.Value).StartsWith(', 첫 필드 모양 표본부터 던전 안 ') }, $true))
+    if ($hideMemberFieldPartFormats.Count -ge 1) { $hideMemberFieldPartFormat = [string]$hideMemberFieldPartFormats[0].Left.Value }
+  }
+}
+Check-Equal "워커 H10: 같은 함수의 필드 모양 구간 꼬리 -f 형식(', 첫 필드 모양 표본부터 던전 안 {0}초') 캡처" ([bool]$hideMemberFieldPartFormat) $true
+# H13 - 파티원 퇴장 절차(Invoke-AbyssMemberLeave)의 P 계측 줄도 -f 식입니다(구현 리뷰 2.7 조건 · 명세 ② 5절 B12 (가)). 같은 머리의 -f 식이 정확히 1곳인지 먼저
+# 세고 왼쪽 형식 문자열 원문을 캡처합니다. GUI 규칙이 값 자리를 숫자로만 받으므로 표본 값의 근거인 오른쪽 값 3개 원문도 고정합니다 - 값의 모양이 바뀌면(예: 초
+# 대신 TimeSpan) 실제 줄은 창에 뜨는데 표본 값으로 채운 이 절은 계속 통과하기 때문입니다(그때는 GUI 규칙의 값 자리를 다시 보고 이 기대를 함께 고칠 것)
+$hideLeaveMeasureFormats = @($workerAst.FindAll({ param($node)
+      ($node -is [System.Management.Automation.Language.BinaryExpressionAst]) -and ($node.Operator -eq [System.Management.Automation.Language.TokenKind]::Format) -and
+      ($node.Left -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and ([string]$node.Left.Value).StartsWith('[파티원] 필드 모양 ') }, $true))
+Check-Equal "워커 H13: '[파티원] 필드 모양 ' 으로 시작하는 -f 식 = 1곳" $hideLeaveMeasureFormats.Count 1
+$hideLeaveFormat = $null
+if ($hideLeaveMeasureFormats.Count -eq 1) {
+  $hideLeaveNode = $hideLeaveMeasureFormats[0]
+  Check-Equal '워커 H13: 그 -f 식 = Invoke-AbyssMemberLeave 의 Write-RunLog 인자' `
+    ('{0}/{1}' -f (Get-WorkerOwnerFunctionName $hideLeaveNode), (Get-EnclosingCommandName $hideLeaveNode)) 'Invoke-AbyssMemberLeave/Write-RunLog'
+  $hideLeaveValueTexts = @()
+  if ($hideLeaveNode.Right -is [System.Management.Automation.Language.ArrayLiteralAst]) { $hideLeaveValueTexts = @($hideLeaveNode.Right.Elements | ForEach-Object { $_.Extent.Text }) }
+  Check-Equal '워커 H13: -f 오른쪽 값 3개 원문 = 표본 수([int]) · 첫 필드 모양 표본부터 초(벽시계 차의 Math.Round 한 자리) · 필드 모양 확정 폭 W (표본 값의 근거)' `
+    ($hideLeaveValueTexts -join ' | ') '[int]$leaveTransition.FieldCount | [Math]::Round(((Get-Date) - [datetime]$leaveTransition.FieldSince).TotalSeconds, 1) | $memberFieldSettleSeconds'
+  $hideLeaveFormat = [string]$hideLeaveNode.Left.Value
+}
+# 규칙별 워커 문자열(함수 · 머리)과 표본 값 - H6 사유 = 명세 ② 2.3 의 두 값 · H7 화면 = 명세 ② 2.5 의 own 닫기 자리(필드 확정 + 패널류 넷) · H8·H9 = 구간 꼬리 없음/있음
+$hideSpecs = @(
+  @{ Id = 'H6'; Label = 'R2 닫기 성공'; Function = 'Close-AbyssKeyEntryOnLeave'; Prefix = '[어비스]'
+     Fills = @(@{ Reason = 'abandoned-death-exit' }, @{ Reason = 'cleanup-only' }) }
+  @{ Id = 'H7'; Label = 'own 닫기 성공'; Function = 'Close-AbyssOwnEntryBeforeEntry'; Prefix = '[어비스]'
+     Fills = @(@{ closeScreen = 'field' }, @{ closeScreen = 'popup' }, @{ closeScreen = 'ready' }, @{ closeScreen = 'matching' }, @{ closeScreen = 'entry-waiting' }) }
+  @{ Id = 'H8'; Label = '[어비스] 입장 계측'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 입장 계측 - '
+     Fills = @(@{ entryUnknown = '3'; entryField = '0'; entryFieldPart = ''; entryBreaks = '0'; memberFieldSettleSeconds = $hideSettleSeconds },
+               @{ entryUnknown = '0'; entryField = '2'; entryFieldPart = $hideAbyssFieldPart; entryBreaks = '1'; memberFieldSettleSeconds = $hideSettleSeconds }) }
+  @{ Id = 'H9'; Label = '[어비스] 이어받기 시작 계측'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 이어받기 시작 계측 - '
+     Fills = @(@{ startUnknown = '4'; startField = '0'; startFieldPart = ''; startBreaks = '0' },
+               @{ startUnknown = '1'; startField = '3'; startFieldPart = $hideAbyssFieldPart; startBreaks = '2' }) }
+  @{ Id = 'H11'; Label = '입장 기록 저장'; Function = 'Add-AbyssJournalEnteredEntry'; Prefix = '[어비스]'; Fills = @(@{}) }
+)
+# 표본 목록은 일반 배열입니다 - PS 5.1 은 해시테이블을 담은 List[object] 를 @() 로 감싸면 ArgumentException 을 냅니다(이 절 작성 때 실측)
+$hideSamples = @()
+foreach ($hideSpec in $hideSpecs) {
+  $hideNodes = @(Get-WorkerLogArgumentNodes -FunctionName $hideSpec.Function -Prefix $hideSpec.Prefix)
+  Check-Equal ("워커 {0}({1}): {2} 의 '{3}' Write-RunLog 첫 인자 1곳" -f $hideSpec.Id, $hideSpec.Label, $hideSpec.Function, $hideSpec.Prefix) $hideNodes.Count 1
+  if ($hideNodes.Count -ne 1) { continue }
+  $hideLines = New-Object System.Collections.Generic.List[string]
+  foreach ($hideFill in @($hideSpec.Fills)) {
+    $hideLine = Expand-WorkerStringSample -Node $hideNodes[0] -Values $hideFill
+    if ($null -eq $hideLine) {
+      Check-Equal ('워커 {0}: 표본 값으로 채울 수 없는 자리 (줄 {1})' -f $hideSpec.Id, $hideNodes[0].Extent.StartLineNumber) $false $true
+      continue
+    }
+    $hideLines.Add($hideLine)
+  }
+  $hideSamples += @{ Id = $hideSpec.Id; Label = $hideSpec.Label; Lines = @($hideLines) }
+}
+if (($hideMemberMeasureFormats.Count -eq 1) -and $hideMemberFieldPartFormat) {
+  $hideMemberFormat = [string]$hideMemberMeasureFormats[0].Left.Value
+  $hideMemberFieldPart = $hideMemberFieldPartFormat -f '1.4'
+  $hideSamples += @{ Id = 'H10'; Label = '[파티원] 입장 계측(-f 형식)'
+    Lines = @(($hideMemberFormat -f '3', '0', '', '0', $hideSettleSeconds), ($hideMemberFormat -f '0', '2', $hideMemberFieldPart, '1', $hideSettleSeconds)) }
+}
+if ($hideLeaveFormat) {
+  # H13 표본 값({0} 표본 수 · {1} 초 · {2} = 워커 상수 W): 0초 · 소수 · 두 자리 표본 수 · 음수(벽시계 차 - 시계가 뒤로 맞춰진 경우) 넷. PS 5.1 의 -f 는 Math.Round
+  # 결과를 '0' · '1.4' · '-0.4' 처럼 씁니다(정수 값은 소수점 없음 · '-0' 없음 - 5.1 실측)
+  $hideLeaveLines = @()
+  foreach ($hideLeaveFill in @(@('1', '0'), @('3', '1.4'), @('10', '5.9'), @('2', '-0.3'))) {
+    try {
+      $hideLeaveLines += ($hideLeaveFormat -f $hideLeaveFill[0], $hideLeaveFill[1], $hideSettleSeconds)
+    } catch {
+      Check-Equal ('워커 H13: 형식 문자열을 표본 값 3개로 채움 ({0})' -f $_.Exception.Message) $false $true
+    }
+  }
+  $hideSamples += @{ Id = 'H13'; Label = '[파티원] 퇴장 절차 계측(-f 형식)'; Lines = $hideLeaveLines }
+}
+Check-Equal '워커: 줄 전체 숨김 7규칙의 표본 = H6·H7·H8·H9·H11·H10·H13' ((@($hideSamples) | ForEach-Object { $_.Id }) -join '·') 'H6·H7·H8·H9·H11·H10·H13'
+foreach ($hideSample in $hideSamples) {
+  for ($hideIndex = 0; $hideIndex -lt @($hideSample.Lines).Count; $hideIndex++) {
+    $hideLine = [string]@($hideSample.Lines)[$hideIndex]
+    Check-Equal ('GUI {0}({1}) 표본 {2}: 시각 접두 · 커스텀 → 숨김' -f $hideSample.Id, $hideSample.Label, ($hideIndex + 1)) `
+      (Convert-WorkerLogLineForGui ('12:00:00 ' + $hideLine) $true) $null
+    Check-Equal ('GUI {0}({1}) 표본 {2}: 접두 없음 · 비커스텀 → 숨김' -f $hideSample.Id, $hideSample.Label, ($hideIndex + 1)) `
+      (Convert-WorkerLogLineForGui $hideLine $false) $null
+  }
+  # 근접 변형 - 그대로여야 함: 뒤에 글이 더 붙음(끝 앵커) · 다른 태그(머리 태그 고정) · 다른 줄 안에 인용(머리 앵커)
+  $hideFirst = [string]@($hideSample.Lines)[0]
+  $hideNearCases = @(
+    @{ Label = '뒤에 글이 더 붙음'; Line = ($hideFirst + ' 후속문구') },
+    @{ Label = '다른 태그'; Line = ('[커스텀]' + $hideFirst.Substring($hideFirst.IndexOf(']') + 1)) },
+    @{ Label = '다른 줄 안에 인용'; Line = ('[오류] 확인 필요 - ' + $hideFirst) }
+  )
+  foreach ($hideNear in $hideNearCases) {
+    Check-Equal ('GUI {0}(보존 근접 변형 - {1}): 창 줄 그대로' -f $hideSample.Id, $hideNear.Label) `
+      (Convert-WorkerLogLineForGui ('12:00:00 ' + $hideNear.Line) $false) ('12:00:00 ' + $hideNear.Line)
+  }
+}
+# H13 근접 변형 더 보기 - 값 자리만 숫자로 받는 규칙이라 머리·가운데·끝 글자가 하나라도 다르면 그대로여야 함: [어비스] 태그(파티원 태그 고정) · '(퇴장 절차)' 없음
+# (가운데 고정) · 다른 머리 낱말(같은 함수의 퇴장 결과 줄 '[파티원] 필드 확인 (…' 과 같은 머리) · 문장 중간 인용(머리·끝 앵커 둘 다 - 위 '다른 줄 안에 인용' 은 끝이 같음).
+# 바꾼 줄이 표본과 같으면(워커 문구가 바뀌어 바꿀 글자가 없음) 근접 변형이 아니므로 그것도 FAIL 로 드러냅니다
+$hideLeaveSamples = @($hideSamples | Where-Object { $_.Id -eq 'H13' })
+if ($hideLeaveSamples.Count -eq 1) {
+  $hideLeaveFirst = [string]@($hideLeaveSamples[0].Lines)[0]
+  $hideLeaveNearCases = @(
+    @{ Label = '[어비스] 태그'; Line = $hideLeaveFirst.Replace('[파티원]', '[어비스]') },
+    @{ Label = "'(퇴장 절차)' 없음"; Line = $hideLeaveFirst.Replace('(퇴장 절차)', '') },
+    @{ Label = "다른 머리 낱말('필드 확인')"; Line = $hideLeaveFirst.Replace('[파티원] 필드 모양 ', '[파티원] 필드 확인 ') },
+    @{ Label = '문장 중간 인용'; Line = ("[안내] 인용: '" + $hideLeaveFirst + "' 줄을 확인했습니다") }
+  )
+  foreach ($hideLeaveNear in $hideLeaveNearCases) {
+    Check-Equal ('GUI H13(보존 근접 변형 - {0}): 바꾼 줄이 표본과 다름 · 창 줄 그대로' -f $hideLeaveNear.Label) `
+      ('{0} · {1}' -f ([string]$hideLeaveNear.Line -cne $hideLeaveFirst), (Convert-WorkerLogLineForGui ('12:00:00 ' + $hideLeaveNear.Line) $false)) `
+      ('True · 12:00:00 ' + $hideLeaveNear.Line)
+  }
+}
+
+# ③ 보존 줄 - 그대로 보여야 하는 워커 줄(함수 · 머리/조각 · 개수)과 표본 값. 실패 낱말 = 설계 R2 3.6 의 셋 · 키 라벨 = config.json afterEntry 의 두 키
+$keepSpecs = @(
+  @{ Label = '[경고] R2 닫기 실패'; Function = 'Close-AbyssKeyEntryOnLeave'; Prefix = '[경고]'; Want = 2
+     Fills = @(@{ failureKind = '파일 사용 중' }, @{ failureKind = '기록 실패' }) }
+  @{ Label = '[경고] own 닫기 실패'; Function = 'Close-AbyssOwnEntryBeforeEntry'; Prefix = '[경고]'; Want = 1
+     Fills = @(@{ failureKind = '파일 사용 중' }, @{ failureKind = '파일 손상' }, @{ failureKind = '기록 실패' }) }
+  @{ Label = 'cleared 저장 실패'; Function = 'Add-AbyssJournalClearedEntry'; Prefix = '[경고] 클리어 완료 기록을 저장하지 못했습니다'; Want = 1
+     Fills = @(@{ failureKind = '파일 사용 중' }, @{ failureKind = '기록 실패' }) }
+  @{ Label = '필드 확정 결과 줄(S3)'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 이어받기 시작: 던전 밖(HUD) 확인 - '; Want = 1
+     Fills = @(@{ memberFieldSettleSeconds = $hideSettleSeconds; settleSpan = '6.3'; settleCount = '9' }) }
+  @{ Label = "키 '이미 보낸 키' 줄"; Function = 'Invoke-AfterEntryKeys'; Fragment = ' - 이전 실행이 이미 보낸 키라 다시 보내지 않습니다 ('; Want = 1
+     Fills = @(@{ LogPrefix = '[어비스]'; actionLabel = '자동출발'; keyName = 'Space' }, @{ LogPrefix = '[어비스]'; actionLabel = '음식 자동 먹기'; keyName = 'B' }) }
+  @{ Label = '[안내] 복구 기동'; Function = 'Consume-Handoff'; Prefix = '[안내] 복구 기동 - '; Want = 1; Fills = @(@{}) }
+  @{ Label = 'B2 단계 시작 줄(S7)'; Function = 'Invoke-AbyssHandoffStart'; Fragment = ' 감지 - 입장을 기다립니다 (최대 '; Want = 1
+     Fills = @(@{ b2Label = '준비 패널'; timeoutPartyMatch = '300' }, @{ b2Label = '권장 인원 팝업'; timeoutPartyMatch = '300' }) }
+  @{ Label = '이벤트 정리 안내 줄(S8)'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[안내] 이어받기 시작: 알 수 없는 화면이 '; Want = 1
+     Fills = @(@{ memberUnknownOverlaySeconds = $hideUnknownSeconds }) }
+)
+foreach ($keepSpec in $keepSpecs) {
+  $keepNodes = @(Get-WorkerLogArgumentNodes -FunctionName $keepSpec.Function -Prefix ([string]$keepSpec.Prefix) -Fragment ([string]$keepSpec.Fragment))
+  Check-Equal ('워커 보존 줄({0}): {1} 의 Write-RunLog 첫 인자 {2}곳' -f $keepSpec.Label, $keepSpec.Function, $keepSpec.Want) $keepNodes.Count $keepSpec.Want
+  foreach ($keepNode in $keepNodes) {
+    $keepFills = @($keepSpec.Fills)
+    if ($keepNode -is [System.Management.Automation.Language.StringConstantExpressionAst]) { $keepFills = @(@{}) }   # 상수 문자열은 한 번만
+    foreach ($keepFill in $keepFills) {
+      $keepLine = Expand-WorkerStringSample -Node $keepNode -Values $keepFill
+      if ($null -eq $keepLine) {
+        Check-Equal ('워커 보존 줄({0}): 표본 값으로 채울 수 없는 자리 (줄 {1})' -f $keepSpec.Label, $keepNode.Extent.StartLineNumber) $false $true
+        continue
+      }
+      Check-Equal ('GUI 보존 줄({0}): 창 줄 그대로 - {1}' -f $keepSpec.Label, $keepLine) (Convert-WorkerLogLineForGui ('12:00:00 ' + $keepLine) $true) ('12:00:00 ' + $keepLine)
+    }
+  }
+}
+
+# ④ 판별은 원문 - [완료] 줄인 꼬리 표본(H5 는 [어비스] 줄이라 사유 수집 대상이 아님)으로 두 수집 경로를 돌립니다
+#  (a) 타이머 통상 tail 의 [완료] 사유 수집 식 - 기본 로그(위 InsideHandoff 절이 고른 if 원문)와 복구 로그(같은 모양의 if 원문) 둘 다
+$recoveryReasonIfs = @($guiTailAst.FindAll({ param($node)
+      $node -is [System.Management.Automation.Language.IfStatementAst] -and
+      $node.Clauses[0].Item1.Extent.Text -eq '$recoveryLine -match ''\[완료\]\s*(.+)''' }, $true))
+Check-Equal 'GUI: 타이머 통상 tail 의 복구 로그 [완료] 사유 수집 식 1곳' $recoveryReasonIfs.Count 1
+if (($tailReasonIfs.Count -eq 1) -and ($recoveryReasonIfs.Count -eq 1)) {
+  foreach ($doneTailId in @($doneTailSamples.Keys)) {
+    $doneTailRaw = [string]$doneTailSamples[$doneTailId].Raw
+    if (-not $doneTailRaw.StartsWith('[완료] ')) { continue }
+    $script:lastWorkerDoneReason = ''
+    $logLine = '12:00:00 ' + $doneTailRaw
+    . ([scriptblock]::Create($tailReasonIfs[0].Extent.Text))
+    Check-Equal ('GUI {0}: 타이머 통상 tail(기본 로그)의 [완료] 사유에는 꼬리가 남음 (판별 원문)' -f $doneTailId) $script:lastWorkerDoneReason $doneTailRaw.Substring('[완료] '.Length)
+    $script:lastWorkerDoneReason = ''
+    $recoveryLine = '12:00:00 ' + $doneTailRaw
+    . ([scriptblock]::Create($recoveryReasonIfs[0].Extent.Text))
+    Check-Equal ('GUI {0}: 타이머 통상 tail(복구 로그)의 [완료] 사유에는 꼬리가 남음 (판별 원문)' -f $doneTailId) $script:lastWorkerDoneReason $doneTailRaw.Substring('[완료] '.Length)
+  }
+}
+#  (b) 공통 최종 수집 - 실제 Invoke-ExitLogFinalCollect(실제 Read-NewLogLines · Convert-WorkerLogLineForGui). 창 출력 두 함수만 기록 모의이고, 복구 로그는 평소처럼
+#      파일이 없어 새 줄 0 입니다
+$finalCollectReady = $false
+try {
+  Invoke-Expression ((Get-SourceFunctionDefinitions -Path $guiPath -Names @('Invoke-ExitLogFinalCollect')) -join "`n")
+  $finalCollectReady = $true
+} catch {
+  Check-Equal ('GUI: 공통 최종 수집 함수 추출 ({0})' -f $_.Exception.Message) $false $true
+}
+if ($finalCollectReady) {
+  $script:finalCollectShown = New-Object System.Collections.Generic.List[string]
+  $script:finalCollectGuiLogs = New-Object System.Collections.Generic.List[string]
+  function Add-ColoredLogLine {
+    # 창 줄 기록 모의 (실제 서명 param([string]$Text))
+    param([string]$Text)
+    $script:finalCollectShown.Add($Text)
+  }
+  function Add-GuiLog {
+    # GUI 줄 기록 모의 (실제 서명 param([string]$Message)) - 수집 실패 [경고] 가 나오면 여기에 남습니다
+    param([string]$Message)
+    $script:finalCollectGuiLogs.Add($Message)
+  }
+  $workerLog = Join-Path ([IO.Path]::GetTempPath()) ("honeynogi_final_collect_{0}.log" -f [guid]::NewGuid().ToString('N'))
+  $workerRecoveryLog = $workerLog + '.recovery'   # 만들지 않는 파일 - 워커가 기본 로그를 쓸 수 있는 평소 모양
+  try {
+    foreach ($doneTailId in @($doneTailSamples.Keys)) {
+      $doneTailRaw = [string]$doneTailSamples[$doneTailId].Raw
+      if (-not $doneTailRaw.StartsWith('[완료] ')) { continue }
+      [IO.File]::WriteAllText($workerLog, ('12:00:05 ' + $doneTailRaw + "`r`n"), $utf8Bom)
+      $script:logOffset = [long]0
+      $script:recoveryLogOffset = [long]0
+      $script:lastWorkerDoneReason = ''
+      $script:customActive = $true
+      $script:finalCollectShown.Clear()
+      $script:finalCollectGuiLogs.Clear()
+      Invoke-ExitLogFinalCollect
+      Check-Equal ('GUI {0}: 공통 최종 수집의 [완료] 사유에는 꼬리가 남음 (판별 원문)' -f $doneTailId) $script:lastWorkerDoneReason $doneTailRaw.Substring('[완료] '.Length)
+      Check-Equal ('GUI {0}: 공통 최종 수집의 창 줄은 꼬리 0 · 수집 실패 경고 0' -f $doneTailId) `
+        ('{0} || 경고 {1}' -f (@($script:finalCollectShown) -join ' || '), $script:finalCollectGuiLogs.Count) `
+        ('{0} || 경고 0' -f ('  12:00:05 ' + [string]$doneTailSamples[$doneTailId].Body))
+    }
+  } finally {
+    Remove-Item -LiteralPath $workerLog -Force -ErrorAction SilentlyContinue
   }
 }
 

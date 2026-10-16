@@ -276,7 +276,9 @@ Check-Equal '⑨ stop 분기에 throw 없음 (코드 1 은 죽은 화면에 재�
 Check-Equal '⑨ stop-max 분기·옛 상한 상수가 남아 있지 않다' (($workerCode -match "'stop-max'") -or ($workerCode -match '\$reviveMaxPerCycle')) $false
 # ⑩ 퇴장 배선
 Check-Equal '⑩ leave 분기: 퇴장 헬퍼가 left 면 클리어 대기가 left 를 반환, 아니면 재판정(continue)' ($clearCode -match "(?s)elseif \(\`$reviveAction -eq 'leave'\) \{[\s\S]{0,900}?if \(\(Invoke-AbyssDeathExit -Game \`$Game\) -eq 'left'\) \{ return 'left' \}[\s\S]{0,300}?continue") $true
-Check-Equal '⑩ 어비스 본류: left → 선택 화면 복귀(안전 중지 코드 10) → [완료] 준비 실행 → exit 10 (회차 미계상)' ($workerCode -match "(?s)\`$clearOutcome = Wait-ForDungeonClearScreen -Game \`$game -TimeoutSeconds \`$timeoutClear\s*\r?\n\s*if \(\`$clearOutcome -eq 'left'\) \{\s*\r?\n\s*Return-ToAbyssSelection -Game \`$game -SafeStopExitCode 10\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*\`$leaveCause = [^\r\n]*\r?\n\s*Write-RunLog `"\[완료\] \`$\{leaveCause\} 던전을 나왔습니다[^\r\n]*준비 실행[^\r\n]*`"\s*\r?\n\s*exit 10") $true   # 09-26: [완료] 사유는 원인 조각(거점 상한 / 부활 불가 대기 초과) 조합
+# 2026-10-13 구현 명세 ② 2.3 (3.4 · 설계 R2 3.3 ④): 'left' 의 복귀 호출 줄 끝에 코드 10 출구의 열쇠 닫기 사유 ` -LeaveEntryReason 'abandoned-death-exit'` 가
+#   붙었습니다 - 바로 아래 'left' 흐름 단언과 ⑬ 의 [완료] 문구 조합 단언은 그 꼬리를 정확히 그 글자로 받습니다(순서·나머지 그대로). 다른 사유·꼬리 없음은 둘 다 FAIL
+Check-Equal '⑩ 어비스 본류: left → 선택 화면 복귀(안전 중지 코드 10 · 열쇠 닫기 사유 abandoned-death-exit) → [완료] 준비 실행 → exit 10 (회차 미계상)' ($workerCode -match "(?s)\`$clearOutcome = Wait-ForDungeonClearScreen -Game \`$game -TimeoutSeconds \`$timeoutClear\s*\r?\n\s*if \(\`$clearOutcome -eq 'left'\) \{\s*\r?\n\s*Return-ToAbyssSelection -Game \`$game -SafeStopExitCode 10 -LeaveEntryReason 'abandoned-death-exit'\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*\`$leaveCause = [^\r\n]*\r?\n\s*Write-RunLog `"\[완료\] \`$\{leaveCause\} 던전을 나왔습니다[^\r\n]*준비 실행[^\r\n]*`"\s*\r?\n\s*exit 10") $true   # 09-26: [완료] 사유는 원인 조각(거점 상한 / 부활 불가 대기 초과) 조합
 Check-Equal '⑩ 파티원: left → [완료] 사유(원인 조각 조합) → exit 4 (파티원은 퇴장 뒤 자동 재입장 흐름이 없음 - 코드 10 이면 30분 준비 대기 뒤 코드 1)' ($workerCode -match "(?s)if \(\`$clearOutcome -eq 'left'\) \{\s*\r?\n\s*\`$leaveCause = [^\r\n]*\r?\n\s*Write-RunLog `"\[완료\] 파티원: \`$\{leaveCause\} 던전을 나왔습니다[^\r\n]*자동 재입장 흐름이 없어[^\r\n]*`"\s*\r?\n\s*exit 4") $true
 # ⑬ 부활 불가 화면 대기 (2026-09-26 03:13 실사고 - 파티 회차, 부활 제한 구역 남은 0회 + 파티 생존 → 거점 버튼 없음. 사용자 확정 설계)
 Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Test-ReviveBlockedNoteText')))
@@ -321,11 +323,25 @@ $blockedNoop = [regex]::Match($clearCode, '(?s)if \(\$blockedNow\) \{(.*?)\} els
 Check-Equal '⑬ 배선: 대기 분기 본문에 클릭·키 전송·시도 표시가 없다 (시도 없는 회전)' (($blockedNoop -match 'Click-|Press-Key|dispatchAttempted = \$true')) $false
 Check-Equal '⑬ 배선: blocked-timeout 분기 - 어비스는 원인 조각 뒤 퇴장 헬퍼(left 반환), 던전류는 진단 캡처 + [완료] + exit 4' ($clearCode -match "(?s)elseif \(\`$reviveAction -eq 'blocked-timeout'\) \{\s*\r?\n\s*if \(-not \`$DungeonMode\) \{[\s\S]{0,300}?\`$script:abyssLeaveCause = '부활 불가 화면 대기 초과로'\s*\r?\n\s*if \(\(Invoke-AbyssDeathExit -Game \`$Game\) -eq 'left'\) \{ return 'left' \}[\s\S]{0,400}?continue\s*\r?\n\s*\}\s*\r?\n\s*Write-LifeDiagnostics -Game \`$Game -Context '부활 불가 화면 대기 초과' -CaptureOnly\s*\r?\n\s*Write-RunLog `"\[완료\] 부활 불가 화면[^\r\n]*`"\s*\r?\n\s*exit 4") $true
 Check-Equal '⑬ 배선: leave 분기도 원인 조각을 둔다 (퇴장 헬퍼 호출 앞)' ($clearCode -match "(?s)elseif \(\`$reviveAction -eq 'leave'\) \{[\s\S]{0,600}?\`$script:abyssLeaveCause = '거점 부활 상한으로'[\s\S]{0,400}?Invoke-AbyssDeathExit -Game \`$Game") $true
-Check-Equal '⑬ 배선: 어비스 본류 [완료] 문구가 원인 조각으로 조합 (기본 거점 부활 상한으로)' ($workerCode -match "(?s)Return-ToAbyssSelection -Game \`$game -SafeStopExitCode 10\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*\`$leaveCause = \`$\(if \(\`$script:abyssLeaveCause\) \{ \`$script:abyssLeaveCause \} else \{ '거점 부활 상한으로' \}\)\s*\r?\n\s*Write-RunLog `"\[완료\] \`$\{leaveCause\} 던전을 나왔습니다 - 선택 화면 복귀 완료[^\r\n]*`"\s*\r?\n\s*exit 10") $true
+Check-Equal '⑬ 배선: 어비스 본류 [완료] 문구가 원인 조각으로 조합 (기본 거점 부활 상한으로)' ($workerCode -match "(?s)Return-ToAbyssSelection -Game \`$game -SafeStopExitCode 10 -LeaveEntryReason 'abandoned-death-exit'\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*\`$leaveCause = \`$\(if \(\`$script:abyssLeaveCause\) \{ \`$script:abyssLeaveCause \} else \{ '거점 부활 상한으로' \}\)\s*\r?\n\s*Write-RunLog `"\[완료\] \`$\{leaveCause\} 던전을 나왔습니다 - 선택 화면 복귀 완료[^\r\n]*`"\s*\r?\n\s*exit 10") $true
 Check-Equal "⑩ settling 은 사망 화면 - 아래 감시로 내려가지 않고 800ms 뒤 continue" ($clearCode -match "(?s)elseif \(\`$reviveAction -eq 'settling'\) \{\s*\r?\n\s*Start-Sleep -Milliseconds 800\s*\r?\n\s*continue") $true
 Check-Equal "⑩ R키 전면 미확인은 사용자 조작 중이면 user-active 사유 (규칙 4)" ($clearCode -match "\`$dispatchSkipReason = \`$\(if \(Test-UserRecentlyActive\) \{ 'user-active' \} else \{ 'foreground' \}\)") $true
 Check-Equal "⑩ 생략 헬퍼 호출이 양보 누적을 넘김" ($clearCode -match 'Resolve-ReviveDispatchSkip -State \$reviveState -Reason \$dispatchSkipReason -Now \(Get-Date\) -YieldTotalMs \(\[double\]\$script:userYieldTotalMs\)') $true
-Check-Equal '⑩ 본류 left 분기는 커스텀 클리어 마커를 쓰지 않는다 (클리어가 아님)' (([regex]::Match($workerCode, "(?s)if \(\`$clearOutcome -eq 'left'\) \{.{0,600}?exit 10").Value) -match 'Write-CustomClearMarker') $false
+# 2026-10-13 구현 명세 ② 2.3 (3.4 · 부록 B-16): 옛 단언은 주석 뺀 사본에서 `if ($clearOutcome -eq 'left') {` 부터 `.{0,600}?exit 10` 창을 잘라 마커를 찾았습니다.
+#   'left' 복귀 호출에 ` -LeaveEntryReason 'abandoned-death-exit'`(41자)가 붙으면 창 안이 566 → 607자라 일치가 없고, 빈 값('')이 기대 거짓과 늘 같아져
+#   마커를 넣어도 통과합니다(빈 참). 그래서 창 대신 AST 로 본류(함수 밖)의 'left' if 블록을 잘라 블록 1개를 먼저 단언하고, 그 본문(주석 뺀 사본)에서 마커를
+#   봅니다 - 파티원 사이클의 같은 조건 if 는 함수 안이라 뺍니다(그 블록은 exit 4). 블록이 없으면 마커 단언도 '(블록 없음)' 으로 FAIL
+$leftWorkerAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
+$mainLeftIfs = @($leftWorkerAst.FindAll({ param($node)
+      ($node -is [System.Management.Automation.Language.IfStatementAst]) -and ($node.Clauses[0].Item1.Extent.Text -eq "`$clearOutcome -eq 'left'") }, $true) | Where-Object {
+      $leftInsideFunction = $false
+      for ($leftAncestor = $_.Parent; $null -ne $leftAncestor; $leftAncestor = $leftAncestor.Parent) {
+        if ($leftAncestor -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $leftInsideFunction = $true }
+      }
+      -not $leftInsideFunction })
+Check-Equal "⑩ 본류 left 분기 - 함수 밖 'left' if 블록 1개 (아래 마커 단언의 대상 - 창 단언의 빈 참 방지, ② 2.3)" $mainLeftIfs.Count 1
+$mainLeftMarker = $(if ($mainLeftIfs.Count -eq 1) { [bool]((Remove-SourceComments -Text $mainLeftIfs[0].Clauses[0].Item2.Extent.Text) -match 'Write-CustomClearMarker') } else { '(블록 없음)' })
+Check-Equal '⑩ 본류 left 분기는 커스텀 클리어 마커를 쓰지 않는다 (클리어가 아님)' $mainLeftMarker $false
 $exitBody = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-AbyssDeathExit')))
 Check-Equal '⑩ 퇴장 헬퍼: 캡처 실패 동결(안전 중지 진입점 + 복구 탐침 + 마감 되돌림 + continue)' ($exitBody -match '(?s)if \(\$script:screenCaptureFailing\) \{\s*\r?\n\s*Test-SafeStopDuringCaptureFail\s*\r?\n\s*Start-Sleep -Seconds 2\s*\r?\n\s*\[void\]\(Test-CaptureRecovered -Game \$Game\)\s*\r?\n\s*\$deadline = \(Get-Date\)\.AddSeconds\(\$TimeoutSeconds\)\s*\r?\n\s*\$seenYieldMs = \[double\]\$script:userYieldTotalMs\s*\r?\n\s*continue') $true
 Check-Equal '⑩ 퇴장 헬퍼: 마감은 양보 차분 반영 + 초과는 진단 캡처 뒤 throw' ($exitBody -match '(?s)Get-YieldAdjustedDeadline -Deadline \(\[ref\]\$deadline\) -SeenYieldMs \(\[ref\]\$seenYieldMs\)[\s\S]{0,900}?Write-LifeDiagnostics[\s\S]{0,200}?throw') $true   # 09-25: 사이에 캡처 탐침 + 주석 (구현 리뷰 2차)

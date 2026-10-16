@@ -3519,7 +3519,7 @@ $nextCycleCode = Get-GuiFunctionCode 'Start-NextCycle'
 $startAutomationCode = Get-GuiFunctionCode 'Invoke-StartAutomation'
 $memberActiveCode = Get-GuiFunctionCode 'Test-AbyssMemberRunActive'
 # Start-NextCycle 의 UNTIL 배선 (시간 지정 '그 판까지' 설계 2.5·8.1 + 설계 리뷰 1차 P2, 생활 확장 설계 v3 2.4): 매 회차 먼저 지우고 →
-# 전투 분기(판 끝에서 스스로 판단하는 워커 - 던전·심층·어비스 파티원, Test-WorkerTimeJudgeActive)만 InvariantCulture 'yyyy-MM-dd HH:mm' 으로 넘깁니다.
+# 전투 분기(UNTIL 전달 대상 워커 - 던전·심층·어비스, Test-WorkerTimeJudgeActive · 설계 v11 R3 Q3)만 InvariantCulture 'yyyy-MM-dd HH:mm' 으로 넘깁니다.
 # 생활에는 넘기지 않습니다(2026-10-02 생활 확장 A안 - GUI 가 사이클이 끝난 뒤 판단). 사이클 추정치 env 는 GUI 전체(주석 뺀 사본)에서 0건 - 워커가 더 읽지 않습니다
 Check-True '§5 Start-NextCycle: UNTIL 을 매 회차 먼저 지우고, 생활 분기 없이 전투 분기(시간 지정 + 판 끝 판단 워커)만 InvariantCulture 로 넘김 · 사이클 추정치 env 0건(GUI 전체)' (
   ($nextCycleCode -match '\$env:HONEYNOGI_UNTIL_TIME = ''''\s*if \(\(\$null -ne \$script:targetTime\) -and \(Test-WorkerTimeJudgeActive\)\) \{\s*\$env:HONEYNOGI_UNTIL_TIME = \$script:targetTime\.ToString\(''yyyy-MM-dd HH:mm'', \[Globalization\.CultureInfo\]::InvariantCulture\)\s*\}') -and

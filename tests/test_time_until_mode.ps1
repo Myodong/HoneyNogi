@@ -9,7 +9,8 @@
 # 여기서 고정하는 계약 (설계 8.2 표 번호 그대로. T4-g·T4-h 는 설계 표 밖에서 더한 행동 확인 - 소스 블록을 그대로 실행):
 #   T4-a Get-NextCycleAction 진리표 - 안전 중지 > (지정 횟수 | 준비 실행 3회 연속) > 지정 시간 > 다음 회차, 코드 11 은 '지정 시간' 칸만 건너뜀
 #   T4-b Test-TimeAllowsNextCycle - 전투·생활 '지금 < 목표', 기타 '지금 + 클리어 대기 <= 목표'(옛 식 그대로)
-#   T4-c Test-WorkerTimeJudgeActive - 던전·심층·어비스 파티원(전투·비커스텀)만. 생활·기타로 바꿔도 보존되는 전투 라디오를 모형화 (설계 회귀 R-3)
+#   T4-c Test-WorkerTimeJudgeActive(UNTIL 전달 대상 술어) - 던전·심층·어비스(전투·비커스텀) - 사냥터·생활·기타·커스텀 제외(설계 v11 R3 Q3).
+#        생활·기타로 바꿔도 보존되는 전투 라디오를 모형화 (설계 회귀 R-3)
 #   T4-d 문구 보조 함수 - 전투 '판'·생활 '사이클' 새 문구, 기타 출력은 옛 문구와 글자 그대로
 #   T4-e 배선 (주석 뺀 GUI 사본) - 타이머 바깥 조건·공통 최종 수집 자리(1b)·호출 두 곳·완료 줄·옛 사슬 리터럴 위치·판단 호출 인자·시작 게이트·UNTIL 분기·상태줄·설명서
 #        + 단계 2.6(구현 명세 ① · 설계 v11 R1 6.1 · R2 5.4): 재입장 실행부·완주 호출 자리(2c) · 0·11 갈래의 판별 → 일반 끝 처리 순서(2d) · 코드 10 첫 문장(S6)
@@ -18,7 +19,8 @@
 #          · 예전 처리 recover 갈래 안전 중지의 nonce 닫기 → 정지 순서(2c - 단계 2.7·2.8 구현 리뷰 확인 라운드 · retry 갈래는 열어 둠 - 구현 리뷰 확인)
 #   T4-f Invoke-NextCycleDecision 행동 - Stop-AllRun·Start-NextCycle·Add-GuiLog 를 모의로 바꿔 '무엇을 했는지'로 지킴 (인자 누락·고정값 변이를 잡는 곳)
 #   T4-g 시작 게이트 행동 - Invoke-StartAutomation 의 시간 지정 블록을 그대로 실행 (전투·생활은 거부 없음 - 조건 2·생활 확장 조건 2, 기타는 거부 원문 - 해당 없음)
-#   T4-h UNTIL 전달 범위 행동 - Start-NextCycle 의 UNTIL 구간을 그대로 실행 (설계 2.5 표 - 받는 워커는 던전·심층·어비스 파티원뿐, 생활은 받지 않음 - 생활 확장 A안)
+#   T4-h UNTIL 전달 범위 행동 - Start-NextCycle 의 UNTIL 구간을 그대로 실행 (설계 2.5 표 - 받는 워커는 던전·심층·어비스(전투·비커스텀) - 사냥터·생활·기타·
+#        커스텀 제외(설계 v11 R3 Q3), 생활은 받지 않음 - 생활 확장 A안)
 #   P2   문화권 왕복 - GUI 목표 시각 계산·전투 생산식 → 워커 Get-LifeUntilDeadline → 던전·파티원 판단을 ko-KR·th-TH·fi-FI × (21:20 / 자정 넘김)
 #        으로 돌려 해석값이 원래 DateTime 과 같음을 단언한다 (현재 문화권으로 만들면 th-TH 는 불기 연도로 '정상' 해석, fi-FI 는 해석 실패)
 #   T5   생활 새 규칙(2026-10-02 생활 확장 '그 사이클까지' - 설계_v3_생활) = T4-b 5~7 · T4-d 생활 열 · T4-e 4(생활 리터럴)·6·8·10 · T4-f 13·14 · T4-g g6·g7·g10 · T4-h h1
@@ -312,14 +314,18 @@ $t4cRows = @(
   @{ N = 1; D = 'battle · 던전'; Cat = 'battle'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; X = $true }
   @{ N = 2; D = 'battle · 심층'; Cat = 'battle'; Content = 'deep'; Mode = 'solo'; Matching = 'chance'; Custom = $false; X = $true }
   @{ N = 3; D = 'battle · 어비스 + 함께하기 + 파티원 · 비커스텀'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'member'; Custom = $false; X = $true }
-  @{ N = 4; D = 'battle · 어비스 혼자하기 (매칭 라디오는 파티원으로 보존)'; Cat = 'battle'; Content = 'abyss'; Mode = 'solo'; Matching = 'member'; Custom = $false; X = $false }
-  @{ N = 5; D = 'battle · 어비스 + 함께하기 + 파티장'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'lead'; Custom = $false; X = $false }
+  @{ N = 4; D = 'battle · 어비스 혼자하기 (매칭 라디오는 파티원으로 보존) - 어비스 혼자하기·파티장도 받음(설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'solo'; Matching = 'member'; Custom = $false; X = $true }
+  @{ N = 5; D = 'battle · 어비스 + 함께하기 + 파티장 - 어비스 혼자하기·파티장도 받음(설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'lead'; Custom = $false; X = $true }
   @{ N = 6; D = 'battle · 사냥터'; Cat = 'battle'; Content = 'hunting'; Mode = 'solo'; Matching = 'chance'; Custom = $false; X = $false }
   @{ N = 7; D = 'battle · 던전 · 커스텀'; Cat = 'battle'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $true; X = $false }
   @{ N = 8; D = 'life · 던전 라디오 켜짐(보존)'; Cat = 'life'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; X = $false }
   @{ N = 9; D = 'etc · 던전 라디오 켜짐(보존)'; Cat = 'etc'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; X = $false }
   @{ N = 10; D = 'life · 어비스 + 함께하기 + 파티원 라디오 모두 켜짐(보존)'; Cat = 'life'; Content = 'abyss'; Mode = 'party'; Matching = 'member'; Custom = $false; X = $false }
   @{ N = 11; D = 'etc · 어비스 + 함께하기 + 파티원 라디오 모두 켜짐(보존)'; Cat = 'etc'; Content = 'abyss'; Mode = 'party'; Matching = 'member'; Custom = $false; X = $false }
+  # 12~14 설계 v11 R3 5.1 U6~U8 - 어비스는 매칭·역할 라디오를 보지 않고(우연한 만남·파티 찾기도 받음), 커스텀은 받지 않음
+  @{ N = 12; D = 'battle · 어비스 + 함께하기 + 우연한 만남 (설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'chance'; Custom = $false; X = $true }
+  @{ N = 13; D = 'battle · 어비스 + 함께하기 + 파티 찾기 (받기만 - 설계 v11 R3 4.2)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'find'; Custom = $false; X = $true }
+  @{ N = 14; D = 'battle · 어비스 혼자하기 · 커스텀 (커스텀은 받지 않음 - 설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'solo'; Matching = 'chance'; Custom = $true; X = $false }
 )
 $t4cRun = 0
 foreach ($row in $t4cRows) {
@@ -549,8 +555,9 @@ Assert-Case "T4-e 10: 문단 내용 - 규칙·끝 모양·파티원 따라감·�
     [int]$manualValue.Contains(' - 오늘 그 시각이 이미 지났으면 내일 그 시각으로 잡습니다.'),
     [int]$manualValue.Contains('2분'), [int]$manualValue.Contains('최대 한 판')) '1/1/1/1/0/0'
 
-# 11. 판단 워커 판정 본문 원문 (설계 2.5)
-Assert-Case 'T4-e 11: Test-WorkerTimeJudgeActive 본문 = 전투 · 비커스텀 · (던전 | 심층 | 파티원 실행)' (Get-PatternCount $judgeActiveCode (New-SequencePattern @('return (($script:mainCategory -eq ''battle'') -and (-not $script:customActive) -and', '($rbCatDungeon.Checked -or $rbCatDeep.Checked -or (Test-AbyssMemberRunActive)))'))) 1
+# 11. 판단 워커 판정 본문 원문 (설계 2.5 · v11 R3 4.1 - 셋째 항은 어비스 콘텐츠 라디오, 매칭·역할 라디오는 보지 않음. 행동이 같은 다른 모양(예: 사냥터가 아님)은
+#     이 원문 단언만 잡습니다 - 변이 R3-M5)
+Assert-Case 'T4-e 11: Test-WorkerTimeJudgeActive 본문 = 전투 · 비커스텀 · (던전 · 심층 · 어비스) - 설계 v11 R3 Q3' (Get-PatternCount $judgeActiveCode (New-SequencePattern @('return (($script:mainCategory -eq ''battle'') -and (-not $script:customActive) -and', '($rbCatDungeon.Checked -or $rbCatDeep.Checked -or $rbCatAbyss.Checked))'))) 1
 
 # ── T4-f 실행부 Invoke-NextCycleDecision 행동 (지정 시각 21:20) ────────────────────
 $noticeCarry = '[안내] 지정 시간(21:20) 전에 워커가 다음 판으로 이어 가기로 정했습니다 - 다음 워커가 이어받아 마무리합니다.'
@@ -668,14 +675,18 @@ $t4hRows = @(
   @{ N = 'h2'; D = '던전 + 시간 지정 → UNTIL (신설)'; Cat = 'battle'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
   @{ N = 'h3'; D = '심층 + 시간 지정 → UNTIL (신설)'; Cat = 'battle'; Content = 'deep'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
   @{ N = 'h4'; D = '어비스 함께하기 파티원 + 시간 지정 → UNTIL 만 (사이클 추정치 없음)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'member'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
-  @{ N = 'h5'; D = '어비스 혼자하기 → 없음 (GUI 가 회차 종료 때 판단 - 설계 5절)'; Cat = 'battle'; Content = 'abyss'; Mode = 'solo'; Matching = 'member'; Custom = $false; Target = $baseTarget; X = '' }
-  @{ N = 'h6'; D = '어비스 함께하기 파티장 → 없음'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'lead'; Custom = $false; Target = $baseTarget; X = '' }
+  @{ N = 'h5'; D = '어비스 혼자하기 → UNTIL (설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'solo'; Matching = 'member'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
+  @{ N = 'h6'; D = '어비스 함께하기 파티장 → UNTIL (설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'lead'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
   @{ N = 'h7'; D = '사냥터 → 없음'; Cat = 'battle'; Content = 'hunting'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '' }
   @{ N = 'h8'; D = '기타 + 보존된 던전 라디오 → 없음 (기타 워커는 UNTIL 을 받으면 그 시각에 뽑기를 마침)'; Cat = 'etc'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '' }
   @{ N = 'h9'; D = '기타 + 보존된 어비스 함께하기 파티원 라디오 → 없음'; Cat = 'etc'; Content = 'abyss'; Mode = 'party'; Matching = 'member'; Custom = $false; Target = $baseTarget; X = '' }
   @{ N = 'h10'; D = '던전 커스텀 → 없음'; Cat = 'battle'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $true; Target = $baseTarget; X = '' }
   @{ N = 'h11'; D = '던전 · 시간 지정 아님(목표 시각 없음) → 없음'; Cat = 'battle'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $null; X = '' }
   @{ N = 'h12'; D = '생활 · 시간 지정 아님 → 없음 (앞 회차 값도 먼저 지움)'; Cat = 'life'; Content = 'dungeon'; Mode = 'solo'; Matching = 'chance'; Custom = $false; Target = $null; X = '' }
+  # h13~h15 설계 v11 R3 5.1 U6~U8 - 어비스는 매칭·역할 라디오와 무관하게 받고(파티 찾기는 받기만), 커스텀은 받지 않음
+  @{ N = 'h13'; D = '어비스 함께하기 우연한 만남 → UNTIL (설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'chance'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
+  @{ N = 'h14'; D = '어비스 함께하기 파티 찾기 → UNTIL (받기만 - 설계 v11 R3 4.2)'; Cat = 'battle'; Content = 'abyss'; Mode = 'party'; Matching = 'find'; Custom = $false; Target = $baseTarget; X = '2026-10-01 21:20' }
+  @{ N = 'h15'; D = '어비스 혼자하기 커스텀 → 없음 (커스텀은 받지 않음 - 설계 v11 R3 Q3)'; Cat = 'battle'; Content = 'abyss'; Mode = 'solo'; Matching = 'chance'; Custom = $true; Target = $baseTarget; X = '' }
 )
 $t4hRun = 0
 foreach ($row in $t4hRows) {
@@ -751,7 +762,7 @@ foreach ($cultureName in @('ko-KR', 'th-TH', 'fi-FI')) {
 Assert-Case 'P2 문화권 원복 (기준 ko-KR 로 돌아옴)' ([Threading.Thread]::CurrentThread.CurrentCulture.Name) 'ko-KR'
 
 # ── 실행 행 수 (예외로 표가 중간에 끊기면 여기서 드러남) ─────────────────────────────
-Assert-Case '실행 행 수 T4-a/T4-b/T4-c/T4-f/T4-g/T4-h/P2' ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $t4aRun, $t4bRun, $t4cRun, $t4fRun, $t4gRun, $t4hRun, $p2Run) '17/12/11/15/10/12/12'
+Assert-Case '실행 행 수 T4-a/T4-b/T4-c/T4-f/T4-g/T4-h/P2' ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $t4aRun, $t4bRun, $t4cRun, $t4fRun, $t4gRun, $t4hRun, $p2Run) '17/12/14/15/10/15/12'
 
 [Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
 $env:HONEYNOGI_UNTIL_TIME = $originalUntilEnv

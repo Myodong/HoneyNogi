@@ -44,6 +44,23 @@
 #   X4-h 워커 단독 실행(RUN_ID 없음 → 실행 id 읽기 원문 문장 그대로 → 빈 값 그대로 기록).
 #   그 반영의 검토(2026-10-10): X4-h 정적 ①② - 워커 전체(모든 깊이)에서 실행 id 변수 대입 = 스크립트 최상위 W2 하나 · RUN_ID env 대입 0(W2 는 두고
 #   그 앞뒤에 더한 빈 값 분기가 W2 문장 하나만 돌리는 X4-h 를 통과하던 것 - 정적이라 동작보다 먼저).
+# 구현 명세 ② 2.1(2026-10-12 - 3.3 ㉑ W-ONLY 표): 워커 전용 목록에 이어받기 시작 함수 Consume-Handoff(시작 때 journal 1회 읽기 → 역할)를 더했습니다 -
+#   자리(워커 1 · 표지 뒤 · GUI 0)·exit 0 은 기존 W-ONLY 단언이 함께 보고, 모양은 try 0(예외 비포장 - 설계 R2-5) · 잠금 읽기 1 · 저장 0(쓰기 0) 입니다(W-ONLY ⑤).
+#   동작 행은 test_abyss_handoff_start(⑱′) CH·L 입니다. X4 는 자기가 돌리는 두 함수(소유자 해석 · 클리어 기록)만 갖춰지면 돕니다 - ② 의 뒤 단계가 이 목록에
+#   함수를 더해도 X4 가 그 함수의 유무에 묶이지 않게(빠진 함수는 W-ONLY 자리 단언이 FAIL 로 드러냄).
+# 구현 명세 ② 2.2·2.3(2026-10-13 - 3.3 ㉑ W-ONLY 표 · 3.4): 워커 전용 목록에 자기 항목 생성 Add-AbyssJournalEnteredEntry · 입장 직후 키 인덱스 기록
+#   Set-AbyssAfterEntryIndex · 코드 10 출구의 열쇠 닫기 Close-AbyssKeyEntryOnLeave 를 더했습니다 - 자리·exit 0 은 기존 W-ONLY 단언이 함께 보고, 모양(W-ONLY ⑥)은
+#   명세 표의 칸만 함수마다 봅니다(생성: try 0 · 저장 1 · 클로저 1 · 그 안 $script: 0 · 그 안 명령 = 소유자 대조만 / 인덱스: try 0 · 저장 1 · 클로저 2 · 그 안
+#   $script:·명령 0 / 닫기: try·trap·throw 0 · 저장 1 · 클로저 1 · 그 안 $script: 0 · 그 안 명령 = 필드 쓰기만). W-ONLY ⑦ 은 mutator 변경 표식
+#   ($change.Changed = $true - 저장 계약은 표식이 선 저장만 쓰고 없으면 unchanged, 명세 2.0-10)의 자리입니다: 덧붙이는 둘(클리어 기록 · 생성)은 클로저 최상위
+#   마지막 문장이고 바로 앞 = entries 덧붙임, 항목을 찾아 고치는 둘(인덱스 · 닫기)은 foreach 안 그 갈래의 마지막 문장이고 바로 앞 = index 대입 / 필드 쓰기 명령,
+#   무변경 갈래에는 두지 않습니다(닫기의 무변경 갈래는 continue 뿐). own 던전 밖 시작의 기존 항목 닫기는 아래 2.5 문단입니다.
+#   X4-i~l 은 클리어 기록의 열쇠 항목 닫기입니다(명세 2.2 · J4 - 같은 저장에서 열쇠 항목 done + applied: 있음 / 없음 / 이미 done / 항목 없음).
+# 구현 명세 ② 2.5(2026-10-13 - 3.3 ㉑ W-ONLY 표): 워커 전용 목록에 own 던전 밖 시작의 기존 항목 닫기 Close-AbyssOwnEntryBeforeEntry(이어받기 시작 선분기가
+#   필드 확정·패널류 첫 표본에서 받은 own 항목을 abandoned-pre-entry-start 로 닫음)를 더했습니다 - 자리·exit 0 은 기존 W-ONLY 단언이 함께 보고, 모양(W-ONLY ⑧)은
+#   표의 칸(try 0 · 저장 1 · 클로저 2(Expect·Mutator) · 그 안 $script: 0 · 그 안 명령 = 필드 쓰기만), 변경 표식(⑦)은 열쇠 닫기와 같은 모양(Mutator 에만 1 -
+#   찾은 항목 갈래 안 마지막 · 바로 앞 = 필드 쓰기 명령 · Expect 0 · Mutator 의 무변경 갈래는 continue 뿐)입니다. 동작 행은 test_abyss_handoff_start O·N 과
+#   test_after_entry_at_most_once OK3~OK5·R2-E4 입니다.
 # J14 토큰 비교: 주석 토큰만 빼고 줄바꿈(NewLine) 토큰과 문자열 원문은 그대로 비교합니다(명세 리뷰 1·확인 라운드). 주석만 있는
 #   줄도 줄바꿈 토큰은 남으므로 두 사본은 주석까지 같은 글자로 유지합니다.
 $ErrorActionPreference = 'Stop'
@@ -72,7 +89,13 @@ $WARNING_BAK_UNREADABLE_FRAGMENT = '직전본을 읽지 못했습니다'        
 $WARNING_TEMP_LIST_FRAGMENT = '임시본 목록을 읽지 못했습니다'        # (a) 의 임시본 목록 읽기 실패(P2a 정적)
 # 단계 2.10 워커 전용 함수(묶음 끝 표지 뒤)와 그 로그 문구(구현 명세 ① 2.10 W3 - 실패 낱말은 설계 R2 3.6: locked 파일 사용 중 / corrupt 파일 손상 /
 # io-failed 기록 실패). 성공 줄은 GUI 가 화면에서 숨기는 글자와 같아야 합니다(test_log_tail_offset W7 가 소스에서 잡아 대조)
-$WORKER_ONLY_FUNCTION_NAMES = @('ConvertTo-AbyssJournalOwner', 'Add-AbyssJournalClearedEntry')
+# 구현 명세 ② 2.1: 이어받기 시작 함수 Consume-Handoff 를 더함(3.3 ㉑ 표 - 표지 뒤 · GUI 0 · try 0 · 잠금 읽기 1 · 저장 0 · exit 0). ② 의 뒤 단계가 함수를 더합니다
+# 구현 명세 ② 2.2·2.3: 자기 항목 생성 · 키 인덱스 기록 · 코드 10 출구의 열쇠 닫기를 더함(3.3 ㉑ 표 - 모양 W-ONLY ⑥ · 변경 표식 ⑦)
+# 구현 명세 ② 2.5: own 던전 밖 시작의 기존 항목 닫기를 더함(3.3 ㉑ 표 - 모양 W-ONLY ⑧ · 변경 표식 ⑦)
+$WORKER_ONLY_FUNCTION_NAMES = @('ConvertTo-AbyssJournalOwner', 'Add-AbyssJournalClearedEntry', 'Consume-Handoff',
+    'Add-AbyssJournalEnteredEntry', 'Set-AbyssAfterEntryIndex', 'Close-AbyssKeyEntryOnLeave', 'Close-AbyssOwnEntryBeforeEntry')
+# X4(클리어 기록 동작)가 실제로 돌리는 워커 전용 함수 - 이 둘이 있으면 X4 를 돌립니다
+$X4_FUNCTION_NAMES = @('ConvertTo-AbyssJournalOwner', 'Add-AbyssJournalClearedEntry')
 $CLEARED_SUCCESS_LINE = '[어비스] 클리어 완료 기록 저장 (결과 화면 도달)'
 $CLEARED_OWNER_WARNING = '[경고] 커스텀 항목 소유자 정보를 읽지 못해 클리어 완료 기록을 남기지 않습니다 - GUI/워커 버전을 확인해 주세요'
 $CLEARED_FAIL_FORMAT = '[경고] 클리어 완료 기록을 저장하지 못했습니다 ({0}) - 정상 종료면 GUI가 종료 코드로 계상하므로 진행을 계속합니다'
@@ -748,11 +771,126 @@ function Get-WorkerOnlyFunctions {
     return $found
 }
 
+function Get-FunctionClosures {
+    # 함수 안의 클로저({ … }.GetNewClosure()) - 저장 계약의 -Mutator·-Expect 는 클로저로 만듭니다(저장 함수 머리 주석). 열거용이라 풀어서 돌려주고
+    # 호출부가 @() 로 받습니다(절대 규칙 3)
+    param($FunctionAst)
+    return $FunctionAst.FindAll({ param($candidate)
+            $candidate -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and $candidate.Member.Extent.Text -eq 'GetNewClosure' -and
+            $candidate.Expression -is [System.Management.Automation.Language.ScriptBlockExpressionAst] }, $true)
+}
+
+function Get-WorkerOnlyFunctionFacts {
+    # 워커 전용 함수 하나의 모양 재료(구현 명세 ② 3.3 ㉑ 표의 칸) → @{ Tries; Traps; Throws; Updates(저장 호출 수); Closures(클로저 수);
+    # ClosureScriptVariables(클로저 안 $script: 참조 수); ClosureCommands(클로저 안 명령 이름 - 중복 제거·정렬, ',' 구분 - 없으면 빈 값) }
+    param($FunctionAst)
+    $commandNames = @($FunctionAst.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() })
+    $closures = @(Get-FunctionClosures -FunctionAst $FunctionAst)
+    $closureScriptVariables = 0
+    $closureCommandNames = @()
+    foreach ($closure in $closures) {
+        $closureScriptVariables += @($closure.Expression.FindAll({ param($candidate)
+                    $candidate -is [System.Management.Automation.Language.VariableExpressionAst] -and $candidate.VariablePath.UserPath -like 'script:*' }, $true)).Count
+        $closureCommandNames += @($closure.Expression.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() })
+    }
+    return @{
+        Tries                  = @($FunctionAst.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.TryStatementAst] }, $true)).Count
+        Traps                  = @($FunctionAst.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.TrapStatementAst] }, $true)).Count
+        Throws                 = @($FunctionAst.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.ThrowStatementAst] }, $true)).Count
+        Updates                = @($commandNames | Where-Object { $_ -eq 'Update-AbyssJournal' }).Count
+        Closures               = $closures.Count
+        ClosureScriptVariables = $closureScriptVariables
+        ClosureCommands        = (@($closureCommandNames | Sort-Object -Unique) -join ',')
+    }
+}
+
+function Get-StatementChangeKind {
+    # 문장 종류(㉑ 'Changed' 칸의 '바로 앞 형제' - 구현 명세 ② 3.3): 멤버 대입(복합 대입 포함) '멤버 대입 <멤버>' · 명령 하나만 든 문장 '<명령 이름>' ·
+    # 그 밖은 AST 형식 이름
+    param($Statement)
+    if (($Statement -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($Statement.Left -is [System.Management.Automation.Language.MemberExpressionAst])) {
+        return ('멤버 대입 ' + $Statement.Left.Member.Extent.Text)
+    }
+    if (($Statement -is [System.Management.Automation.Language.PipelineAst]) -and (@($Statement.PipelineElements).Count -eq 1) -and
+        ($Statement.PipelineElements[0] -is [System.Management.Automation.Language.CommandAst])) {
+        return [string]$Statement.PipelineElements[0].GetCommandName()
+    }
+    return $Statement.GetType().Name
+}
+
+function Get-ChangedMarkerShapeText {
+    # mutator 변경 표식의 자리(구현 명세 ② 2.0-10 · 3.3 ㉑ 'Changed' 칸 - 주석이 없는 AST 로 봄) → 클로저마다 '<역할>: Changed <수> [<자리> / …]' 를 역할 순으로
+    # ' | ' 로 잇습니다. 역할은 저장 계약의 모양으로 가릅니다(-Mutator 는 param($journal, $change) 둘 · -Expect 는 param($journal) 하나 - 저장 함수 머리 주석).
+    # 표식 = '<무엇>.Changed = $true' 대입문. 자리 = 최상위(클로저 본문에 바로 든 문장) · 마지막(든 블록의 마지막 문장) · foreach 안(클로저 안 foreach 본문 안) ·
+    # 앞 형제(같은 블록 바로 앞 문장의 종류 - Get-StatementChangeKind, 첫 문장이면 '(없음)')
+    param($FunctionAst)
+    $closureTexts = foreach ($closure in @(Get-FunctionClosures -FunctionAst $FunctionAst)) {
+        $closureBody = $closure.Expression.ScriptBlock
+        $parameterCount = 0
+        if ($null -ne $closureBody.ParamBlock) { $parameterCount = @($closureBody.ParamBlock.Parameters).Count }
+        $role = '매개변수 {0}개' -f $parameterCount
+        if ($parameterCount -eq 2) { $role = 'Mutator' } elseif ($parameterCount -eq 1) { $role = 'Expect' }
+        $markers = @($closureBody.FindAll({ param($candidate)
+                    ($candidate -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+                    ($candidate.Left -is [System.Management.Automation.Language.MemberExpressionAst]) -and
+                    ($candidate.Left.Member.Extent.Text -eq 'Changed') -and ($candidate.Right.Extent.Text -eq '$true') }, $true))
+        $markerPlaces = foreach ($marker in $markers) {
+            $siblings = @($marker.Parent.Statements)
+            $markerAt = -1
+            for ($siblingIndex = 0; $siblingIndex -lt $siblings.Count; $siblingIndex++) {
+                if ([object]::ReferenceEquals($siblings[$siblingIndex], $marker)) { $markerAt = $siblingIndex }
+            }
+            $inForeach = $false
+            for ($ancestor = $marker.Parent; ($null -ne $ancestor) -and (-not [object]::ReferenceEquals($ancestor, $closureBody)); $ancestor = $ancestor.Parent) {
+                if ($ancestor -is [System.Management.Automation.Language.ForEachStatementAst]) { $inForeach = $true }
+            }
+            $previousKind = '(없음)'
+            if ($markerAt -gt 0) { $previousKind = Get-StatementChangeKind -Statement $siblings[$markerAt - 1] }
+            '최상위 {0} · 마지막 {1} · foreach 안 {2} · 앞 형제 {3}' -f ([object]::ReferenceEquals($marker.Parent, $closureBody.EndBlock)),
+                (($markerAt -ge 0) -and ($markerAt -eq ($siblings.Count - 1))), $inForeach, $previousKind
+        }
+        $placeText = ''
+        if ($markers.Count -gt 0) { $placeText = ' [' + (@($markerPlaces) -join ' / ') + ']' }
+        '{0}: Changed {1}{2}' -f $role, $markers.Count, $placeText
+    }
+    return ((@($closureTexts) | Sort-Object) -join ' | ')
+}
+
+function Get-NoChangeBranchStatementCount {
+    # 무변경 갈래의 continue 아닌 문장 수(㉑ 'Changed' 칸 - 닫기 함수 '무변경 갈래(항목 없음·이미 done)는 continue 뿐', 구현 명세 ② 3.3): 클로저 안 if 의
+    # 갈래(else 포함) 가운데 변경 표식을 품지 않은 갈래의 문장만 셉니다 - 0 이어야 합니다. 표식을 품은 갈래(찾은 항목 쪽)는 표식 자리 단언이 봅니다.
+    # -MutatorOnly 면 Mutator 클로저(param 둘 - 저장 함수 머리 주석)만 봅니다 - -Expect 클로저는 판정 값을 담는 갈래(표식 없음)가 정상이라 세면 안 됩니다
+    # (구현 명세 ② 2.5 own 닫기 - Expect·Mutator 두 클로저)
+    param($FunctionAst, [switch]$MutatorOnly)
+    $count = 0
+    foreach ($closure in @(Get-FunctionClosures -FunctionAst $FunctionAst)) {
+        if ($MutatorOnly) {
+            $closureParams = $closure.Expression.ScriptBlock.ParamBlock
+            if (($null -eq $closureParams) -or (@($closureParams.Parameters).Count -ne 2)) { continue }
+        }
+        foreach ($ifStatement in @($closure.Expression.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.IfStatementAst] }, $true))) {
+            $branches = @($ifStatement.Clauses | ForEach-Object { $_.Item2 })
+            if ($null -ne $ifStatement.ElseClause) { $branches += $ifStatement.ElseClause }
+            foreach ($branch in $branches) {
+                $branchMarkers = @($branch.FindAll({ param($candidate)
+                            ($candidate -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+                            ($candidate.Left -is [System.Management.Automation.Language.MemberExpressionAst]) -and ($candidate.Left.Member.Extent.Text -eq 'Changed') }, $true))
+                if ($branchMarkers.Count -gt 0) { continue }
+                $count += @($branch.Statements | Where-Object { -not ($_ -is [System.Management.Automation.Language.ContinueStatementAst]) }).Count
+            }
+        }
+    }
+    return $count
+}
+
 function Test-WorkerOnlyStatic {
     # W-ONLY(정적) 워커 전용 함수의 자리·모양 - ① 워커에 1번씩 · 묶음 끝 표지 뒤(표지 안이면 J14 이름 집합이 갈라짐 - 명세 2.1 '두 사본' 규칙) ·
     # GUI 에 0 ② 기록 함수: 예외를 감싸지 않음(try 0 - 설계 R2-5: 남는 예외는 구현 결함이라 최상위 catch 의 코드 1 로 드러나야 함) · 저장 1번 ·
     # 잠금 읽기 0 · mutator 는 클로저 1개이고 그 안에서 $script: 를 읽지 않고(클로저는 빈 값으로 읽음) 명령도 부르지 않음(체크리스트 5·6)
-    # ③ 해석 함수: $script: 0(순수) · try 1개에 catch 1절 ④ 두 함수 안 exit 문 0(단계 2.10 구현 검증)
+    # ③ 해석 함수: $script: 0(순수) · try 1개에 catch 1절 ④ 목록 함수 안 exit 문 0(단계 2.10 구현 검증 - 없는 함수는 '(없음)' 으로 적어 FAIL)
+    # ⑤ 이어받기 시작 함수 Consume-Handoff(구현 명세 ② 2.1 · 3.3 ㉑ 표): try 0 · 잠금 읽기 1 · 저장 0
+    # ⑥ 자기 항목 생성 · 키 인덱스 기록 · 열쇠 닫기(구현 명세 ② 2.2·2.3 · 3.3 ㉑ 표의 칸만) ⑦ 클리어 기록과 ②·⑧ 의 mutator 변경 표식 자리(명세 ② 2.0-10)
+    # ⑧ own 던전 밖 시작의 기존 항목 닫기(구현 명세 ② 2.5 · 3.3 ㉑ 표의 칸만)
     param([hashtable]$WorkerOnly, [hashtable]$WorkerBundle, [hashtable]$GuiBundle)
     $prefix = '[워커 전용]'
     $placement = foreach ($functionName in $WORKER_ONLY_FUNCTION_NAMES) {
@@ -764,6 +902,81 @@ function Test-WorkerOnlyStatic {
     }
     Assert-Case "$prefix W-ONLY 자리 - 워커에 1번 · 묶음 끝 표지 뒤 · GUI 0" ($placement -join ' | ') `
         (($WORKER_ONLY_FUNCTION_NAMES | ForEach-Object { '{0}:워커 1·표지 뒤 True·GUI 0' -f $_ }) -join ' | ')
+    # ⑤ Consume-Handoff - 시작 때 journal 을 한 번 읽어 역할만 정합니다: try 0(남는 예외는 구현 결함이라 최상위 catch 의 코드 1 로 - 설계 R2-5) · 잠금 읽기 1
+    #    (nonce 유무와 무관하게 1회 - 명세 ② J1) · 저장 0(쓰기 0 - 명세 ② 2.1). exit 0 은 아래 ④ 가 함께 봅니다. 함수가 없으면 위 자리 단언이 FAIL 입니다
+    $consumeAst = $WorkerOnly.Functions['Consume-Handoff']
+    if ($null -ne $consumeAst) {
+        $consumeTries = @($consumeAst.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.TryStatementAst] }, $true)).Count
+        $consumeCommands = @($consumeAst.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
+        Assert-Case "$prefix W-ONLY 이어받기 시작 함수 Consume-Handoff - try 0 · 잠금 읽기 1 · 저장 0" `
+            ('{0}/{1}/{2}' -f $consumeTries, @($consumeCommands | Where-Object { $_ -eq 'Read-AbyssJournal' }).Count,
+                @($consumeCommands | Where-Object { $_ -eq 'Update-AbyssJournal' }).Count) '0/1/0'
+    }
+    # ⑥ 구현 명세 ② 2.2·2.3 의 세 함수 - 3.3 ㉑ 표의 칸만 봅니다(exit 0 은 아래 ④ · 함수가 없으면 위 자리 단언이 FAIL). 셋 다 예외를 감싸지 않고(try 0 - 설계 R2-5:
+    #    저장소가 잠금·IO 실패를 태그로 바꾸므로 남는 예외는 최상위 catch 의 코드 1) 저장을 1번 하며, mutator·Expect 는 클로저이고 그 안에서 $script: 를 읽지
+    #    않습니다(클로저는 빈 값으로 읽음 - 값은 클로저 밖 지역 사본으로, 명세 ② 2.0-1). 클로저가 부르는 명령은 표의 것만(클로저는 최상위 함수만 부름):
+    #    생성 = 클로저 1 · 그 안 명령은 소유자 대조만(같은 owner 의 남은 열린 항목을 같은 저장에서 닫음 - 명세 2.2) / 인덱스 = 클로저 2(Expect·Mutator) · 그 안
+    #    명령 0 / 닫기 = trap·throw 도 0(설계 R2 S4) · 클로저 1 · 그 안 명령은 필드 쓰기 Set-AbyssJournalProperty 만(없는 필드는 더하고 있는 필드는 자리 유지 - 명세 J5)
+    $enteredAst = $WorkerOnly.Functions['Add-AbyssJournalEnteredEntry']
+    if ($null -ne $enteredAst) {
+        $enteredFacts = Get-WorkerOnlyFunctionFacts -FunctionAst $enteredAst
+        Assert-Case "$prefix W-ONLY 자기 항목 생성 Add-AbyssJournalEnteredEntry - try 0 · 저장 1 · 클로저 1 · 그 안 `$script: 0 · 그 안 명령 = 소유자 대조만" `
+            ('{0}/{1}/{2}/{3}/[{4}]' -f $enteredFacts.Tries, $enteredFacts.Updates, $enteredFacts.Closures, $enteredFacts.ClosureScriptVariables, $enteredFacts.ClosureCommands) `
+            '0/1/1/0/[Test-AbyssJournalOwnerMatch]'
+    }
+    $indexAst = $WorkerOnly.Functions['Set-AbyssAfterEntryIndex']
+    if ($null -ne $indexAst) {
+        $indexFacts = Get-WorkerOnlyFunctionFacts -FunctionAst $indexAst
+        Assert-Case "$prefix W-ONLY 키 인덱스 기록 Set-AbyssAfterEntryIndex - try 0 · 저장 1 · 클로저 2(Expect·Mutator) · 그 안 `$script: 0 · 그 안 명령 0" `
+            ('{0}/{1}/{2}/{3}/[{4}]' -f $indexFacts.Tries, $indexFacts.Updates, $indexFacts.Closures, $indexFacts.ClosureScriptVariables, $indexFacts.ClosureCommands) '0/1/2/0/[]'
+    }
+    $leaveAst = $WorkerOnly.Functions['Close-AbyssKeyEntryOnLeave']
+    if ($null -ne $leaveAst) {
+        $leaveFacts = Get-WorkerOnlyFunctionFacts -FunctionAst $leaveAst
+        Assert-Case "$prefix W-ONLY 열쇠 닫기 Close-AbyssKeyEntryOnLeave - try·trap·throw 0 · 저장 1 · 클로저 1 · 그 안 `$script: 0 · 그 안 명령 = 필드 쓰기만" `
+            ('{0}/{1}/{2}/{3}/{4}/{5}/[{6}]' -f $leaveFacts.Tries, $leaveFacts.Traps, $leaveFacts.Throws, $leaveFacts.Updates, $leaveFacts.Closures,
+                $leaveFacts.ClosureScriptVariables, $leaveFacts.ClosureCommands) '0/0/0/1/1/0/[Set-AbyssJournalProperty]'
+    }
+    # ⑧ 구현 명세 ② 2.5 의 own 닫기 - 이어받기 시작 선분기가 필드 확정·패널류 첫 표본에서 받은 own 항목을 닫습니다(launchState done · reason
+    #    abandoned-pre-entry-start · screen = 그 화면). 3.3 ㉑ 표의 칸만 봅니다(exit 0 은 아래 ④ · 함수가 없으면 위 자리 단언이 FAIL): 예외를 감싸지 않고(try 0 -
+    #    설계 R2-5) 저장 1번, 클로저 2(-Expect '받은 own 항목이 있고 entered ∧ done 아님' · -Mutator)이고 그 안에서 $script: 를 읽지 않으며(지역 사본 - 명세 ② 2.0-1)
+    #    부르는 명령은 필드 쓰기 Set-AbyssJournalProperty 만(없는 필드는 더하고 있는 필드는 자리 유지 - 명세 J5)
+    $ownCloseAst = $WorkerOnly.Functions['Close-AbyssOwnEntryBeforeEntry']
+    if ($null -ne $ownCloseAst) {
+        $ownCloseFacts = Get-WorkerOnlyFunctionFacts -FunctionAst $ownCloseAst
+        Assert-Case "$prefix W-ONLY own 닫기 Close-AbyssOwnEntryBeforeEntry - try 0 · 저장 1 · 클로저 2(Expect·Mutator) · 그 안 `$script: 0 · 그 안 명령 = 필드 쓰기만" `
+            ('{0}/{1}/{2}/{3}/[{4}]' -f $ownCloseFacts.Tries, $ownCloseFacts.Updates, $ownCloseFacts.Closures, $ownCloseFacts.ClosureScriptVariables, $ownCloseFacts.ClosureCommands) `
+            '0/1/2/0/[Set-AbyssJournalProperty]'
+    }
+    # ⑦ mutator 변경 표식의 자리(구현 명세 ② 2.0-10 · 3.3 ㉑ 'Changed' 칸 - 명세 리뷰 2 P1-1): 저장 계약은 mutator 가 '$change.Changed = $true' 를 둔 저장만
+    #    씁니다(없으면 unchanged = 임시 파일·Replace 0 - 호출부는 실패로 처리해 키 지점이 늘 코드 4, 닫기는 저장되지 않음). 표식은 실제 필드 변경 바로 뒤 1번이고
+    #    무변경 갈래에는 없습니다 - 덧붙이는 둘(클리어 기록 · 생성)은 클로저 최상위 마지막 문장 · 바로 앞 = entries 덧붙임(덧붙임은 늘 변경 - 클리어 기록의 열쇠 닫기
+    #    갈래 · 생성의 동반 닫기 foreach 안에는 0), 항목을 찾아 고치는 둘(인덱스 · 닫기)은 foreach 안 그 갈래의 마지막 문장 · 바로 앞 = index 대입 / 필드 쓰기 명령 ·
+    #    클로저 최상위 0(최상위의 무조건 표식이면 무변경 갈래에서도 쓰기가 생김 - 그 동작은 test_after_entry_at_most_once R2-N1·N2). 인덱스의 Expect 에는 0,
+    #    닫기의 무변경 갈래(항목 없음·이미 done)는 continue 뿐. 함수가 없으면 건너뜁니다(위 자리 단언이 FAIL)
+    #    구현 명세 ② 2.5: own 닫기(⑧)도 항목을 찾아 고치는 쪽이라 열쇠 닫기와 같은 모양입니다 - Mutator 에만 1(찾은 항목 갈래 안 마지막 · 바로 앞 = 필드 쓰기
+    #    명령) · Expect 0 · Mutator 의 무변경 갈래(받은 항목이 아닌 항목 - 정상 흐름에서는 Expect 가 막음)는 continue 뿐. 표식이 빠지면 저장이 unchanged 라 늘
+    #    own 닫기 [경고] 갈래로 가고 받은 항목이 열린 채 남습니다(명세 2.0-10 · 3.5 ⓐ)
+    $appendMarkerPlace = 'Mutator: Changed 1 [최상위 True · 마지막 True · foreach 안 False · 앞 형제 멤버 대입 entries]'
+    $markerSpecs = @(
+        @{ Name = 'Add-AbyssJournalClearedEntry'; Place = $appendMarkerPlace },
+        @{ Name = 'Add-AbyssJournalEnteredEntry'; Place = $appendMarkerPlace },
+        @{ Name = 'Set-AbyssAfterEntryIndex'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 멤버 대입 index]' },
+        @{ Name = 'Close-AbyssKeyEntryOnLeave'; Place = 'Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' },
+        @{ Name = 'Close-AbyssOwnEntryBeforeEntry'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' })
+    foreach ($markerSpec in $markerSpecs) {
+        $markerFunctionAst = $WorkerOnly.Functions[$markerSpec.Name]
+        if ($null -eq $markerFunctionAst) { continue }
+        Assert-Case ('{0} W-ONLY 변경 표식 자리 - {1}' -f $prefix, $markerSpec.Name) (Get-ChangedMarkerShapeText -FunctionAst $markerFunctionAst) $markerSpec.Place
+    }
+    if ($null -ne $leaveAst) {
+        Assert-Case "$prefix W-ONLY 변경 표식 - 열쇠 닫기의 무변경 갈래(항목 없음·이미 done)는 continue 뿐(표식을 품지 않은 if 갈래의 continue 아닌 문장 0)" `
+            (Get-NoChangeBranchStatementCount -FunctionAst $leaveAst) 0
+    }
+    if ($null -ne $ownCloseAst) {
+        Assert-Case "$prefix W-ONLY 변경 표식 - own 닫기 Mutator 의 무변경 갈래(받은 항목이 아님)는 continue 뿐(표식을 품지 않은 if 갈래의 continue 아닌 문장 0)" `
+            (Get-NoChangeBranchStatementCount -FunctionAst $ownCloseAst -MutatorOnly) 0
+    }
     $recordAst = $WorkerOnly.Functions['Add-AbyssJournalClearedEntry']
     $ownerAst = $WorkerOnly.Functions['ConvertTo-AbyssJournalOwner']
     if ($null -eq $recordAst -or $null -eq $ownerAst) { return }
@@ -790,9 +1003,11 @@ function Test-WorkerOnlyStatic {
     # 최상위 catch 의 코드 1). 이 회귀는 함수를 같은 프로세스에서 부르므로 exit 가 들면 아래 동작 행(X4)이 단언 없이 조용히 끝나 통과로 보입니다(단계 2.10
     # 변이 검증 - 생존 e1·e2: exit 0) - 그래서 동작보다 먼저 정적으로 봅니다
     $exitCounts = foreach ($functionName in $WORKER_ONLY_FUNCTION_NAMES) {
-        '{0}:{1}' -f $functionName, @($WorkerOnly.Functions[$functionName].FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count
+        $exitFunctionAst = $WorkerOnly.Functions[$functionName]
+        if ($null -eq $exitFunctionAst) { '{0}:(없음)' -f $functionName; continue }
+        '{0}:{1}' -f $functionName, @($exitFunctionAst.FindAll({ param($candidate) $candidate -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count
     }
-    Assert-Case "$prefix W-ONLY 두 함수 안 exit 문 0(동작 행보다 먼저 - 같은 프로세스에서 exit 가 테스트를 끝내지 않게)" ($exitCounts -join ' | ') `
+    Assert-Case "$prefix W-ONLY 워커 전용 함수 안 exit 문 0(동작 행보다 먼저 - 같은 프로세스에서 exit 가 테스트를 끝내지 않게)" ($exitCounts -join ' | ') `
         (($WORKER_ONLY_FUNCTION_NAMES | ForEach-Object { '{0}:0' -f $_ }) -join ' | ')
 }
 
@@ -2274,7 +2489,10 @@ function Invoke-ClearedEntryCall {
     # @{ Error(메시지 - 없으면 빈 값); Outputs(출력 개수 - 반환값 없음 계약); Logs; Before; After(호출 앞뒤 시각) }. 경로는 그 함수가 이름 그대로 읽는
     # 스크립트 수준 $abyssJournalPath 에 둡니다(워커와 같은 모양 - 이 함수 안에 같은 이름의 지역 변수를 두지 않음: 동적 스코프로 가려짐).
     # 나머지 워커 상태는 보통 판의 값으로 두고 호출 앞뒤를 비교해, 달라진 것을 $script:x4StateChanges 에 '실행 id: 내용' 으로 적습니다(Test-CaseX4 끝 단언)
-    param([string]$JournalPath, [string]$RunId, [bool]$Custom, [string]$OwnerJson = '')
+    # 열쇠(구현 명세 ② 2.2 - X4-i~l): -HandoffNonce 를 $script:handoff.Nonce 로 둡니다(기록 함수가 클로저 밖 지역 사본으로 읽는 열쇠 - 빈 값 = 열쇠 없음. 기록
+    # 함수가 읽는 이어받기 상태는 이 필드 하나). -NoHandoff 면 $script:handoff 를 지운 채 부릅니다(⑯ 결합 행처럼 이어받기 상태가 없는 실행). -EnvHandoffNonce 는
+    # 그 호출 동안만 HONEYNOGI_HANDOFF_NONCE 로 둡니다(Role none 기동이 받은 nonce - 열쇠가 아님, 설계 R2 3.3 ⑥) - 그 밖의 호출은 그 env 를 비운 채 부릅니다
+    param([string]$JournalPath, [string]$RunId, [bool]$Custom, [string]$OwnerJson = '', [string]$HandoffNonce = '', [switch]$NoHandoff, [string]$EnvHandoffNonce = '')
     $script:abyssJournalPath = $JournalPath
     $script:abyssRunId = $RunId
     $script:customMode = $Custom
@@ -2284,6 +2502,15 @@ function Invoke-ClearedEntryCall {
     $script:customRecoveryOnly = $false
     $script:customMarkerPath = ''
     $script:dgLastRun = $false
+    if ($NoHandoff) {
+        Remove-Variable -Name 'handoff' -Scope Script -ErrorAction SilentlyContinue
+    } else {
+        $script:handoff = @{ Nonce = $HandoffNonce }
+    }
+    $savedHandoffEnv = [Environment]::GetEnvironmentVariable('HONEYNOGI_HANDOFF_NONCE', 'Process')
+    $callHandoffEnv = $null
+    if ($EnvHandoffNonce) { $callHandoffEnv = $EnvHandoffNonce }
+    [Environment]::SetEnvironmentVariable('HONEYNOGI_HANDOFF_NONCE', $callHandoffEnv, 'Process')
     $script:workerRunLogLines.Clear()
     $callError = ''
     $callOutputs = @()
@@ -2293,6 +2520,8 @@ function Invoke-ClearedEntryCall {
         $callOutputs = @(Add-AbyssJournalClearedEntry)
     } catch {
         $callError = $_.Exception.Message
+    } finally {
+        [Environment]::SetEnvironmentVariable('HONEYNOGI_HANDOFF_NONCE', $savedHandoffEnv, 'Process')
     }
     $callAfter = Get-Date
     $stateAfter = Get-WorkerStateSnapshot
@@ -2302,6 +2531,28 @@ function Invoke-ClearedEntryCall {
     }
     if ($stateDiffs.Count -gt 0) { $script:x4StateChanges.Add(('{0}: {1}' -f $RunId, ($stateDiffs -join ', '))) }
     return @{ Error = $callError; Outputs = $callOutputs.Count; Logs = @($script:workerRunLogLines); Before = $callBefore; After = $callAfter }
+}
+
+function New-KeyEntryJson {
+    # X4-i~l 픽스처 항목 한 건(JSON) - 워커 사본의 항목 기본값(New-AbyssJournalEntry) 위에 입장 기록 모양(stage entered · owner { runId } · afterEntry
+    # {2, 2, [32,66]} · at.entered)과 그 launchState
+    param([string]$Nonce, [string]$RunId, [string]$LaunchState)
+    $fixtureEntry = New-AbyssJournalEntry -Stage 'entered'
+    $fixtureEntry.nonce = $Nonce
+    $fixtureEntry.runId = $RunId
+    $fixtureEntry.owner = [pscustomobject]@{ runId = $RunId }
+    $fixtureEntry.launchState = $LaunchState
+    $fixtureEntry.afterEntry = [pscustomobject]@{ index = 2; total = 2; keys = @(32, 66) }
+    $fixtureEntry.at.entered = '2026-10-13T09:00:00.0000000+09:00'
+    return (ConvertTo-Json -InputObject $fixtureEntry -Depth 10 -Compress)
+}
+
+function Get-KeyEntryText {
+    # X4-i~l 항목 대조 글자 - 필드 이름 순서 | nonce/stage/launchState/afterEntry index·total·keys/reason/screen/cleanupOnly/at.entered (항목이 없으면 '(없음)')
+    param($Entry)
+    if ($null -eq $Entry) { return '(없음)' }
+    return ('{0} | {1}/{2}/{3}/{4}/{5}/[{6}]/[{7}]/[{8}]/{9}/{10}' -f (@($Entry.PSObject.Properties | ForEach-Object { $_.Name }) -join ','), $Entry.nonce, $Entry.stage,
+        $Entry.launchState, $Entry.afterEntry.index, $Entry.afterEntry.total, (@($Entry.afterEntry.keys) -join ','), $Entry.reason, $Entry.screen, $Entry.cleanupOnly, $Entry.at.entered)
 }
 
 function Test-CaseX4 {
@@ -2315,6 +2566,8 @@ function Test-CaseX4 {
     #   X4-e 저장 실패 사용 중·손상·기록 실패 → [경고] 1(설계 R2 3.6 낱말) · 예외 0 · 파일 그대로 · 임시·잠금 0
     #   X4-f 저장소 밖 예외(구현 결함)는 감싸지 않고 밖으로 - 경고·성공 줄 0 (설계 R2-5)
     #   X4-g 본 파일 손상 + 직전본 유효 → 저장소의 복구 경고를 로그로 남기고(호출부 몫) 기록 성공
+    #   X4-i~l 열쇠 항목 닫기(구현 명세 ② 2.2) - 있음 → done + applied / 없음(이어받기 상태 없음 · 빈 열쇠 + 받은 env nonce) → 그대로 / 이미 done → applied 에
+    #          1번(중복 0) / 항목 없음 → applied 그대로. 넷 다 같은 저장 1번 · 그 밖 필드·순서·다른 항목 그대로 · cleared 1 · 성공 줄 1
     param([hashtable]$Context)
     $prefix = $Context.Prefix
     $guidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -2472,6 +2725,53 @@ function Test-CaseX4 {
             ('[](String)/1/[]/[runId=]/[{0}]/' -f $CLEARED_SUCCESS_LINE)
     }
 
+    # X4-i~l 열쇠 항목 닫기(구현 명세 ② 2.2 · J4 · 설계 v10 '같은 mutation 에서 이 판의 entered 항목 applied·done'): 클리어 기록과 같은 저장(seq +1 한 번 ·
+    #       직전본 = 앞 내용)에서 열쇠 항목($script:handoff.Nonce)을 launchState done 으로, 그 nonce 를 applied 에(이미 있으면 그대로) - 그 항목이 있을 때만(지난 기록
+    #       정리 ③ 이 applied 를 보고 지움). 그 항목의 다른 필드·필드 순서(직접 대입 - 명세 J5)·다른 항목·기존 applied 는 그대로이고 cleared 1건·성공 줄 1 은 기존
+    #       그대로입니다. 기대 항목 글자 = 호출 전 디스크 항목에 행의 기대 launchState 만 덮은 것(바뀌는 것만 행이 정하고 나머지는 픽스처에서 가져옴).
+    #       X4-j2 의 env nonce 는 Role none 기동이 받은 값이라 열쇠가 아닙니다(설계 R2 3.3 ⑥ - 기록 함수는 env 를 읽지 않음)
+    $keyCases = @(
+        @{ N = 'X4-i 있음(열린 항목 · applied 에 없음)'; Folder = 'x4-key-open'; Key = 'key-x4i'; Entries = @('key-x4i:launched', 'other-x4i:launched'); Applied = '["old-a"]'
+            States = 'done,launched'; ExpectApplied = 'old-a,key-x4i' },
+        @{ N = 'X4-j1 없음($script:handoff 자체가 없음 - ⑯ 결합 행 모양)'; Folder = 'x4-key-none'; Key = ''; NoHandoff = $true; Entries = @('open-x4j1:launched')
+            Applied = '[]'; States = 'launched'; ExpectApplied = '' },
+        @{ N = 'X4-j2 없음(열쇠 빈 값 + 받은 env nonce 가 열린 항목)'; Folder = 'x4-key-env'; Key = ''; EnvNonce = 'open-x4j2'; Entries = @('open-x4j2:launched')
+            Applied = '[]'; States = 'launched'; ExpectApplied = '' },
+        @{ N = 'X4-k1 이미 done(applied 에 없음)'; Folder = 'x4-key-done'; Key = 'key-x4k1'; Entries = @('key-x4k1:done'); Applied = '["old-a"]'
+            States = 'done'; ExpectApplied = 'old-a,key-x4k1' },
+        @{ N = 'X4-k2 이미 done(applied 에 이미 있음)'; Folder = 'x4-key-applied'; Key = 'key-x4k2'; Entries = @('key-x4k2:done'); Applied = '["key-x4k2"]'
+            States = 'done'; ExpectApplied = 'key-x4k2' },
+        @{ N = 'X4-l 항목 없음(지난 기록 정리 뒤)'; Folder = 'x4-key-gone'; Key = 'gone-x4l'; Entries = @('other-x4l:launched'); Applied = '["old-a"]'
+            States = 'launched'; ExpectApplied = 'old-a' })
+    foreach ($keyCase in $keyCases) {
+        $folder = New-CaseFolder $Context $keyCase.Folder
+        $path = Get-JournalPath $folder
+        $keyRunId = 'run-' + $keyCase.Folder
+        $entriesJson = '[' + ((@($keyCase.Entries) | ForEach-Object { $entryParts = $_.Split(':'); New-KeyEntryJson -Nonce $entryParts[0] -RunId $keyRunId -LaunchState $entryParts[1] }) -join ',') + ']'
+        Write-Fixture $path (New-JournalJson -Seq 5 -EntriesJson $entriesJson -AppliedJson $keyCase.Applied)
+        $beforeDigest = Get-FileDigest $path
+        $beforeEntries = @((Read-JournalFile $path).entries)
+        $call = Invoke-ClearedEntryCall -JournalPath $path -RunId $keyRunId -Custom $false -HandoffNonce $keyCase.Key -NoHandoff:([bool]$keyCase.NoHandoff) -EnvHandoffNonce ([string]$keyCase.EnvNonce)
+        $raw = Read-JournalFile $path
+        $afterEntries = @($raw.entries)
+        $expectedStates = @($keyCase.States.Split(','))
+        $actualTexts = @()
+        $expectedTexts = @()
+        for ($entryIndex = 0; $entryIndex -lt $beforeEntries.Count; $entryIndex++) {
+            $actualTexts += (Get-KeyEntryText $afterEntries[$entryIndex])
+            $beforeEntries[$entryIndex].launchState = $expectedStates[$entryIndex]
+            $expectedTexts += (Get-KeyEntryText $beforeEntries[$entryIndex])
+        }
+        $lastEntry = $afterEntries[$afterEntries.Count - 1]
+        Assert-Case ('{0} {1} - 같은 저장 1번(seq 6 · 직전본 = 앞 내용) · 항목 상태 [{2}] · applied [{3}] · 그 밖 필드·순서·다른 항목 그대로 · cleared 1 · 성공 줄 1 · 예외·출력 0' -f
+                $prefix, $keyCase.N, $keyCase.States, $keyCase.ExpectApplied) `
+            ('{0} · 항목 {1} · [{2}] · 끝 {3}/{4} · applied [{5}] · 직전본 {6} · 줄 [{7}] · 예외 [{8}] · 출력 {9} · 임시·잠금 {10}' -f $raw.seq, $afterEntries.Count,
+                ($actualTexts -join ' ## '), $lastEntry.stage, $lastEntry.runId, (@($raw.applied) -join ','), ((Get-FileDigest ($path + '.bak')) -eq $beforeDigest),
+                ($call.Logs -join ' | '), $call.Error, $call.Outputs, (Get-LeftoverCount $folder)) `
+            ('6 · 항목 {0} · [{1}] · 끝 cleared/{2} · applied [{3}] · 직전본 True · 줄 [{4}] · 예외 [] · 출력 0 · 임시·잠금 0' -f ($beforeEntries.Count + 1),
+                ($expectedTexts -join ' ## '), $keyRunId, $keyCase.ExpectApplied, $CLEARED_SUCCESS_LINE)
+    }
+
     # 전 호출 공통(단계 2.10 구현 검증 - 생존 변이 t5·t6): 기록 함수는 성공·실패·예외 어느 경우에도 스크립트 변수를 새로 만들거나 워커 상태 값을 바꾸지 않음
     Assert-Case "$prefix X4 전 호출 - 기록 함수가 스크립트 변수 이름 집합·워커 상태 값(정리 전용·재시작·마무리 복구·소유자·마커 경로·실행 id·마지막 판)을 바꾸지 않음" `
         ('{0}건 [{1}]' -f $script:x4StateChanges.Count, ($script:x4StateChanges -join ' || ')) '0건 []'
@@ -2575,7 +2875,8 @@ try {
     $workerRunIdAssigns = @($bundles.worker.Ast.EndBlock.Statements | Where-Object {
             ($_ -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq '$script:abyssRunId') })
     $workerRunIdStatement = $(if ($workerRunIdAssigns.Count -eq 1) { $workerRunIdAssigns[0].Extent.Text } else { '' })
-    if (@($workerOnly.Names).Count -eq $WORKER_ONLY_FUNCTION_NAMES.Count) {
+    # X4 는 자기가 돌리는 두 함수가 있으면 돕니다(구현 명세 ② 2.1 - 목록에 더한 함수의 유무와 무관. 빠진 함수는 W-ONLY 자리 단언이 FAIL)
+    if (@($X4_FUNCTION_NAMES | Where-Object { @($workerOnly.Names) -ccontains $_ }).Count -eq $X4_FUNCTION_NAMES.Count) {
         try {
             Test-CaseX4 -Context @{
                 Key = 'worker'; Prefix = $copyPrefixes.worker; Root = (Join-Path $testRoot 'worker-only'); SavedBy = 'test-worker'
