@@ -670,6 +670,12 @@ $abyssRetryPairBandX = @(560, 710)   # '다시|다세|다셔'·'하기' x - 실�
 $abyssOtherPairBandX = @(720, 880)   # '다른'·'던전' x - 실측 머리 749~762 · 꼬리 781~796
 $abyssPairMaxDy      = 30            # 짝 두 단어의 y 차 한도 - 실측 0~1, 안내문 줄과 버튼 줄 차 56~63
 
+# 어비스 재입장 대기(Wait-AbyssReentry - 구현 명세 ④ · 설계 v11 R5 3.2)의 무변화 창. config 가 아닌 스크립트 상수라
+# coordsVersion·configSchemaVersion 은 그대로입니다. 보고 켬 호출(재클릭 요청을 돌려받는 호출)에서 3버튼 보상 화면이 이 시간(양보·캡처 실패 제외)
+# 바뀌지 않으면 '다시 하기' 가 먹지 않은 것으로 봅니다 - 값은 설계 v10 의 10초(실측 필요 - 다시 하기 실기에서 클릭 → 첫 변화 시간을 잼).
+# resume 유예의 상한(던전 안 연속을 잇는 동결·복구 회전과 조작 양보가 연속을 끊은 뒤 새 표본 전 회전은 던전 안 유예가 처음 미룬 회전부터 · 3버튼 무변화 · 첫 유효 회전 전은 호출부터)도 이 길이입니다. 회귀 tests\test_abyss_party_leader.ps1 이 이 대입문을 캡처하고 값 10 을 고정합니다.
+$abyssReclickQuietSeconds = 10
+
 # 입장 방식: solo = 혼자하기 / party = 함께하기 (우연한 만남 매칭 자동화 지원)
 $dungeonMode = [string](Get-ConfigValue $config @('dungeons', 'mode') 'solo')
 if ($dungeonMode -ne 'party') { $dungeonMode = 'solo' }
@@ -12948,6 +12954,39 @@ function Step-AbyssFieldSettle {
   return @{ Since = $since; Count = $count; Confirmed = $confirmed }
 }
 
+# 어비스 재입장 대기의 결론 순수 판정 - 위 선분기 분류기와 같은 모양(판독값만 받음)이라 이 자리에 둡니다 (구현 명세 ④ 1.6)
+function Resolve-AbyssReentryVerdict {
+  param(
+    [string]$Kind,               # 그 유효 회전의 분류 (Resolve-AbyssHandoffStartScreen 키)
+    [int]$InsideStreak,          # 던전 안 연속 (그 회전까지)
+    [bool]$PanelSeen,            # 패널 관측 (그 회전까지 - 호출 창 + 호출부가 넘긴 직전 자기 관측)
+    [ValidateSet('entry', 'reward', 'field')][string]$Target = 'entry',   # 대기 목표 - waiter 는 구현 단위 ⑥d 전까지 늘 'entry'
+    [bool]$ReportRewardReturn,   # 3버튼 귀환을 결과로 돌려받는 호출
+    [bool]$QuietExpired,         # 무변화 창(호출부터 조정 $abyssReclickQuietSeconds) 만료
+    [bool]$FieldSettled          # 필드 확정(W) - waiter 는 구현 단위 ⑥d 전까지 늘 거짓
+  )
+
+  # 어비스 재입장 대기의 결론 (순수 판정 - 진리표 대상, 구현 명세 ④ 1.6 · 설계 v11 R5 3.3). 화면을 읽지 않고 대기 함수가 그 유효 회전에 넘긴 값만 받습니다.
+  # 위 조건이 이깁니다 - 순서가 곧 계약입니다:
+  #  1 던전 안 연속 2 이상 → 'entered' - 다른 결론과 겹쳐도 입장이 이깁니다(설계 v10 - 취소 뒤라도 던전 안 2연속이면 입장)
+  #  2 목표 'field' · 분류 'field'(필드 모양) · 필드 확정 → 'field' - 확정 전 필드 모양은 던전 밖의 증거가 아닙니다(설계 v11 R4 3.6 - 구현 단위 ⑥d 몫)
+  #  3 목표 'reward' · 분류 'reward3'(3버튼) → 'reward' - 보상 화면 재확인(구현 단위 ⑥d 몫). 2·3 은 대기 함수가 목표 'entry' · 필드 확정 거짓을 넘겨
+  #     대기 함수에서는 아직 닿지 않습니다
+  #  4 목표 'entry' · 보고 켬 · 분류 'reward3' · 패널 관측 → 'cancelled' - 패널류를 본 뒤의 3버튼은 사용자 취소라 재클릭 요청이 아닙니다(설계 v11 R3 3.1).
+  #     5 보다 앞이라 무변화 창이 지났어도 같습니다. 1표본입니다 - 분류기에서 패널류가 3버튼보다 앞 순위라 패널이 읽힌 회전은 'reward3' 이 될 수 없습니다.
+  #     보관 프레임(2026-09-21·09-26)의 정상 전이 셋(팝업 → 패널 둘 · 준비 패널 → 로딩 하나)에도 3버튼 표본은 없었지만 저장 간격이 약 1초라, 정상
+  #     '다시 하기' 전이의 오검출 0 은 배선(구현 단위 ⑤) 전 실기에서 확인하는 조건입니다(하나라도 나오면 배선 전에 1표본 규격을 다시 정함)
+  #  5 목표 'entry' · 보고 켬 · 분류 'reward3' · 무변화 창 만료 → 'reclick' - 패널류 없이 3버튼이 무변화 창 동안 그대로면 '다시 하기' 가 먹지 않은 것으로
+  #     봅니다(설계 v10)
+  #  6 그 밖 → '' (관측 지속 - 로딩·검은 화면·알 수 없는 프레임·패널류·보고 끔의 3버튼은 대기 함수가 다음 회전에 다시 읽음)
+  if ($InsideStreak -ge 2) { return 'entered' }
+  if (($Target -eq 'field') -and ($Kind -eq 'field') -and $FieldSettled) { return 'field' }
+  if (($Target -eq 'reward') -and ($Kind -eq 'reward3')) { return 'reward' }
+  if (($Target -eq 'entry') -and $ReportRewardReturn -and ($Kind -eq 'reward3') -and $PanelSeen) { return 'cancelled' }
+  if (($Target -eq 'entry') -and $ReportRewardReturn -and ($Kind -eq 'reward3') -and $QuietExpired) { return 'reclick' }
+  return ''
+}
+
 function Test-AbyssPanelOverRewardText {
   param([string]$Text)
 
@@ -15251,6 +15290,209 @@ function Stop-AbyssHandoffOverlay {
     }
   }
   exit 4
+}
+
+function Wait-AbyssReentry {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [int]$LimitSeconds = 0,            # 새 시계의 한도(초) - 호출부가 모드 예산 변수를 넘김 (-Clock 이 있으면 무시)
+    $Clock = $null,                    # 이미 흐르는 파티원 시계(New-AbyssMemberClock) - 주면 그 hashtable 을 그대로 씀 (타입 없이 $null 허용 - 규칙 3)
+    [string]$Context = '재입장 대기',   # 양보 안내 문맥 (Wait-UserYieldEnd)
+    [switch]$ReportRewardReturn,       # 3버튼 귀환을 'cancelled'/'reclick' 으로 돌려줌 + 권장 인원 팝업 관측 안내 1회
+    [bool]$PanelSeen = $false,         # 패널 관측의 초기값 - 호출부가 그 판에서 이미 본 패널류 자기 표본
+    [switch]$ResumeGrace               # resume 유예 - 시계가 지난 회전에서도 던전 안 1표본(한 연속 · 조작 양보로 끊기면 다시)·3버튼 무변화 창·첫 유효 회전 전·조작 양보가 연속을 끊은 뒤 새 표본 전 회전(유예 시계 안)을 미룸
+    # (구현 단위 ⑥d 자리) -Target 'reward'·'field' · -ChallengeFewMembers (명시한 호출만 팝업 도전 - ⑪)
+  )
+
+  # 어비스 재입장 대기 (구현 명세 ④ · 설계 v11 R5 2·3절). 머리 주석 여섯 항목(설계 v11 R5 12절):
+  #  ① 회전 순서: 서두(메타 비움) → ① 동결 → ② 조작 양보 → ③ 탐침 복구 뒤 회전 → ④ 팝업 스윕 → ⑤ 판독(하단 → 패널 → HUD → 추적기) → ⑥ 간접 양보
+  #     리셋 → ⑦ 유효성 → ⑧ 분류·던전 안 연속·패널 관측·계측 → ⑨ 결론(같은 회전의 마감보다 먼저) → ⑩ 마감(파티원 시계 - 양보·캡처 실패 차분,
+  #     되돌림 없음) → (⑪ 클릭 - 구현 단위 ⑥d 의 팝업 도전 자리) → ⑫ 대기(굶김 0 · 복구 2초 · 그 밖 700ms). 조작 생략·아직 캡처 실패 중인 회전은
+  #     마감을 확정하지 않습니다(규칙 4·15). 동결 블록은 여러 줄·단독 줄 continue 입니다(동결 지점 계수 규칙)
+  #  ② 결과: @{ Result; LastKind; PanelSeen } 하나 - Result 'entered'(던전 안 2연속) / 'timeout'(조정 마감 - LastKind = 마지막 유효 분류) /
+  #     (보고 켬) 'cancelled'(패널류를 본 뒤의 3버튼) · 'reclick'(패널류 없이 무변화 창이 지난 3버튼). 재클릭·이어받기·정지 문구는 호출부
+  #  ③ 패널 관측 창: 이 호출 1회 + -PanelSeen(호출부가 그 판에서 이미 본 자기 표본). 동결·양보·스윕을 넘어 유지합니다 - 양보 중 사용자가 매칭을
+  #     취소해도 그 전에 본 패널이 증거입니다. journal 에 쓰지 않습니다
+  #  ④ resume 유예의 근거: 재개 시계가 이미 지났어도 설계 v10 재개 표의 던전 안(다음 유효 표본 하나 더)·3버튼(무변화 창) 행이 서야 수동 재개가
+  #     'none' 정지로 끝나지 않습니다. 기다리는 화면(패널류·팝업·S·알 수 없음·확정 전 필드 모양)은 미루지 않습니다. 던전 안은 그 호출의 한 연속에만
+  #     (스윕 전송·커서 미확인·캡처 실패·다른 화면으로 끊긴 뒤 새 연속은 미루지 않음. 사용자 조작 양보 - ② 게이트 · ④ 스윕 'yield' · ⑥ 간접 양보 - 가
+  #     끊은 연속은 그 연속에 쓴 유예를 되돌려(아직 안 썼으면 그대로) 조작 뒤 표본이 다시 받음 - 양보는 판정을 늦출 뿐, 규칙 4. 끊은 뒤 새 유효 표본이
+  #     오기 전의 동결·복구 회전도 미룸) - 첫 표본의 한 번은 상한 없이, 그 연속을 잇는 동결·복구 회전과 끊은 뒤 새 표본 전 회전은 던전 안 유예가 처음
+  #     미룬 회전부터 무변화 창 길이 안에서만(판독 실패 ↔ 탐침 복구가 이어져도 끝나게 - 되돌림은 표식만이라 이 길이는 호출당 하나). 3버튼과 첫 유효
+  #     회전 전(캡처 실패로 아직 한 번도 못 읽은 회전)은 무변화 창 안에서만
+  #  ⑤ 관찰 전용: 클릭·키·이벤트 정리·journal·exit 가 없습니다. 권장 인원 팝업 도전은 구현 단위 ⑥d 가 -ChallengeFewMembers 를 명시한 호출에만 더합니다
+  #     (클릭 직전 새 판독의 팝업 서명 + '나가기' 없음 + 조정 3초 재도전 - HEAD 의 3초 Space 반복을 대신함)
+  #  ⑥ 창 좌표 throw: 창 좌표를 못 읽은 캡처 실패(원인 gameWindowGone) 중의 두 문구 - 공용 판독(캡처 실패를 등록한 뒤 던짐)과 스윕 예비 좌표
+  #     클릭(같은 회전 앞 판독이 등록한 뒤 던짐) - 만 catch 하나에서 정확 일치로 받아 다음 회전 동결로 보냅니다. 그 밖의 예외는 그대로 다시 던집니다 -
+  #     이어받기 선분기·시작 패널 대기 등 기존 루프는 이 throw 를 받지 않습니다(설계 v11 R5 3.7 · 구현 명세 ④ B-4)
+  $reentryClock = $(if ($null -ne $Clock) { $Clock } else { New-AbyssMemberClock -LimitSeconds $LimitSeconds })
+  $quietClock = New-AbyssMemberClock -LimitSeconds $abyssReclickQuietSeconds   # 보고와 무관하게 만듦 - 순수 판정 입력·3버튼·첫 유효 회전 전 유예가 봄 (구현 명세 ④ J6)
+  $insideGraceClock = New-AbyssMemberClock -LimitSeconds $abyssReclickQuietSeconds -Paused   # 던전 안 유예 시계 - 정지로 만들고 처음 미루는 회전(첫 유예 · 조작 양보가 연속을 끊은 뒤 새 표본 전 회전)에서 진행 (구현 명세 ④ J1·J29)
+  $panelObserved = $PanelSeen
+  $lastKind = ''
+  $result = ''
+  $insideStreak = 0
+  $insideSince = $null               # 그 연속 첫 표본의 회전 시작 시각 (계측 줄 전용)
+  $insideRun = 0                     # 던전 안 연속 번호 (0 → 1 마다 +1 - resume 유예의 '한 번' 표식에만)
+  $insideGraceRun = 0                # 던전 안 유예를 쓴 연속 번호 (0 = 아직 안 씀 · 조작 양보가 그 연속을 끊으면 0 으로 되돌림)
+  $insideGraceReverted = $false      # 조작 양보가 던전 안 연속을 끊은 뒤 새 유효 표본 전 (그 사이 동결·복구 회전은 ⑩ 이 유예 시계 안에서 미룸)
+  $popupNoticed = $false
+  $sweepStreak = 0
+  $probeRecovered = $false
+  # 계측 (로그 전용 - 판정·조건문에 쓰지 않습니다. 이어받기 선분기와 같은 규칙)
+  $runUnknown = 0; $runField = 0; $runFieldSince = $null; $runBreaks = 0; $runSerial = $script:captureFailSerial
+  while ($true) {
+    # 서두 - 규칙 4: 직전 회전 클릭의 생략 메타가 남아 스윕 분류가 오발동하지 않게 비웁니다
+    $turnSerial = $script:captureFailSerial
+    $script:lastClickSkipReason = ''
+    $turnYieldMs = [double]$script:userYieldTotalMs
+    $turnStart = Get-Date
+    $sweepStarved = $false
+    $turnRecovered = $false
+    # ① 동결 (규칙 15) - 마감은 되돌리지 않습니다(시계가 캡처 실패 차분을 더함). 던전 안 연속·패널 관측 유지
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+      $probeRecovered = -not $script:screenCaptureFailing
+      continue
+    }
+    # ② 조작 양보 (규칙 4) - 시간 상한 없음. 마감은 다음 마감 판정에서 시계가 양보 차분을 더함. 이 양보가 던전 안 연속을 끊으면 그 연속이 쓴
+    #    resume 유예를 되돌리고(아직 안 썼으면 이미 0) 되돌림 뒤 창을 엶 - 조작 뒤 표본이 다시 받음(④ 스윕 'yield' · ⑥ 간접 양보와 같은 한 줄 · 끊을 연속이 없으면 무동작)
+    if (Test-UserRecentlyActive) {
+      if ($insideStreak -gt 0) { $insideGraceRun = 0; $insideGraceReverted = $true }
+      $insideStreak = 0
+      $runBreaks++
+      Wait-UserYieldEnd -Game $Game -Context $Context
+      continue
+    }
+    if ($probeRecovered) {
+      # ③ 탐침 복구 뒤 회전 - 스윕·판독 없이 마감만 보고 2초 뒤 다음 회전 (조작이면 위 게이트가 먼저 받고 표식은 남음)
+      $probeRecovered = $false
+      $turnRecovered = $true
+    }
+    try {
+      # ④ 팝업 스윕 (순위 1) - 참이면 이 회전은 판독하지 않고 생략 사유로 가릅니다 (스윕이 판독 전 커서를 창 밖으로 뺌)
+      if ((-not $turnRecovered) -and (Invoke-PurchasePopupSweep -Game $Game)) {
+        $sweepTurn = Resolve-AbyssMemberSweepTurn -CaptureFailingNow $script:screenCaptureFailing -CaptureFailedInTurn ($script:captureFailSerial -ne $turnSerial) `
+          -Performed $script:lastClickPerformed -SkipReason $script:lastClickSkipReason -Streak $sweepStreak -Limit $memberSweepStreakLimit
+        $sweepStreak = [int]$sweepTurn.Streak
+        # 조작 생략('yield' - 스윕의 닫기 클릭을 사용자 조작으로 건너뜀)이 끊는 연속만 쓴 유예를 되돌리고 되돌림 뒤 창을 엽니다(분류를 먼저 - 끊기 전 연속을
+        # 봄). 전송·커서 미확인·캡처 실패('counted'·'starved'·'freeze'·'recovered')가 끊은 연속은 그대로 한 번 - 스윕 안 커서 대피 양보가 함께 났어도 끊은 것은 팝업 처리
+        if (($sweepTurn.Action -eq 'yield') -and ($insideStreak -gt 0)) { $insideGraceRun = 0; $insideGraceReverted = $true }
+        $insideStreak = 0
+        $runBreaks++
+        if ($sweepTurn.Action -eq 'freeze' -or $sweepTurn.Action -eq 'yield' -or $sweepTurn.Action -eq 'counted') {
+          continue
+        }
+        $sweepStarved = ($sweepTurn.Action -eq 'starved')
+        $turnRecovered = ($sweepTurn.Action -eq 'recovered')
+      }
+      # ⑤ 판독 (순서 고정) - 선택 화면·메뉴·상세는 읽지 않습니다 (그 셋을 쓰는 목표는 구현 단위 ⑥d 의 'field')
+      if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+        $promptNow = Test-DungeonClearPrompt -Game $Game
+        $bottomText = [string]$script:lastClearPromptText
+        $panelKind = Get-AbyssPanelKind -Game $Game
+        $hudNow = Test-HomeEndEscHud -Game $Game
+        $questNow = $(if ($hudNow) { Test-InDungeonQuest -Game $Game } else { $false })
+      }
+    } catch {
+      # 창 좌표 throw 제한 catch - 캡처 실패(원인 gameWindowGone) 중의 두 문구(공용 판독 · 스윕 예비 좌표 클릭)만 정확 일치로 받습니다(아래 ⑦ 이 다음 회전 동결로 보냄)
+      if (-not ($script:screenCaptureFailing -and ($script:captureFailCause -eq 'gameWindowGone') -and (@('OCR용 게임 창 좌표를 읽지 못했습니다.', '게임 창 좌표를 읽지 못했습니다.') -contains $_.Exception.Message))) {
+        throw
+      }
+    }
+    if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+      # ⑥ 간접 양보 리셋 (스윕 안 커서 대피 양보 - 게이트가 못 보는 조작) - 실패 표본 폐기보다 앞. 끊는 연속이 쓴 유예는 되돌리고 되돌림 뒤 창(② 와 같은 한 줄)
+      if ([double]$script:userYieldTotalMs -ne $turnYieldMs) {
+        if ($insideStreak -gt 0) { $insideGraceRun = 0; $insideGraceReverted = $true }
+        $insideStreak = 0
+      }
+      # ⑦ 유효성 - 아직 실패 중이면 다음 회전 ① 동결, 판독 도중 실패했다가 이미 복구면 복구 회전(판정 없이 마감만)
+      if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) {
+        $turnRecovered = -not $script:screenCaptureFailing
+        if (-not $turnRecovered) {
+          continue
+        }
+      } else {
+        $sweepStreak = 0
+        # ⑧ 분류 · 던전 안 연속 · 패널 관측 · 계측
+        $screen = Resolve-AbyssHandoffStartScreen -PromptVisible $promptNow -BottomText $bottomText -PanelKind $panelKind -HudVisible $hudNow -InDungeonQuest $questNow
+        $lastKind = $screen
+        $insideGraceReverted = $false   # 새 유효 표본 - 되돌림 뒤 창을 닫음(이 회전부터는 그 분류로 ⑩ 의 창을 고름)
+        if ($screen -eq 'inside') {
+          if ($insideStreak -eq 0) { $insideSince = $turnStart; $insideRun++ }
+          $insideStreak++
+        } else {
+          $insideStreak = 0
+          $insideSince = $null
+        }
+        if (@('popup', 'ready', 'matching', 'entry-waiting') -contains $screen) { $panelObserved = $true }
+        if ($ReportRewardReturn -and ($screen -eq 'popup') -and (-not $popupNoticed)) {
+          $popupNoticed = $true
+          Write-RunLog '[안내] 권장 인원 팝업 관측(클릭 없음)'
+        }
+        $runBreaks += [int]($script:captureFailSerial -ne $runSerial)
+        $runSerial = $script:captureFailSerial
+        if ($screen -eq 'unknown' -or $screen -eq 'field' -or $screen -eq 'inside') {
+          $runUnknown += [int]($screen -eq 'unknown')
+          $runField += [int]($screen -eq 'field')
+          if ($screen -eq 'field') {
+            $runFieldSince = @($runFieldSince, $turnStart) | Where-Object { $null -ne $_ } | Select-Object -First 1
+          }
+        } else {
+          $runUnknown = 0; $runField = 0; $runFieldSince = $null; $runBreaks = 0
+        }
+        # 무변화 판정 → ⑨ 결론 (같은 회전의 마감보다 먼저 - 마감 경계의 성공이 이김)
+        $quietExpired = Test-AbyssMemberClockExpired -Clock $quietClock
+        $result = Resolve-AbyssReentryVerdict -Kind $screen -InsideStreak $insideStreak -PanelSeen $panelObserved -Target 'entry' `
+          -ReportRewardReturn ([bool]$ReportRewardReturn) -QuietExpired $quietExpired -FieldSettled $false
+        if ($result -eq 'entered') {
+          $entryUnknown = $runUnknown; $entryField = $runField; $entryBreaks = $runBreaks
+          $entryFieldPart = (@($runFieldSince) | Where-Object { $null -ne $_ } | ForEach-Object { ", 첫 필드 모양 표본부터 던전 안 $([Math]::Round(($insideSince - $_).TotalSeconds, 1))초" }) -join ''
+          Write-RunLog "[어비스] 입장 계측 - 던전 안 2연속 앞 로딩(알 수 없음) ${entryUnknown}표본, 필드 모양 ${entryField}표본${entryFieldPart}, 관측 끊김 ${entryBreaks}회 (필드 확정 폭 ${memberFieldSettleSeconds}초 계측 - 판정에 쓰지 않음)"
+        }
+        if ($result) { break }
+      }
+    }
+    # ⑩ 마감 - 유효·굶김·복구·탐침 복구 뒤 회전이 봅니다 (조정 시간 - 양보·캡처 실패 제외, 경계 -ge)
+    if (Test-AbyssMemberClockExpired -Clock $reentryClock) {
+      $graceHold = $false
+      if ($ResumeGrace) {
+        # resume 유예 - 던전 안 1표본(그 연속 하나 - 첫 유예는 상한 없이, 그 연속을 잇는 회전은 처음 미룬 회전부터 유예 시계 안 · 조작 양보로 끊긴 연속은
+        # ②·④·⑥ 이 표식을 되돌려 새 연속이 다시 첫 유예) / 3버튼 무변화 창 / 첫 유효 회전 전 (이 둘은 무변화 창 안에서만) / 조작 양보가 연속을 끊은 뒤
+        # 새 유효 표본 전의 동결·복구 회전 (유예 시계 안에서만 - 조작이 끝난 뒤 다시 읽을 때까지)
+        $quietOpen = -not (Test-AbyssMemberClockExpired -Clock $quietClock)
+        if (($insideStreak -eq 1) -and ($insideGraceRun -eq 0)) {
+          $insideGraceRun = $insideRun
+          Resume-AbyssMemberClock -Clock $insideGraceClock
+          $graceHold = $true
+        } elseif (($insideStreak -eq 1) -and ($insideGraceRun -eq $insideRun) -and (-not (Test-AbyssMemberClockExpired -Clock $insideGraceClock))) {
+          $graceHold = $true
+        } elseif ($quietOpen -and $ReportRewardReturn -and ($lastKind -eq 'reward3')) {
+          $graceHold = $true
+        } elseif ($quietOpen -and ($lastKind -eq '')) {
+          $graceHold = $true
+        } elseif ($insideGraceReverted -and (-not (Test-AbyssMemberClockExpired -Clock $insideGraceClock))) {
+          Resume-AbyssMemberClock -Clock $insideGraceClock   # 유예를 쓰기 전에 끊긴 연속이면 정지된 유예 시계를 여기서 처음 진행 (진행 중이면 무동작)
+          $graceHold = $true
+        }
+      }
+      if (-not $graceHold) {
+        $result = 'timeout'
+        break
+      }
+    }
+    # (⑪ 클릭 - 구현 단위 ⑥d 가 -ChallengeFewMembers 호출의 팝업 도전을 이 자리에 더합니다)
+    # ⑫ 대기 - 굶김 회전은 스윕이 이미 기다렸고, 복구 회전은 2초, 그 밖은 700ms
+    if ($sweepStarved) { continue }
+    if ($turnRecovered) {
+      Start-Sleep -Seconds 2
+      continue
+    }
+    Start-Sleep -Milliseconds 700
+  }
+  return @{ Result = $result; LastKind = $lastKind; PanelSeen = $panelObserved }
 }
 
 function Get-KeyDisplayName {

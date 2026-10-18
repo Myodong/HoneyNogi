@@ -830,9 +830,9 @@ if ($clearedSuccessTexts.Count -eq 1 -and $clearedWarningTexts.Count -eq 1 -and 
 #     H13 [파티원] 퇴장 절차 계측: 시각 접두 있음·없음 모두 숨김, 근접 변형(뒤에 글이 더 붙음 · 다른 태그 · 다른 줄 안에 인용)은 그대로. H10 은 파티원 경로라 혼자
 #     실기(G-H1)로 못 보는 줄이어서(명세 ② 4.3) 워커 -f 의 왼쪽 형식 문자열 원문을 표본 값으로 채워 실제 변환에 넣는 것으로 대신합니다. H13(파티원 P 계측 줄 -
 #     명세 ② 5절 B12 (가) · 구현 리뷰 2.7 조건)도 같은 파티원 경로라 같은 방법으로 보고, 값 자리를 숫자로만 받는 규칙이라 -f 오른쪽 값 원문을 고정하고 근접 변형
-#     ([어비스] 태그 · '(퇴장 절차)' 없음 · 다른 머리 낱말 · 문장 중간 인용)을 더 봅니다
+#     ([어비스] 태그 · '(퇴장 절차)' 없음 · 다른 머리 낱말 · 문장 중간 인용)을 더 봅니다. H8w 재입장 대기의 같은 입장 계측 줄(구현 명세 ④)은 H8 규칙의 표본입니다
 #  ③ 보존 줄(명세 ② 2.7 '보이는 그대로 둘 줄' · 3.4): [경고] 닫기 실패(R2·own) · cleared 저장 실패 · 필드 확정 결과 줄 · 키 '이미 보낸 키' 줄 · [안내] 복구 기동 ·
-#     B2 단계 시작 줄 · 이벤트 정리 안내 줄
+#     B2 단계 시작 줄 · 이벤트 정리 안내 줄 · 권장 인원 팝업 관측 안내(재입장 대기 - 구현 명세 ④)
 #  ④ 판별은 원문(명세 ② 2.7 · J11): 타이머 통상 tail 의 수집 식(기본·복구 로그)과 공통 최종 수집(Invoke-ExitLogFinalCollect)이 남기는 [완료] 사유에는 꼬리가
 #     남고 창 줄에서만 빠집니다. 코드 4 상태줄($code4Reason)의 꼬리 0 은 tests\test_abyss_handoff_gui.ps1 가 실제 타이머 틱으로 봅니다
 function Get-WorkerOwnerFunctionName {
@@ -853,9 +853,27 @@ function Get-EnclosingCommandName {
   return '(명령 없음)'
 }
 
+function Get-SubExpressionVariableName {
+  # 부분식 자리 $( … ) 가 변수 하나뿐($($이름) · $(${이름}))이면 그 이름, 아니면 $null. 그 꼴은 실행 결과가 ${이름} 과 같습니다 - 구현 명세 ④ N4-P9 가 재입장 대기
+  #   S2 줄의 채움 표기로 ${x} · $($x) · $x 를 함께 허용하는데, 이 절이 $($x) 를 채우지 못하면 같은 뜻의 줄을 H8w 가 '채울 수 없는 자리' 로 거부합니다(구현 리뷰 P3)
+  param($Node)
+  if (-not ($Node -is [System.Management.Automation.Language.SubExpressionAst])) { return $null }
+  $innerBlock = $Node.SubExpression
+  if (($null -ne $innerBlock.Traps) -and ($innerBlock.Traps.Count -gt 0)) { return $null }
+  if ($innerBlock.Statements.Count -ne 1) { return $null }
+  $innerPipeline = $innerBlock.Statements[0]
+  if (-not ($innerPipeline -is [System.Management.Automation.Language.PipelineAst]) -or ($innerPipeline.PipelineElements.Count -ne 1)) { return $null }
+  $innerElement = $innerPipeline.PipelineElements[0]
+  if (-not ($innerElement -is [System.Management.Automation.Language.CommandExpressionAst])) { return $null }
+  if (($null -ne $innerElement.Redirections) -and ($innerElement.Redirections.Count -gt 0)) { return $null }
+  if (-not ($innerElement.Expression -is [System.Management.Automation.Language.VariableExpressionAst])) { return $null }
+  return [string]$innerElement.Expression.VariablePath.UserPath
+}
+
 function Expand-WorkerStringSample {
-  # 워커 문자열 노드(상수·확장) → 표본 값으로 채운 줄. 확장 문자열의 변수 자리(${이름} · $이름)는 -Values 의 같은 이름 값으로, 부분식 자리 $(…)는 -SubValue 로
-  # 바꿉니다. 식을 평가하지 않고 소스 글자만 바꿉니다 - 이 파일의 다른 절이 스크립트 범위에 둔 같은 이름 변수($LogPrefix 등)와 섞이지 않게. 자리는 뒤에서부터
+  # 워커 문자열 노드(상수·확장) → 표본 값으로 채운 줄. 확장 문자열의 변수 자리(${이름} · $이름)와 변수 하나뿐인 부분식 자리($($이름) - 실행 결과가 같음)는
+  # -Values 의 같은 이름 값으로, 그 밖의 부분식 자리 $(…)는 -SubValue 로 바꿉니다(변수 하나뿐인 부분식도 -Values 에 그 이름이 없으면 -SubValue).
+  # 식을 평가하지 않고 소스 글자만 바꿉니다 - 이 파일의 다른 절이 스크립트 범위에 둔 같은 이름 변수($LogPrefix 등)와 섞이지 않게. 자리는 뒤에서부터
   # 소스 위치로 바꿔 이름이 겹쳐도 엇갈리지 않습니다. 채울 값이 없는 자리가 있거나 문자열 노드가 아니면 $null(호출부가 FAIL 로 찍음)
   param($Node, [hashtable]$Values = @{}, $SubValue = $null)
   if ($Node -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return [string]$Node.Value }
@@ -864,8 +882,11 @@ function Expand-WorkerStringSample {
   $baseOffset = $Node.Extent.StartOffset
   foreach ($nestedNode in @($Node.NestedExpressions | Sort-Object { $_.Extent.StartOffset } -Descending)) {
     $fillText = $null
+    $subVariableName = Get-SubExpressionVariableName $nestedNode
     if (($nestedNode -is [System.Management.Automation.Language.VariableExpressionAst]) -and $Values.ContainsKey([string]$nestedNode.VariablePath.UserPath)) {
       $fillText = [string]$Values[[string]$nestedNode.VariablePath.UserPath]
+    } elseif (($null -ne $subVariableName) -and $Values.ContainsKey($subVariableName)) {
+      $fillText = [string]$Values[$subVariableName]
     } elseif (($nestedNode -is [System.Management.Automation.Language.SubExpressionAst]) -and ($null -ne $SubValue)) {
       $fillText = [string]$SubValue
     }
@@ -1054,6 +1075,9 @@ $hideSpecs = @(
   @{ Id = 'H8'; Label = '[어비스] 입장 계측'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 입장 계측 - '
      Fills = @(@{ entryUnknown = '3'; entryField = '0'; entryFieldPart = ''; entryBreaks = '0'; memberFieldSettleSeconds = $hideSettleSeconds },
                @{ entryUnknown = '0'; entryField = '2'; entryFieldPart = $hideAbyssFieldPart; entryBreaks = '1'; memberFieldSettleSeconds = $hideSettleSeconds }) }
+  @{ Id = 'H8w'; Label = '[어비스] 입장 계측(재입장 대기)'; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 입장 계측 - '
+     Fills = @(@{ entryUnknown = '3'; entryField = '0'; entryFieldPart = ''; entryBreaks = '0'; memberFieldSettleSeconds = $hideSettleSeconds },
+               @{ entryUnknown = '0'; entryField = '2'; entryFieldPart = $hideAbyssFieldPart; entryBreaks = '1'; memberFieldSettleSeconds = $hideSettleSeconds }) }
   @{ Id = 'H9'; Label = '[어비스] 이어받기 시작 계측'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 이어받기 시작 계측 - '
      Fills = @(@{ startUnknown = '4'; startField = '0'; startFieldPart = ''; startBreaks = '0' },
                @{ startUnknown = '1'; startField = '3'; startFieldPart = $hideAbyssFieldPart; startBreaks = '2' }) }
@@ -1095,7 +1119,7 @@ if ($hideLeaveFormat) {
   }
   $hideSamples += @{ Id = 'H13'; Label = '[파티원] 퇴장 절차 계측(-f 형식)'; Lines = $hideLeaveLines }
 }
-Check-Equal '워커: 줄 전체 숨김 7규칙의 표본 = H6·H7·H8·H9·H11·H10·H13' ((@($hideSamples) | ForEach-Object { $_.Id }) -join '·') 'H6·H7·H8·H9·H11·H10·H13'
+Check-Equal '워커: 줄 전체 숨김 7규칙의 표본 = H6·H7·H8·H8w·H9·H11·H10·H13' ((@($hideSamples) | ForEach-Object { $_.Id }) -join '·') 'H6·H7·H8·H8w·H9·H11·H10·H13'
 foreach ($hideSample in $hideSamples) {
   for ($hideIndex = 0; $hideIndex -lt @($hideSample.Lines).Count; $hideIndex++) {
     $hideLine = [string]@($hideSample.Lines)[$hideIndex]
@@ -1152,6 +1176,7 @@ $keepSpecs = @(
      Fills = @(@{ b2Label = '준비 패널'; timeoutPartyMatch = '300' }, @{ b2Label = '권장 인원 팝업'; timeoutPartyMatch = '300' }) }
   @{ Label = '이벤트 정리 안내 줄(S8)'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[안내] 이어받기 시작: 알 수 없는 화면이 '; Want = 1
      Fills = @(@{ memberUnknownOverlaySeconds = $hideUnknownSeconds }) }
+  @{ Label = '권장 인원 팝업 관측 안내(재입장 대기)'; Function = 'Wait-AbyssReentry'; Prefix = '[안내] 권장 인원 팝업 관측'; Want = 1; Fills = @(@{}) }
 )
 foreach ($keepSpec in $keepSpecs) {
   $keepNodes = @(Get-WorkerLogArgumentNodes -FunctionName $keepSpec.Function -Prefix ([string]$keepSpec.Prefix) -Fragment ([string]$keepSpec.Fragment))

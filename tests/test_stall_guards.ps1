@@ -97,7 +97,7 @@ foreach ($node in $stallAst.FindAll({
     Line = $node.Extent.StartLineNumber
     Body = $clause.Item2.Extent.Text; PreCheck = $preCheck }
 }
-Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 43   # 2026-10-13 구현 명세 ② 2.5 42 → 43: 어비스 이어받기 시작 선분기 루프(Invoke-AbyssHandoffStart)의 서두 동결 블록 +1 (여러 줄 continue 형 - 같은 루프의 B2 단계는 따로 두지 않음, 명세 3.4) / 2026-10-01 ⑥e 43 → 42: 옛 파티원 사이클 동결 4곳 삭제(-4), 파티원 관측 루프 D·퇴장 절차 P 동결 +2, 대기형 정의로 Clear-EventOverlay 서두 동결 +1 (어비스 복귀 루프 동결 블록은 되돌림 삭제로 한도 되돌림 형 → continue 형 - 개수 불변) / 2026-09-26 +3: ⑥a 파티원 클리어 S 터치 루프(Invoke-AbyssMemberClearTouch) 서두 동결 + 구현 리뷰 1차 P1 - 파티원 시작 판정·시작 패널 판정의 유효 표본 루프 동결 2 / 2026-09-25 +1: Invoke-AbyssDeathExit(거점 부활 상한 뒤 던전 퇴장) 서두 동결 / 2026-09-21 던전 안 선택 화면 오판 핫픽스(설계 합의 A5 예상치 그대로): 시작 재매칭 입장 대기 루프 +1, 파티원 필드 복귀 루프 +1 (복귀 루프의 추적기 판독 뒤 if-continue 는 조건식이 플래그 단독이라 함께 계수 - 아래 if-continue 참고) / 2026-09-18 어비스 보상 화면 '나가기' 글자 클릭 헬퍼(Invoke-AbyssExitClick) 동결 +1 / 2026-09-16 어비스 '우연한 만남' 켜기 양보 후 제목 판독 동결 +1 / 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1 / 2026-09-13 냥코인 규칙 15: PURCHASE_WAIT 동결(if + 내부 while) +2, 냥코인·골드 판독 직후 가드 +2, REROLL_WAIT 판독 직후 가드 +1 / 2026-09-14 REROLL_WAIT 동결 블록 내부 복구 대기 while +1
+Assert-Case '동결 지점 개수 (늘리면 이 숫자도 함께 올릴 것)' $freezeSpots.Count 44   # 2026-10-18 구현 명세 ④ 2.1 43 → 44: 어비스 재입장 대기(Wait-AbyssReentry)의 서두 동결 블록 +1 (여러 줄 continue 형 - 호출 0 이어도 계수에 듦) / 2026-10-13 구현 명세 ② 2.5 42 → 43: 어비스 이어받기 시작 선분기 루프(Invoke-AbyssHandoffStart)의 서두 동결 블록 +1 (여러 줄 continue 형 - 같은 루프의 B2 단계는 따로 두지 않음, 명세 3.4) / 2026-10-01 ⑥e 43 → 42: 옛 파티원 사이클 동결 4곳 삭제(-4), 파티원 관측 루프 D·퇴장 절차 P 동결 +2, 대기형 정의로 Clear-EventOverlay 서두 동결 +1 (어비스 복귀 루프 동결 블록은 되돌림 삭제로 한도 되돌림 형 → continue 형 - 개수 불변) / 2026-09-26 +3: ⑥a 파티원 클리어 S 터치 루프(Invoke-AbyssMemberClearTouch) 서두 동결 + 구현 리뷰 1차 P1 - 파티원 시작 판정·시작 패널 판정의 유효 표본 루프 동결 2 / 2026-09-25 +1: Invoke-AbyssDeathExit(거점 부활 상한 뒤 던전 퇴장) 서두 동결 / 2026-09-21 던전 안 선택 화면 오판 핫픽스(설계 합의 A5 예상치 그대로): 시작 재매칭 입장 대기 루프 +1, 파티원 필드 복귀 루프 +1 (복귀 루프의 추적기 판독 뒤 if-continue 는 조건식이 플래그 단독이라 함께 계수 - 아래 if-continue 참고) / 2026-09-18 어비스 보상 화면 '나가기' 글자 클릭 헬퍼(Invoke-AbyssExitClick) 동결 +1 / 2026-09-16 어비스 '우연한 만남' 켜기 양보 후 제목 판독 동결 +1 / 2026-08-11 ⑤ +1 / 2026-08-15 냥코인 뽑기 캡처 실패 루프 +1, REROLL_WAIT 동결 블록 +1 / 2026-09-08 어비스 이동하기 루프 +1 / 2026-09-13 냥코인 규칙 15: PURCHASE_WAIT 동결(if + 내부 while) +2, 냥코인·골드 판독 직후 가드 +2, REROLL_WAIT 판독 직후 가드 +1 / 2026-09-14 REROLL_WAIT 동결 블록 내부 복구 대기 while +1
 Assert-Case '동결 지점: while 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'while' }).Count) 9   # 2026-09-13 PURCHASE_WAIT 내부 복구 대기 +1 / 2026-09-14 REROLL_WAIT 내부 복구 대기 +1
 # 한도 되돌림 형 2곳 (Wait-ForScreen / 클리어 대기 본문). 11차에서 감시망에
 # 새로 들어온 형태입니다 - 이 자리들이 캡처 실패 중 유일한 게임 사망 감지 지점입니다.
@@ -106,17 +106,17 @@ Assert-Case '동결 지점: while 형' (@($freezeSpots | Where-Object { $_.Kind 
 #   되돌림을 되살리는 변이는 continue 가 있어 if-continue 로 남아 개수로는 못 잡습니다 - test_abyss_screen_signatures 의 '동결 블록 안
 #   $deadline 대입 0건' 과 test_abyss_return_loop RL2 가 잡습니다.
 Assert-Case '동결 지점: if-renew 형(한도 되돌림)' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-renew' }).Count) 2
-# if-continue 형이 9곳입니다 - 3차 점검이 while 7곳만 세는 바람에 이 9곳은 계약 밖에
+# if-continue 형이 3차 점검 때 9곳이었습니다(지금 수는 :117) - 3차 점검이 while 7곳만 세는 바람에 이 9곳은 계약 밖에
 # 있었습니다(공통 진입점 호출 여부는 우연히 전부 지키고 있었지만, 복구 탐침은 4곳이
 # 빠져 무한 회전이었습니다 - 7차 점검에서 발견·수정).
 # 2026-08-15 +1: 냥코인 REROLL_WAIT 동결 블록 (Stopwatch 정지+복구 탐침+continue) → 13곳
 # 2026-09-09 +3: Resolve-DgEntryAfterYield / Resolve-HtEntryAfterYield 의 캡처 실패 동결(신설,
-#   Codex P1 - 판독만 건너뛰어 캡처 시도 0회 → 무조건 unknown → exit 4 였음) +
+#   리뷰 P1 - 판독만 건너뛰어 캡처 시도 0회 → 무조건 unknown → exit 4 였음) +
 #   어비스 **혼자하기** 이동하기 루프(함께하기 쪽과 비대칭이라 마감 되돌림·안전 중지가 빠져 있었음)
 # 2026-09-10 +2: 던전·사냥터 '파티 찾기'의 양보 후 재판독 앞 캡처 실패 동결
-Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 31   # 2026-10-13 구현 명세 ② 2.5 30 → 31: 이어받기 시작 선분기 루프 서두 동결 +1 (여러 줄 블록 - 공통 진입점 · 이번 회전 복구 탐침 · 마감 되돌림 없음, 명세 2.0-2. 한 줄 `if (...) { …; continue }` 로 쓰면 이 계수를 조용히 빠져나감) / 2026-10-01 ⑥e 31 → 30: 옛 파티원 사이클 -4, D·P 서두 동결 +2 (여러 줄 블록 - 한 줄 `if (...) { continue }` 로 쓰면 본문 continue 가 줄 머리가 아니라 계수를 조용히 빠져나감, 설계 §3 단언이 막음), 어비스 복귀 루프 동결 블록 +1 (한도 되돌림 형에서 옮겨 옴) / 2026-09-26 +3 (⑥a 파티원 클리어 S 터치 루프 + 파티원 시작 판정·시작 패널 판정 유효 표본 루프) / 2026-09-25 +1 (사망 화면 퇴장 헬퍼) / 2026-09-21 핫픽스 +2 (시작 재매칭 대기·파티원 필드 복귀 루프의 서두 동결) / 2026-09-18 어비스 나가기 글자 클릭 헬퍼 +1 / 2026-09-16 어비스 우연한 만남 켜기 제목 판독 뒤 +1 / 2026-09-08 어비스 이동하기 +1 / 2026-09-13 냥코인 규칙 15 +4 (PURCHASE_WAIT·냥코인·골드·REROLL_WAIT 판독 직후)
+Assert-Case '동결 지점: if-continue 형' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-continue' }).Count) 32   # 2026-10-18 구현 명세 ④ 2.1 31 → 32: 어비스 재입장 대기(Wait-AbyssReentry)의 서두 동결 블록 +1 (여러 줄 블록 - 공통 진입점 · 이번 회전 복구 탐침 · 마감 되돌림 없음, 명세 2.0-2 · 호출 0 이어도 계수에 듦) / 2026-10-13 구현 명세 ② 2.5 30 → 31: 이어받기 시작 선분기 루프 서두 동결 +1 (여러 줄 블록 - 공통 진입점 · 이번 회전 복구 탐침 · 마감 되돌림 없음, 명세 2.0-2. 한 줄 `if (...) { …; continue }` 로 쓰면 이 계수를 조용히 빠져나감) / 2026-10-01 ⑥e 31 → 30: 옛 파티원 사이클 -4, D·P 서두 동결 +2 (여러 줄 블록 - 한 줄 `if (...) { continue }` 로 쓰면 본문 continue 가 줄 머리가 아니라 계수를 조용히 빠져나감, 설계 §3 단언이 막음), 어비스 복귀 루프 동결 블록 +1 (한도 되돌림 형에서 옮겨 옴) / 2026-09-26 +3 (⑥a 파티원 클리어 S 터치 루프 + 파티원 시작 판정·시작 패널 판정 유효 표본 루프) / 2026-09-25 +1 (사망 화면 퇴장 헬퍼) / 2026-09-21 핫픽스 +2 (시작 재매칭 대기·파티원 필드 복귀 루프의 서두 동결) / 2026-09-18 어비스 나가기 글자 클릭 헬퍼 +1 / 2026-09-16 어비스 우연한 만남 켜기 제목 판독 뒤 +1 / 2026-09-08 어비스 이동하기 +1 / 2026-09-13 냥코인 규칙 15 +4 (PURCHASE_WAIT·냥코인·골드·REROLL_WAIT 판독 직후)
 # 대기형 1곳 (2026-10-01 ⑥e 설계 2.13 - 09-30 리뷰4 정의, 09-30 리뷰5 로 1곳): Clear-EventOverlay 의 서두 동결(안전 확인 + 2초 대기 뒤 같은
-# 회전의 루프 끝 Test-KnownScreen 이 복구 탐침). 어비스 복귀 루프 동결 블록을 옛 대기형으로 되돌리는 변이는 이 값이 2·if-continue 29 가 되어 잡힙니다
+# 회전의 루프 끝 Test-KnownScreen 이 복구 탐침). 어비스 복귀 루프 동결 블록을 옛 대기형으로 되돌리는 변이는 이 값이 2·if-continue 31 이 되어 잡힙니다
 Assert-Case '동결 지점: if-wait 형(대기)' (@($freezeSpots | Where-Object { $_.Kind -eq 'if-wait' }).Count) 1
 $loopMissing = @()
 foreach ($spot in $freezeSpots) {
