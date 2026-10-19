@@ -57,10 +57,17 @@ function Clear-EventOverlay { param($Game) return $false }
 $script:noticeOpen = $false        # 공지 게시판이 떠 있는가
 $script:purchaseOpen = $false      # 구매 팝업
 $script:weeklyOpen = $false        # 주간 리셋 팝업
+# 주간 리셋 캡처 실패 게이트 모형 (구현 단위 ④′ - 2026-10-18): 아래 두 값이 기본값이면 기존 시나리오는 그대로입니다
+$script:weeklyCaptureGateLeft = 0  # 남은 게이트 회전 수 - 0 보다 크면 주간 모의가 클릭 없이 $true (아래 게이트 모형)
+$script:weeklyViaSweep = $false    # 참이면 스윕 모의가 스윕 안에서 주간 리셋 닫기를 부름 (월요일 실제 경로 - 아래 스윕 모의 서두)
 # 구매·주간 스윕은 자기 안에서 클릭하고 $true 를 돌려줍니다 - 미전송이어도 $true 입니다
-# (Codex 확인: 미전송을 이유로 반환값을 $false 로 바꾸면 팝업이 남은 채 판독으로 내려갑니다)
+# (리뷰 확인: 미전송을 이유로 반환값을 $false 로 바꾸면 팝업이 남은 채 판독으로 내려갑니다).
+# 주간 리셋은 캡처 실패 게이트(구현 단위 ④′)에서 클릭 없이 $true 를 돌려줄 수 있습니다 - 아래 게이트 모형
 function Invoke-PurchasePopupSweep {
   param($Game)
+  # 스윕 안 주간 처리: 원문 스윕은 하단 판독에 '협동'·'참여' 가 보이면 주간 리셋 닫기를 불러 그 참으로 끝납니다(시작 확인 루프의 월요일
+  # 실제 경로). 거짓(기본)이면 예전처럼 주간 리셋을 부르지 않아, 시작 확인 루프는 스윕이 거짓인 뒤의 직접 호출로만 주간 리셋을 만납니다
+  if ($script:weeklyViaSweep -and $script:weeklyOpen -and -not $script:screenCaptureFailing) { return (Close-WeeklyCoopResetPopup -Game $Game) }
   if (-not $script:purchaseOpen) { return $false }
   Click-GamePoint -Game $Game -ReferenceX 1 -ReferenceY 1
   if ($script:lastClickPerformed) { $script:purchaseOpen = $false }
@@ -68,7 +75,16 @@ function Invoke-PurchasePopupSweep {
 }
 function Close-WeeklyCoopResetPopup {
   param($Game, [string]$LogPrefix)
+  if ($script:screenCaptureFailing) { return $false }   # 원문 서두 가드와 같음 - 캡처 실패 중에는 판독 없이 거짓
   if (-not $script:weeklyOpen) { return $false }
+  # 게이트 모형: 원문은 첫 판독이 팝업을 확정한 뒤 두 번째 판독(닫기 탐색)이 캡처 실패를 등록하면 포커스·클릭·클릭 메타 쓰기 없이 $true 를
+  # 돌려줍니다. 남은 횟수만큼 그 회전을 흉내 냅니다 - 플래그만 세우고 궤적 WEEKLYGATE (복구는 호출부 동결 블록의 탐침이 맡음)
+  if ($script:weeklyCaptureGateLeft -gt 0) {
+    $script:weeklyCaptureGateLeft--
+    $script:screenCaptureFailing = $true
+    [Console]::WriteLine('WEEKLYGATE')
+    return $true
+  }
   Click-GamePoint -Game $Game -ReferenceX 2 -ReferenceY 2
   if ($script:lastClickPerformed) { $script:weeklyOpen = $false }
   return $true
@@ -268,6 +284,63 @@ switch ($Scenario) {
     # 주간 리셋 분기도 동일 (구매 스윕 내부에서도 호출되는 함수라 계약이 같아야 합니다)
     $script:weeklyOpen = $true
     $script:clickSeq = @('user-active') * 11 + @('ok')
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'weekly-capture-gate-stale-yield' {
+    # 구현 단위 ④′ (2026-10-18 - test_life_gather 행 GL1): 주간 리셋 캡처 실패 게이트를 직접 호출(스윕이 거짓일 때의 elseif)로 한 번 만납니다.
+    # 게이트 회전은 클릭 없이 $true 라 클릭 메타가 그 앞의 옛 값(미전송 user-active)입니다. 시작 확인 루프는 그 회전에서 옛 메타를 읽지 않고
+    # (양보 0) 다음 회전 서두의 동결로 가서(탐침 1회에 복구) 다음 감지에서 팝업을 클릭으로 닫아야 합니다 - 옛 메타를 읽으면 양보가 1회 생깁니다
+    $script:weeklyOpen = $true
+    $script:weeklyCaptureGateLeft = 1
+    $script:captureRecoverAfterProbes = 1
+    $script:lastClickPerformed = $false
+    $script:lastClickSkipReason = 'user-active'
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'weekly-capture-gate-rounds' {
+    # 행 GL2: 같은 게이트를 10회 연속 만납니다(회전마다 탐침 1회에 복구된 뒤 다음 감지에서 다시 실패). 게이트 회전이 팝업 가드 라운드(10)를
+    # 쓰지 않아야 첫 판독 전에 팝업을 클릭으로 닫습니다(규칙 15 ②). 옛 메타는 미전송 cursor-not-ready - 그 메타를 읽으면 게이트 회전마다
+    # 라운드를 써 10회째에 가드가 꺼지고(소진 줄 1) 팝업이 덮인 채 첫 판독으로 갑니다
+    $script:weeklyOpen = $true
+    $script:weeklyCaptureGateLeft = 10
+    $script:captureRecoverAfterProbes = 1
+    $script:lastClickPerformed = $false
+    $script:lastClickSkipReason = 'cursor-not-ready'
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'weekly-capture-gate-stale-yield-sweep' {
+    # 행 GL3: GL1 과 같고 게이트를 스윕 안 주간 처리(월요일 실제 경로)로 만납니다
+    $script:weeklyViaSweep = $true
+    $script:weeklyOpen = $true
+    $script:weeklyCaptureGateLeft = 1
+    $script:captureRecoverAfterProbes = 1
+    $script:lastClickPerformed = $false
+    $script:lastClickSkipReason = 'user-active'
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'weekly-capture-gate-rounds-sweep' {
+    # 행 GL4: GL2 와 같고 스윕 경로 - 갈래를 직접 호출 분기로 좁힌 꼴은 이 경로에서 드러납니다
+    $script:weeklyViaSweep = $true
+    $script:weeklyOpen = $true
+    $script:weeklyCaptureGateLeft = 10
+    $script:captureRecoverAfterProbes = 1
+    $script:lastClickPerformed = $false
+    $script:lastClickSkipReason = 'cursor-not-ready'
+    $script:stateSeq = @('present')
+    $script:stateTail = 'absent'
+  }
+  'weekly-capture-gate-rounds-sent' {
+    # 행 GL5: GL2 와 같고 옛 메타만 전송(True/'' - 앞 클릭이 전송된, 운용에서 가장 흔한 옛 메타)입니다. GL1~GL4 의 옛 메타는 모두 미전송이라
+    # 갈래 조건에 옛 메타 항을 더한 꼴도 넷을 통과합니다 - 이 시나리오에서만 그 꼴이 게이트 회전마다 라운드를 써 10회째에 가드가 꺼집니다
+    $script:weeklyOpen = $true
+    $script:weeklyCaptureGateLeft = 10
+    $script:captureRecoverAfterProbes = 1
+    $script:lastClickPerformed = $true
+    $script:lastClickSkipReason = ''
     $script:stateSeq = @('present')
     $script:stateTail = 'absent'
   }

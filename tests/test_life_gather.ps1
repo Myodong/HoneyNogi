@@ -1042,6 +1042,33 @@ foreach ($popupCase in @('purchase-yield-budget', 'weekly-yield-budget')) {
   Assert-Case "시작 팝업($popupCase): 조작 취소는 가드 예산을 쓰지 않는다 (시도 12·양보 11·메뉴 0)" `
     ('{0}/c{1}/y{2}/m{3}' -f $sim.Exit, (@($sim.Out | Where-Object { "$_" -match '^CLICK#' }).Count), (@($sim.Out | Where-Object { "$_" -match '^YIELDWAIT' }).Count), $sim.Menu) '0/c12/y11/m0'
 }
+# ── 구현 단위 ④′ (2026-10-18): 주간 리셋 캡처 실패 게이트 회전의 시작 확인 - 행 GL1~GL5 ──
+# 주간 리셋 닫기는 두 번째 판독(닫기 탐색)이 캡처 실패를 등록하면 포커스·클릭·클릭 메타 쓰기 없이 $true 를 돌려줍니다(게이트 - sim 의 주간 모의가
+# 그 모형이고, 게이트 자체는 test_popup_helper_yield 섹션 6 이 원문으로 지킴). 시작 확인 루프는 그 회전에서 옛 클릭 메타를 읽지 않고 팝업 가드
+# 라운드도 쓰지 않은 채 다음 회전 서두의 동결 블록으로 가야 합니다(한 줄 갈래 - 규칙 4 · 규칙 15 ②).
+#   경로 둘 - 직접 호출(스윕이 거짓일 때의 elseif: GL1·GL2·GL5) · 스윕 안 주간 처리(월요일 실제 경로: GL3·GL4)
+#   옛 메타 셋 - 미전송 user-active(GL1·GL3) · 미전송 cursor-not-ready(GL2·GL4) · 전송 True/''(GL5 - 갈래 조건에 옛 메타 항을 더한 꼴은 이 행만 잡음)
+#   갈래가 없으면 GL1·GL3 은 옛 user-active 로 양보하고(y1), GL2·GL4·GL5 는 게이트 회전마다 라운드를 써 10회째 가드가 꺼진 채 첫 판독으로 갑니다(x1 · cb0).
+#   'cb' 는 첫 STATE# 앞 CLICK# 수(위 커서 미확인 행과 같은 셈) - 갈래 본문에서 라운드를 로그 없이 쓰는 꼴은 소진 줄 0 · 전체 클릭 1 이라 'cb' 로만 갈립니다
+foreach ($gateCase in @(
+    @{ Row = 'GL1'; Scenario = 'weekly-capture-gate-stale-yield'; Rounds = $false; Label = '직접 호출 · 옛 메타 user-active' },
+    @{ Row = 'GL2'; Scenario = 'weekly-capture-gate-rounds'; Rounds = $true; Label = '직접 호출 · 옛 메타 cursor-not-ready' },
+    @{ Row = 'GL3'; Scenario = 'weekly-capture-gate-stale-yield-sweep'; Rounds = $false; Label = '스윕 경로 · 옛 메타 user-active' },
+    @{ Row = 'GL4'; Scenario = 'weekly-capture-gate-rounds-sweep'; Rounds = $true; Label = '스윕 경로 · 옛 메타 cursor-not-ready' },
+    @{ Row = 'GL5'; Scenario = 'weekly-capture-gate-rounds-sent'; Rounds = $true; Label = '직접 호출 · 옛 메타 전송' })) {
+  $sim = Invoke-CycleSim $gateCase.Scenario
+  $gateTurns = @($sim.Out | Where-Object { "$_" -match '^WEEKLYGATE' }).Count
+  if ($gateCase.Rounds) {
+    $gateTrace = @($sim.Out | Where-Object { "$_" -match '^(CLICK#|STATE#)' })
+    $gateFirstStateAt = [array]::IndexOf(@($gateTrace | ForEach-Object { [bool]("$_" -match '^STATE#') }), $true)
+    $gateClicksBeforeFirstState = $(if ($gateFirstStateAt -lt 0) { @($gateTrace).Count } else { $gateFirstStateAt })
+    Assert-Case "$($gateCase.Row) 시작 팝업(주간 캡처 실패 게이트 10회 · $($gateCase.Label)): 팝업 가드 라운드를 쓰지 않음 - 소진 줄 0 · 첫 판독 앞 닫기 1" `
+      ('{0}/g{1}/x{2}/cb{3}' -f $sim.Exit, $gateTurns, (@($sim.Out | Where-Object { "$_" -match '시작 확인 팝업 가드 소진' }).Count), $gateClicksBeforeFirstState) '0/g10/x0/cb1'
+  } else {
+    Assert-Case "$($gateCase.Row) 시작 팝업(주간 캡처 실패 게이트 1회 · $($gateCase.Label)): 옛 메타를 읽지 않음 - 양보 0 · 동결 탐침 1 · 복구 뒤 닫기 1" `
+      ('{0}/g{1}/y{2}/p{3}/c{4}' -f $sim.Exit, $gateTurns, (@($sim.Out | Where-Object { "$_" -match '^YIELDWAIT' }).Count), (@($sim.Out | Where-Object { "$_" -match '^PROBE#' }).Count), (@($sim.Out | Where-Object { "$_" -match '^CLICK#' }).Count)) '0/g1/y0/p1/c1'
+  }
+}
 # 양보한 시간이 사이클 마감에 반영되는가 - 반영 안 되면 한도 60초가 양보 100초에 끊깁니다
 $sim = Invoke-CycleSim 'notice-yield-deadline'
 Assert-Case '시작 팝업: 양보 100초가 사이클 한도(60초)에 반영돼 끊기지 않는다' `
@@ -1338,14 +1365,16 @@ Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($worke
 # 2026-09-30 ⑥e: 옛 파티원 −4, D·P +2, 어비스 복귀 루프 동결 블록(양보 게이트 앞 탐침) +1 → 19곳.
 #   옛 파티원 사이클(두 출구의 S 터치·필드 복귀·시작 판정·입장 대기)이 관측 루프 D·퇴장 절차 P 로 바뀌며 각 서두 동결 블록 1곳씩 탐침을 부릅니다.
 #   어비스 복귀 루프의 동결 블록은 옛 대기형(뒤 판독이 탐침)에서 continue 형으로 바뀌어 블록 안 탐침이 생겼습니다(설계 2.13 - 09-30 리뷰5 P2-1:
-#   캡처 실패 + 조작이면 조작이 끝날 때까지 캡처 시도가 0 이던 자리). 그 탐침을 지우거나 블록을 대기형으로 되돌리는 변이는 이 개수가 20 이 됩니다.
+#   캡처 실패 + 조작이면 조작이 끝날 때까지 캡처 시도가 0 이던 자리). 그 탐침을 지우거나 블록을 대기형으로 되돌리는 변이는 이 개수가 22 가 됩니다.
 # 2026-10-13 구현 명세 ② 2.5 +1: 어비스 이어받기 시작 선분기 루프(Invoke-AbyssHandoffStart - 함수 매개변수 $Game)의 서두 동결 블록이 이번 회전 탐침
 #   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(명세 2.0-2 · 3.4 - 같은 루프의 B2 단계·탐침 복구 뒤 회전은 탐침을 따로 부르지 않음) → 20곳.
-#   그 탐침을 지우거나 판독만 건너뛰는 동결로 바꾸는 변이는 이 개수가 20 이 됩니다.
+#   그 탐침을 지우거나 판독만 건너뛰는 동결로 바꾸는 변이는 이 개수가 22 가 됩니다.
 # 2026-10-18 구현 명세 ④ 2.1 +1: 어비스 재입장 대기(Wait-AbyssReentry - 함수 매개변수 $Game · 아직 호출 없음)의 서두 동결 블록이 이번 회전 탐침
-#   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(명세 2.0-6 - 주석 포함 원문을 세어 호출 0 이어도 듦) → 21곳. 그 탐침을 지우는 변이는 이 개수가 20 이 됩니다.
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 21곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 D·P 2 + 어비스 복귀 루프 동결 1 + 어비스 이어받기 시작 선분기 1 + 어비스 재입장 대기 1 + 사망 화면 퇴장 1 + 검증 종료 루프 1 + 냥코인 뽑기 3 + 양보 후 판정 2)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '21'   # 2026-10-18 ④ 2.1 20 → 21 (위 주석) / 2026-10-13 ② 2.5 19 → 20 (위 주석) / 2026-09-30 ⑥e 20 → 19 / 2026-09-26 ⑥a 파티원 클리어 S 터치 루프·파티원 시작 판정 동결 +2 / 2026-09-13 냥코인 PURCHASE_WAIT 동결 +1
+#   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(명세 2.0-6 - 주석 포함 원문을 세어 호출 0 이어도 듦) → 21곳. 그 탐침을 지우는 변이는 이 개수가 22 가 됩니다.
+# 2026-10-18 구현 단위 ④′ +2: 던전·사냥터 시작부 팝업 정리 루프(함수 매개변수 $Game)의 게이트 회전 동결 while 이 이번 회전 탐침
+#   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다 → 23곳(그 탐침을 지우는 변이는 22). 본류(최상위 `$game`)의 같은 블록은 이 패턴에 안 잡힘 - 그 탐침을 지우는 변이는 test_stall_guards 의 탐침 검사가 잡음.
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 23곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 D·P 2 + 어비스 복귀 루프 동결 1 + 어비스 이어받기 시작 선분기 1 + 어비스 재입장 대기 1 + 사망 화면 퇴장 1 + 검증 종료 루프 1 + 냥코인 뽑기 3 + 양보 후 판정 2 + 시작부 팝업 정리(던전·사냥터) 2)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '23'   # 2026-10-18 ④′ 21 → 23 (위 주석) / 2026-10-18 ④ 2.1 20 → 21 (위 주석) / 2026-10-13 ② 2.5 19 → 20 (위 주석) / 2026-09-30 ⑥e 20 → 19 / 2026-09-26 ⑥a 파티원 클리어 S 터치 루프·파티원 시작 판정 동결 +2 / 2026-09-13 냥코인 PURCHASE_WAIT 동결 +1
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `

@@ -17,7 +17,7 @@
 #     연속의 연장(유예 시계 안) · 3버튼 창(보고 켬 · 무변화 창 안) · 첫 유효 회전 전(무변화 창 안) · 되돌림 뒤 창(유예 시계 안 - 정지면 그 회전에 처음 진행).
 #     사용자 조작 양보 셋(② 게이트 · ④ 스윕 'yield' · ⑥ 간접 양보)이 살아 있는 던전 안 연속을 끊으면 그 연속이 쓴 유예 표식을 되돌리고 되돌림 뒤 창
 #     표식을 세우며, ⑧ 이 유효 분류마다 그 표식을 비웁니다(사용자 결정 U-R5-4 (나))
-#   창 좌표 throw - catch 하나가 캡처 실패 플래그 ∧ 원인 gameWindowGone ∧ 두 문구(공용 판독 run:3864 · 스윕 예비 좌표 클릭 run:2915) 정확 일치만 받아 다음
+#   창 좌표 throw - catch 하나가 캡처 실패 플래그 ∧ 원인 gameWindowGone ∧ 두 문구(공용 판독 run:3870 · 스윕 예비 좌표 클릭 run:2921) 정확 일치만 받아 다음
 #     회전 동결로 보내고, 그 밖의 예외는 그대로 다시 던집니다(방어선 - 1차 차단은 구현 단위 ④′ 의 스윕 사전 동결 게이트)
 # 방법(구현 명세 ④ 3.2):
 #   - 원문 추출: 대기 함수·순수 판정·분류기와 그 서명 셋·파티원 시계 여섯·마감 조정 셋·캡처 성공 등록·누적·패널 서명 둘을 워커 원문 그대로 이 파일 최상위에서
@@ -416,7 +416,7 @@ if (($null -eq $abyssReclickQuietSeconds) -or (-not ($abyssReclickQuietSeconds -
 $Q = [int]$abyssReclickQuietSeconds
 
 try {
-    # 원인 둘 - Get-CaptureFailInfo 의 'rect-failed' 갈래(run:3565~3570) · 함수 끝 return(run:3595~3598)
+    # 원인 둘 - Get-CaptureFailInfo 의 'rect-failed' 갈래(run:3571~3576) · 함수 끝 return(run:3601~3604)
     $failInfoNode = Get-WorkerFunction 'Get-CaptureFailInfo'
     $rectFailedIfs = @($failInfoNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and ((Get-NodeCode $candidate.Clauses[0].Item1) -ceq "`$GameWindowIssue -eq 'rect-failed'") }, $true))
     if ($rectFailedIfs.Count -ne 1) { throw "Get-CaptureFailInfo 의 'rect-failed' 갈래가 $($rectFailedIfs.Count)개입니다(1개여야 함)" }
@@ -428,8 +428,8 @@ try {
     $OTHER_CAUSE = Get-HashtableStringValue -Table (Get-InnerExpression $otherReturn.Pipeline) -Key 'Cause'
     if (-not $WINDOW_GONE_CAUSE -or -not $OTHER_CAUSE) { throw "원인 상수를 읽지 못했습니다 ([$WINDOW_GONE_CAUSE] / [$OTHER_CAUSE])" }
 
-    # throw 문구 둘 - 판독 경로 Get-GameRegionCapture 의 창 사각형 실패 갈래(run:3863~3864 - 등록 뒤 스위치일 때만 throw) · 클릭 경로
-    # Get-ScaledScreenPoint 의 창 좌표 실패(run:2914~2916 - 등록 없이 throw)
+    # throw 문구 둘 - 판독 경로 Get-GameRegionCapture 의 창 사각형 실패 갈래(run:3869~3870 - 등록 뒤 스위치일 때만 throw) · 클릭 경로
+    # Get-ScaledScreenPoint 의 창 좌표 실패(run:2920~2922 - 등록 없이 throw)
     $captureNode = Get-WorkerFunction 'Get-GameRegionCapture'
     $readThrowIfs = @($captureNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and (Test-IsVariable $candidate.Clauses[0].Item1 'ThrowOnWindowRectFailure') }, $true))
     if ($readThrowIfs.Count -ne 1) { throw "Get-GameRegionCapture 의 -ThrowOnWindowRectFailure 갈래가 $($readThrowIfs.Count)개입니다(1개여야 함)" }
@@ -446,7 +446,7 @@ try {
     $CLICK_PATH_MESSAGE = [string](Get-InnerExpression $clickRectStatements[0].Pipeline).Value
     $THIRD_MESSAGE = 'X ' + $CLICK_PATH_MESSAGE   # 두 문구의 공통 꼬리를 품지만 어느 쪽도 아닌 셋째 문구 (N4-L3′ - 다시 박지 않고 캡처에서 만듦)
 
-    # 선분기(Invoke-AbyssHandoffStart - ④ 무변경)의 대기 값 둘 - while 끝 기본 대기(run:15217 · R5-P1 ⑫ 앵커의 값)와 복구 회전 대기(run:15213~15215)
+    # 선분기(Invoke-AbyssHandoffStart - ④ 무변경)의 대기 값 둘 - while 끝 기본 대기(run:15283 · R5-P1 ⑫ 앵커의 값)와 복구 회전 대기(run:15279~15281)
     $selectorNode = Get-WorkerFunction 'Invoke-AbyssHandoffStart'
     $selectorWhile = $selectorNode.Find({ param($candidate) $candidate -is [WhileStatementAst] }, $true)
     $selectorLastCommand = Get-StatementCommand (@($selectorWhile.Body.Statements)[-1])
@@ -462,14 +462,14 @@ try {
     if ($null -eq $recoveredWaitArgument) { throw '선분기 복구 회전 대기(Start-Sleep -Seconds)를 찾지 못했습니다' }
     $RECOVERED_WAIT_MS = [int](Invoke-Expression $recoveredWaitArgument.Extent.Text) * 1000
 
-    # 스윕 안 양보 문맥 - 원문 구매 팝업 닫기의 Wait-UserYieldEnd -Context 상수(run:7646 - 'ua-wait' 모의가 같은 문맥으로 부름 · N4-L13′)
+    # 스윕 안 양보 문맥 - 원문 구매 팝업 닫기의 Wait-UserYieldEnd -Context 상수(run:7661 - 'ua-wait' 모의가 같은 문맥으로 부름 · N4-L13′)
     $sweepYieldCalls = @(Get-CommandNodes -Node (Get-WorkerFunction 'Invoke-PurchasePopupSweep') -Name 'Wait-UserYieldEnd')
     if ($sweepYieldCalls.Count -ne 1) { throw "공용 스윕의 Wait-UserYieldEnd 호출이 $($sweepYieldCalls.Count)개입니다(1개여야 함)" }
     $sweepYieldContextNode = Get-InnerExpression (Get-CommandArgument -Command $sweepYieldCalls[0] -Name 'Context')
     if (-not ($sweepYieldContextNode -is [StringConstantExpressionAst])) { throw '공용 스윕의 양보 문맥이 문자열 상수가 아닙니다' }
     $SWEEP_YIELD_CONTEXT = [string]$sweepYieldContextNode.Value
 
-    # 안전 확인의 F9 조기 종료 문턱(초) - 원문 run:3808 '((Get-Date) - $script:captureFailingSince).TotalSeconds -lt N' (WA-L30 (가) 의 기대)
+    # 안전 확인의 F9 조기 종료 문턱(초) - 원문 run:3814 '((Get-Date) - $script:captureFailingSince).TotalSeconds -lt N' (WA-L30 (가) 의 기대)
     $safeStopThresholdNodes = @((Get-WorkerFunction 'Test-SafeStopDuringCaptureFail').FindAll({ param($candidate) ($candidate -is [BinaryExpressionAst]) -and
                 ($candidate.Operator -eq [TokenKind]::Ilt) -and (Test-HasVariable $candidate.Left 'script:captureFailingSince') -and ($candidate.Right -is [ConstantExpressionAst]) }, $true))
     if ($safeStopThresholdNodes.Count -ne 1) { throw "안전 확인의 캡처 실패 지속 문턱이 $($safeStopThresholdNodes.Count)개입니다(1개여야 함)" }
@@ -694,7 +694,7 @@ function Start-Sleep {
     Add-RowEvent -Kind 'sleep' -Ms $sleepMs
     Step-VirtualClock ($sleepMs / 1000.0)
 }
-# 원문 안전 확인의 F9 경로(run:3806·3809) - 하니스의 안전 중지 파일 표식만 답합니다 (test_abyss_party_member.ps1 과 같은 꼴)
+# 원문 안전 확인의 F9 경로(run:3812·3815) - 하니스의 안전 중지 파일 표식만 답합니다 (test_abyss_party_member.ps1 과 같은 꼴)
 function Test-Path {
     param($LiteralPath, $Path, $PathType)
     if ([string]$LiteralPath -eq $safeStopFlagPath) { return [bool]$script:safeStopFlagMock }
@@ -850,7 +850,7 @@ function Invoke-YieldStub {
     $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $yieldTicks / 10000.0
 }
 
-# 스윕 모의 (명세 3.2.5) - 진입 때 플래그 참이면 거짓(원문 run:7617) · 첫 판독 캡처 실패면 거짓(run:7627) · 계획이 없으면 거짓
+# 스윕 모의 (명세 3.2.5) - 진입 때 플래그 참이면 거짓(원문 run:7632) · 첫 판독 캡처 실패면 거짓(run:7642) · 계획이 없으면 거짓
 function Set-SweepMeta {
     # 모의 스윕이 쓰는 클릭 메타 - 공통 단언 ③ 이 '모의 스윕이 쓴 값' 으로 봅니다
     param([bool]$Performed, [string]$SkipReason)
@@ -871,7 +871,7 @@ function Invoke-SweepStub {
     if ($script:screenCaptureFailing) { return $false }
     $activePlan = Get-ActiveSweepPlan
     if (($null -ne $activePlan) -and ($activePlan.Kind -eq 'rect-throw')) {
-        # 스윕 첫 판독(재시작 팝업 run:7574)이 창 사각형 실패를 등록하고 판독 경로 문구를 던지는 꼴 (WA-L43 (다))
+        # 스윕 첫 판독(재시작 팝업 run:7589)이 창 사각형 실패를 등록하고 판독 경로 문구를 던지는 꼴 (WA-L43 (다))
         if ([int]$activePlan.Count -gt 0) { $activePlan.Count = [int]$activePlan.Count - 1 }
         $script:sweepFired.Add([pscustomobject]@{ T = $sweepEntryTime; Kind = 'rect-throw' })
         Register-MockFail -Cause $WINDOW_GONE_CAUSE
@@ -892,14 +892,14 @@ function Invoke-SweepStub {
         'sent' { Step-VirtualClock $gapSeconds; Set-SweepMeta -Performed $true -SkipReason ''; return $true }
         'cursor' { Step-VirtualClock $gapSeconds; Set-SweepMeta -Performed $false -SkipReason 'cursor-not-ready'; return $true }
         'ua-wait' {
-            # 원문 구매 팝업·주간 리셋 닫기(run:7644~7647 · 6832~6834) - 조작 생략 뒤 스윕 안에서 기다리고 참 (Gap 을 먼저 흘림 - 명세 3.2.5)
+            # 원문 구매 팝업·주간 리셋 닫기(run:7659~7662 · 6847~6849) - 조작 생략 뒤 스윕 안에서 기다리고 참 (Gap 을 먼저 흘림 - 명세 3.2.5)
             Step-VirtualClock $gapSeconds
             Set-SweepMeta -Performed $false -SkipReason 'user-active'
             Wait-UserYieldEnd -Game $Game -Context $SWEEP_YIELD_CONTEXT
             return $true
         }
         'ua-deleg' {
-            # 보상 '확인'·협동 완료·협동 창·네트워크(run:7596~7602 등) - 기다리지 않고 참, 다음 회전 게이트가 조작을 봄
+            # 보상 '확인'·협동 완료·협동 창·네트워크(run:7611~7617 등) - 기다리지 않고 참, 다음 회전 게이트가 조작을 봄
             Step-VirtualClock $gapSeconds
             Set-SweepMeta -Performed $false -SkipReason 'user-active'
             $script:activeQueue = 1
@@ -909,33 +909,33 @@ function Invoke-SweepStub {
         'fail-false' { Register-MockFail -Cause $OTHER_CAUSE; Step-VirtualClock $gapSeconds; return $false }
         'fail-true' { Register-MockFail -Cause $OTHER_CAUSE; Step-VirtualClock $gapSeconds; Set-SweepMeta -Performed $false -SkipReason 'cursor-not-ready'; return $true }
         'yield-false' {
-            # 스윕 안 커서 대피 양보(run:7632 → 3316~3328 - 메타 없이 누적만) 뒤 팝업 없음
+            # 스윕 안 커서 대피 양보(run:7647 → 3322~3334 - 메타 없이 누적만) 뒤 팝업 없음
             Step-VirtualClock $gapSeconds
             $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $gapSeconds * 1000
             return $false
         }
         'yield-sent' {
-            # 같은 꼴의 커서 대피 양보 뒤 팝업 닫기 전송(run:7637 꼴 - 분류 'counted')
+            # 같은 꼴의 커서 대피 양보 뒤 팝업 닫기 전송(run:7652 꼴 - 분류 'counted')
             Step-VirtualClock $gapSeconds
             $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $gapSeconds * 1000
             Set-SweepMeta -Performed $true -SkipReason ''
             return $true
         }
         'yield-rect-throw' {
-            # 커서 대피 양보 뒤 같은 스윕의 하단 판독(run:7658 → 3863~3864)이 창 사각형 실패를 등록하고 판독 경로 문구를 던짐 - 메타 쓰기 0
+            # 커서 대피 양보 뒤 같은 스윕의 하단 판독(run:7673 → 3869~3870)이 창 사각형 실패를 등록하고 판독 경로 문구를 던짐 - 메타 쓰기 0
             Step-VirtualClock $gapSeconds
             $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $gapSeconds * 1000
             Register-MockFail -Cause $WINDOW_GONE_CAUSE
             throw $READ_PATH_MESSAGE
         }
         'rect-click-throw' {
-            # 주간 리셋 팝업(run:6821 → 6827) - 스위치 없는 두 번째 판독이 gameWindowGone 을 등록만 하고 예비 좌표 클릭이 클릭 경로 문구를 던짐 - 메타 쓰기 0
+            # ④′ 전 주간 리셋 경로의 꼴(스위치 없는 두 번째 판독이 gameWindowGone 을 등록만 하고 예비 좌표 클릭이 클릭 경로 문구를 던짐) - ④′ 뒤 원문 경로는 없고 방어선 모의(게이트가 클릭 전에 끊음) - 메타 쓰기 0
             Register-MockFail -Cause $WINDOW_GONE_CAUSE
             if ([string]$activePlan.Message) { throw ([string]$activePlan.Message) }
             throw $CLICK_PATH_MESSAGE
         }
         'click-throw-noreg' {
-            # 앞 스위치 판독이 성공한 뒤의 예비 좌표 클릭(run:7435 → 7436 꼴) - 등록 없이 클릭 경로 문구 throw (플래그 거짓) - 메타 쓰기 0
+            # 앞 스위치 판독이 성공한 뒤의 예비 좌표 클릭(run:7450 → 7451 꼴) - 등록 없이 클릭 경로 문구 throw (플래그 거짓) - 메타 쓰기 0
             throw $CLICK_PATH_MESSAGE
         }
     }
@@ -945,7 +945,7 @@ function Invoke-SweepStub {
 # 판독 스텁 (명세 3.2.6 - 화면 함수 층에서 시각표의 지금 화면으로 답함)
 function Invoke-PromptStub {
     # 하단 - 판독 회전 기록 @{ T; S; Fail } 하나 (그 회전 스윕 호출부터 다음 대기 사건 사이에 실패 등록이 있으면 Fail 참) · 실패면 스태시 '' · 거짓 ·
-    # rect throw 는 스태시 갱신 앞 (원문 run:5756 → 5761)
+    # rect throw 는 스태시 갱신 앞 (원문 run:5762 → 5767)
     param($Game)
     Add-GameSeen -Kind 'prompt' -Game $Game
     $screenKey = Get-ScreenNow
@@ -1290,7 +1290,7 @@ $n4p7Actual = '일련번호 +1={0} · 시작 시각 규칙={1} · 갱신 규칙=
 $serialIncrements, $startTimeRule, $updateRule, $successRule, $totalMsRule, $WINDOW_GONE_CAUSE, $OTHER_CAUSE, $rectCaptureStatements
 $n4p7Expected = '일련번호 +1=1 · 시작 시각 규칙=1 · 갱신 규칙=1 · 성공 누적·비움=1 · 누적 식=[{0}] · rect-failed → gameWindowGone · 끝 return → other · 창 사각형 실패 갈래=[{1}]' -f
 '$total = [double]$script:captureFailTotalMs ; if ($script:screenCaptureFailing -and $script:captureFailingSince) { $total += ((Get-Date) - $script:captureFailingSince).TotalMilliseconds } ; return $total', $rectCaptureExpected
-Check-Equal 'N4-P7 캡처 모의의 전제 - 원문 규칙 사본 (run:3694 일련번호 · 3707~3716 시작 시각·갱신 · 3730~3739 누적·비움 · 3756~3763 누적 식 · 3565~3570 rect-failed 원인 · 3595~3598 other · 3863~3864 등록 → throw)' $n4p7Actual $n4p7Expected
+Check-Equal 'N4-P7 캡처 모의의 전제 - 원문 규칙 사본 (run:3700 일련번호 · 3713~3722 시작 시각·갱신 · 3736~3745 누적·비움 · 3762~3769 누적 식 · 3571~3576 rect-failed 원인 · 3601~3604 other · 3869~3870 등록 → throw)' $n4p7Actual $n4p7Expected
 
 # ── §6 WA-P · N4-L4 - 결론 우선순위 순수 진리표 (명세 3.3 - 비교는 -ceq) ─────────────────────────────────────────────────────
 $VERDICT_ROWS = @(
@@ -1586,7 +1586,7 @@ $row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 45 }
 Check-True 'WA-L28 U 45초 → timeout · Clear-EventOverlay 0' (($row.Result -ceq 'timeout') -and ([int]$row.RecordCalls['Clear-EventOverlay'] -eq 0)) (Format-RowDetail $row)
 Check-RowCommon 'WA-L28' $row
 
-# WA-L29 - 실제 스윕 + 재시작 팝업 모의 참 → 스윕 안 exit 4 센티널(원문 run:7620~7623) · 반환 0 · [완료] 줄 1
+# WA-L29 - 실제 스윕 + 재시작 팝업 모의 참 → 스윕 안 exit 4 센티널(원문 run:7635~7638) · 반환 0 · [완료] 줄 1
 Reset-ReentryRow; Set-ScreenPlan @('U', 0); $script:useRealSweep = $true; $script:restartPopupMock = $true
 $row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 60 }
 Check-True 'WA-L29 실제 스윕 + Test-GameRestartPopup 모의 참 → __EXIT__4 · 반환 수 0 · [완료] 줄 1' `
@@ -2246,7 +2246,7 @@ Check-Equal 'R5-P3 waiter 안 Clear-EventOverlay · $xCandidates · Press-KeyOnc
 $r5p4Hits = @(@('Click-GamePoint', 'Click-ScreenPoint') | Where-Object { [regex]::IsMatch($waiterCode, ('(?<![\w-])' + [regex]::Escape($_) + '(?![\w-])'), [Text.RegularExpressions.RegexOptions]::IgnoreCase) })
 Check-Equal 'R5-P4 waiter 안 Click-GamePoint · Click-ScreenPoint 0 (관찰 전용 - 클릭은 구현 단위 ⑥d 의 ⑪)' ('걸린 것=[{0}]' -f ($r5p4Hits -join ',')) '걸린 것=[]'
 
-# 선분기 S2(run:15113 - 소스 캡처) - R5-P5 · N4-P9 · N4-P14 의 대조 대상
+# 선분기 S2(run:15179 - 소스 캡처) - R5-P5 · N4-P9 · N4-P14 의 대조 대상
 $selectorS2Nodes = @(Get-CommandNodes -Node $selectorNode -Name 'Write-RunLog' | Where-Object { (@($_.CommandElements).Count -ge 2) -and ($_.CommandElements[1] -is [ExpandableStringExpressionAst]) -and ([string]$_.CommandElements[1].Value).Contains('2연속 앞 로딩') })
 $selectorS2Value = $(if ($selectorS2Nodes.Count -eq 1) { [string]$selectorS2Nodes[0].CommandElements[1].Value } else { '' })
 $S2_PREFIX = $(if ($selectorS2Value.IndexOf(')') -ge 0) { $selectorS2Value.Substring(0, $selectorS2Value.IndexOf(')') + 1) } else { '' })   # '[어비스] 입장 계측 - 던전 안 2연속 앞 로딩(알 수 없음)'
@@ -2541,7 +2541,7 @@ if (($selectorS2Nodes.Count -eq 1) -and ($s2ExpandableNodes.Count -eq 1)) {
     $n4p9Actual = '조각 {0}개 어긋남=[{1}] · 채움=[{2}]' -f $waiterParts.Fragments.Count, ($fragmentMismatches -join ','), ($waiterParts.Fills -join ',')
     $n4p9Expected = '조각 {0}개 어긋남=[] · 채움=[{1}]' -f $selectorParts.Fragments.Count, ($selectorParts.Fills -join ',')
 }
-Check-Equal 'N4-P9 S2 글자·채움 대응 - waiter S2 고정 조각 열 = 선분기 S2(run:15113 소스 캡처) 조각 열(-ceq) · 채움 변수 이름 차례 = 선분기 (entryUnknown·entryField·entryFieldPart·entryBreaks·memberFieldSettleSeconds)' $n4p9Actual $n4p9Expected
+Check-Equal 'N4-P9 S2 글자·채움 대응 - waiter S2 고정 조각 열 = 선분기 S2(run:15179 소스 캡처) 조각 열(-ceq) · 채움 변수 이름 차례 = 선분기 (entryUnknown·entryField·entryFieldPart·entryBreaks·memberFieldSettleSeconds)' $n4p9Actual $n4p9Expected
 
 # N4-P10 - 무변화·정지 유예 시계 생성 두 문장(정규화 글자 - 구현 형상 계약) 각 1 · 둘 다 while 앞 · 함수 본문 직속(무조건 생성)
 $N4P10_STATEMENTS = @('$quietClock = New-AbyssMemberClock -LimitSeconds $abyssReclickQuietSeconds', '$insideGraceClock = New-AbyssMemberClock -LimitSeconds $abyssReclickQuietSeconds -Paused')
@@ -2562,7 +2562,7 @@ Check-Equal 'N4-P12 Test-CaptureRecovered · Wait-UserYieldEnd · Invoke-Purchas
     ('호출 {0} · -Game 어긋남=[{1}] · 문맥 {2}' -f $gameArgumentCalls.Count, ($gameArgumentProblems -join ','), $contextOk) '호출 7 · -Game 어긋남=[] · 문맥 True'
 
 # N4-P13 - 스윕 참 분기 사실(뜻): 분기 if 1 · continue 1(조건 = Action 정확 일치 {freeze, yield, counted}) · exit·return·break 0 · 굶김·복구 대입 각 1(Action 정확 일치) ·
-#   분기 안 마감 판정 0 · 분기 안 $insideStreak 대입 = 상수 0 하나 · 분류 호출 1(매개변수·값 = 선분기 run:15038~15039 - 대칭 비교 무관) · 되돌림 if 1('yield' ∧ 살아 있는 연속,
+#   분기 안 마감 판정 0 · 분기 안 $insideStreak 대입 = 상수 0 하나 · 분류 호출 1(매개변수·값 = 선분기 run:15104~15105 - 대칭 비교 무관) · 되돌림 if 1('yield' ∧ 살아 있는 연속,
 #   본문 둘) · 직속 문장 차례 분류 < 되돌림 < 연속 0 < continue if · 연속 수 대입 = .Streak(해석된 형 Int32·Int64 한 겹까지) 1 + ⑦ else 직속 상수 0 1 · 루프 앞 상수 0 1
 function Get-ParameterMap {
     # 명령 호출의 매개변수 이름 → 값 식 구조 문자열 (위치 인자는 따로) - 매개변수 순서·줄 이음·인자 꼴 무관

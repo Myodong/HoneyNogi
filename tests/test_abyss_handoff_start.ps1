@@ -3399,7 +3399,7 @@ function Test-StaticFlow {
         (J @($carryPairs.Count, (@($carryPairs | ForEach-Object { $_.BeforeFreeze -and $_.FreezeFound }) -join ','), ($stepInSelector.Count -ge 1), $stepOutsideField.Count)) (J @(1, 'True', 'True', 0))
 
     # R4-P12s [보강 2.5] - 회전 서두의 클릭 생략 사유 비움(명세 ② 2.0-2 · 2.5 골격 서두 · 규칙 4 '회전 서두에서 비운다 - 직전 회전의 메타가 남아 오발동'): 동결
-    #   블록보다 앞의 루프 최상위 문장에 $script:lastClickSkipReason = '' 대입 정확히 1. 지금 스윕의 참은 늘 클릭 시도 뒤라 실행으로는 드러나지 않아(남은 메타를 읽을
+    #   블록보다 앞의 루프 최상위 문장에 $script:lastClickSkipReason = '' 대입 정확히 1. 스윕의 참은 클릭 시도 뒤이거나 주간 리셋 캡처 실패 게이트 회전(그때는 플래그 참이라 분류가 메타보다 먼저 'freeze')이라 실행으로는 드러나지 않아(남은 메타를 읽을
     #   자리가 없음) 정적으로 고정합니다 - test_abyss_screen_signatures 가 시작 패널 입장 대기의 같은 서두를 원문으로 지키는 것과 같은 자리(2026-10-13 변이 검증)
     $headResets = @()
     $headLoops = 0

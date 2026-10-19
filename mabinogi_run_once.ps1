@@ -6826,6 +6826,15 @@ function Close-WeeklyCoopResetPopup {
   if ($weeklyText.Contains('협동') -and $weeklyText.Contains('참여')) {
     $weeklyClosePoint = Find-GameTextPoint -Game $Game -ReferenceX $rgClearExit[0] -ReferenceY $rgClearExit[1] `
       -RegionWidth $rgClearExit[2] -RegionHeight $rgClearExit[3] -SearchText '닫기'
+    # 캡처 실패 게이트 (구현 단위 ④′ - 규칙 4·15): 위 두 번째 판독은 스위치가 없어 캡처 실패면 등록만 하고 $null 입니다. 그대로 내려가면
+    # 포커스(ALT 주입) 뒤 예비 좌표 클릭이 화면 확인 없이 나가거나 클릭 헬퍼가 창 좌표·최소화·창 크기로 던져 캡처 실패 중에 코드 1 로 끝났습니다.
+    # 참 = '팝업을 감지해 이번 흐름을 처리했다'(클릭은 미룸 - 구매 스윕의 반환 계약과 같은 뜻 · 서두 가드의 거짓은 '이 회전엔 판독 없음').
+    # 루프 호출부는 동결 블록이 받고(어비스 분류 루프는 'freeze' · 시작부 팝업 정리는 같은 회전에 동결한 뒤 같은 시도로 다시 스윕 - 구현 명세 ④′ 1.4),
+    # 클릭 메타는 쓰지 않습니다. 회귀 tests\test_popup_helper_yield.ps1 섹션 6
+    if ($script:screenCaptureFailing) {
+      Write-RunLog "[안내] ${LogPrefix}주간 협동 미션 팝업 감지 - 화면 캡처 실패로 닫기 클릭을 미룸 (화면이 돌아오면 다음 감지에서 재시도)"
+      return $true
+    }
     Focus-Game -Game $Game
     if ($weeklyClosePoint) {
       Click-ScreenPoint -X $weeklyClosePoint.X -Y $weeklyClosePoint.Y
@@ -10024,9 +10033,18 @@ function Invoke-NormalDungeonCycle {
   # 시작 화면 판정 전 전체 화면 팝업 정리 (2026-08-01 실사고: 물약 부족 팝업+협동 미션 완료
   # 화면이 겹친 채 재시도 워커가 시작되자 제목/HUD 판독이 전부 가려져 "던전 화면이 아닙니다"
   # 3연속 즉사 → 정지. 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건)
+  # 스윕이 캡처 실패 중에 참이면 주간 리셋 팝업의 캡처 실패 게이트가 닫기 클릭을 미룬 회전입니다(구현 단위 ④′). 화면이 돌아올 때까지
+  # 동결하고(규칙 15 - 공통 진입점·탐침) 시도를 되돌려 다시 스윕합니다 - 팝업을 덮어 둔 채 시작 판정으로 가면 덮인 화면을 오판합니다(08-17 꼴)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     $script:lastClickSkipReason = ''
     if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
+    $startSweepDeferred = [bool]$script:screenCaptureFailing
+    while ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+    }
+    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
     # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
     # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
@@ -12202,9 +12220,18 @@ function Invoke-HuntingGroundCycle {
   Write-RunLog "[사냥터] 자동화 시작: 난이도 '$htDifficulty', 은동전 $(if ($htUseCoin) { '사용' } else { '미사용' })$(if ($htUseCoin -and $htDoubleLoot) { ' + 더블 루팅' }), 매칭 '$htMatching'"
 
   # 시작 화면 판정 전 전체 화면 팝업 정리 (던전/심층 시작부와 같은 계약 - 2026-08-01 실사고)
+  # 스윕이 캡처 실패 중에 참이면 주간 리셋 팝업의 캡처 실패 게이트가 닫기 클릭을 미룬 회전입니다(구현 단위 ④′). 화면이 돌아올 때까지
+  # 동결하고(규칙 15 - 공통 진입점·탐침) 시도를 되돌려 다시 스윕합니다 - 팝업을 덮어 둔 채 시작 판정으로 가면 덮인 화면을 오판합니다(08-17 꼴)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     $script:lastClickSkipReason = ''
     if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
+    $startSweepDeferred = [bool]$script:screenCaptureFailing
+    while ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+    }
+    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
     # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
     # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
@@ -13130,9 +13157,9 @@ function Resolve-AbyssMemberSweepTurn {
     [int]$Limit
   )
 
-  # 팝업 스윕(Invoke-PurchasePopupSweep)이 참을 돌려준 회전의 생략 사유 분류 (순수 판정 - 진리표 §1(j), 설계 ㉺·㉻). 스윕의 참은 언제나
-  # 스윕 자신의 클릭 시도 뒤라(구매 '닫기'·보상 '확인'·협동 완료·협동 창 X·주간 '닫기'·네트워크 '다시 시도하기') 두 클릭 메타가 곧 스윕의
-  # 결과입니다. 반환 @{ Action; Streak }:
+  # 팝업 스윕(Invoke-PurchasePopupSweep)이 참을 돌려준 회전의 생략 사유 분류 (순수 판정 - 진리표 §1(j), 설계 ㉺·㉻). 스윕의 참은
+  # 스윕 자신의 클릭 시도 뒤(구매 '닫기'·보상 '확인'·협동 완료·협동 창 X·주간 '닫기'·네트워크 '다시 시도하기')이거나 주간 리셋의 캡처 실패 게이트(클릭 0 - 구현 단위 ④′)입니다.
+  # 게이트 회전은 늘 아직 캡처 실패 중이라 ① 'freeze' 가 메타보다 먼저 받고, 그 밖의 참은 두 클릭 메타가 곧 스윕의 결과입니다. 반환 @{ Action; Streak }:
   #  ① 스윕이 끝났을 때 아직 캡처 실패 중 → 'freeze' (다음 회전 ① 동결 - 규칙 15, 연속 수 그대로)
   #  ② 사용자 조작으로 생략(user-active) → 'yield' (다음 회전 ② 양보 - 규칙 4, 미소모). 같은 회전에 복구 실패가 함께 있어도 양보가 먼저 -
   #     조작 중에는 마감을 확정하지 않습니다 (㉻)
@@ -15323,7 +15350,7 @@ function Wait-AbyssReentry {
   #  ⑤ 관찰 전용: 클릭·키·이벤트 정리·journal·exit 가 없습니다. 권장 인원 팝업 도전은 구현 단위 ⑥d 가 -ChallengeFewMembers 를 명시한 호출에만 더합니다
   #     (클릭 직전 새 판독의 팝업 서명 + '나가기' 없음 + 조정 3초 재도전 - HEAD 의 3초 Space 반복을 대신함)
   #  ⑥ 창 좌표 throw: 창 좌표를 못 읽은 캡처 실패(원인 gameWindowGone) 중의 두 문구 - 공용 판독(캡처 실패를 등록한 뒤 던짐)과 스윕 예비 좌표
-  #     클릭(같은 회전 앞 판독이 등록한 뒤 던짐) - 만 catch 하나에서 정확 일치로 받아 다음 회전 동결로 보냅니다. 그 밖의 예외는 그대로 다시 던집니다 -
+  #     클릭(방어선 - 스윕의 주간 리셋 경로는 캡처 실패 게이트(구현 단위 ④′)가 클릭 전에 끊음) - 만 catch 하나에서 정확 일치로 받아 다음 회전 동결로 보냅니다. 그 밖의 예외는 그대로 다시 던집니다 -
   #     이어받기 선분기·시작 패널 대기 등 기존 루프는 이 throw 를 받지 않습니다(설계 v11 R5 3.7 · 구현 명세 ④ B-4)
   $reentryClock = $(if ($null -ne $Clock) { $Clock } else { New-AbyssMemberClock -LimitSeconds $LimitSeconds })
   $quietClock = New-AbyssMemberClock -LimitSeconds $abyssReclickQuietSeconds   # 보고와 무관하게 만듦 - 순수 판정 입력·3버튼·첫 유효 회전 전 유예가 봄 (구현 명세 ④ J6)
@@ -15397,7 +15424,7 @@ function Wait-AbyssReentry {
         $questNow = $(if ($hudNow) { Test-InDungeonQuest -Game $Game } else { $false })
       }
     } catch {
-      # 창 좌표 throw 제한 catch - 캡처 실패(원인 gameWindowGone) 중의 두 문구(공용 판독 · 스윕 예비 좌표 클릭)만 정확 일치로 받습니다(아래 ⑦ 이 다음 회전 동결로 보냄)
+      # 창 좌표 throw 제한 catch - 캡처 실패(원인 gameWindowGone) 중의 두 문구(공용 판독 · 스윕 예비 좌표 클릭 - 뒤의 것은 구현 단위 ④′ 뒤 방어선)만 정확 일치로 받습니다(아래 ⑦ 이 다음 회전 동결로 보냄)
       if (-not ($script:screenCaptureFailing -and ($script:captureFailCause -eq 'gameWindowGone') -and (@('OCR용 게임 창 좌표를 읽지 못했습니다.', '게임 창 좌표를 읽지 못했습니다.') -contains $_.Exception.Message))) {
         throw
       }
@@ -17964,13 +17991,16 @@ function Invoke-LifeGatherCycle {
         $initialPopupLastBranch = '공지 게시판 X'
       }
       if ($popupHandled) {
+        # 주간 리셋의 캡처 실패 게이트(구현 단위 ④′)는 클릭 없이 참을 돌려줍니다 - 그 회전은 옛 클릭 메타를 읽지 않고 팝업 가드 라운드도 쓰지 않은 채
+        # 다음 회전 서두의 동결 블록으로 갑니다 (규칙 4·15 - 시작 패널 입장 대기의 '아직 실패 중 → 다음 회전 동결' 과 같은 꼴)
+        if ($script:screenCaptureFailing) { continue }
         # ★ 사용자 조작으로 취소된 클릭은 **팝업 가드 예산을 쓰지 않습니다** (2026-09-10 설계 합의).
         #   예전에는 클릭 0회여도 $initialPopupRounds 가 올라, 조작 20~30초면 10라운드가 ~20초에
         #   소진되고 팝업 처리가 **꺼진 채** 판독으로 넘어갔습니다. 공지 게시판은 가장자리 HUD 가
         #   그대로 보여 Test-HomeEndEscHud 가 참이라 '게임 화면인데 퀘스트 없음(absent)'으로
         #   확정되고, 그대로 메뉴를 열어 **진행 중이던 남의 채집을 끊습니다** - 이 팝업 가드
         #   자체가 2026-08-07 감사가 그 사고 때문에 넣은 것입니다.
-        #   세 분기(구매 스윕·주간 리셋·공지) 모두 $true 를 돌려주기 전 **마지막 동작이 클릭**이라
+        #   세 분기(구매 스윕·주간 리셋·공지) 모두 $true 를 돌려주기 전 **마지막 동작이 클릭**이라(클릭 없이 참인 주간 리셋 캡처 실패 게이트 회전은 위 한 줄이 먼저 받음)
         #   여기서 공통으로 판단합니다. $popupHandled 가 거짓일 때는 옛 클릭 메타를 읽지 않습니다.
         #   커서 미확인은 **자동화의 실패 시도**라 기존대로 라운드를 소모합니다 - 사용자에게
         #   양보한 회전과 구별하는 기존 클릭 계약입니다.
@@ -19243,9 +19273,18 @@ try {
   # 화면이 겹친 채 재시도 워커가 시작되자 판독이 전부 가려져 3연속 즉사 → 정지. 아래
   # 출석/이벤트 처리(Clear-EventOverlay)는 구매 팝업을 모르므로 스윕을 먼저 돌립니다.
   # 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건. 콘텐츠 공통)
+  # 스윕이 캡처 실패 중에 참이면 주간 리셋 팝업의 캡처 실패 게이트가 닫기 클릭을 미룬 회전입니다(구현 단위 ④′). 화면이 돌아올 때까지
+  # 동결하고(규칙 15 - 공통 진입점·탐침) 시도를 되돌려 다시 스윕합니다 - 팝업을 덮어 둔 채 시작 판정으로 가면 덮인 화면을 오판합니다(08-17 꼴)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     $script:lastClickSkipReason = ''
     if (-not (Invoke-PurchasePopupSweep -Game $game)) { break }
+    $startSweepDeferred = [bool]$script:screenCaptureFailing
+    while ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $game)
+    }
+    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
     # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
     # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
