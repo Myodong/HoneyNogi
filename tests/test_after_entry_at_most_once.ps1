@@ -1006,7 +1006,7 @@ function Move-CursorOutsideGame {
 function Find-GameTextPoint {
     # 글자 위치 - 입장 직후 구매 팝업 '닫기' 는 없음('' 판독), 'ESC' 는 HUD 화면, '어비스' 는 메뉴 화면에서 고정 자리
     param([System.Diagnostics.Process]$Game, [int]$ReferenceX, [int]$ReferenceY, [int]$RegionWidth, [int]$RegionHeight, [string]$SearchText,
-        [string]$ExactText = '', [int]$Scale = 3, $Engine = $null, [switch]$BinaryWhiteText)
+        [string]$ExactText = '', [int]$Scale = 3, $Engine = $null, [switch]$BinaryWhiteText, [string[]]$ExcludeText = @())
     if ($SearchText -eq 'ESC') {
         if ([bool](Read-MockScreen 'Find-GameTextPoint:ESC' (Test-MockHudScreen))) { return @{ X = $MOCK_ESC_POINT.X; Y = $MOCK_ESC_POINT.Y } }
         return $null

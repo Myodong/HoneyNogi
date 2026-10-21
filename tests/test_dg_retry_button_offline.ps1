@@ -4,6 +4,7 @@
 # 보존한 오류 캡처 10장으로 '고치기 전(일반 s5)' 재현과 '고친 후(이진화 폴백)' 통과를
 # **실제 탐색 함수(Find-DgRetryButtonPoint → Find-GameTextPoint)를 돌려** 확인하고, 반환 좌표가
 # '다시 하기' 버튼 안인지까지 본다. 캡처 폴더가 없는 PC 는 진리표만 건너뛴다(배선 가드는 항상 실행).
+# 5절 = 2026-08-17 주간 리셋 팝업 '협동 미션 참여하기' - 실제 탐색 함수가 '참여' 든 단어를 건너뛰는지(고치기 전 재현 → 고친 후 통과).
 $fails = 0
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
@@ -34,6 +35,41 @@ $normalCallIndex = $retryCode.IndexOf('-Scale 5' + "`n")
 $binaryCallIndex = $retryCode.IndexOf('-Scale 5 -BinaryWhiteText')
 Assert-Case '가드: 다시 하기 탐색 - 일반 판독이 이진화보다 먼저' (($normalCallIndex -ge 0) -and ($binaryCallIndex -ge 0) -and ($normalCallIndex -lt $binaryCallIndex)) $true
 Assert-Case '가드: 다음 층 탐색은 이진화를 쓰지 않음(변경 근거 없음)' ($nextFloorCode -match 'BinaryWhiteText') $false
+# 2026-08-17 주간 리셋 팝업 대응 - 제외 조각 배선 (주석 뺀 사본에서 셈)
+Assert-Case 'WJG1 가드: 다시 하기 탐색의 제외 목록은 정확히 @(''참여'')' ([regex]::Matches($retryCode, "\`$retryExcludeText = @\('참여'\)").Count) 1
+Assert-Case 'WJG2 가드: 일반·이진화 두 호출 모두 제외 목록 전달' ([regex]::Matches($retryCode, '-ExcludeText \$retryExcludeText').Count) 2
+Assert-Case 'WJG3 가드: Find-GameTextPoint 제외 인자 기본값 빈 목록 (다른 호출부 불변)' ([regex]::Matches($textPointCode, '\[string\[\]\]\$ExcludeText = @\(\)').Count) 1
+Assert-Case 'WJG4 가드: Find-GameTextPoint 의 제외 인자 글자 2곳 (선언 1 · 사용 1)' ([regex]::Matches($textPointCode, '\$ExcludeText').Count) 2
+
+# ── 1-2. 단어 목록 모의 (캡처·OCR 없이 늘 실행): ExcludeText 의 선택 규칙 ─────────────────────
+# OCR 결과를 값으로 주고 실제 Find-GameTextPoint 를 돌린다 (선례 tests\test_difficulty_tabs_offline.ps1 3절).
+# 좌표 = 영역 왼쪽 위 + round(단어 중심 / 배율). 아래 2절이 PNG 재생·실제 OCR 로 이 함수들을 다시 정의한다.
+Add-Type -AssemblyName System.Drawing   # 1-2 모의(2절 SKIP 앞)와 2~5절 공용 - 1-2 모의 캡처의 Bitmap 과 원문 Find-GameTextPoint 의 [System.Drawing.Point] 가 쓴다
+Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Find-GameTextPoint')))
+function Get-GameRegionCapture {
+  param($Game, [int]$ReferenceX, [int]$ReferenceY, [int]$RegionWidth, [int]$RegionHeight, [int]$Scale = 3,
+    [switch]$BinaryWhiteText, [switch]$ThrowOnWindowRectFailure)
+  return [pscustomobject]@{ Bitmap = (New-Object System.Drawing.Bitmap 1, 1); CropLeft = $ReferenceX; CropTop = $ReferenceY
+    CropWidth = $RegionWidth; CropHeight = $RegionHeight; ScaledWidth = ($RegionWidth * $Scale); ScaledHeight = ($RegionHeight * $Scale) }
+}
+function Invoke-OcrOnBitmap { param($Bitmap, $Engine) return [pscustomobject]@{ Lines = @($script:mockLines) } }
+function New-MockWord { param([string]$Text, [int]$X)
+  [pscustomobject]@{ Text = $Text; BoundingRect = [pscustomobject]@{ X = $X; Y = 20; Width = 100; Height = 30 } } }
+function Get-MockPointText {
+  # 호출이 예외로 끝나면 원인 문구를 값('error: …')으로 남긴다(예: System.Drawing 미로드). 고치기 전 워커는 단순 함수라 모르는 -ExcludeText 를 $args 로 받아 오류 없이 무시 - 그 꼴은 WJ7 좌표로 드러남
+  param([hashtable]$Arguments)
+  try {
+    $mockPoint = Find-GameTextPoint @Arguments
+    if ($mockPoint) { return ('({0},{1})' -f $mockPoint.X, $mockPoint.Y) }
+    return 'null'
+  } catch { return ('error: ' + $_.Exception.Message) }
+}
+# 한 줄 [참여하기 · 다시하기] (확대 좌표 x 100 · 300, 배율 5) → 화면 참여하기 (570,632) · 다시하기 (610,632)
+$script:mockLines = @([pscustomobject]@{ Words = @((New-MockWord '참여하기' 100), (New-MockWord '다시하기' 300)) })
+$mockArguments = @{ Game = $null; ReferenceX = 540; ReferenceY = 625; RegionWidth = 340; RegionHeight = 60; SearchText = '하기'; Scale = 5 }
+Assert-Case 'WJ6 모의: 1차 정확 일치는 제외 밖 - ExactText 참여하기 + 제외 참여 → 참여하기' (Get-MockPointText ($mockArguments + @{ ExactText = '참여하기'; ExcludeText = @('참여') })) '(570,632)'
+Assert-Case 'WJ7 모의: 제외는 단어 단위 - 같은 줄의 다음 단어 다시하기' (Get-MockPointText ($mockArguments + @{ ExcludeText = @('참여') })) '(610,632)'
+Assert-Case 'WJ8 모의: 제외 인자 없음(다른 44 호출) → 읽기 순서 첫 단어 참여하기' (Get-MockPointText $mockArguments) '(570,632)'
 
 # ── 2. 캡처 진리표 ──────────────────────────────────────────────────────────────
 $captureDir = Join-Path $projectRoot '던전이미지\심층던전\20260911_심층결과화면_다시하기_미탐지_1908'
@@ -42,7 +78,6 @@ if (-not (Test-Path -LiteralPath $captureDir)) {
   exit $fails
 }
 
-Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType=WindowsRuntime] | Out-Null
 [Windows.Graphics.Imaging.BitmapPixelFormat, Windows.Graphics.Imaging, ContentType=WindowsRuntime] | Out-Null
@@ -272,5 +307,54 @@ if (-not (Test-Path -LiteralPath $nativeDir)) {
     } finally { $script:sourceBitmap.Dispose() }
   }
 }
+
+
+# ── 5. 주간 리셋 '새로운 한 주' 팝업 (2026-08-17 06:00 실사고) ─────────────────────────────────────
+# 팝업 하단 버튼 줄 '닫기 · 협동 미션 참여하기' 의 녹색 버튼이 이 영역(540,625,340,60) 안에 들어와, '하기' 부분 일치가
+# '참여하기'@(776,654) 를 결과 화면 버튼으로 잡았다 (08-17 06:00:46 '시작: 결과 화면 감지 - 재입장부터 진행' → 완료 마커 오기록 →
+# 그 자리 '다시 하기' 클릭 → 4초 뒤 '협동 미션 전체 창' - 보관 로그 run_20260817_h06m01s29). 실제 탐색 함수가 제외 조각 단어를
+# 건너뛰어 null 을 돌려주는지 · 고치기 전 꼴(제외 없는 일반 3어휘)은 그 버튼을 잡는지(재현) · 이진화 폴백도 같은 제외를
+# 받는지(캡처 순서 · 구제 로그)를 본다. 프레임 2장 = 보관 캡처 + 같은 날 오류 캡처(팝업 본문이 다른 판) - 하단 버튼 줄은 같다.
+$weeklyFrames = @(
+  (Join-Path $projectRoot '던전이미지\공통\20260817_주간리셋팝업_입장대기_1272.png'),
+  (Join-Path $projectRoot '던전이미지\공통\20260917_Log폴더_덮어쓰기_보존_원본사본\error_20260817_h06m00s43.png'))
+# '협동 미션 참여하기' 녹색 버튼 안쪽 상자(캡처 픽셀 = 1272 기준 좌표 - 보관 캡처 실측 버튼 x 597~870 / y 626~684 의 안쪽)
+$weeklyJoinBox = @{ Left = 610; Top = 632; Right = 860; Bottom = 680 }
+foreach ($weeklyPath in $weeklyFrames) {
+  $weeklyName = [IO.Path]::GetFileNameWithoutExtension($weeklyPath)
+  if (-not (Test-Path -LiteralPath $weeklyPath)) {
+    # 2절 문(0911 폴더)을 지난 PC 는 보관 폴더가 있는 PC 다 - 파일이 없으면 이동이라 SKIP 이 아니라 FAIL (러너 머리 2026-10-07 SKIP 규칙)
+    "FAIL 5절 보관 캡처 없음: $weeklyPath - 폴더를 옮겼다면 이 테스트의 경로도 함께 고칠 것"
+    $fails++
+    continue
+  }
+  $script:sourceBitmap = [System.Drawing.Bitmap]::FromFile($weeklyPath)
+  try {
+    # 고치기 전 재현: 제외 없는 일반 3어휘 (= HEAD 의 첫 루프) - 그 버튼 안을 잡아야 수정에 근거가 있다
+    $beforePoint = $null
+    foreach ($searchWord in @('다시', '다셔', '하기')) {
+      $beforePoint = Find-GameTextPoint -Game $null -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
+        -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5
+      if ($beforePoint) { break }
+    }
+    $beforeText = if ($beforePoint) { "({0},{1})" -f $beforePoint.X, $beforePoint.Y } else { 'null' }
+    $beforeInside = ($null -ne $beforePoint) -and ($beforePoint.X -ge $weeklyJoinBox.Left) -and ($beforePoint.X -le $weeklyJoinBox.Right) -and
+      ($beforePoint.Y -ge $weeklyJoinBox.Top) -and ($beforePoint.Y -le $weeklyJoinBox.Bottom)
+    Assert-Case ("WJ1 주간 팝업 고치기 전 {0}: 제외 없는 '하기' 일치 {1} 가 '협동 미션 참여하기' 버튼 안 (재현)" -f $weeklyName, $beforeText) $beforeInside $true
+    # 고친 후: 실제 탐색 함수 - 결과 화면 버튼이 아님
+    $script:captureModes.Clear()
+    $script:dgRetryBinaryFallbackLogged = $false
+    $weeklyLogsBefore = $script:fallbackLogs.Count
+    $weeklyPoint = Find-DgRetryButtonPoint -Game $null
+    $weeklyText = if ($weeklyPoint) { "({0},{1})" -f $weeklyPoint.X, $weeklyPoint.Y } else { 'null' }
+    Assert-Case ("WJ2 주간 팝업 {0}: 탐색 null (실제 {1})" -f $weeklyName, $weeklyText) ($null -eq $weeklyPoint) $true
+    Assert-Case ("WJ3 주간 팝업 {0}: 캡처 순서 일반 3 → 이진화 3 (일반 판독도 제외 - 이진화 경로까지 감)" -f $weeklyName) ($script:captureModes -join ',') 'normal,normal,normal,bin,bin,bin'
+    Assert-Case ("WJ4 주간 팝업 {0}: 이진화 구제 로그 없음 (이진화도 같은 제외)" -f $weeklyName) ($script:fallbackLogs.Count - $weeklyLogsBefore) 0
+    Assert-Case ("WJ5 주간 팝업 {0}: 다음 층 탐색도 null" -f $weeklyName) ($null -eq (Find-DgNextFloorButtonPoint -Game $null)) $true
+  } finally {
+    $script:sourceBitmap.Dispose()
+  }
+}
+$script:dgRetryBinaryFallbackLogged = $true
 
 exit $fails

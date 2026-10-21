@@ -3993,7 +3993,8 @@ function Find-GameTextPoint {
     [string]$ExactText = '',
     [int]$Scale = 3,
     $Engine = $ocrKoreanEngine,
-    [switch]$BinaryWhiteText
+    [switch]$BinaryWhiteText,
+    [string[]]$ExcludeText = @()
   )
 
   # 영역을 OCR로 읽되 단어별 위치(BoundingRect)까지 받아, 찾는 글자가 포함된 단어의
@@ -4004,6 +4005,7 @@ function Find-GameTextPoint {
   # 글자를 못 찾거나 캡처에 실패하면 $null 을 돌려줍니다.
   # BinaryWhiteText: 흰 글자만 남기는 이진화 (Get-GameRegionCapture 참고). 광택 그라데이션 버튼
   # 위의 흰 글자처럼 배경 색이 판독을 흔드는 자리에서 호출부가 폴백으로 켠다 (2026-09-11 실사고).
+  # ExcludeText: 부분 일치(2차)에서 이 조각이 하나라도 든 단어는 건너뜁니다(1차 정확 일치는 그대로).
   $capture = Get-GameRegionCapture -Game $Game -ReferenceX $ReferenceX -ReferenceY $ReferenceY `
     -RegionWidth $RegionWidth -RegionHeight $RegionHeight -Scale $Scale -BinaryWhiteText:$BinaryWhiteText
   if (-not $capture) { return $null }
@@ -4024,7 +4026,10 @@ function Find-GameTextPoint {
       # 2차: 찾는 글자가 포함된 첫 단어 (읽기 순서 = 왼쪽부터)
       foreach ($line in $result.Lines) {
         foreach ($word in $line.Words) {
-          if (($word.Text -replace '\s', '').Contains($SearchText)) { $matchedWord = $word; break }
+          $wordText = $word.Text -replace '\s', ''
+          if (-not $wordText.Contains($SearchText)) { continue }
+          if (@($ExcludeText | Where-Object { $wordText.Contains($_) }).Count -gt 0) { continue }
+          $matchedWord = $word; break
         }
         if ($matchedWord) { break }
       }
@@ -7189,12 +7194,16 @@ function Wait-DgTributeCostSettles {
 function Find-DgRetryButtonPoint {
   param([System.Diagnostics.Process]$Game)
 
+  $retryExcludeText = @('참여')
+
   # 결과 화면의 '다시 하기' 버튼을 찾습니다. OCR이 '다시'를 '다셔'로 깨뜨리거나
   # 기본 배율(3)에서는 '하기'만 읽는 경우가 있어(실측) 배율 5로 여러 후보를 찾습니다.
-  # ('하기'는 이 영역에 다시 하기 버튼 글자만 들어와 안전 - 나가기는 영역 밖 + '가기')
+  # ('하기'는 결과 화면에서는 다시 하기 버튼 글자뿐이지만(나가기는 영역 밖 + '가기') 월요일 주간 리셋 팝업의 '협동 미션 참여하기'
+  #  버튼도 이 영역에 들어와 '하기'로 잡혔습니다 - 2026-08-17 실사고: 시작 판정이 결과 화면으로 오판 → 완료 마커 오기록 → 그 버튼 클릭.
+  #  그래서 두 판독 모두 '참여'가 든 단어는 제외 - 회귀 tests\test_dg_retry_button_offline.ps1 5절)
   foreach ($searchWord in @('다시', '다셔', '하기')) {
     $point = Find-GameTextPoint -Game $Game -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
-      -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5
+      -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -ExcludeText $retryExcludeText -Scale 5
     if ($point) { return $point }
   }
   # 2026-09-11 실사고 (하루 4회 정지): 게임이 DPI 미인식이라 150% 디스플레이에서는 1272 렌더를
@@ -7207,7 +7216,7 @@ function Find-DgRetryButtonPoint {
   # (진리표 tests\test_dg_retry_button_offline.ps1, 캡처 던전이미지\심층던전\20260911_심층결과화면_*).
   foreach ($searchWord in @('다시', '다셔', '하기')) {
     $point = Find-GameTextPoint -Game $Game -ReferenceX $rgDgRetryBtn[0] -ReferenceY $rgDgRetryBtn[1] `
-      -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -Scale 5 -BinaryWhiteText
+      -RegionWidth $rgDgRetryBtn[2] -RegionHeight $rgDgRetryBtn[3] -SearchText $searchWord -ExcludeText $retryExcludeText -Scale 5 -BinaryWhiteText
     if ($point) {
       # 실기 증거용 - 폴백이 구한 회차를 로그로 구분한다. 폴링 루프 여러 곳에서 불리므로 회차당 첫 1회만.
       if (-not $script:dgRetryBinaryFallbackLogged) {
