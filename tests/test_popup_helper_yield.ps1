@@ -8,12 +8,22 @@
 #   시작 스윕: user-active 면 $startSweep-- 후 continue (외부 1.2초 대기도 건너뜀)
 #   생활 메뉴: 각 호출 직후 메타 확인, user-active 면 $menuTry-- 후 continue
 # 6. 주간 리셋 캡처 실패 게이트(구현 단위 ④′ - 2026-10-18): 두 번째 판독 실패(원인 셋) → 포커스·클릭·메타 0 · 참 · 스윕 freeze / 시작 스윕 for(1..2) 3곳은 복구까지 동결 → 같은 시도로 다시 스윕해 닫음(시도 미소모) / 정상 경로 그대로 / 네트워크는 그대로(사전 포커스 1 · 클릭 0)
+# 7. 시작부 팝업 정리의 캡처 실패 회전(구현 단위 C8): 스윕 안에 실패가 있었으면(이미 복구 포함) 끊지 않고 블록이 복구까지 동결 → 같은 시도로 다시 스윕(시도 미소모 · 스윕이 참이어도 1.2초 없이) / 그 회전에 사용자 조작 취소가 겹치면 조작이 끝날 때까지 기다린 뒤 한 번 되돌림(분기 순서) / 평상시 그대로
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 $workerPath = Join-Path $root 'mabinogi_run_once.ps1'
 foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-PurchasePopupSweep', 'Close-WeeklyCoopResetPopup')) {
-  Invoke-Expression $definition
+  # 원문 스윕은 Invoke-RealPurchasePopupSweep 이름으로 올리고 아래 감싸개가 호출 수를 셉니다 (구현 단위 C8)
+  Invoke-Expression ($definition -replace '^function Invoke-PurchasePopupSweep\b', 'function Invoke-RealPurchasePopupSweep')
+}
+function Invoke-PurchasePopupSweep {
+  # 호출 수 상한 감싸개 - 시작 스윕 루프가 대기 없이 끝없이 도는 변이(끊기가 영영 거짓 · 동결 while 삭제)에서도 러너가 멈추지 않고
+  # FAIL 로 끝나게 합니다(러너에 파일별 시간 상한 없음 · 정상 실행 합계는 이 상한보다 훨씬 작음). 반환은 원문 그대로
+  param($Game)
+  $script:sweepCallCount++
+  if ($script:sweepCallCount -gt 1000) { throw '스윕 호출 1000회 초과 - 시작 스윕 루프가 끝나지 않습니다' }
+  return (Invoke-RealPurchasePopupSweep -Game $Game)
 }
 
 $fails = 0
@@ -461,5 +471,134 @@ try { $networkCallResult = Close-NetworkUnstablePopup -Game $game } catch { $net
 # 예외 | 반환 | 사전 포커스 | 클릭(예비 좌표 + 화면 좌표) | 플래그
 Check-Equal 'GN1 네트워크 그대로 - 짝 판독 캡처 실패 → 사전 포커스 1 · 재판독이 막아 클릭 0 · 거짓 · 플래그 참' `
   ("$networkCallError|$networkCallResult|$($script:focusCalls)|$($script:gamePointClicks + $script:screenPointClicks)|$($script:screenCaptureFailing)") '|False|1|0|True'
+
+# ── 7. 시작부 팝업 정리의 캡처 실패 회전 (구현 단위 C8 - 2026-10-19) ─────────────────────────────
+# 섹션 3 의 원문 루프 셋($sweepLoops)을 그대로 돌립니다. 스윕 안에 캡처 실패가 있던 회전(진입 때 이미 실패 · 첫 판독/구매 탐색/하단 판독에서 시작 ·
+# 같은 스윕 안 복구)을 주입하고, 기대는 '끊지 않고 블록이 복구까지 동결 → 같은 시도로 다시 스윕(시도 미소모)' / 평상시 그대로입니다.
+# SF12 는 그 회전에 사용자 조작 취소가 겹친 꼴입니다(같은 스윕 안 복구 뒤 위임 함수 - 섹션 1 보상 화면 모형처럼 기다리지 않고 참). 기대는 '조작이
+# 끝날 때까지 기다린 뒤 시도를 한 번 되돌려 새로 스윕' - 실패 쪽 되돌림이 먼저 넘기면 다음 회전 서두가 클릭 메타를 비워, 다음 스윕이 거짓일 때
+# 양보 없이 시작 판정으로 내려갑니다(규칙 4). 이 행만 끝에 두 열(양보 호출 수 · 루프 끝 남은 조작 ms)을 더 봅니다.
+# SF13 은 SF12 와 같은 꼴에서 위임 함수의 클릭이 전송된 회전입니다(조작 0 · 스윕 참 · 놓친 구매 팝업은 다시 스윕이 닫음). 기대는 '스윕이 참이어도 그 안에
+# 실패가 있었으면 시도를 쓰지 않고 1.2초 없이 같은 시도로 다시 스윕'(구현 명세 C8 1.1 '스윕 참 회전') - SF12 는 그 회전을 양보 분기가 먼저 받으므로, 미룸 표지의 일련번호 몫을 스윕 참 회전에서 보는 행은 이것뿐입니다.
+# 7-1. 모의 재정의(이 뒤 호출에만 적용) - 앞 GN1 의 원문 네트워크 helper·단어 판독 모의가 닿지 않게 끊습니다(순서 계약)
+function Close-NetworkUnstablePopup { param($Game) $false }
+function Get-GameRegionOcrWords { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $Scale, $Engine) return @() }
+Invoke-Expression ([string]$workerFunctionNodes['Close-CoopMissionScreen'].Extent.Text)   # 원문 - 서두 가드 없는 판독이 스윕 안 복구 지점
+function Close-QuestRewardScreen {
+  # 위임 함수 모형 - 섹션 1 과 같은 꼴(기다리지 않고, 취소돼도 1초 뒤 참) + 원문 서두 가드 + 취소 뒤 '조작 중 사용자가 직접 닫음'(SF12 - 다음 스윕 거짓)
+  param($Game, $BottomText)
+  if ($script:screenCaptureFailing) { return $false }
+  if (-not $script:rewardOpen) { return $false }
+  if ($script:rewardCancelLeft -gt 0) {
+    $script:rewardCancelLeft--; $script:lastClickPerformed = $false; $script:lastClickSkipReason = 'user-active'
+    if ($script:rewardClosedByUser) { $script:rewardOpen = $false }
+  } else { $script:lastClickPerformed = $true; $script:lastClickSkipReason = ''; $script:clicksSent++; $script:rewardOpen = $false }
+  $script:vclock = $script:vclock.AddMilliseconds(1000)
+  return $true
+}
+$WEEKLY_BOTTOM_TEXT = '〔㉬닫기Space협동미션참여하기'   # 08-17 보관 캡처 판독문 - 하단 판독과 주간 helper 첫 판독은 같은 영역·배율
+function Get-GameRegionOcrText {
+  param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $Scale, $Engine)
+  if ($ReferenceX -eq 360) {
+    # 협동 완료 부제 - 주간 팝업 위라 '' · 지정하면 이 판독이 캡처를 되살림(원문 Register-CaptureSuccess 꼴)
+    $script:coopReads++
+    if ($script:screenCaptureFailing -and $script:recoverOnCoopRead) { $script:screenCaptureFailing = $false; $script:captureFailCause = $null }
+    return ''
+  }
+  if (($ReferenceX -eq $rgClearExit[0]) -and $script:weeklyOpen -and -not $script:screenCaptureFailing) { return $WEEKLY_BOTTOM_TEXT }
+  return ''
+}
+function Test-GameRestartPopup {
+  # 스윕 첫 판독 - 지정 회차면 실패 등록 뒤 거짓(스위치 판독의 그 밖 원인 꼴) · 50회 초과는 '끝나지 않는 루프' 표지(러너 멈춤 방지)
+  param($Game)
+  $script:restartReads++
+  if ($script:restartReads -gt 50) { throw '섹션 7 모의: 스윕 50회 초과 - 루프가 끝나지 않습니다' }
+  if ($script:restartFailCalls -contains $script:restartReads) { Register-MockCaptureFailure -Cause $script:injectCause }
+  return $false
+}
+function Find-GameTextPoint {
+  param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $SearchText, $ExactText)
+  if ($ReferenceX -eq $rgPopupClose[0]) {
+    $script:purchaseReads++
+    if ($script:purchaseFailCalls -contains $script:purchaseReads) { Register-MockCaptureFailure -Cause $script:injectCause; return $null }
+    if ($script:purchaseOpen -and -not $script:screenCaptureFailing) { return [pscustomobject]@{ X = 640; Y = 500 } }
+    return $null
+  }
+  if (($ReferenceX -eq $rgClearExit[0]) -and $script:weeklyOpen -and -not $script:screenCaptureFailing) { return [pscustomobject]@{ X = 495; Y = 654 } }
+  return $null
+}
+function Get-GameOcrText {
+  # 하단 판독(스위치 판독) - 지정 회차면 실패 등록 뒤 '' · 지정하면 이 판독이 캡처를 되살림(같은 스윕 안 복구)
+  param($Game)
+  $script:bottomReads++
+  if ($script:bottomFailCalls -contains $script:bottomReads) { Register-MockCaptureFailure -Cause $script:injectCause; return '' }
+  if ($script:recoverOnBottomRead -and $script:screenCaptureFailing) { $script:screenCaptureFailing = $false; $script:captureFailCause = $null }
+  if ($script:weeklyOpen -and -not $script:screenCaptureFailing) { return $WEEKLY_BOTTOM_TEXT }
+  return ''
+}
+function Test-SafeStopDuringCaptureFail {
+  $script:safeStopCalls++
+  if (($script:exitAtSafeStop -gt 0) -and ($script:safeStopCalls -ge $script:exitAtSafeStop)) { throw 'EXIT4-모의: 게임 프로세스 종료(공통 진입점 코드 4)' }
+  if ($script:safeStopCalls -gt 30) { throw '섹션 7 모의: 공통 진입점 30회 초과 - 동결이 복구를 보지 못합니다(자기 잠금)' }
+}
+function Test-CaptureRecovered {
+  # 복구 탐침 - 정한 회차부터 복구 · 실패 탐침은 일련번호 +1(원문은 실패 캡처마다 등록) · 30회 초과 표지(공통 진입점을 빠뜨린 변이도 멈추지 않게)
+  param($Game)
+  $script:probeCalls++
+  if ($script:probeCalls -gt 30) { throw '섹션 7 모의: 복구 탐침 30회 초과 - 동결이 끝나지 않습니다' }
+  if ($script:screenCaptureFailing -and ($script:recoverAtProbe -gt 0) -and ($script:probeCalls -ge $script:recoverAtProbe)) {
+    $script:screenCaptureFailing = $false; $script:captureFailCause = $null
+  } elseif ($script:screenCaptureFailing) { $script:captureFailSerial++ }
+  return (-not $script:screenCaptureFailing)
+}
+function Reset-StartFreezeCase {
+  param([bool]$FailingAtEntry = $false, [string]$Cause = '', [int[]]$RestartFailCalls = @(), [int[]]$PurchaseFailCalls = @(), [int[]]$BottomFailCalls = @(),
+    [int]$RecoverAtProbe = 0, [bool]$Purchase = $false, [bool]$Weekly = $false, [int]$ExitAtSafeStop = 0, [bool]$RecoverOnBottomRead = $false, [bool]$RecoverOnCoopRead = $false,
+    [bool]$Reward = $false, [int]$RewardCancel = 0, [bool]$RewardClosedByUser = $false, [int]$UserBusyMs = 0)
+  Reset-WeeklyGateCase -Purchase $Purchase -Weekly $Weekly -RecoverAtProbe $RecoverAtProbe
+  $script:recoverOnBottomRead = $RecoverOnBottomRead; $script:recoverOnCoopRead = $RecoverOnCoopRead
+  $script:injectCause = $(if ($Cause) { $Cause } else { $CAUSE_OTHER })
+  $script:restartFailCalls = @($RestartFailCalls); $script:purchaseFailCalls = @($PurchaseFailCalls); $script:bottomFailCalls = @($BottomFailCalls)
+  $script:restartReads = 0; $script:purchaseReads = 0; $script:bottomReads = 0; $script:coopReads = 0
+  $script:exitAtSafeStop = $ExitAtSafeStop
+  # 보상 화면(위임 함수 모형) · 사용자 조작 - Reset-WeeklyGateCase 가 비운 값(보상 닫힘 · 취소 0 · 조작 0) 위에 이 행 값을 둡니다
+  $script:rewardOpen = $Reward; $script:rewardCancelLeft = $RewardCancel; $script:rewardClosedByUser = $RewardClosedByUser; $script:userBusyMs = $UserBusyMs
+  if ($FailingAtEntry) { Register-MockCaptureFailure -Cause $script:injectCause }
+}
+function Get-StartFreezeShown {
+  param([string]$CallError)
+  # 예외 | 끝 플래그 | 공통 진입점 | 탐침 | 경과(불변 문화권 - -f 는 현재 문화권을 따라 소수점이 바뀜) | 전송 클릭 | 눈감은 클릭 | 구매 열림 | 주간 열림 | 첫 판독 수
+  return ("{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}" -f $CallError, $script:screenCaptureFailing, $script:safeStopCalls, $script:probeCalls, (Elapsed).ToString([Globalization.CultureInfo]::InvariantCulture),
+    $script:clicksSent, $script:blindClicks, $script:purchaseOpen, $script:weeklyOpen, $script:restartReads)
+}
+$sfRows = @(
+  @{ Id = 1; Label = '진입 때 이미 실패(그 밖) · 팝업 없음 · 탐침 2회째 복구'; Args = @{ FailingAtEntry = $true; RecoverAtProbe = 2 }; Expect = '|False|2|2|4|0|0|False|False|1' },
+  @{ Id = 2; Label = '진입 때 이미 실패(그 밖) · 주간 팝업 · 탐침 2회째 복구'; Args = @{ FailingAtEntry = $true; RecoverAtProbe = 2; Weekly = $true }; Expect = '|False|2|2|7.2|1|0|False|False|2' },
+  @{ Id = 3; Label = '진입 때 이미 실패(최소화) · 구매 팝업 · 탐침 1회째 복구'; Args = @{ FailingAtEntry = $true; Cause = 'MIN'; RecoverAtProbe = 1; Purchase = $true }; Expect = '|False|1|1|4.2|1|0|False|False|2' },
+  @{ Id = 4; Label = '첫 판독에서 실패 시작(그 밖) · 팝업 없음 · 탐침 2회째 복구'; Args = @{ RestartFailCalls = @(1); RecoverAtProbe = 2 }; Expect = '|False|2|2|4|0|0|False|False|2' },
+  @{ Id = 5; Label = '구매 닫기 탐색에서 실패 시작(그 밖) · 구매 팝업 · 탐침 1회째 복구'; Args = @{ PurchaseFailCalls = @(1); RecoverAtProbe = 1; Purchase = $true }; Expect = '|False|1|1|4.2|1|0|False|False|3' },
+  @{ Id = 6; Label = '둘째 시도 첫 판독에서 실패 시작 · 구매+주간 팝업 · 탐침 1회째 복구'; Args = @{ RestartFailCalls = @(2); RecoverAtProbe = 1; Purchase = $true; Weekly = $true }; Expect = '|False|1|1|7.4|2|0|False|False|3' },
+  @{ Id = 7; Label = '진입 때 이미 실패(창 좌표) · 복구 없음 · 공통 진입점 3회째 게임 종료'; Args = @{ FailingAtEntry = $true; Cause = 'WG'; ExitAtSafeStop = 3 }; Expect = 'EXIT4-모의: 게임 프로세스 종료(공통 진입점 코드 4)|True|3|2|4|0|0|False|False|0' },
+  @{ Id = 8; Label = '교대 - 첫 판독 실패 다섯 번 · 매번 탐침 1회째 복구'; Args = @{ RestartFailCalls = @(1, 2, 3, 4, 5); RecoverAtProbe = 1 }; Expect = '|False|5|5|10|0|0|False|False|6' },
+  @{ Id = 9; Label = '평상시 - 실패 없음 · 팝업 없음'; Args = @{}; Expect = '|False|0|0|0|0|0|False|False|1' },
+  @{ Id = 10; Label = '구매 탐색 실패 → 같은 스윕 하단 판독이 복구 · 구매 팝업'; Args = @{ PurchaseFailCalls = @(1); Purchase = $true; RecoverOnBottomRead = $true }; Expect = '|False|0|0|2.2|1|0|False|False|3' },
+  @{ Id = 11; Label = '하단 판독 실패 → 같은 스윕 협동 완료 helper 판독이 복구 · 주간 팝업'; Args = @{ BottomFailCalls = @(1); Weekly = $true; RecoverOnCoopRead = $true }; Expect = '|False|0|0|3.2|1|0|False|False|3' },
+  @{ Id = 12; Label = '구매 탐색 실패 → 같은 스윕 하단 판독이 복구 → 보상 화면 확인이 사용자 조작으로 취소(위임 - 기다리지 않음) · 조작 중 사용자가 닫음 · 조작 3초'; Args = @{ PurchaseFailCalls = @(1); RecoverOnBottomRead = $true; Reward = $true; RewardCancel = 1; RewardClosedByUser = $true; UserBusyMs = 3000 }; Expect = '|False|0|0|4|0|0|False|False|2|1|0'; YieldColumns = $true },
+  @{ Id = 13; Label = '구매 탐색 실패 → 같은 스윕 하단 판독이 복구 → 보상 화면 확인 전송(스윕 참) · 구매 팝업'; Args = @{ PurchaseFailCalls = @(1); RecoverOnBottomRead = $true; Reward = $true; Purchase = $true }; Expect = '|False|0|0|3.2|2|0|False|False|3' }
+)
+foreach ($sfLoopAst in $sweepLoops) {
+  $sfLoopBlock = [scriptblock]::Create($sfLoopAst.Extent.Text)
+  foreach ($sfRow in $sfRows) {
+    $sfArgs = @{} + $sfRow.Args
+    if ($sfArgs.Cause -eq 'MIN') { $sfArgs.Cause = $CAUSE_MINIMIZED } elseif ($sfArgs.Cause -eq 'WG') { $sfArgs.Cause = $CAUSE_WINDOW_GONE }
+    Reset-StartFreezeCase @sfArgs
+    $sfError = ''
+    try { & $sfLoopBlock } catch { $sfError = $_.Exception.Message }
+    $sfShown = Get-StartFreezeShown -CallError $sfError
+    # SF12 만: + 양보 호출 수 | 루프 끝 남은 조작(ms) - 시작 판정 전에 조작이 끝났는지
+    if ($sfRow.YieldColumns) { $sfShown += ('|{0}|{1}' -f $script:yieldCalls, $script:userBusyMs) }
+    Check-Equal ('SF{0} 시작 스윕 {1}: {2}' -f $sfRow.Id, $sfLoopAst.Extent.StartLineNumber, $sfRow.Label) $sfShown $sfRow.Expect
+  }
+}
 
 exit $fails

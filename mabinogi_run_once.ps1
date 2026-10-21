@@ -10035,16 +10035,18 @@ function Invoke-NormalDungeonCycle {
   # 3연속 즉사 → 정지. 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건)
   # 스윕이 캡처 실패 중에 참이면 주간 리셋 팝업의 캡처 실패 게이트가 닫기 클릭을 미룬 회전입니다(구현 단위 ④′). 화면이 돌아올 때까지
   # 동결하고(규칙 15 - 공통 진입점·탐침) 시도를 되돌려 다시 스윕합니다 - 팝업을 덮어 둔 채 시작 판정으로 가면 덮인 화면을 오판합니다(08-17 꼴)
+  # 스윕 안에서 캡처 실패가 있었으면(아직 실패 중이든 이미 복구됐든 - 실패 일련번호로 봄) 거짓이어도 판독이 빠진 회전이라 '팝업 없음' 이 아닙니다 - 끊지 않고 같은 블록이 받아 복구 뒤 같은 시도로 다시 스윕합니다(구현 단위 C8 - 규칙 15)
+  # 조작 양보 되돌림을 실패 회전 되돌림($startSweepDeferred)보다 먼저 둡니다 - 스윕 안 캡처 실패와 사용자 조작 취소가 겹친 회전도 조작이 끝날 때까지 기다린 뒤 시도를 한 번만 되돌려 새로 스윕합니다(규칙 4 - 실패 쪽이 먼저 넘기면 다음 회전 서두가 클릭 메타를 비워 양보가 사라짐)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     $script:lastClickSkipReason = ''
-    if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
-    $startSweepDeferred = [bool]$script:screenCaptureFailing
+    $startSweepSerial = $script:captureFailSerial
+    if (-not (Invoke-PurchasePopupSweep -Game $Game) -and -not $script:screenCaptureFailing -and $script:captureFailSerial -eq $startSweepSerial) { break }
+    $startSweepDeferred = [bool]$script:screenCaptureFailing -or ($script:captureFailSerial -ne $startSweepSerial)
     while ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 2
       [void](Test-CaptureRecovered -Game $Game)
     }
-    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
     # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
     # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
@@ -10054,6 +10056,7 @@ function Invoke-NormalDungeonCycle {
       $startSweep--
       continue
     }
+    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     Start-Sleep -Milliseconds 1200
   }
   $titleText = & $readDgTitle
@@ -12222,16 +12225,18 @@ function Invoke-HuntingGroundCycle {
   # 시작 화면 판정 전 전체 화면 팝업 정리 (던전/심층 시작부와 같은 계약 - 2026-08-01 실사고)
   # 스윕이 캡처 실패 중에 참이면 주간 리셋 팝업의 캡처 실패 게이트가 닫기 클릭을 미룬 회전입니다(구현 단위 ④′). 화면이 돌아올 때까지
   # 동결하고(규칙 15 - 공통 진입점·탐침) 시도를 되돌려 다시 스윕합니다 - 팝업을 덮어 둔 채 시작 판정으로 가면 덮인 화면을 오판합니다(08-17 꼴)
+  # 스윕 안에서 캡처 실패가 있었으면(아직 실패 중이든 이미 복구됐든 - 실패 일련번호로 봄) 거짓이어도 판독이 빠진 회전이라 '팝업 없음' 이 아닙니다 - 끊지 않고 같은 블록이 받아 복구 뒤 같은 시도로 다시 스윕합니다(구현 단위 C8 - 규칙 15)
+  # 조작 양보 되돌림을 실패 회전 되돌림($startSweepDeferred)보다 먼저 둡니다 - 스윕 안 캡처 실패와 사용자 조작 취소가 겹친 회전도 조작이 끝날 때까지 기다린 뒤 시도를 한 번만 되돌려 새로 스윕합니다(규칙 4 - 실패 쪽이 먼저 넘기면 다음 회전 서두가 클릭 메타를 비워 양보가 사라짐)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     $script:lastClickSkipReason = ''
-    if (-not (Invoke-PurchasePopupSweep -Game $Game)) { break }
-    $startSweepDeferred = [bool]$script:screenCaptureFailing
+    $startSweepSerial = $script:captureFailSerial
+    if (-not (Invoke-PurchasePopupSweep -Game $Game) -and -not $script:screenCaptureFailing -and $script:captureFailSerial -eq $startSweepSerial) { break }
+    $startSweepDeferred = [bool]$script:screenCaptureFailing -or ($script:captureFailSerial -ne $startSweepSerial)
     while ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 2
       [void](Test-CaptureRecovered -Game $Game)
     }
-    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
     # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
     # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
@@ -12241,6 +12246,7 @@ function Invoke-HuntingGroundCycle {
       $startSweep--
       continue
     }
+    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     Start-Sleep -Milliseconds 1200
   }
 
@@ -19275,16 +19281,18 @@ try {
   # 스윕이 닫은 경우에만 1.2초 대기 후 재확인, 최대 2회 - 리뷰 조건. 콘텐츠 공통)
   # 스윕이 캡처 실패 중에 참이면 주간 리셋 팝업의 캡처 실패 게이트가 닫기 클릭을 미룬 회전입니다(구현 단위 ④′). 화면이 돌아올 때까지
   # 동결하고(규칙 15 - 공통 진입점·탐침) 시도를 되돌려 다시 스윕합니다 - 팝업을 덮어 둔 채 시작 판정으로 가면 덮인 화면을 오판합니다(08-17 꼴)
+  # 스윕 안에서 캡처 실패가 있었으면(아직 실패 중이든 이미 복구됐든 - 실패 일련번호로 봄) 거짓이어도 판독이 빠진 회전이라 '팝업 없음' 이 아닙니다 - 끊지 않고 같은 블록이 받아 복구 뒤 같은 시도로 다시 스윕합니다(구현 단위 C8 - 규칙 15)
+  # 조작 양보 되돌림을 실패 회전 되돌림($startSweepDeferred)보다 먼저 둡니다 - 스윕 안 캡처 실패와 사용자 조작 취소가 겹친 회전도 조작이 끝날 때까지 기다린 뒤 시도를 한 번만 되돌려 새로 스윕합니다(규칙 4 - 실패 쪽이 먼저 넘기면 다음 회전 서두가 클릭 메타를 비워 양보가 사라짐)
   for ($startSweep = 1; $startSweep -le 2; $startSweep++) {
     $script:lastClickSkipReason = ''
-    if (-not (Invoke-PurchasePopupSweep -Game $game)) { break }
-    $startSweepDeferred = [bool]$script:screenCaptureFailing
+    $startSweepSerial = $script:captureFailSerial
+    if (-not (Invoke-PurchasePopupSweep -Game $game) -and -not $script:screenCaptureFailing -and $script:captureFailSerial -eq $startSweepSerial) { break }
+    $startSweepDeferred = [bool]$script:screenCaptureFailing -or ($script:captureFailSerial -ne $startSweepSerial)
     while ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 2
       [void](Test-CaptureRecovered -Game $game)
     }
-    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     # 사용자 조작으로 취소된 스윕은 시도를 쓰지 않습니다 (2026-09-13 설계 합의: 취소만 반환하는 모의에서 클릭
     # 0회로 두 시도와 대기 2.4초를 소모했음). 여기서 **한 번 더 기다립니다** - 스윕의 직접 닫기는 이미
     # 기다렸지만(그때는 유휴라 즉시 반환), 보상 화면·협동·네트워크 **위임 함수는 기다리지 않고** 돌아오므로
@@ -19294,6 +19302,7 @@ try {
       $startSweep--
       continue
     }
+    if ($startSweepDeferred) { $startSweep--; continue }   # 시도 미소모(규칙 15 ②) - 같은 시도로 다시 스윕
     Start-Sleep -Milliseconds 1200
   }
 

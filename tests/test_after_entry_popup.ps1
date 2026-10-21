@@ -85,11 +85,30 @@ Assert-Case '협동: 폴백 로그가 클릭 전에 나오지 않음' `
 # 메인 공통 = 3곳, '닫은 경우에만 1.2초 대기, 최대 2회' 계약
 # 2026-09-13: 스윕과 1.2초 대기 사이에 '사용자 조작 취소 → 기다린 뒤 시도 되돌림' 분기가 끼었다 (test_popup_helper_yield
 # 가 동작을 봄). 여기서는 배선 3곳의 **순서**만 고정한다 - 스윕 → user-active 되돌림(Wait-UserYieldEnd 포함) → 대기.
-Assert-Case '시작 스윕: 3곳(던전·사냥터·메인 공통) - 스윕 → 취소 되돌림 → 1.2초 대기 순서' `
-  ([regex]::Matches($workerAll, "if \(-not \(Invoke-PurchasePopupSweep -Game \`$[Gg]ame\)\) \{ break \}[\s\S]{0,900}?lastClickSkipReason -eq 'user-active'\) \{\s+Wait-UserYieldEnd[^
-]+\s+\`$startSweep--\s+continue\s+\}\s+Start-Sleep -Milliseconds 1200").Count) 3
+# 2026-10-19 구현 단위 C8: 스윕 앞 실패 일련번호 기록 + 끊기 조건에 캡처 실패 없음(플래그 · 일련번호) - 실패가 있던 회전은 ④′ 동결·재스윕 블록이 받고, 블록 아래는 조작 양보 되돌림이 실패 되돌림보다 앞(겹친 회전도 기다린 뒤 한 번 되돌림) (동작은 test_popup_helper_yield 섹션 7)
+# 아래 두 구조 단언(순서·거리)은 주석 토큰을 지운 워커 사본으로 봅니다(구현 단위 C8 - 소스 문자열 단언은 주석 뺀 사본). 공용 Remove-SourceComments 는
+# 주석을 같은 길이 공백으로 바꿔 위치를 보존하므로 거리 창([\s\S]{0,N})이 주석 길이를 그대로 셉니다 - 여기서는 토큰째 지워 루프 안 주석이 창을 늘리지 않게 합니다
+function Remove-SourceCommentTokens {
+  param([string]$Text)
+  $tokens = $null; $errors = $null
+  [void][System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$tokens, [ref]$errors)
+  if (@($errors).Count -gt 0) { throw "워커 파서 오류 - 주석 지운 사본을 만들 수 없습니다: $($errors[0].Message)" }
+  $builder = New-Object System.Text.StringBuilder ($Text.Length)
+  $copyFrom = 0
+  foreach ($token in $tokens) {
+    if ($token.Kind -ne [System.Management.Automation.Language.TokenKind]::Comment) { continue }
+    [void]$builder.Append($Text, $copyFrom, $token.Extent.StartOffset - $copyFrom)
+    $copyFrom = $token.Extent.EndOffset
+  }
+  [void]$builder.Append($Text, $copyFrom, $Text.Length - $copyFrom)
+  return $builder.ToString()
+}
+$workerCode = Remove-SourceCommentTokens -Text $workerAll
+Assert-Case '시작 스윕: 3곳(던전·사냥터·메인 공통) - 기록 → 끊기(스윕 거짓 ∧ 실패 없음) → 취소 되돌림 → 실패 되돌림 → 1.2초 대기 순서' `
+  ([regex]::Matches($workerCode, "\`$startSweepSerial = \`$script:captureFailSerial\s+if \(-not \(Invoke-PurchasePopupSweep -Game \`$[Gg]ame\) -and -not \`$script:screenCaptureFailing -and \`$script:captureFailSerial -eq \`$startSweepSerial\) \{ break \}[\s\S]{0,900}?lastClickSkipReason -eq 'user-active'\) \{\s+Wait-UserYieldEnd[^
+]+\s+\`$startSweep--\s+continue\s+\}\s+if \(\`$startSweepDeferred\) \{ \`$startSweep--; continue \}[^\r\n]*\s+Start-Sleep -Milliseconds 1200").Count) 3
 Assert-Case '시작 스윕: 던전 사이클 제목 첫 판독보다 앞' `
-  ([bool]([regex]::Match($workerAll, 'function Invoke-NormalDungeonCycle[\s\S]{0,5200}').Value -match
+  ([bool]([regex]::Match($workerCode, 'function Invoke-NormalDungeonCycle[\s\S]{0,5200}').Value -match
     'Invoke-PurchasePopupSweep[\s\S]{0,900}\$titleText = & \$readDgTitle')) $true
 
 exit $fails
