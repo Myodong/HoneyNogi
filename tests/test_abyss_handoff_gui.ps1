@@ -122,13 +122,39 @@
 #   [C4-12′·C4-13] 시작 화면 미확인 표지도 재전달(next·own launched → 다음 후보 같은 항목) · 커스텀 재개 보류 4종 · N6′(비커스텀 - 다음 시작 새 실행 id 라 none).
 #   [KP] 클리어 전 정지 술어 Test-AbyssKeepLaunchOnStop(R-6 (나) · J22) - 진리표(KP0) · own·next 기동의 표지 없는 코드 4(KP1·KP2) · 코드 1 같은 항목 3회째 정지(KP3) ·
 #        그 밖 크래시 코드(KP4)는 넘긴 nonce 를 열어 둠(다음 시작이 같은 항목) · 놓아줌 표지는 지금처럼 닫음(KP5 = ⑱′ N9′·O4‴·O4⁗ 의 (GUI 틱)) · 클리어 근거(마커·기록
-#        경로 계상)가 있으면 닫음(KP6) · Role none(KP7)·재개·마무리 실행(KP8)은 술어 밖. 같은 기준으로 기대가 바뀐 기존 행 셋: C4-18 · E-C1 코드 -1 · E-C1″ 픽스처.
+#        경로 계상)가 있으면 닫음(KP6) · Role none(KP7)·재개(KP8)는 술어 밖(마무리 실행은 구현 명세 ⑤b5 G3 로 술어 안 - KP0 · KP8 · H32e. H32d 는 그 판을 클리어한
+#        마무리 실행 워커가 넘긴 nonce 를 이미 닫은 실제 모양이라 술어가 닿지 않음 - 내부 검토 반영). 같은 기준으로 기대가
+#        바뀐 기존 행 셋: C4-18 · E-C1 코드 -1 · E-C1″ 픽스처.
 #   [(GUI 틱)] 이어받기 시작 경로(⑱′ test_abyss_handoff_start)의 워커 쪽 결과(워커 원문 [완료] 문구 · 종료 코드 · journal 파일 모양)를 입력으로 실제 타이머 틱 → 다음
 #        실제 Start-NextCycle(설계 v11 R4 6.1 ③ · 명세 5절 B16 - Resolve·끝 처리 두 함수만 직접 부르는 모양 금지): N3·N6·N12·O3·O10~O12·O17 · 복구 기동 L4a~L4c·L5.
 #   [LR5] 커스텀이 재시작(RESTART) 상태로 멈춘 뒤 같은 앱의 비커스텀 기동은 own 을 먼저 고르지 않음(G4 · R-5 (가) - 인자 자체의 유일한 회귀, 옛 인자 대조 포함).
 #   [L5·S15] 비커스텀 어비스도 UNTIL 을 받음(설계 v11 R3 Q3 - ② 워커는 읽지 않음) · [S18·S21] 끝 처리 호출의 새 모양(G5 - 클리어 전 정지 술어 인자).
 #   [P11·P22 GUI 쪽] 정적(Test-CaseCode4Static) - 표지 판별 두 항 · 재전달 집합($relayMarker 우변 = G2 원문) · 커스텀 재개 보류는 $relayMarker 그대로(G5) ·
 #        숨김 2곳(꼬리 제거 함수 정의 1 · 호출 2 · 꼬리 목록) - ⑱′ test_abyss_handoff_start 의 워커 쪽 R4-P11 · P22 의 짝(명세 ② 3.2 정적 표).
+# 지키는 것 (구현 명세 ⑤b5 - 어비스 '다시 하기' 본류 배선 · GUI 다음 판 env · 열어 둠. 명세 ⑤b5 3.1 ⑯ 결합 · 3.4 · 설계 v11 R6 7.2~7.5 · 8.1 · R1 2.2):
+#   [하니스] 워커 본류 꼬리를 ⓪ 부터 자르고 완료 기록 if 를 조건식으로 찾음(결합 0′) - 결합 1~8 은 입장 방식·매칭을 비워 경로 거짓(옛 나가기)으로 그대로.
+#   [⑤b5 결합] 실제 Start-NextCycle env → 워커 원문 읽기(항목 · 다음 항목 · 마지막 판 · 마무리 실행 · 지정 시각) → 꼬리 전체(실제 경로 술어 · 보상 결정 · 재판단 · 클리어 기록 ·
+#        기록 확인 · 결정 사유 줄) → 두 끝 원문(exit 가로챔 - 그 안의 대기 둘 · 클릭 루프 · 진단은 결과 차례 모의) → 실제 타이머 틱: SS1 · SS3 · SS5~SS8 · SS11 · FB3 · FB4 ·
+#        FB10 · FB12 · FB13 · PC1~PC4 · PC6~PC8 · IH(재입장 11) · R6-RC1 · R6-RC2(Test-CaseRewardTailCoupling). PC5 는 test_abyss_pending_advance, 워커 쪽 행동은
+#        test_abyss_party_leader §9~§11, 재개(FB14 · FB18 · RC4 · RC5)는 구현 단계 ⑤c 몫입니다.
+#   [G1 · G3] S6(직렬화 호출 소유자에 다음 판 env) · 결합 5([설정] 커스텀 줄 끝 NEXT_OWNER · NEXT_BOUNDARY) · KP0 · KP8 · H32e(마무리 실행의 클리어 전 정지도 열어 둠) ·
+#        H32d(클리어한 마무리 실행 판 - 워커가 넘긴 nonce 를 닫아 끝 처리가 건드리지 않음). 'unconfirmed' 정지 칸은 상태줄 자르기를 다시 쓰지 않음(SS7) · S3 에 정지 함수의
+#        예약 파일 삭제(SS3 · SS11 '플래그 0' 의 정적 몫) - 둘 다 내부 검토 반영.
+#   [명세 리뷰 2 RV-11] H32f(진행 저장 실패 보류의 마무리 실행이 클리어 전 코드 4 - 앞 판 마커를 이번 판의 클리어 근거로 쓰지 않음 · 계상 0 · 전진 0 · 넘긴 nonce 열어 둠 →
+#        다음 시작이 대기열을 1회 반영한 뒤 같은 nonce 를 이어받음) · H32g(경계 - 진행 저장에 성공한 보류의 클리어 뒤 코드 4 는 마커 경로 그대로).
+# 지키는 것 (구현 명세 ⑤b6 - 멈출 때 · 다음 항목의 입장 방식이 바뀔 때 '나가기' → 필드, 같은 입장 방식의 다른 던전 · 난이도 '다른 던전 가기', 커스텀 어비스 혼자하기 ↔
+#   함께하기 · 우연한 만남 섞기. 명세 ⑤b6 3.4 ⑯ · 3.1 ⑯ · 3.2 ⑯ · 사용자 결정 2026-10-26 ① · 밤 ⓪):
+#   [하니스] 복귀 루프 모의 = 진짜 루프의 두 출구 모형(안전 중지 예약 파일이 있으면 소비 · 필드 확정 출구 ②의 [완료] 줄(워커 원문) · 넘겨받은 코드로 끝남 · -Plan ReturnInside 면
+#        '복귀 중 던전 안 2연속' 코드 4) · 꼬리 전체('whole')가 예외 없이 끝나면 종료 코드 0(워커 스크립트 끝 - B-8) · 마무리 실행 안내 형식($FINISH_NOTICE_FORMAT)은 GUI 원문
+#        캡처 · 결합 준비의 원인 조각 switch 는 대입 대상($otherCause · $exitCause · $moveCause)으로 고름 · 결정 줄 고르개에 끝말 둘("'나가기'로 던전 밖에 나와 마칩니다" ·
+#        "… 다음 항목으로 넘어갑니다") · 결정 뒤 예약을 만드는 모의 셋(클릭 루프 - 결과 무관 · '다른 던전 가기' 대기 · 나가기 헬퍼).
+#   [⑤b5 결합 갱신] 멈춤 끝은 옛 나가기 기대로(SS1 · SS5 · SS6 · SS7 · PC7 - 헬퍼 1 · 복귀 [0] · 결정 exit · F9 는 출구 ② 소비). 결정 exit 로는 닿지 않는 갈래는 입구를 바꿈(SS3 ·
+#        PC1 · PC8 · R6-RC2 = 비커스텀 'retry' + 클릭 루프 'no-pair' 폴백 ① · SS11 = '다시 하기' 전송 뒤 예약 · FB4 = 커스텀 같은 입장 방식 다른 던전). 입구를 못 바꾸는 PC4 비커스텀
+#        절반은 결정 exit + 기록 실패 → 옛 나가기 exit 0 → 종료 코드로 계상 1, SS7 의 코드 4 절반은 옛 나가기 경로의 코드 4(복귀 중 던전 안). 픽스처 1번은 같은 입장 방식(혼자하기)의
+#        다른 던전이고 섞인 목록은 $ABYSS_ITEMS_MIX 입니다.
+#   [새 행] SS1c(커스텀 'other' 대기 중 예약 → 확인이 소비 → 안전 중지) · CX1(커스텀 마지막 바퀴 끝 → 옛 나가기 → 지정 바퀴 완료) · MX-G1 · MX-G2(섞인 목록의 입장 방식 바뀜 →
+#        'entry-change' 이어 감 줄 → 옛 나가기 exit 0 → Step · 다음 기동 none · 다음 항목 env) · MX-G3(랜덤 진행 · 섞인 목록 바퀴 끝 → 실제 Start-NextCycle 의 NEXT_BOUNDARY 'mixed' →
+#        'next-unknown' → Step 바퀴 넘김 · 새 순열) · MX-G4(입장 방식 바뀜 판 + 결정 뒤 예약 → 출구 ② → 안전 중지) · FN1(정적 - 마무리 실행 안내 끝말).
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing   # 갈래의 상태줄 색([System.Drawing.Color]::SteelBlue 등)
 $fails = 0
@@ -146,6 +172,8 @@ $GUI_FUNCTION_NAMES = @(
     'Test-WorkerTimeJudgeActive', 'Get-TimeStatusSuffix', 'Test-CustomLastRun', 'Format-CustomItemToken', 'Get-CustomFingerprint',
     'Get-CustomOrderKey', 'Get-CustomListCompact', 'New-CustomMarkerOwnerJson', 'Get-CustomCanonicalOwner', 'ConvertTo-CustomMarkerOwnerJson',
     'Read-CustomMarkerOwner',
+    # 구현 명세 ⑤b5 G1 - 실제 Start-NextCycle 커스텀 블록이 부르는 다음 판 이어받기 env 두 값(NEXT_OWNER · NEXT_BOUNDARY)
+    'Get-CustomNextHandoffEnv',
     # 단계 2.6 종료 처리 - 판별·실행부·완주·끝 처리와 그 의존 (다음 회차 판단 순수부·시간 판단·대기열 함수는 실제 함수)
     'Get-AbyssJournalLockedGuide', 'Get-AbyssExitStopReason', 'Get-AbyssExitHandoffKind', 'Read-AbyssExitHandoff', 'Complete-AbyssExitJournal',
     'Invoke-InsideHandoffExit', 'Complete-FinishOnlyCycle', 'Get-NextCycleAction', 'Invoke-NextCycleDecision', 'Test-TimeAllowsNextCycle',
@@ -225,11 +253,19 @@ $NEXT_OWNER_ENV_NAMES = @('HONEYNOGI_CUSTOM_NEXT_OWNER', 'HONEYNOGI_CUSTOM_NEXT_
 $OTHER_ENV_NAMES = @('HONEYNOGI_REPEAT_INFO', 'HONEYNOGI_UNTIL_TIME', 'HONEYNOGI_RUN_ID', 'HONEYNOGI_APP_VERSION')
 $ALL_ENV_NAMES = @($HANDOFF_ENV_NAMES + $CUSTOM_ENV_NAMES + $NEXT_OWNER_ENV_NAMES + $OTHER_ENV_NAMES)
 $ABYSS_SECTION = 'abyssCustomRepeat'
-# 어비스 커스텀 목록 픽스처 (항목 토큰만 쓰임 - 던전 이름은 아무것이나)
+# 어비스 커스텀 목록 픽스처 - 서로 다른 세 항목. 구현 명세 ⑤b5 의 경로 참 커스텀 행은 워커가 기동 env 의 항목·다음 항목 토큰을 원문 해석 함수
+# (ConvertFrom-AbyssCustomItemSpec - GUI 가 제공하는 던전 셋·난이도만 받음)로 읽으므로 그 함수가 받는 던전·난이도입니다(그 밖 행은 토큰만 씀).
+# 구현 명세 ⑤b6(3.4 ⑯): 세 항목이 모두 혼자하기라 0번 → 1번은 같은 입장 방식의 다른 던전('다른 던전 가기' item-change - PC2 · PC3 · PC6 · R6-RC1 · FB4 · SS1c 가 그 꼴을 봄)
+# 입니다. 입장 방식이 바뀌는 판(혼자하기 ↔ 함께하기 · 우연한 만남 → 'entry-change' 옛 나가기)은 아래 섞인 픽스처를 쓰는 MX-G 행이 봅니다
 $ABYSS_ITEMS = @(
     [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '어려움'; dungeon = '허상의 정박지'; matching = '' },
-    [pscustomobject]@{ kind = 'abyss'; mode = 'party'; difficulty = '어려움'; dungeon = '잊혀진 성소'; matching = '우연한 만남' },
-    [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '일반'; dungeon = '그림자 회랑'; matching = '' })
+    [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '어려움'; dungeon = '광기의 동굴'; matching = '' },
+    [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '입문'; dungeon = '흩어진 물길'; matching = '' })
+# 섞인 픽스처(구현 명세 ⑤b6 3.1 ⑯ - 옛 $ABYSS_ITEMS 그대로: [혼자하기, 함께하기 · 우연한 만남, 혼자하기] - 사용자 결정 2026-10-26 밤 '혼자하기 · 함께하기 섞기')
+$ABYSS_ITEMS_MIX = @(
+    [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '어려움'; dungeon = '허상의 정박지'; matching = '' },
+    [pscustomobject]@{ kind = 'abyss'; mode = 'party'; difficulty = '어려움'; dungeon = '광기의 동굴'; matching = '우연한 만남' },
+    [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '입문'; dungeon = '흩어진 물길'; matching = '' })
 # 완료 기록 픽스처 nonce (GUID 'D' 형식)
 $NONCE_A = 'a0000000-0000-4000-8000-00000000000a'
 $NONCE_B = 'b0000000-0000-4000-8000-00000000000b'
@@ -256,7 +292,7 @@ $IH_QUEUE_FAIL = '커스텀 진행 기록·대기열 저장 실패 - 중복 실�
 $IH_EXCEPTION_FORMAT = '재입장 처리 중 예외 - 기동을 보류하고 정지 ({0})'
 $IH_LOG_WARNING = '[경고] 재입장 완료 기록이 없어 종료 문구로 이어받기를 확인했습니다 - 완료 기록을 보정하고 이어 갑니다'
 $IH_REPLACED_WARNING = '[경고] 재입장 완료 기록의 다음 판 위치가 진행 기록과 달라 진행 기록 값으로 고쳤습니다'
-$FINISH_NOTICE_FORMAT = "{0} 마무리 실행: {1} - '다시 하기'로 이미 들어간 판을 끝까지 하고 선택 화면에서 멈춥니다"
+# 마무리 실행 안내 형식 $FINISH_NOTICE_FORMAT 은 아래 소스 추출에서 GUI 원문을 캡처합니다(구현 명세 ⑤b6 3.4 ⑯ - 끝말은 정적 FN1 이 지킴)
 $CARRY_NOTICE_FORMAT = '[안내] 지정 시간({0}) 전에 워커가 다음 판으로 이어 가기로 정했습니다 - 다음 워커가 이어받아 마무리합니다.'
 $FINISH_RECORD_FAIL = '마무리 실행 완료 기록 저장 실패 - 대기열·마커를 보존하고 정지'
 $FINISH_ADVANCE_FAIL = '마무리 실행 진행 반영 실패 - 대기열·마커를 보존하고 정지'
@@ -336,6 +372,7 @@ $C1_CLOSE_FAIL_FORMAT = '[경고] 이번 기동의 완료 표시를 남기지 �
 # GUI 는 줄 끝 표지 꼬리만 봄)
 $GUI_TICK_TPM = 300                                                       # ${timeoutPartyMatch} - 매칭 대기(초)
 $GUI_TICK_B2_LABEL = '준비 패널'                                            # ${b2Label} - 선분기 B2 단계를 연 화면(워커 라벨 넷 중 하나)
+$WORKER_TIMEOUT_ENTRY = 45                                                 # ${timeoutEntry} - 혼자하기 재입장(입장) 대기(초 - 워커 config 기본값과 같은 값, ⑤b5 결합 행)
 
 # ===== 소스 추출 (최상위 정의) =====
 $guiTokens = $null
@@ -380,6 +417,10 @@ $retryFlagAssigns = @($guiAst.EndBlock.Statements | Where-Object { ($_ -is [Syst
 if ($retryFlagAssigns.Count -ne 1) { throw ('GUI 의 재개 기능 플래그($script:abyssPartyRetryEnabled) 스크립트 수준 대입이 1개가 아닙니다 ({0}개)' -f $retryFlagAssigns.Count) }
 $GUI_RETRY_FLAG = [bool](Invoke-Expression $retryFlagAssigns[0].Right.Extent.Text)
 $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG
+# 마무리 실행 안내 형식 = GUI 원문 캡처(구현 명세 ⑤b6 3.4 ⑯ - 직접 적은 글자 대신 '마무리 실행: {1}' 문자열 1개의 원문. 끝말은 정적 FN1 이 지킴)
+$finishNoticeNodes = @($guiAst.FindAll({ param($node) (($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -or ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst])) -and ([string]$node.Value).Contains(' 마무리 실행: {1} - ') }, $true))
+if ($finishNoticeNodes.Count -ne 1) { throw ('GUI 의 마무리 실행 안내 형식 문자열이 1개가 아닙니다 ({0}개)' -f $finishNoticeNodes.Count) }
+$FINISH_NOTICE_FORMAT = [string]$finishNoticeNodes[0].Value
 # Resolve 감시: 실제 함수를 Invoke-RealResolveHandoffEnv 로 한 번 더 정의하고, 같은 이름은 호출 수만 세고 넘깁니다 (후보 선택은 실제 함수)
 Invoke-Expression ($guiFunctionTexts['Resolve-HandoffEnvForContext'] -replace '^function Resolve-HandoffEnvForContext\b', 'function Invoke-RealResolveHandoffEnv')
 function Resolve-HandoffEnvForContext {
@@ -436,25 +477,54 @@ $tickCalls = @($guiAst.FindAll({
         }, $true))
 if ($tickCalls.Count -ne 1) { throw ('타이머 틱 등록($timer.Add_Tick)이 {0}개입니다(1개여야 함)' -f $tickCalls.Count) }
 $timerTick = [scriptblock]::Create($tickCalls[0].Arguments[0].ScriptBlock.EndBlock.Extent.Text)
-# 워커 쪽(단계 2.10 결합 행 - 구현 명세 ① 3.3 '① 실동작 결합 행') - 실제 워커 소스에서 꺼냅니다: 워커 함수 3개(완료 마커 Write-CustomClearMarker ·
-# 묶음 끝 표지 뒤의 워커 전용 기록 함수 2개 - 최상위 정의, 체크리스트 6) · 기동 env 를 받는 문장 3개(커스텀 마커 경로 · 소유자 JSON · 실행 id W2) ·
-# 본류 끝 문장들(AST 로 잘라 점소싱 - 순서·조건식이 소스 그대로) · 저장소 작성자 표지(워커 원문 "worker:$PID" 를 이 프로세스에서 평가).
-# 완료 기록 if(W3)는 조건식 글자가 아니라 자리로 찾습니다 - 나가기 헬퍼 문장('[void](Invoke-AbyssExitClick -Game $game ') 바로 앞 문장이 기록 함수 호출을
-# 품은 if 인 곳. 구현 명세 ② 2.6(P16 · J9)부터 보상·클리어 화면 시작 분기의 헬퍼 앞도 같은 모양(마커 줄 → own 완료 기록 if → 헬퍼)이라 그런 if 가 3곳
-# (본류 1 + own 시작 분기 2)이고, 셋 가운데 조건식에 $clearOutcome 이 든 if 를 본류로 고릅니다 - FindAll 은 소스 순이라 첫 원소는 보상 화면 시작 분기의
-# if 이고 그것을 고르면 결합 1~8 이 본류가 아닌 블록을 돕니다(명세 J9). 본류를 하나로 못 고르면 하니스를 멈추고, 개수 3 · 본류 1 · 고른 if = 본류는 결합 0′
-# 자기 검사 행이 봅니다. 조건식은 행동 행(결합 1·2·3·7·8 - 클리어 결과 · 커스텀 · 정리 전용)이,
-# 본문을 감싸지 않는 것은 결합 7(저장 함수 예외)이 지키고, 글자·본문 모양은 test_abyss_screen_signatures 배선이 고정합니다(단계 2.10 구현 검증 - 조건·본문
-# 변이가 행 단언이 아니라 하니스 추출 중단으로만 잡히던 것을 행으로). 잘라 쓰는 모양 셋: [완료 기록 if → 나가기 헬퍼](결합 1~4·8) / [완료 마커 if → 완료 기록 if →
-# 나가기 헬퍼](결합 6 - 마커 쓰기를 실제로) / 꼬리 전체 [완료 기록 if → … → 본류 try 끝](결합 7 - 종료 문 exit 는 가로채는 함수로 바꾼 사본)
+# 워커 쪽(단계 2.10 결합 행 - 구현 명세 ① 3.3 '① 실동작 결합 행') - 실제 워커 소스에서 꺼냅니다: 워커 함수(완료 마커 Write-CustomClearMarker · 묶음 끝 표지 뒤의
+# 워커 전용 기록 함수 - 최상위 정의, 체크리스트 6) · 기동 env 를 받는 문장(커스텀 마커 경로 · 소유자 JSON · 실행 id W2 · 아래 ⑤b5 몫) · 본류 끝 문장들(AST 로 잘라
+# 점소싱 - 순서·조건식이 소스 그대로) · 저장소 작성자 표지(워커 원문 "worker:$PID" 를 이 프로세스에서 평가).
+# 구현 명세 ⑤b5(3.1 ⑯ 결합 · 3.4): 본류 보상 화면 꼬리가 ⓪ 초기화 → 경로 술어 → (경로 참) 보상 결정 → 완료 마커 if → 클리어 기록 if → (경로 참) 기록 확인·갈래 →
+# 나가기 헬퍼 → 복귀 → [완료] → 정리 전용 exit 10 이 되어 꼬리를 ⓪ 부터 자릅니다. 완료 기록 if 는 자리(헬퍼 바로 앞)가 아니라 조건식으로 찾습니다 - 조건식에 $clearOutcome
+# 이 들고 기록 함수 호출을 품은 if 는 본류 하나뿐입니다(보상·클리어 화면 시작 분기의 own 기록 if 2곳 - 구현 명세 ② 2.6 P16 · J9 - 은 조건식이 own · 정리 전용이고 지금도
+# 헬퍼 바로 앞이라 결합 0′ 자기 검사가 그 수를 셈). ⓪ 은 그 if 와 같은 블록에서 앞으로 찾은 첫 '$script:abyssRetryTimeVerdict = ''' 이고 꼬리 첫 문장입니다(⑤b5 1.2 ·
+# test_abyss_party_leader P5e-1). 결합 1~8 은 워커의 입장 방식·매칭($dungeonMode · $abyssMatching)을 비워 경로 술어가 거짓 = 옛 나가기(지금 동작)로 돕니다 - 경로 참 행
+# (⑤b5 결합 - Test-CaseRewardTailCoupling)만 그 둘과 보상 결정 입력(항목 · 다음 항목 · 마지막 판 · 마무리 실행 · 지정 시각)을 워커 원문 읽기 문장으로 받습니다.
+# 조건식은 행동 행(결합 1·2·3·7·8 - 클리어 결과 · 커스텀 · 정리 전용)이, 본문을 감싸지 않는 것은 결합 7(저장 함수 예외)이 지키고, 글자·본문 모양은
+# test_abyss_screen_signatures 배선이 고정합니다(단계 2.10 구현 검증 - 조건·본문 변이가 행 단언이 아니라 하니스 추출 중단으로만 잡히던 것을 행으로). 잘라 쓰는 모양 넷:
+# [⓪ ~ 나가기 헬퍼 - 완료 마커 if 뺌](결합 1~4·8) / [⓪ ~ 나가기 헬퍼](결합 6 - 마커 쓰기를 실제로) / 꼬리 전체 [⓪ ~ 본류 try 끝 - 완료 마커 if 뺌](결합 7) / 꼬리 전체
+# [⓪ ~ 본류 try 끝](⑤b5 결합 - 커스텀 경로 참 행이 완료 마커를 실제로 씀) - 뒤 둘은 종료 문 exit 를 가로채는 함수로 바꾼 사본입니다
 $workerPath = Join-Path $projectRoot 'mabinogi_run_once.ps1'
 $workerParseErrors = $null
 $workerAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$workerParseErrors)
 if ($workerParseErrors.Count -gt 0) { throw ('워커 파서 오류: ' + $workerParseErrors[0].Message) }
-foreach ($workerFunctionName in @('Write-CustomClearMarker', 'ConvertTo-AbyssJournalOwner', 'Add-AbyssJournalClearedEntry')) {
+# 워커 함수 - 기록 셋(마커 · 소유자 해석 · 클리어 기록) · 경로 술어(경로 거짓 행은 이것만 지남) · ⑤b5 경로 참 행의 보상 결정 · 기록 확인 · 재판단과 그 의존(시간 판단 ·
+# 지정 시각 읽기 · 항목 토큰 해석 · 모드 예산) · 재입장 단계 기록 셋(클릭 루프 모의가 원문 기록 함수를 부르고 재입장 완료 끝이 reentered 를 씀)
+foreach ($workerFunctionName in @('Write-CustomClearMarker', 'ConvertTo-AbyssJournalOwner', 'Add-AbyssJournalClearedEntry', 'Test-AbyssRetryRoute',
+        'Resolve-AbyssRewardDecision', 'Resolve-AbyssRewardBranch', 'Update-AbyssRetryTimeVerdict', 'Get-DgTimeVerdict', 'Get-AbyssUntilTime', 'Get-LifeUntilDeadline',
+        'ConvertFrom-AbyssCustomItemSpec', 'Get-AbyssReentryLimitSeconds', 'Set-AbyssJournalRetryAttempt', 'Set-AbyssJournalRetryClicked', 'Set-AbyssJournalReentered')) {
     $workerFunctionAsts = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($_.Name -eq $workerFunctionName) })
     if ($workerFunctionAsts.Count -ne 1) { throw ('워커 최상위 함수 정의가 1개가 아닙니다: {0} ({1}개)' -f $workerFunctionName, $workerFunctionAsts.Count) }
     Invoke-Expression $workerFunctionAsts[0].Extent.Text
+}
+function Convert-WorkerExitText {
+    # 워커 원문 조각의 exit 토큰을 뒤에서부터 가로채는 함수(Stop-WorkerTailExit - 종료 코드를 실은 예외)로 바꿉니다. 파서 오류 · 바꾼 뒤 남은 exit 문이 있으면 멈춥니다
+    param([string]$Text, [string]$Label)
+    $exitTokens = $null
+    $exitErrors = $null
+    $null = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$exitTokens, [ref]$exitErrors)
+    if (@($exitErrors).Count -gt 0) { throw ('{0} 사본 파서 오류: {1}' -f $Label, $exitErrors[0].Message) }
+    foreach ($exitToken in @($exitTokens | Where-Object { $_.Kind -eq [System.Management.Automation.Language.TokenKind]::Exit } | Sort-Object { $_.Extent.StartOffset } -Descending)) {
+        $Text = $Text.Substring(0, $exitToken.Extent.StartOffset) + 'Stop-WorkerTailExit' + $Text.Substring($exitToken.Extent.EndOffset)
+    }
+    $leftExits = @([System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$null).FindAll({ param($node) $node -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count
+    if ($leftExits -gt 0) { throw ('{0} 사본에 exit 문이 {1}개 남았습니다' -f $Label, $leftExits) }
+    return $Text
+}
+# ⑤b5 - 본류 보상 화면 꼬리의 두 끝과 그 끝이 부르는 재입장 완료 끝 · 대기 초과 끝(원문 · exit 가로챔). 그 안의 대기 둘('다른 던전 가기' 대기 · 재입장 대기) · 클릭 루프 ·
+# 진단 캡처는 아래 워커 쪽 모의입니다(구현 명세 ⑤b5 3.1 ⑯ '두 끝 함수 모의' 를 끝 함수 원문 + 대기 모의로 둠 - 3.3 의 R6-M13 · R6-M19 가 ⑯ FB4 · FB10 에서 잡히려면
+# 폴백 ② 갈래 · 취소 끝이 원문이어야 함)
+$WORKER_END_FUNCTION_NAMES = @('Complete-AbyssOtherSelection', 'Complete-AbyssRetrySelection', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout')
+foreach ($workerFunctionName in $WORKER_END_FUNCTION_NAMES) {
+    $workerFunctionAsts = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($_.Name -eq $workerFunctionName) })
+    if ($workerFunctionAsts.Count -ne 1) { throw ('워커 최상위 함수 정의가 1개가 아닙니다: {0} ({1}개)' -f $workerFunctionName, $workerFunctionAsts.Count) }
+    Invoke-Expression (Convert-WorkerExitText -Text $workerFunctionAsts[0].Extent.Text -Label $workerFunctionName)
 }
 $workerHelperStatements = @($workerAst.FindAll({ param($node)
             ($node -is [System.Management.Automation.Language.PipelineAst]) -and ($node.Parent -is [System.Management.Automation.Language.StatementBlockAst]) -and
@@ -471,36 +541,66 @@ foreach ($helperStatement in $workerHelperStatements) {
         }
     }
 }
-$workerMainRecordIfs = @($workerRecordIfs | Where-Object { $_.Clauses[0].Item1.Extent.Text.Contains('$clearOutcome') })
-if ($workerMainRecordIfs.Count -ne 1) {
-    throw ('나가기 헬퍼 바로 앞의 완료 기록 if(기록 함수 호출을 품음) {0}개 중 조건식에 $clearOutcome 이 든 본류 if 가 {1}개입니다(1개여야 함 - 구현 명세 ② J9)' -f `
-            $workerRecordIfs.Count, $workerMainRecordIfs.Count)
-}
+# 본류 완료 기록 if = 조건식에 $clearOutcome 이 들고 기록 함수 호출을 품은 if(워커 전체에서 하나 - 위 헬퍼 앞 if 들은 결합 0′ 가 셈)
+$workerMainRecordIfs = @($workerAst.FindAll({ param($node)
+            ($node -is [System.Management.Automation.Language.IfStatementAst]) -and $node.Clauses[0].Item1.Extent.Text.Contains('$clearOutcome') -and
+            (@($node.FindAll({ param($inner) ($inner -is [System.Management.Automation.Language.CommandAst]) -and ($inner.GetCommandName() -eq 'Add-AbyssJournalClearedEntry') }, $true)).Count -gt 0) }, $true))
+if ($workerMainRecordIfs.Count -ne 1) { throw ('조건식에 $clearOutcome 이 든 완료 기록 if 가 {0}개입니다(1개여야 함 - 구현 명세 ② J9 · ⑤b5)' -f $workerMainRecordIfs.Count) }
 $workerMainRecordIf = $workerMainRecordIfs[0]
 $workerRecordSiblings = @($workerMainRecordIf.Parent.Statements)
 $workerRecordAt = -1
 for ($siblingIndex = 0; $siblingIndex -lt $workerRecordSiblings.Count; $siblingIndex++) {
     if ([object]::ReferenceEquals($workerRecordSiblings[$siblingIndex], $workerMainRecordIf)) { $workerRecordAt = $siblingIndex }
 }
-if (($workerRecordAt -lt 0) -or ($workerRecordAt + 1 -ge $workerRecordSiblings.Count) -or (-not $workerRecordSiblings[$workerRecordAt + 1].Extent.Text.StartsWith('[void](Invoke-AbyssExitClick '))) {
-    throw '워커 본류의 완료 기록 if 바로 다음 문장이 나가기 헬퍼가 아닙니다'
+# ⓪(꼬리 첫 문장) · 완료 마커 if(⓪ 과 기록 if 사이) · 나가기 헬퍼(기록 if 뒤 첫 '[void](Invoke-AbyssExitClick ')
+$workerZeroAt = -1
+for ($siblingIndex = $workerRecordAt - 1; $siblingIndex -ge 0; $siblingIndex--) {
+    if ($workerRecordSiblings[$siblingIndex].Extent.Text -ceq "`$script:abyssRetryTimeVerdict = ''") { $workerZeroAt = $siblingIndex; break }
 }
-if (($workerRecordAt -lt 1) -or (-not $workerRecordSiblings[$workerRecordAt - 1].Extent.Text.Contains('Write-CustomClearMarker'))) {
-    throw '워커 본류의 완료 기록 if 바로 앞 문장이 완료 마커 블록이 아닙니다'
+$workerHelperAt = -1
+for ($siblingIndex = $workerRecordAt + 1; ($workerRecordAt -ge 0) -and ($siblingIndex -lt $workerRecordSiblings.Count); $siblingIndex++) {
+    if ($workerRecordSiblings[$siblingIndex].Extent.Text.StartsWith('[void](Invoke-AbyssExitClick ')) { $workerHelperAt = $siblingIndex; break }
 }
-$workerTailBlock = [scriptblock]::Create($workerMainRecordIf.Extent.Text + "`r`n" + $workerRecordSiblings[$workerRecordAt + 1].Extent.Text)
-$workerMarkerTailBlock = [scriptblock]::Create(($workerRecordSiblings[$workerRecordAt - 1].Extent.Text, $workerMainRecordIf.Extent.Text, $workerRecordSiblings[$workerRecordAt + 1].Extent.Text) -join "`r`n")
+$workerMarkerAt = -1
+for ($siblingIndex = $workerZeroAt + 1; ($workerZeroAt -ge 0) -and ($siblingIndex -lt $workerRecordAt); $siblingIndex++) {
+    if (($workerRecordSiblings[$siblingIndex] -is [System.Management.Automation.Language.IfStatementAst]) -and $workerRecordSiblings[$siblingIndex].Extent.Text.Contains('Write-CustomClearMarker')) { $workerMarkerAt = $siblingIndex }
+}
+if (($workerRecordAt -lt 0) -or ($workerZeroAt -lt 0) -or ($workerHelperAt -lt 0) -or ($workerMarkerAt -lt 0)) {
+    throw ('워커 본류 꼬리(⓪ {0} · 완료 마커 if {1} · 완료 기록 if {2} · 나가기 헬퍼 {3})를 찾지 못했습니다' -f $workerZeroAt, $workerMarkerAt, $workerRecordAt, $workerHelperAt)
+}
+function Get-WorkerTailText {
+    # 꼬리 조각 원문 - ⓪ 부터 -Until(문장 자리, 포함)까지, -SkipMarker 면 완료 마커 if 를 뺍니다
+    param([int]$Until, [switch]$SkipMarker)
+    return ((@(@($workerZeroAt..$Until) | Where-Object { (-not $SkipMarker) -or ($_ -ne $workerMarkerAt) } | ForEach-Object { $workerRecordSiblings[$_].Extent.Text })) -join "`r`n")
+}
+$workerTailBlock = [scriptblock]::Create((Get-WorkerTailText -Until $workerHelperAt -SkipMarker))
+$workerMarkerTailBlock = [scriptblock]::Create((Get-WorkerTailText -Until $workerHelperAt))
 # 꼬리 전체 사본 - exit 토큰을 뒤에서부터 가로채는 함수 이름으로 바꿉니다(워커를 끝내는 대신 종료 코드를 실은 예외로 행에 돌아옴)
 $WORKER_EXIT_PREFIX = 'WORKER-EXIT:'
-$workerFullTailText = (@($workerRecordSiblings[$workerRecordAt..($workerRecordSiblings.Count - 1)] | ForEach-Object { $_.Extent.Text }) -join "`r`n")
-$fullTailTokens = $null
-$fullTailErrors = $null
-$null = [System.Management.Automation.Language.Parser]::ParseInput($workerFullTailText, [ref]$fullTailTokens, [ref]$fullTailErrors)
-if (@($fullTailErrors).Count -gt 0) { throw ('워커 본류 꼬리 사본 파서 오류: ' + $fullTailErrors[0].Message) }
-foreach ($exitToken in @($fullTailTokens | Where-Object { $_.Kind -eq [System.Management.Automation.Language.TokenKind]::Exit } | Sort-Object { $_.Extent.StartOffset } -Descending)) {
-    $workerFullTailText = $workerFullTailText.Substring(0, $exitToken.Extent.StartOffset) + 'Stop-WorkerTailExit' + $workerFullTailText.Substring($exitToken.Extent.EndOffset)
+$workerFullTailBlock = [scriptblock]::Create((Convert-WorkerExitText -Text (Get-WorkerTailText -Until ($workerRecordSiblings.Count - 1) -SkipMarker) -Label '워커 본류 꼬리'))
+$workerWholeTailBlock = [scriptblock]::Create((Convert-WorkerExitText -Text (Get-WorkerTailText -Until ($workerRecordSiblings.Count - 1)) -Label '워커 본류 꼬리(완료 마커 포함)'))
+# ⑤b5 경로 참 행의 기동 env 읽기 - 워커 원문 문장 그대로: 어비스 항목 미리 해석(본류 앞 if 안 대입) · 항목 값의 입장 방식·매칭 덮어쓰기(if) · 커스텀 항목 · 다음 항목 ·
+# 마지막 판 · 마무리 실행 · 자리7 지정 시각 읽기(본류 try 의 if)
+function Get-WorkerAssignBlock {
+    # 워커 전체에서 왼쪽이 -Left 이고 오른쪽 원문이 -RightContains 를 품은 대입 정확히 1개 → 그 대입문 스크립트 블록
+    param([string]$Left, [string]$RightContains)
+    $assignNodes = @($workerAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq $Left) -and $node.Right.Extent.Text.Contains($RightContains) }, $true))
+    if ($assignNodes.Count -ne 1) { throw ('워커 대입 {0} = …{1}… 이 {2}개입니다(1개여야 함)' -f $Left, $RightContains, $assignNodes.Count) }
+    return [scriptblock]::Create($assignNodes[0].Extent.Text)
 }
-$workerFullTailBlock = [scriptblock]::Create($workerFullTailText)
+$workerPreparseBlock = Get-WorkerAssignBlock -Left '$script:abyssCustomPreparsed' -RightContains 'HONEYNOGI_CUSTOM_ITEM'
+$workerCustomItemBlock = Get-WorkerAssignBlock -Left '$script:customItem' -RightContains '$script:abyssCustomPreparsed'
+$workerCustomNextBlock = Get-WorkerAssignBlock -Left '$script:customNext' -RightContains 'ConvertFrom-AbyssCustomItemSpec'
+$workerLastRunBlock = Get-WorkerAssignBlock -Left '$script:dgLastRun' -RightContains 'HONEYNOGI_LAST_RUN'
+$workerFinishOnlyBlock = Get-WorkerAssignBlock -Left '$script:finishOnly' -RightContains 'HONEYNOGI_FINISH_ONLY'
+$workerModeOverrideIfs = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [System.Management.Automation.Language.IfStatementAst]) -and ($_.Clauses[0].Item1.Extent.Text -eq '$script:abyssCustomPreparsed') -and
+        $_.Clauses[0].Item2.Extent.Text.Contains('$dungeonMode = ') })
+if ($workerModeOverrideIfs.Count -ne 1) { throw ('워커의 커스텀 항목 입장 방식 덮어쓰기 if 가 {0}개입니다(1개여야 함)' -f $workerModeOverrideIfs.Count) }
+$workerModeOverrideBlock = [scriptblock]::Create($workerModeOverrideIfs[0].Extent.Text)
+$workerUntilIfs = @($workerAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.IfStatementAst]) -and ($node.Clauses[0].Item1.Extent.Text -eq "`$contentCategory -eq 'abyss'") -and
+            $node.Clauses[0].Item2.Extent.Text.Contains('Get-AbyssUntilTime') }, $true))
+if ($workerUntilIfs.Count -ne 1) { throw ('워커의 어비스 지정 시각 읽기 if 가 {0}개입니다(1개여야 함)' -f $workerUntilIfs.Count) }
+$workerUntilBlock = [scriptblock]::Create($workerUntilIfs[0].Extent.Text)
 $workerRunIdAssigns = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq '$script:abyssRunId') })
 if ($workerRunIdAssigns.Count -ne 1) { throw ('워커의 실행 id 읽기($script:abyssRunId) 스크립트 수준 대입이 {0}개입니다(1개여야 함)' -f $workerRunIdAssigns.Count) }
 $workerRunIdBlock = [scriptblock]::Create($workerRunIdAssigns[0].Extent.Text)
@@ -533,6 +633,10 @@ function Get-WorkerDoneReason {
     if ($doneText.Contains('$')) { throw ('워커 [완료] 문구의 변수 자리를 다 채우지 못했습니다: ' + $doneText) }
     return $doneText.Substring('[완료] '.Length)
 }
+# 복귀 루프 모의(하니스 ① - 구현 명세 ⑤b6 3.4 ⑯ · B-8)가 쓰는 워커 원문 [완료] 사유 둘: 필드 확정 출구 ②의 안전 중지 예약 소비 줄 · 복귀 중 던전 안 2연속의 코드 4 줄
+# (변수 자리 ${insideStreak} 는 진짜 루프가 멈추는 연속 수 2 로 채웁니다 - GUI 는 줄 끝 표지 꼬리만 봄)
+$RETURN_SAFE_STOP_DONE = Get-WorkerDoneReason -Fragment '던전 밖(HUD) 확인 시점에서 회차를 마칩니다' -InFunction 'Return-ToAbyssSelection'
+$RETURN_INSIDE_DONE = Get-WorkerDoneReason -Fragment '선택 화면 복귀 중 던전 안 상태(HUD + 던전 목표)를 확인해' -Values @{ insideStreak = 2 } -InFunction 'Return-ToAbyssSelection'
 
 # ===== GUI 의존 모형 =====
 $script:events = New-Object System.Collections.Generic.List[string]
@@ -565,9 +669,12 @@ function Invoke-NextCycleDecision {
     if ($script:decisionMode -eq 'start') { Start-NextCycle }
     elseif ($script:decisionMode -eq 'real') { Invoke-RealNextCycleDecision -ExitCode $ExitCode }
 }
+$script:stepNextOrder = $null   # 랜덤 진행의 바퀴 전환에서 모형이 쓸 새 순열(행이 정함 - 구현 명세 ⑤b6 MX-G3 · Initialize-HandoffRow 가 비움)
 function Step-CustomProgress {
     # 진행 전진(실제 서명 param([string]$SectionName = $script:customConfigSection)) - 디스크 컨텍스트 모형을 한 칸(바퀴 끝이면 다음 바퀴 0번)
-    # 옮기고 실제처럼 전진 뒤 진행 @{ lap; index } 를 돌려줍니다. 실패 주입($script:stepFailures 가 남음)·디스크 컨텍스트 없음 = $null(저장 실패)
+    # 옮기고 실제처럼 전진 뒤 진행 @{ lap; index } 를 돌려줍니다. 실패 주입($script:stepFailures 가 남음)·디스크 컨텍스트 없음 = $null(저장 실패).
+    # 등록 목록 · 순열은 이어 갑니다(구현 명세 ⑤b6 - 섞인 픽스처 행). 랜덤 진행의 바퀴 전환(index 0 복귀)은 새 순열입니다 - 실제 Step 은 New-CustomShuffleOrder(무작위),
+    # 모형은 행이 정한 $script:stepNextOrder(없으면 같은 순열)
     param([string]$SectionName = $script:customConfigSection)
     $script:stepCalls++
     $script:events.Add('step')
@@ -579,8 +686,10 @@ function Step-CustomProgress {
     $nextIndex = [int]$nowContext.Index + 1
     $nextLap = [int]$nowContext.Lap
     if ($nextIndex -ge [int]$nowContext.Total) { $nextIndex = 0; $nextLap++ }
+    $nextOrder = $nowContext.Order
+    if (($nextIndex -eq 0) -and ($null -ne $nowContext.Order) -and ($null -ne $script:stepNextOrder)) { $nextOrder = $script:stepNextOrder }
     $script:diskContext = New-AbyssContext -Index $nextIndex -Lap $nextLap -Generation ([int]$nowContext.Generation) `
-        -ListRepeat ([string]$nowContext.ListRepeat) -ListRepeatCount ([int]$nowContext.ListRepeatCount)
+        -ListRepeat ([string]$nowContext.ListRepeat) -ListRepeatCount ([int]$nowContext.ListRepeatCount) -Items @($nowContext.Items) -Order $nextOrder
     return [pscustomobject]@{ lap = $nextLap; index = $nextIndex }
 }
 function Reset-CustomProgress {
@@ -627,32 +736,128 @@ function Move-WorkerLogToArchive {
 # 워커 쪽 모의(단계 2.10 결합 행 - 워커 실제 서명과 대조): 워커 로그는 줄을 모으고, 나가기 헬퍼는 부른 횟수만(완료 기록이 실패해도 본류가 다음
 # 문장인 헬퍼로 진행하는지)
 $script:workerRunLogLines = New-Object System.Collections.Generic.List[string]
+$script:crashBeforeDoneLine = $false   # ⑤b5 R6-RC1 · R6-RC2 - 워커가 [완료] 줄을 쓰기 직전에 끊김(그 줄 0 · 예외 = 프로세스 비정상 종료 → GUI 코드 1)
+$WORKER_CRASH_MESSAGE = 'WORKER-CRASH-BEFORE-DONE'
 function Write-RunLog {
     # 워커 로그(워커 실제 서명 param([string]$Message))
     param([string]$Message)
+    if ($script:crashBeforeDoneLine -and $Message.StartsWith('[완료] ')) { throw $WORKER_CRASH_MESSAGE }
     $script:workerRunLogLines.Add($Message)
 }
 $script:exitClickCalls = 0
+$script:exitClickResult = 'gone'
+$script:safeStopOnExitClick = $false   # 나가기 헬퍼가 안전 중지 예약을 만듦(보상 결정 뒤 · 옛 나가기 중 F9 - 구현 명세 ⑤b6 MX-G4)
 function Invoke-AbyssExitClick {
-    # 보상 화면 '나가기' 헬퍼(워커 실제 서명) - 횟수만 세고 'gone'
+    # 보상 화면 '나가기' 헬퍼(워커 실제 서명 · 반환 모양 @{ Result; FrozenMs }) - 횟수를 세고 행이 정한 결과(기본 'gone' - ⑤b5 FB4 는 패널 'matching')
     param([System.Diagnostics.Process]$Game, [string]$LogPrefix = '[어비스]', [string]$Context = '나가기 클릭', $ParentDeadline = $null)
     $script:exitClickCalls++
-    return 'gone'
+    if ($script:safeStopOnExitClick) { [IO.File]::WriteAllText($safeStopFlagPath, 'stop') }
+    return @{ Result = [string]$script:exitClickResult; FrozenMs = 0 }
 }
 $script:returnSelectionCodes = New-Object System.Collections.Generic.List[string]
 $script:returnSelectionLeaveReasons = New-Object System.Collections.Generic.List[string]
+$script:returnInsideCode4 = $false   # 복귀 루프가 '복귀 중 던전 안 2연속' 코드 4 로 끝남(옛 나가기 경로의 코드 4 꼴 - 구현 명세 ⑤b6 SS7)
 function Return-ToAbyssSelection {
     # 선택 화면 복귀 루프(워커 실제 서명) - 넘겨받은 안전 중지 종료 코드를 적습니다(결합 7: 완료 기록 저장이 실패해도 본류가 같은 코드로 복귀하는지).
     # 구현 명세 ② 2.3: 워커 서명에 코드 10 출구의 열쇠 닫기 사유 -LeaveEntryReason(빈 값 = 닫지 않음)이 더해져 같은 모양으로 받고, 받은 값은 따로 적습니다
     # (결합 0 이 이 모의와 워커의 서명을 대조하고, 결합 7 꼬리 사본의 본류 끝 호출이 이 인자를 넘깁니다 - 결합 7 의 복귀 코드 기대는 그대로)
+    # 구현 명세 ⑤b6(3.4 ⑯ 하니스 ① · B-8): 진짜 루프의 두 출구(필드 확정 ② · 출처 있는 선택 화면 ①) 모형 - 안전 중지 예약 파일이 있으면 소비하고 필드 확정 출구 ②의
+    # [완료] 줄(워커 원문 캡처) 뒤 넘겨받은 코드로 끝납니다(정리 전용 코드 10 의 줄은 모형 밖 - 예약과 함께 닿으면 TEST-UNREACHABLE). -Plan ReturnInside 면 '복귀 중 던전 안
+    # 2연속' 의 [완료] 줄(워커 원문 캡처) 뒤 코드 4. 그 밖은 돌아옵니다(선택 화면 복귀 - 부른 쪽이 '[완료] 어비스 선택 화면 복귀 완료' 를 씀). 예약 파일 경로는 부른 쪽
+    # (Invoke-WorkerClearedRecord)의 지역 변수 $safeStopFlagPath 를 동적 범위로 읽습니다(클릭 루프 모의와 같음 - 그 밖에서 부르면 경로 없음 = 예약 없음)
     param([System.Diagnostics.Process]$Game, [int]$SafeStopExitCode = 0, [string]$LeaveEntryReason = '')
     $script:returnSelectionCodes.Add([string]$SafeStopExitCode)
     $script:returnSelectionLeaveReasons.Add($LeaveEntryReason)
+    if ($script:returnInsideCode4) {
+        Write-RunLog ('[완료] ' + $RETURN_INSIDE_DONE)
+        Stop-WorkerTailExit 4
+    }
+    if ([IO.File]::Exists([string]$safeStopFlagPath)) {
+        if ($SafeStopExitCode -ne 0) { throw ('TEST-UNREACHABLE: Return-ToAbyssSelection 안전 중지 코드 ' + $SafeStopExitCode) }
+        [IO.File]::Delete($safeStopFlagPath)
+        Write-RunLog ('[완료] ' + $RETURN_SAFE_STOP_DONE)
+        Stop-WorkerTailExit $SafeStopExitCode
+    }
 }
 function Stop-WorkerTailExit {
     # 꼬리 사본의 exit 자리(결합 7) - 워커를 끝내는 대신 종료 코드를 실은 예외로 행에 돌려줍니다
     param([int]$Code = 0)
     throw ($WORKER_EXIT_PREFIX + $Code)
+}
+# ⑤b5 워커 쪽 모의(구현 명세 ⑤b5 3.1 ⑯ 결합 - 워커 실제 서명과 대조, 결합 0): 두 끝 함수(원문 - 위 하니스) 안의 대기 둘 · 클릭 루프 · 진단 캡처. 결과는 행이 정한 차례
+# (큐)대로 돌려주고 비면 TEST-UNREACHABLE(행이 정하지 않은 호출 = 그 행이 그 갈래에 닿지 않아야 함). 대기 · 클릭 루프 자체의 판독 · 클릭 · 마감은
+# test_abyss_party_leader §9 · §10 이 원문으로 봅니다
+$script:otherWaitPlan = New-Object System.Collections.ArrayList     # '다른 던전 가기' 대기 결과 @{ Result; Sends }
+$script:reentryPlan = New-Object System.Collections.ArrayList       # 재입장 대기 결과 'entered' / 'cancelled' / 'timeout' / 'reclick'
+$script:retryClickPlan = New-Object System.Collections.ArrayList    # 클릭 루프 결과 'sent' / 'skipped' / 'safe-stop' / 'no-pair' / 'last' / 'unconfirmed'
+$script:safeStopOnRetryClick = $false                               # 클릭 루프가 결과를 돌려주기 직전에(전송이면 commit 뒤) 안전 중지 예약을 만듦(보상 결정 뒤 F9 - ⑤b6 SS3 · SS11)
+$script:safeStopOnOtherWait = $false                                # '다른 던전 가기' 대기가 결과를 돌려주기 직전에 안전 중지 예약을 만듦(보상 결정 뒤 F9 - ⑤b6 SS1c)
+$script:otherWaitCalls = 0
+$script:reentryCalls = 0
+$script:retryClickCalls = 0
+$script:diagCalls = 0
+function Get-WorkerPlanNext {
+    # 큐의 첫 원소를 꺼냅니다(비면 TEST-UNREACHABLE: <이름>)
+    param([System.Collections.ArrayList]$Plan, [string]$Name)
+    if ($Plan.Count -eq 0) { throw ('TEST-UNREACHABLE: ' + $Name) }
+    $planHead = $Plan[0]
+    $Plan.RemoveAt(0)
+    return $planHead
+}
+function Wait-AbyssOtherSelection {
+    # '다른 던전 가기' 대기(워커 실제 서명) - 행이 정한 결과 @{ Result; Sends; LastKind }
+    param(
+        [System.Diagnostics.Process]$Game,
+        [string]$Context = "'다른 던전 가기' 대기"
+    )
+    $script:otherWaitCalls++
+    $otherPlanHead = Get-WorkerPlanNext -Plan $script:otherWaitPlan -Name 'Wait-AbyssOtherSelection'
+    if ($script:safeStopOnOtherWait) { [IO.File]::WriteAllText($safeStopFlagPath, 'stop') }
+    return @{ Result = [string]$otherPlanHead.Result; Sends = [int]$otherPlanHead.Sends; LastKind = '' }
+}
+function Wait-AbyssReentry {
+    # 재입장 대기(워커 실제 서명) - 행이 정한 결과 @{ Result; LastKind; PanelSeen }
+    param(
+        [System.Diagnostics.Process]$Game,
+        [int]$LimitSeconds = 0,
+        $Clock = $null,
+        [string]$Context = '재입장 대기',
+        [switch]$ReportRewardReturn,
+        [bool]$PanelSeen = $false,
+        [switch]$ResumeGrace
+    )
+    $script:reentryCalls++
+    return @{ Result = [string](Get-WorkerPlanNext -Plan $script:reentryPlan -Name 'Wait-AbyssReentry'); LastKind = ''; PanelSeen = $true }
+}
+function Invoke-AbyssRetryClick {
+    # '다시 하기' 클릭 루프(워커 실제 서명) - 행이 정한 결과. 원문 클릭 루프의 기록 계약만 따릅니다(구현 명세 ⑤b4 1.2 ②): 짝 점을 잡은 시도('sent' · 'skipped' ·
+    # 'safe-stop' · 'last')는 이 워커의 첫 시도에서 원문 재입장 요청 기록(Set-AbyssJournalRetryAttempt - changed 가 아니면 'record-failed') → 표식 참, 'sent' 는 commit 표지 참 →
+    # 원문 재입장 클릭 기록(Set-AbyssJournalRetryClicked). 짝 없음('no-pair')·마감('unconfirmed')은 기록 0
+    param(
+        [System.Diagnostics.Process]$Game,
+        [string]$Nonce,
+        [string]$Context = "'다시 하기' 클릭"
+    )
+    $script:retryClickCalls++
+    $clickResult = [string](Get-WorkerPlanNext -Plan $script:retryClickPlan -Name 'Invoke-AbyssRetryClick')
+    if ((@('sent', 'skipped', 'safe-stop', 'last') -contains $clickResult) -and (-not $script:abyssRetryAttemptRecorded)) {
+        if ((Set-AbyssJournalRetryAttempt -Nonce $Nonce) -ne 'changed') { return @{ Result = 'record-failed'; LastKind = 'reward3' } }
+        $script:abyssRetryAttemptRecorded = $true
+    }
+    if ($clickResult -eq 'sent') {
+        $script:abyssRetryCommitted = $true
+        Write-RunLog "[어비스] '다시 하기' 클릭 - 글자 탐색 기준좌표 (636,654)"
+        Set-AbyssJournalRetryClicked -Nonce $Nonce
+    }
+    # 보상 결정 뒤 F9(구현 명세 ⑤b6 SS3 · SS11) - 결과 무관하게 돌려주기 직전(전송이면 commit 뒤)에 예약을 만듭니다. 원문 클릭 루프의 직전 재검사는 commit 전 클릭 자리에만 있어
+    # 짝 없음('no-pair')·전송 뒤에 들어온 예약은 루프가 보지 않습니다
+    if ($script:safeStopOnRetryClick) { [IO.File]::WriteAllText($safeStopFlagPath, 'stop') }
+    return @{ Result = $clickResult; LastKind = 'reward3' }
+}
+function Write-LifeDiagnostics {
+    # 진단 캡처(워커 실제 서명) - 횟수만
+    param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly)
+    $script:diagCalls++
 }
 function Get-HandoffEnvSnapshot {
     # 이 프로세스의 관련 env 전부 → 해시테이블 (없음 = 빈 문자열)
@@ -847,14 +1052,18 @@ function Format-Events {
 
 # ===== 기동 하니스 (단계 2.5) =====
 function New-AbyssContext {
-    # Get-CustomCurrentContext 반환 모양의 어비스 커스텀 컨텍스트 (순차 · 기본 무한 반복 · 목록 = $ABYSS_ITEMS)
-    param([int]$Index, [int]$Lap = 1, [int]$Generation = 0, [string]$ListRepeat = 'infinite', [int]$ListRepeatCount = 1)
+    # Get-CustomCurrentContext 반환 모양의 어비스 커스텀 컨텍스트 (순차 · 기본 무한 반복 · 목록 = $ABYSS_ITEMS).
+    # 구현 명세 ⑤b6: -Items = 등록 목록(섞인 픽스처 행은 $ABYSS_ITEMS_MIX) · -Order = 랜덤 진행의 순열(등록 번호 배열 - 실행 순서 = 그 순서의 등록 항목, 위치 글자에 ' (랜덤)' -
+    # 실제 getter 와 같은 모양). 순열이 없으면 순차입니다
+    param([int]$Index, [int]$Lap = 1, [int]$Generation = 0, [string]$ListRepeat = 'infinite', [int]$ListRepeatCount = 1, [object[]]$Items = $ABYSS_ITEMS, $Order = $null)
+    $executionItems = $Items
+    if ($null -ne $Order) { $executionItems = @(foreach ($orderIndex in @($Order)) { $Items[[int]$orderIndex] }) }
     return @{
-        Items = $ABYSS_ITEMS; ExecutionItems = $ABYSS_ITEMS; Total = $ABYSS_ITEMS.Count; RegisteredTotal = $ABYSS_ITEMS.Count
-        Lap = $Lap; Index = $Index; Item = $ABYSS_ITEMS[$Index]; RegisteredIndex = $Index
-        RandomOrder = $false; Order = $null; ShuffleValid = $true
+        Items = $Items; ExecutionItems = $executionItems; Total = $executionItems.Count; RegisteredTotal = $Items.Count
+        Lap = $Lap; Index = $Index; Item = $executionItems[$Index]; RegisteredIndex = $(if ($null -ne $Order) { [int]@($Order)[$Index] } else { $Index })
+        RandomOrder = ($null -ne $Order); Order = $Order; ShuffleValid = $true
         ListRepeat = $ListRepeat; ListRepeatCount = $ListRepeatCount; SectionName = $ABYSS_SECTION
-        Position = ('{0}바퀴째 {1}/{2}번' -f $Lap, ($Index + 1), $ABYSS_ITEMS.Count); Generation = $Generation
+        Position = (('{0}바퀴째 {1}/{2}번' -f $Lap, ($Index + 1), $executionItems.Count) + $(if ($null -ne $Order) { ' (랜덤)' } else { '' })); Generation = $Generation
     }
 }
 
@@ -1597,13 +1806,15 @@ function Test-CaseStatic {
     Assert-Case 'S2 호출 소유자: Set-HandoffLaunchEnv = Start-NextCycle · Resolve = Set-HandoffLaunchEnv · 조립 = Start-NextCycle · handoff env 비움 = 기동·정지' `
         ('{0} / {1} / {2} / {3}' -f (Get-GuiCallOwners 'Set-HandoffLaunchEnv'), (Get-GuiCallOwners 'Resolve-HandoffEnvForContext'), (Get-GuiCallOwners 'Get-FinishOnlyCustomEnv'), (Get-GuiCallOwners 'Clear-HandoffEnv')) `
         '1|Start-NextCycle / 1|Set-HandoffLaunchEnv / 1|Start-NextCycle / 2|Set-HandoffLaunchEnv,Stop-AllRun'
-    # S3 정지가 handoff 상태를 비움(커스텀 여부와 무관 - 커스텀 갈래 밖) · RUN_ID 는 지우지 않음(명세 5절 C12)
+    # S3 정지가 handoff 상태를 비움(커스텀 여부와 무관 - 커스텀 갈래 밖) · RUN_ID 는 지우지 않음(명세 5절 C12) · 안전 중지 예약 파일을 지움(구현 명세 ⑤b5 SS3 · SS11 의
+    #    '플래그 0' 정적 몫 - 이 파일의 행은 정지를 모의하므로 실제 Stop-AllRun 의 예약 파일 삭제는 이 칸이 봄, 내부 검토 반영)
     $stopAst = @($guiAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($node.Name -eq 'Stop-AllRun') }, $true))[0]
     $stopTopLevel = @($stopAst.Body.EndBlock.Statements | ForEach-Object { ($_.Extent.Text -replace '\s+', ' ').Trim() })
-    Assert-Case 'S3 Stop-AllRun 본문 최상위 문장: handoff env 비움 · 보류 $null · 기동 종류 none · nonce 빈 값 · RUN_ID 언급 0' `
-        ('{0}/{1}/{2}/{3}/{4}' -f [int]($stopTopLevel -ccontains 'Clear-HandoffEnv'), [int]($stopTopLevel -ccontains '$script:finishOnlyHold = $null'),
+    Assert-Case 'S3 Stop-AllRun 본문 최상위 문장: handoff env 비움 · 보류 $null · 기동 종류 none · nonce 빈 값 · 안전 중지 예약 파일 삭제 · RUN_ID 언급 0' `
+        ('{0}/{1}/{2}/{3}/{4}/{5}' -f [int]($stopTopLevel -ccontains 'Clear-HandoffEnv'), [int]($stopTopLevel -ccontains '$script:finishOnlyHold = $null'),
             [int]($stopTopLevel -ccontains "`$script:lastLaunchKind = 'none'"), [int]($stopTopLevel -ccontains "`$script:lastLaunchNonce = ''"),
-            ([regex]::Matches((Remove-SourceComments -Text $stopAst.Extent.Text), 'HONEYNOGI_RUN_ID').Count)) '1/1/1/1/0'
+            [int]($stopTopLevel -ccontains 'Remove-Item -LiteralPath $safeStopFlag -Force -ErrorAction SilentlyContinue'),
+            ([regex]::Matches((Remove-SourceComments -Text $stopAst.Extent.Text), 'HONEYNOGI_RUN_ID').Count)) '1/1/1/1/1/0'
     # S4 RUN_ID = 시작 버튼마다(Invoke-StartAutomation) 새 GUID → env (설계 v10 6.1 env 목록) · GUI 의 RUN_ID env 대입은 그 1곳
     $startCode = Remove-SourceComments -Text (@(Get-SourceFunctionDefinitions -Path $guiPath -Names @('Invoke-StartAutomation'))[0])
     $runIdPattern = (@("`$script:runId = [guid]::NewGuid().ToString('D')", '$env:HONEYNOGI_RUN_ID = $script:runId') | ForEach-Object { [regex]::Escape($_) }) -join '\s*'
@@ -1638,11 +1849,12 @@ function Test-CaseStatic {
         ('{0} · {1} · {2} · {3}' -f (Format-HandoffEnv $afterHandoff), @($ALL_ENV_NAMES | Where-Object { ($HANDOFF_ENV_NAMES -notcontains $_) -and ($afterHandoff[$_] -cne $STALE_VALUE) }).Count,
             (Format-EnvValues $afterCustom $CUSTOM_ENV_NAMES), $afterCustom['HONEYNOGI_RUN_ID']) `
         ('|| · 0 · {0} · {1}' -f ('|' * ($CUSTOM_ENV_NAMES.Count - 1)), $STALE_VALUE)
-    # S6 마커 소유자 JSON 하나의 직렬화: 마커(New-CustomMarkerOwnerJson)가 owner 계산·직렬화 헬퍼를 거침 · 커스텀 기동의 OWNER 도 그 함수
+    # S6 마커 소유자 JSON 하나의 직렬화: 마커(New-CustomMarkerOwnerJson)가 owner 계산·직렬화 헬퍼를 거침 · 커스텀 기동의 OWNER 도 그 함수 · 다음 판 이어받기 env 의
+    #    NEXT_OWNER(Get-CustomNextHandoffEnv - 구현 명세 ⑤b5 G1)도 같은 직렬화 헬퍼(OWNER 와 같은 version 3 - 워커 ConvertTo-AbyssJournalOwner 가 읽음)
     $markerJsonCode = Remove-SourceComments -Text $guiFunctionTexts['New-CustomMarkerOwnerJson']
-    Assert-Case 'S6 New-CustomMarkerOwnerJson = ConvertTo-CustomMarkerOwnerJson(Get-CustomCanonicalOwner) 한 줄 · 직렬화 함수 호출 소유자 = 마커·마무리 실행 조립' `
+    Assert-Case 'S6 New-CustomMarkerOwnerJson = ConvertTo-CustomMarkerOwnerJson(Get-CustomCanonicalOwner) 한 줄 · 직렬화 함수 호출 소유자 = 다음 판 env·마커·마무리 실행 조립' `
         ('{0} · {1}' -f [int]($markerJsonCode.Contains('return (ConvertTo-CustomMarkerOwnerJson -Owner (Get-CustomCanonicalOwner -Context $Context))')), (Get-GuiCallOwners 'ConvertTo-CustomMarkerOwnerJson')) `
-        '1 · 2|Get-FinishOnlyCustomEnv,New-CustomMarkerOwnerJson'
+        '1 · 3|Get-CustomNextHandoffEnv,Get-FinishOnlyCustomEnv,New-CustomMarkerOwnerJson'
 }
 
 # ===== 단계 2.6 하니스 - 종료 처리의 완료 기록(handoff) =====
@@ -1692,6 +1904,7 @@ function Initialize-HandoffRow {
     $script:abyssErrorStreak = $AbyssErrorStreak
     $script:preparedStreak = $PreparedStreak
     $script:stepFailures = $StepFailures
+    $script:stepNextOrder = $null   # 랜덤 바퀴 전환의 새 순열(행이 이 함수 뒤에 정함 - 구현 명세 ⑤b6 MX-G3)
     $script:resetResult = $true
     $script:decisionMode = $DecisionMode
     $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG   # 재개 기능 플래그 = GUI 원문 값(켜진 빌드 행은 이 뒤에서 잠시 참)
@@ -2926,18 +3139,30 @@ function Test-CaseExitStatic {
         })
     Assert-Case "S14 '완료 기록 파일이 사용 중' 을 담은 문자열(기동·판별·끝 처리·실행부·코드 4 계상·코드 1 라우팅 2·시작 게이트 S0·S3 '사용 중입니다' 1) 8개 · 잠금 파일 안내 없는 문장 0" ('{0} · {1}' -f $lockedLiterals.Count, $withoutGuide.Count) '8 · 0'
     Assert-Case 'S14 잠금 파일 안내 글자' (Get-AbyssJournalLockedGuide) $LOCKED_GUIDE
-    # S15 N/A 근거(설계 R1 H44·H46·H47): 커스텀은 시작 때 지정 시각을 끄고(UNTIL 미전달) 판단 워커 판정에서 빠짐 · 어비스 혼자하기는 구현 명세 ② 부터 UNTIL 전달
-    #     대상(설계 v11 R3 Q3 - 받기만, ② 워커는 읽지 않음)이라 H44 의 N/A 근거는 넷째 값 = 이 빌드 워커는 재입장 표지를 내지 않음(코드 11 재입장 없음)
+    # S15 N/A 근거(설계 R1 H46·H47): 커스텀은 시작 때 지정 시각을 끄고(UNTIL 미전달) 판단 워커 판정에서 빠짐 · 어비스 혼자하기는 구현 명세 ② 부터 UNTIL 전달
+    #     대상(설계 v11 R3 Q3). H44 의 N/A 근거(옛 넷째 값 - 워커 재입장 표지 0)는 5b-4 가 재입장 완료 끝(코드 11)을 더해 test_abyss_party_leader §10 의 R1 6.4 정적이 맡음(구현 명세 ⑤b4 3.4 · 범위 ⑤-55)
     $startCode = Remove-SourceComments -Text (@(Get-SourceFunctionDefinitions -Path $guiPath -Names @('Invoke-StartAutomation'))[0])
     $judgeCode = Remove-SourceComments -Text $guiFunctionTexts['Test-WorkerTimeJudgeActive']
     Set-RadioModel -Content 'abyss'
     $script:mainCategory = 'battle'
     $script:customActive = $false
     $soloJudge = Test-WorkerTimeJudgeActive
-    $workerText = [IO.File]::ReadAllText((Join-Path $projectRoot 'mabinogi_run_once.ps1'))
-    Assert-Case 'S15 H46·H47 커스텀 지정 시각 해제 1 · 판단 워커에서 커스텀 제외 1 · 어비스 혼자하기 UNTIL 대상(R3 Q3) · H44 워커 재입장 표지 0' `
-        ('{0} · {1} · {2} · {3}' -f [regex]::Matches($startCode, [regex]::Escape('if ($script:customActive) { $script:targetCycles = 0; $script:targetTime = $null }')).Count,
-            [int]$judgeCode.Contains('(-not $script:customActive)'), $soloJudge, [regex]::Matches($workerText, 'terminal=InsideHandoff').Count) '1 · 1 · True · 0'
+    Assert-Case 'S15 H46·H47 커스텀 지정 시각 해제 1 · 판단 워커에서 커스텀 제외 1 · 어비스 혼자하기 UNTIL 대상(R3 Q3)' `
+        ('{0} · {1} · {2}' -f [regex]::Matches($startCode, [regex]::Escape('if ($script:customActive) { $script:targetCycles = 0; $script:targetTime = $null }')).Count,
+            [int]$judgeCode.Contains('(-not $script:customActive)'), $soloJudge) '1 · 1 · True'
+    # FN1 마무리 실행 안내(구현 명세 ⑤b6 3.2 ⑯ · G3): 행 기대($FINISH_NOTICE_FORMAT)는 GUI 원문 캡처를 따라가므로 끝말은 이 정적이 지킵니다 - 캡처한 '마무리 실행: {1}' 문자열 1개 ·
+    #     그 자리 = 실행부(Invoke-InsideHandoffExit) · 주석 뺀 GUI 사본의 끝말 "'다시 하기'로 이미 들어간 판을 끝까지 하고 '나가기'로 던전 밖에 나와 멈춥니다" 1 · 옛 끝말 '끝까지 하고 선택
+    #     화면에서 멈춥니다' 0(끝 화면 = 던전 밖 - 안전 중지 보류는 필드, 그 밖은 필드에서 연 선택 화면)
+    $finishOwners = @($finishNoticeNodes | ForEach-Object {
+            $ownerNode = $_.Parent
+            while (($null -ne $ownerNode) -and -not ($ownerNode -is [System.Management.Automation.Language.FunctionDefinitionAst])) { $ownerNode = $ownerNode.Parent }
+            $(if ($null -ne $ownerNode) { $ownerNode.Name } else { '(함수 밖)' }) })
+    $guiCodeOnly = Remove-SourceComments -Text ([IO.File]::ReadAllText($guiPath))
+    Assert-Case "FN1 마무리 실행 안내 형식 캡처 1개 · 그 자리 = Invoke-InsideHandoffExit · 끝말('나가기'로 던전 밖에 나와 멈춥니다) 1 · 옛 끝말(선택 화면에서 멈춥니다) 0" `
+        ('{0} · {1} · {2}/{3}' -f $finishNoticeNodes.Count, ($finishOwners -join ','),
+            [regex]::Matches($guiCodeOnly, [regex]::Escape("'다시 하기'로 이미 들어간 판을 끝까지 하고 '나가기'로 던전 밖에 나와 멈춥니다")).Count,
+            [regex]::Matches($guiCodeOnly, [regex]::Escape('끝까지 하고 선택 화면에서 멈춥니다')).Count) `
+        '1 · Invoke-InsideHandoffExit · 1/0'
 }
 
 # ===== W 표지 판별 Get-WorkerDoneMarkers (명세 2.7 ① - 순수, 코드 0·11 재입장 판별과 같은 함수) =====
@@ -3281,17 +3506,22 @@ function Test-CaseCode4Relay {
     Assert-Case 'C4-15 종료 직전 표지 줄(기본 로그 || 복구 로그) → 커스텀 재개 보류 · 계상/전진/마커 정리 0 · 요청 기록 그대로 · 상태줄 꼬리 0' ($orderTexts -join ' || ') `
         ((@(1, 2) | ForEach-Object { '{0} · 0/0/0 · retry-clicked/launched/0' -f $C4_STOP }) -join ' || ')
 
-    # H32d 마무리 실행 기동(오류 보류 - 진행 저장 실패)의 코드 4 → '<코드 4 사유> (마무리 실행 전 오류: 커스텀 진행 기록 저장 실패)' 오류 정지 · 빨강 · 넘긴 nonce
-    #      done · 마무리 실행 워커의 클리어 기록(i+1)은 디스크 i 와 owner 가 달라 계상 0(명세 5절 B7·C17 - R6 안건으로 넘긴 알려진 손실)
+    # H32d 마무리 실행 기동(오류 보류 - 진행 저장 실패)의 코드 4 → '<코드 4 사유> (마무리 실행 전 오류: 커스텀 진행 기록 저장 실패)' 오류 정지 · 빨강 · 마무리 실행 워커의
+    #      클리어 기록(i+1)은 디스크 i 와 owner 가 달라 계상 0(명세 5절 B7·C17 - R6 안건으로 넘긴 알려진 손실 · 다음 시작의 사슬 총 1 은 test_abyss_pending_advance PC5).
+    #      넘긴 NA 는 실제 워커 모양 그대로 이미 done·적용: 마무리 실행 기동은 NA 를 Role next 로 받고(워커 Consume-Handoff - 마무리 실행 표지는 역할 판정에 안 씀) 그 판의
+    #      클리어 기록이 같은 저장에서 열쇠 항목 NA 를 닫습니다(워커 Add-AbyssJournalClearedEntry). 그래서 열어 둠(구현 명세 ⑤b5 G3)이 닿지 않고 끝 처리는 이미 done 인
+    #      NA 를 건드리지 않습니다 - G3 의 행은 클리어 전 정지인 H32e · KP0 · KP8 입니다(내부 검토 반영: NA launched + 클리어 기록 픽스처는 워커가 만들지 않는 모양)
     $handoff = New-FixtureEntry -Stage 'reentered' -Owner $fixture.FiveNow -NextOwner $fixture.FiveNext -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_A
+    $handoffClosedByClear = New-FixtureEntry -Stage 'reentered' -Owner $fixture.FiveNow -NextOwner $fixture.FiveNext -Generation $H_GENERATION -LaunchState 'done' -Section $ABYSS_SECTION -Nonce $NONCE_A
     $finishCleared = New-FixtureEntry -Stage 'cleared' -Owner $fixture.FiveNext -Generation $H_GENERATION -Section $ABYSS_SECTION -Nonce $NONCE_B
     $errorHold = @{ Kind = 'step-failed'; Reason = '커스텀 진행 기록 저장 실패'; IsError = $true; Owner = $fixture.OwnerNext; Position = $fixture.Next.Position; Snapshot = $fixture.Now }
-    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($handoff, $finishCleared) -Applied @($NONCE_A) -LaunchKind 'finish-only' -LaunchNonce $NONCE_A -FinishOnlyHold $errorHold
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($handoffClosedByClear, $finishCleared) -Applied @($NONCE_A) -LaunchKind 'finish-only' -LaunchNonce $NONCE_A -FinishOnlyHold $errorHold
     $row = Invoke-HandoffTick -ExitCode 4 -Reason $CODE4_REASON
-    Assert-Case 'H32d 마무리 실행(오류 보류)의 코드 4 → 사유 + 마무리 실행 전 오류 · 오류 정지 · 빨강 · 계상 0 · NA done · 마무리 실행 판의 기록 그대로' `
+    Assert-Case 'H32d 마무리 실행(오류 보류 · 그 판 클리어 - 워커가 NA 를 닫음)의 코드 4 → 사유 + 마무리 실행 전 오류 · 오류 정지 · 빨강 · 계상 0 · NA done 그대로 · 마무리 실행 판의 기록 그대로' `
         ('{0} · {1} · {2} · {3} · {4}' -f $row.Flow, $row.Color, $row.Completed, (Get-EntryText $row.Journal $NONCE_A), (Get-EntryText $row.Journal $NONCE_B)) `
         ('stop|{0}|True · Firebrick · 0 · reentered/done/1 · cleared/pending/0' -f ($C4_PRIOR_ERROR_FORMAT -f ('조건 정지: ' + $CODE4_REASON), '커스텀 진행 기록 저장 실패'))
-    # H32e 마무리 실행 비오류 보류(비커스텀 안전 중지 / 커스텀 바퀴 완주) → 코드 4 사유 그대로 정상 정지 · SteelBlue · 넘긴 nonce done
+    # H32e 마무리 실행 비오류 보류(비커스텀 안전 중지 / 커스텀 바퀴 완주) → 코드 4 사유 그대로 정상 정지 · SteelBlue · 넘긴 nonce launched(⑤b5 G3 - 클리어 근거 0 인 클리어 전
+    #      정지라 열어 둠, 옛 기대 done)
     $safeHold = @{ Kind = 'safe-stop'; Reason = '안전 중지'; IsError = $false; Owner = @{ runId = 'run-H' }; Position = ''; Snapshot = $null }
     Initialize-HandoffRow -Entries @(New-FixtureEntry -Stage 'reentered' -Owner $runOwner -NextOwner $runOwner -LaunchState 'launched' -Nonce $NONCE_A) -Applied @($NONCE_A) `
         -LaunchKind 'finish-only' -LaunchNonce $NONCE_A -FinishOnlyHold $safeHold
@@ -3299,9 +3529,60 @@ function Test-CaseCode4Relay {
     $lapHold = @{ Kind = 'lap-complete'; Reason = '지정 바퀴 완료'; IsError = $false; Owner = $fixture.OwnerNext; Position = $fixture.Next.Position; Snapshot = $fixture.Now }
     Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($handoff) -Applied @($NONCE_A) -LaunchKind 'finish-only' -LaunchNonce $NONCE_A -FinishOnlyHold $lapHold
     $rowCustom = Invoke-HandoffTick -ExitCode 4 -Reason $CODE4_REASON
-    Assert-Case 'H32e 마무리 실행 비오류 보류(비커스텀 안전 중지 || 커스텀 바퀴 완주) → 코드 4 사유 그대로 정상 정지 · SteelBlue · NA done' `
+    Assert-Case 'H32e 마무리 실행 비오류 보류(비커스텀 안전 중지 || 커스텀 바퀴 완주) → 코드 4 사유 그대로 정상 정지 · SteelBlue · NA launched(⑤b5 G3)' `
         ('{0} · {1} · {2} || {3} · {4} · {5}' -f $rowPlain.Flow, $rowPlain.Color, (Get-EntryText $rowPlain.Journal $NONCE_A), $rowCustom.Flow, $rowCustom.Color, (Get-EntryText $rowCustom.Journal $NONCE_A)) `
-        ('{0} · SteelBlue · reentered/done/1 || {0} · SteelBlue · reentered/done/1' -f $C4_STOP)
+        ('{0} · SteelBlue · reentered/launched/1 || {0} · SteelBlue · reentered/launched/1' -f $C4_STOP)
+    # H32f (구현 명세 ⑤b5 명세 리뷰 2 RV-11 - 실제 모양 두 틱): 진행 저장 실패 보류(step-failed)의 마무리 실행이 그 판(i+1)을 클리어하기 전 코드 4 로 끝남.
+    #      첫 틱 = 재입장 코드 0 · 진행 저장 실패 → 대기열 A1(owner i) · 마무리 실행(넘긴 NA). 앞 판 i 의 완료 마커는 남습니다(그 판의 워커가 '다시 하기' 앞에서 썼고 실행부의
+    #      진행 저장 실패 갈래는 마커를 지우지 않음 - 실제 순서대로 첫 틱 앞에 씀). 둘째 틱 = 그 워커의 클리어 전 코드 4(클리어 기록 0 - 넘긴 NA 는 워커가 닫지 않음) → 앞 판
+    #      마커를 이번 판의 클리어 근거로 쓰지 않음: 계상 1 → 1(첫 틱의 계상 그대로) · 전진 0 · 마커 정리 0 · 진행 1/0 · NA launched(G3 열어 둠) · 대기열 A1 그대로 · 마커 남음 ·
+    #      보류 사유 오류 정지 → 다음 시작 = 대기열 반영 1회(실제 Invoke-AbyssPendingAdvance -Caller start - 시작 게이트 S0 의 대기열 함수) → 실제 Start-NextCycle 이 같은
+    #      NA 를 next 로 넘김 · 항목 i+1(입장 직후 키 재전송 0 = 워커 Role next). 시작 게이트 전체(S0·S3·마커 게이트·첫 기동)로 잇는 행은 test_abyss_pending_advance PC5′
+    #      (변이: 앞 판 마커를 다시 근거로 · 넘긴 nonce 닫기 · 계상 1 · 전진 1 → 이 행 FAIL)
+    $handoffPending = New-FixtureEntry -Stage 'reentered' -Owner $fixture.FiveNow -NextOwner $fixture.FiveNext -Generation $H_GENERATION -Section $ABYSS_SECTION -Nonce $NONCE_A
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($handoffPending) -StepFailures 1
+    Write-ContextMarker -Context $fixture.Now
+    $first = Invoke-HandoffTick -ExitCode 0 -Reason ($IH_REASON + ($IH_TAIL_FORMAT -f $NONCE_A))
+    $row = Invoke-HandoffTick -ExitCode 4 -Reason $CODE4_REASON
+    $markerLeft = [IO.File]::Exists($script:customMarkerFile)
+    $null = Invoke-AbyssPendingAdvance -Caller 'start'
+    $diskAfterAdvance = '{0}/{1}' -f $script:diskContext.Lap, $script:diskContext.Index
+    $nextStart = Invoke-NextStartAfterTick
+    $nextItem = $(if ($script:launches.Count -gt 0) { [int]([string]$script:launches[0]['HONEYNOGI_CUSTOM_ITEM'] -ceq (Format-CustomItemToken -Item $ABYSS_ITEMS[1])) } else { '(기동 없음)' })
+    Assert-Case 'H32f 마무리 실행(진행 저장 실패 보류)의 클리어 전 코드 4 + 앞 판 마커 → 첫 틱 기동/보류 || 둘째 틱 흐름 · 색 · 계상 · 전진 · 마커 정리 · 진행 · NA · 대기열 · 마커 남음 → 다음 시작(대기열 반영 1회) 진행 · 종류/nonce · HANDOFF_NONCE · ITEM = i+1' `
+        ('{0}/{1} || {2} · {3} · {4} → {5} · {6} · {7} · {8} · {9} · [{10}] · {11} → {12} · {13}/{14} · {15} · {16}' -f $first.Kind, $first.Hold.Kind, $row.Flow, $row.Color, $first.Completed,
+            $row.Completed, $row.Steps, $row.MarkerClears, $row.Disk, (Get-EntryText $row.Journal $NONCE_A), (Get-QueueText $row.Journal), $markerLeft, $diskAfterAdvance, $nextStart.Kind,
+            $nextStart.Nonce, $nextStart.HandoffNonce, $nextItem) `
+        ('finish-only/step-failed || stop|{0}|True · Firebrick · 1 → 1 · 0 · 0 · 1/0 · reentered/launched/1 · [inside-handoff:NA:1/0:g{1}] · True → 1/1 · next/NA · NA · 1' -f
+            ($C4_PRIOR_ERROR_FORMAT -f ('조건 정지: ' + $CODE4_REASON), '커스텀 진행 기록 저장 실패'), $H_GENERATION)
+    # H32g (같은 리뷰 - 경계): 마커 경로를 빼는 것은 진행 저장 실패 보류뿐입니다. 커스텀 안전 중지 보류(진행 저장 성공 - 디스크 i+1 · 실행부가 앞 판 마커를 정리함)의 마무리
+    #      실행이 그 판(i+1)을 클리어(완료 마커 i+1 · 클리어 기록 NB 가 같은 저장에서 NA 를 닫음)한 뒤 코드 4 → 마커 경로 그대로: 완료 줄(i+1) → 전진 → 정상 정지 · 계상 1 → 2 ·
+    #      전진 1 · 마커 정리 1 · 진행 1/2 · NA done 그대로 · NB 소비 (변이: 마무리 실행 전부에서 마커 경로를 빼면 기록 경로로 셈 - 마커 정리 0 → 이 행 FAIL)
+    $safeStopHold = @{ Kind = 'safe-stop'; Reason = '안전 중지'; IsError = $false; Owner = $fixture.OwnerNext; Position = $fixture.Next.Position; Snapshot = $fixture.Now }
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Next -Entries @($handoffClosedByClear, $finishCleared) -Applied @($NONCE_A) -LaunchKind 'finish-only' -LaunchNonce $NONCE_A `
+        -FinishOnlyHold $safeStopHold -CompletedCycles 1
+    Write-ContextMarker -Context $fixture.Next
+    $row = Invoke-HandoffTick -ExitCode 4 -Reason $CODE4_REASON
+    Assert-Case 'H32g 마무리 실행(안전 중지 보류 · 진행 저장 성공)이 그 판을 클리어한 뒤 코드 4 → 마커 경로 그대로 · 흐름 · 색 · 계상/전진/마커 정리 · 진행 · NA · NB' `
+        ('{0} · {1} · {2}/{3}/{4} · {5} · {6} · {7}' -f $row.Flow, $row.Color, $row.Completed, $row.Steps, $row.MarkerClears, $row.Disk, (Get-EntryText $row.Journal $NONCE_A), (Get-EntryText $row.Journal $NONCE_B)) `
+        ('gui|[커스텀] {0} 항목 완료 / step / {1} · SteelBlue · 2/1/1 · 1/2 · reentered/done/1 · cleared/pending/1' -f $fixture.Next.Position, $C4_STOP)
+    # H32h (같은 리뷰 - 놓아줌 변형): H32f 와 같은 두 틱인데 그 워커가 놓아줌 표지(' (release)' - 워커가 그 판이 끝났다고 스스로 정한 정지)로 끝남. 이 갈래도 앞 판
+    #      마커를 근거로 쓰지 않고(계상 1 → 1 · 전진 0 · 마커 정리 0 · 진행 1/0 · 대기열 A1 그대로 · 진행 위치 읽기 = 계상 함수의 진입 컨텍스트 1번뿐 - 맨 앞 항이라 마커
+    #      유효 판정의 읽기 0) 끝 처리는 그대로 돌아 놓아줌이 넘긴 NA 를 닫음(놓아줌은 지금처럼 닫음 - 구현 명세 ⑤b5 1.7 넷째 항목) → 다음 시작 = 대기열 반영 1회 1/1 ·
+    #      후보 없음(none · HANDOFF_NONCE 빈 값) (변이: 이 갈래에서 끝 처리를 건너뜀 → NA launched · 다음 시작 next/NA / 맨 앞 항을 뒤로 → 위치 읽기 2 → 이 행 FAIL)
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($handoffPending) -StepFailures 1
+    Write-ContextMarker -Context $fixture.Now
+    $first = Invoke-HandoffTick -ExitCode 0 -Reason ($IH_REASON + ($IH_TAIL_FORMAT -f $NONCE_A))
+    $row = Invoke-HandoffTick -ExitCode 4 -Reason ($CODE4_REASON + ' (release)')
+    $null = Invoke-AbyssPendingAdvance -Caller 'start'
+    $diskAfterAdvance = '{0}/{1}' -f $script:diskContext.Lap, $script:diskContext.Index
+    $nextStart = Invoke-NextStartAfterTick
+    Assert-Case 'H32h 마무리 실행(진행 저장 실패 보류)의 클리어 전 코드 4 + 앞 판 마커 + 놓아줌 표지 → 첫 틱 기동/보류 || 둘째 틱 흐름 · 계상 · 전진 · 마커 정리 · 위치 읽기 · 진행 · NA(닫힘) · 대기열 → 다음 시작(대기열 반영 1회) 진행 · 종류/nonce/HANDOFF_NONCE' `
+        ('{0}/{1} || {2} · {3} → {4} · {5} · {6} · {7} · {8} · {9} · [{10}] → {11} · {12}/{13}/{14}' -f $first.Kind, $first.Hold.Kind, $row.Flow, $first.Completed, $row.Completed,
+            $row.Steps, $row.MarkerClears, $row.ContextReads, $row.Disk, (Get-EntryText $row.Journal $NONCE_A), (Get-QueueText $row.Journal), $diskAfterAdvance, $nextStart.Kind,
+            $nextStart.Nonce, $nextStart.HandoffNonce) `
+        ('finish-only/step-failed || stop|{0}|True · 1 → 1 · 0 · 0 · 1 · 1/0 · reentered/done/1 · [inside-handoff:NA:1/0:g{1}] → 1/1 · none//' -f
+            ($C4_PRIOR_ERROR_FORMAT -f ('조건 정지: ' + $CODE4_REASON), '커스텀 진행 기록 저장 실패'), $H_GENERATION)
 }
 
 # ===== C4 행동 - 완료 기록 읽기 실패 · 끝 처리 실패 · 진입 컨텍스트 $null · 처리 중 예외 (명세 2.7 ⑤ · 5절 B3·B13·A4) =====
@@ -3434,9 +3715,18 @@ function Invoke-WorkerClearedRecord {
     # -Run: 'record' = [완료 기록 if → 나가기 헬퍼] / 'marker' = [완료 마커 if → 완료 기록 if → 나가기 헬퍼](마커 쓰기를 실제로 - 경로는 기동 env) /
     #       'tail' = 꼬리 전체 [완료 기록 if → … → 본류 try 끝](exit 는 가로챔)
     # -HoldLock = 기록하는 동안 다른 기록 주체가 잠금을 쥠(저장 실패 주입 - 기록이 끝나면 놓음) · -UpdateThrows = 저장 함수가 던짐(저장소 밖 예외 = 구현 결함
-    # 주입 - 저장 감시의 첫 저장 예외). 지역 변수 이름은 워커 문장이 읽는 이름($clearOutcome·$game·$timeout*)만 쓰고 $abyssJournalPath 는 두지 않습니다(기록
-    # 함수가 스크립트 수준 값을 이름 그대로 읽음 - 동적 스코프로 가려짐)
-    param([bool]$Custom, [bool]$CleanupOnly = $false, [string]$ClearOutcome = 'clear', [switch]$HoldLock, [string]$Run = 'record', [switch]$UpdateThrows)
+    # 주입 - 저장 감시의 첫 저장 예외). 지역 변수 이름은 워커 문장이 읽는 이름($clearOutcome·$game·$timeout*·$dungeonMode·$abyssMatching·$contentCategory·
+    # $safeStopFlagPath)만 쓰고 $abyssJournalPath 는 두지 않습니다(기록 함수가 스크립트 수준 값을 이름 그대로 읽음 - 동적 스코프로 가려짐)
+    # ⑤b5(구현 명세 ⑤b5 3.1 ⑯ 결합): -RetryRoute 면 보상 결정 입력을 워커 원문 읽기 문장으로 받습니다 - 어비스 항목 미리 해석 → (커스텀) 항목 · 다음 항목 · 항목 값의
+    #   입장 방식·매칭 덮어쓰기 → 마지막 판 · 마무리 실행 → 자리7 지정 시각 읽기. 비커스텀의 입장 방식·매칭은 -Mode · -Matching(= config 값)이고, -RetryRoute 가 없으면 둘 다
+    #   빈 값이라 경로 술어가 거짓입니다(결합 1~8 = 옛 나가기). 'whole' = 꼬리 전체 [⓪ ~ 본류 try 끝](완료 마커 if 포함 · exit 가로챔). -SafeStop = 안전 중지 예약 파일이
+    #   있음(행 폴더의 safe_stop.flag) · -Plan = 끝 함수 안 모의의 결과 차례(OtherWait · Reentry · RetryClick · ExitClick · SafeStopOnClick · CrashBeforeDone) ·
+    #   -HandoffRole = 이 워커의 이어받기 역할(폴백 ② 의 재개 판 판정이 읽음 - 기본 none)
+    # ⑤b6(구현 명세 ⑤b6 3.4 ⑯ · B-8): -Plan 에 결정 뒤 예약을 만드는 모의 둘(SafeStopOnOtherWait = '다른 던전 가기' 대기 · SafeStopOnExitClick = 나가기 헬퍼 - SafeStopOnClick 은
+    #   클릭 루프)과 복귀 루프의 코드 4(ReturnInside = '복귀 중 던전 안 2연속')를 더했고, 꼬리 전체('whole')가 exit · 예외 없이 끝나면 종료 코드 0 입니다(워커는 본류 try 뒤
+    #   스크립트가 끝남 - 옛 나가기 경로의 정상 끝)
+    param([bool]$Custom, [bool]$CleanupOnly = $false, [string]$ClearOutcome = 'clear', [switch]$HoldLock, [string]$Run = 'record', [switch]$UpdateThrows,
+        [switch]$RetryRoute, [string]$Mode = '', [string]$Matching = '', [switch]$SafeStop, [hashtable]$Plan = @{}, [string]$HandoffRole = 'none')
     $script:customMode = $Custom
     $script:customOwnerJson = ''
     $script:customMarkerPath = ''
@@ -3455,6 +3745,48 @@ function Invoke-WorkerClearedRecord {
     $timeoutHud = 30
     $timeoutAbyssMenu = 30
     $timeoutAbyssSelect = 30
+    $timeoutEntry = $WORKER_TIMEOUT_ENTRY
+    $timeoutPartyMatch = $GUI_TICK_TPM
+    $contentCategory = 'abyss'
+    $dungeonMode = $Mode
+    $abyssMatching = $Matching
+    $safeStopFlagPath = Join-Path $script:rowFolder 'safe_stop.flag'
+    if ($SafeStop) { [IO.File]::WriteAllText($safeStopFlagPath, 'stop') }
+    # 보상 결정 입력 - 앞 행 값이 새지 않게 비운 뒤 -RetryRoute 면 워커 원문 문장으로 받습니다
+    $script:abyssCustomPreparsed = $null
+    $script:customItem = $null
+    $script:customNext = $null
+    $script:dgLastRun = $false
+    $script:finishOnly = $false
+    $script:abyssUntil = $null
+    $script:handoff = @{ Role = $HandoffRole; Nonce = ''; CleanupOnly = $false; FreshEntry = $false; StartScreen = ''; AfterEntry = $null; JournalState = 'ok' }
+    if ($RetryRoute) {
+        . $workerPreparseBlock
+        if ($Custom) {
+            . $workerCustomItemBlock
+            . $workerCustomNextBlock
+        }
+        $dungeonDifficulty = ''
+        . $workerModeOverrideBlock
+        . $workerLastRunBlock
+        . $workerFinishOnlyBlock
+        . $workerUntilBlock
+    }
+    # 끝 함수 안 모의의 결과 차례(비면 TEST-UNREACHABLE) · 주입
+    foreach ($planList in @(@($script:otherWaitPlan, 'OtherWait'), @($script:reentryPlan, 'Reentry'), @($script:retryClickPlan, 'RetryClick'))) {
+        $planList[0].Clear()
+        foreach ($planItem in @($Plan[$planList[1]])) { if ($null -ne $planItem) { [void]$planList[0].Add($planItem) } }
+    }
+    $script:exitClickResult = $(if ($Plan.ContainsKey('ExitClick')) { [string]$Plan.ExitClick } else { 'gone' })
+    $script:safeStopOnRetryClick = [bool]$Plan.SafeStopOnClick
+    $script:safeStopOnOtherWait = [bool]$Plan.SafeStopOnOtherWait
+    $script:safeStopOnExitClick = [bool]$Plan.SafeStopOnExitClick
+    $script:returnInsideCode4 = [bool]$Plan.ReturnInside
+    $script:crashBeforeDoneLine = [bool]$Plan.CrashBeforeDone
+    $script:otherWaitCalls = 0
+    $script:reentryCalls = 0
+    $script:retryClickCalls = 0
+    $script:diagCalls = 0
     $noncesBefore = @()
     $journalBefore = Read-FixtureJournal -Path $script:abyssJournalPath
     if ($null -ne $journalBefore) { $noncesBefore = @(@($journalBefore.entries) | ForEach-Object { [string]$_.nonce }) }
@@ -3466,6 +3798,7 @@ function Invoke-WorkerClearedRecord {
     $workerBlock = $workerTailBlock
     if ($Run -eq 'marker') { $workerBlock = $workerMarkerTailBlock }
     elseif ($Run -eq 'tail') { $workerBlock = $workerFullTailBlock }
+    elseif ($Run -eq 'whole') { $workerBlock = $workerWholeTailBlock }
     $recordError = ''
     $tailExit = ''
     try {
@@ -3476,8 +3809,15 @@ function Invoke-WorkerClearedRecord {
     } finally {
         $script:abyssJournalSavedBy = $guiSavedBy
         $script:updateThrowAt = 0
+        $script:crashBeforeDoneLine = $false
+        $script:safeStopOnOtherWait = $false
+        $script:safeStopOnExitClick = $false
+        $script:returnInsideCode4 = $false
         if ($HoldLock) { Unlock-LogFiles }
     }
+    # 꼬리 전체가 exit 없이 · 예외 없이 끝남 = 워커 스크립트 끝 = 종료 코드 0(구현 명세 ⑤b6 3.4 ⑯ 하니스 ② · B-8 - 옛 나가기 경로의 '[완료] 어비스 선택 화면 복귀 완료' 뒤
+    # 본류 try 를 나와 스크립트가 끝남. 예전에는 빈 값이라 Invoke-RewardTick 이 -CrashCode 1 로 틱해 '오류 종료(코드 1)' 로 보였음)
+    if (($Run -eq 'whole') -and ($tailExit -eq '') -and ($recordError -eq '')) { $tailExit = '0' }
     $journalAfter = Read-FixtureJournal -Path $script:abyssJournalPath
     $newEntries = @()
     if ($null -ne $journalAfter) { $newEntries = @(@($journalAfter.entries) | Where-Object { $noncesBefore -notcontains [string]$_.nonce }) }
@@ -3492,6 +3832,11 @@ function Invoke-WorkerClearedRecord {
         ReturnCodes = @($script:returnSelectionCodes)
         LeaveReasons = @($script:returnSelectionLeaveReasons)
         TailExit    = $tailExit
+        OtherWaits  = $script:otherWaitCalls
+        Reentries   = $script:reentryCalls
+        RetryClicks = $script:retryClickCalls
+        Diags       = $script:diagCalls
+        FlagAfter   = [IO.File]::Exists($safeStopFlagPath)
     }
 }
 
@@ -3502,17 +3847,19 @@ function Get-WindowLineCount {
 }
 
 function Test-CaseCode4Coupling {
-    # 결합 0 하니스: 워커 쪽 모의 서명 = 워커 실제 서명 (복귀 루프 모의는 결합 7 의 꼬리 사본이 부름)
+    # 결합 0 하니스: 워커 쪽 모의 서명 = 워커 실제 서명 (복귀 루프 모의는 결합 7 의 꼬리 사본이 부름 · 대기 둘 · 클릭 루프 · 진단은 ⑤b5 결합의 끝 함수 원문이 부름)
     $selfAst = [System.Management.Automation.Language.Parser]::ParseFile($PSCommandPath, [ref]$null, [ref]$null)
-    Assert-Case '결합 0 워커 모의 Write-RunLog·Invoke-AbyssExitClick·Return-ToAbyssSelection 서명 = 워커 실제 서명' `
-        ((@('Write-RunLog', 'Invoke-AbyssExitClick', 'Return-ToAbyssSelection') | ForEach-Object { '{0}({1})' -f $_, (Get-ParamSignature $selfAst $_) }) -join ' / ') `
-        ((@('Write-RunLog', 'Invoke-AbyssExitClick', 'Return-ToAbyssSelection') | ForEach-Object { '{0}({1})' -f $_, (Get-ParamSignature $workerAst $_) }) -join ' / ')
-    # 결합 0′ 하니스 자기 검사(구현 명세 ② J9 · 3.4): 나가기 헬퍼 바로 앞의 완료 기록 if = 3(본류 1 + 보상·클리어 화면 시작 분기의 own 기록 2 - P16) · 그중
-    #   조건식에 $clearOutcome 이 든 if 1 · 결합 1~8 이 실제로 돌리는 if(고른 if)의 조건식이 본류의 것. 고르는 규칙을 소스 순 첫 원소로 되돌리면 보상 화면
-    #   시작 분기의 if 를 골라 셋째 칸이 거짓이 됩니다(명세 3.5 '⑯ 본류 if 를 [0] 으로')
-    Assert-Case '결합 0′ 하니스 자기 검사 - 나가기 헬퍼 바로 앞 완료 기록 if 수 · 그중 본류(조건식에 $clearOutcome) 수 · 고른 if 의 조건식에 $clearOutcome' `
-        ('{0} · {1} · {2}' -f $workerRecordIfs.Count, @($workerRecordIfs | Where-Object { $_.Clauses[0].Item1.Extent.Text.Contains('$clearOutcome') }).Count,
-            $workerMainRecordIf.Clauses[0].Item1.Extent.Text.Contains('$clearOutcome')) '3 · 1 · True'
+    $workerMockNames = @('Write-RunLog', 'Invoke-AbyssExitClick', 'Return-ToAbyssSelection', 'Wait-AbyssOtherSelection', 'Wait-AbyssReentry', 'Invoke-AbyssRetryClick', 'Write-LifeDiagnostics')
+    Assert-Case '결합 0 워커 모의 Write-RunLog·Invoke-AbyssExitClick·Return-ToAbyssSelection·Wait-AbyssOtherSelection·Wait-AbyssReentry·Invoke-AbyssRetryClick·Write-LifeDiagnostics 서명 = 워커 실제 서명' `
+        ((@($workerMockNames) | ForEach-Object { '{0}({1})' -f $_, (Get-ParamSignature $selfAst $_) }) -join ' / ') `
+        ((@($workerMockNames) | ForEach-Object { '{0}({1})' -f $_, (Get-ParamSignature $workerAst $_) }) -join ' / ')
+    # 결합 0′ 하니스 자기 검사(구현 명세 ② J9 · ⑤b5 3.4): 조건식에 $clearOutcome 이 든 완료 기록 if = 1(본류 - 하니스가 고른 if) · 나가기 헬퍼 바로 앞의 완료 기록 if = 2
+    #   (보상·클리어 화면 시작 분기의 own 기록 - P16, 조건식에 $clearOutcome 0 · 본류 기록 if 는 이제 헬퍼 바로 앞이 아님 - 사이에 보상 결정 갈래) · 하니스 꼬리 첫 문장 = ⓪ ·
+    #   고른 if 가 꼬리 안(⓪ 뒤 · 헬퍼 앞). 기록 if 를 자리(헬퍼 바로 앞)로 되돌리면 본류 if 를 못 찾고(하니스 정지), ⓪ 을 빼면 꼬리 첫 문장이 달라집니다
+    Assert-Case '결합 0′ 하니스 자기 검사 - 조건식에 $clearOutcome 이 든 완료 기록 if 수 · 헬퍼 바로 앞 own 기록 if 수(그중 조건식에 $clearOutcome) · 꼬리 첫 문장 · ⓪ < 기록 if < 헬퍼' `
+        ('{0} · {1}({2}) · {3} · {4}' -f $workerMainRecordIfs.Count, $workerRecordIfs.Count, @($workerRecordIfs | Where-Object { $_.Clauses[0].Item1.Extent.Text.Contains('$clearOutcome') }).Count,
+            $workerRecordSiblings[$workerZeroAt].Extent.Text, (($workerZeroAt -lt $workerRecordAt) -and ($workerRecordAt -lt $workerHelperAt))) `
+        ("1 · 2(0) · `$script:abyssRetryTimeVerdict = '' · True")
 
     # 결합 1 비커스텀: 실행 시작(새 실행 id → HONEYNOGI_RUN_ID - Invoke-StartAutomation 의 두 문장, 원문은 S4 가 고정) → 실제 Start-NextCycle → 워커가 받은
     # 실행 id 로 실제 클리어 기록 → 나가기 위치 미발견 코드 4 → 계상 1 · 소비 / 같은 판이 정상 종료(코드 0) → 종료 코드로 계상 1 · 그 기록은 소비만(두 번 세지 않음)
@@ -3602,8 +3949,9 @@ function Test-CaseCode4Coupling {
         ((@(@(0, 1), @(4, 0)) | ForEach-Object { '코드 {0}: 워커 [{1}] · 헬퍼 1 · 예외 [] · 기록 0 || GUI 계상 {2} · 창 경고 줄 1' -f $_[0], $CLEARED_FAIL_LOCKED, $_[1] }) -join ' ## ')
 
     # 결합 5 정적(명세 2.10 W6) - 워커 [설정] 스냅샷(파일 로그 전용)이 GUI 가 넘기는 완료 기록 env 를 받은 그대로 적음: 공통 줄 = 실행 id·handoff env 3개,
-    # 커스텀 줄 = (이전·다음 항목 뒤에) 소유자 JSON·진행 세대 - 같은 계산의 두 값이 어긋나면 제보 로그로 드러남(설계 v10 1.7). 적는 env 마다 GUI 원문에
-    # 그 env 의 대입이 있음(이름이 어긋나 늘 빈 값으로 찍히지 않게). 지정 시각·사이클 추정치 env 를 넣지 않는 것은 test_life_gather · test_abyss_party_member
+    # 커스텀 줄 = (이전·다음 항목 뒤에) 소유자 JSON·진행 세대 · 다음 판 이어받기 env 둘(NEXT_OWNER · NEXT_BOUNDARY - 구현 명세 ⑤b5 W5 · G1) - 같은 계산의 두 값이
+    # 어긋나면 제보 로그로 드러남(설계 v10 1.7). 적는 env 마다 GUI 원문에 그 env 의 대입이 있음(이름이 어긋나 늘 빈 값으로 찍히지 않게 - NEXT 둘은 Start-NextCycle 의
+    # 대입). 지정 시각·사이클 추정치 env 를 넣지 않는 것은 test_life_gather · test_abyss_party_member
     $settingsStrings = @($workerAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and $node.Value.StartsWith('[설정] ') }, $true))
     $settingsRows = foreach ($settingsHead in @('[설정] 완료 기록 env: ', '[설정] 커스텀 리스트: ')) {
         $settingsNodes = @($settingsStrings | Where-Object { $_.Value.StartsWith($settingsHead) })
@@ -3615,9 +3963,9 @@ function Test-CaseCode4Coupling {
                 [int](@($guiAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq $envAssignTarget) }, $true)).Count -gt 0) })
         '{0}{1}줄 · {2} · GUI 대입 {3}' -f $settingsHead, $settingsNodes.Count, ($settingsEnvNames -join ','), ($guiAssigned -join '')
     }
-    Assert-Case '결합 5 정적: 워커 [설정] 완료 기록 env 줄 = 실행 id·handoff env 3개 · 커스텀 줄 끝 = 소유자 JSON·진행 세대 · 전부 GUI 가 대입하는 env' ($settingsRows -join ' || ') `
+    Assert-Case '결합 5 정적: 워커 [설정] 완료 기록 env 줄 = 실행 id·handoff env 3개 · 커스텀 줄 끝 = 소유자 JSON·진행 세대·다음 판 이어받기 둘(⑤b5) · 전부 GUI 가 대입하는 env' ($settingsRows -join ' || ') `
         ('[설정] 완료 기록 env: 1줄 · HONEYNOGI_RUN_ID,HONEYNOGI_HANDOFF_NONCE,HONEYNOGI_RESUME_REENTRY,HONEYNOGI_FINISH_ONLY · GUI 대입 1111 || ' +
-            '[설정] 커스텀 리스트: 1줄 · HONEYNOGI_CUSTOM_PREV,HONEYNOGI_CUSTOM_NEXT,HONEYNOGI_CUSTOM_OWNER,HONEYNOGI_CUSTOM_GENERATION · GUI 대입 1111')
+            '[설정] 커스텀 리스트: 1줄 · HONEYNOGI_CUSTOM_PREV,HONEYNOGI_CUSTOM_NEXT,HONEYNOGI_CUSTOM_OWNER,HONEYNOGI_CUSTOM_GENERATION,HONEYNOGI_CUSTOM_NEXT_OWNER,HONEYNOGI_CUSTOM_NEXT_BOUNDARY · GUI 대입 111111')
     # 결합 5′ 정적(단계 2.10 구현 검증 - 줄 수·env 이름만 보던 결합 5 로는 자리·중복을 못 가름): ① 새 env 줄은 기존 첫 [설정] 줄('[설정] 꿀비노기 v' - 명세 W6 의
     # run:17285) 바로 다음 문장이고 같은 블록입니다 - 커스텀 if 안으로 들어가면 비커스텀 실행의 제보 로그에 실행 id 가 남지 않습니다 ② 완료 기록 env 6개(실행 id·
     # handoff 3·소유자 JSON·진행 세대)는 [설정] 스냅샷 전체에서 한 번씩만 적히고 기존 첫 줄은 env 를 읽지 않습니다(명세 W6 '17285 원문 불변' - 첫 줄에
@@ -3735,6 +4083,485 @@ function Test-CaseCode4CouplingWorker {
     }
     Assert-Case "결합 8 클리어 결과별: reward → 기록 1 · 성공 줄 1 / selection·left → 기록 0 · 줄 0 · 헬퍼는 셋 다 1" ($outcomeRows -join ' ## ') `
         'reward: 기록 1 · 줄 1 · 헬퍼 1 ## selection: 기록 0 · 줄 0 · 헬퍼 1 ## left: 기록 0 · 줄 0 · 헬퍼 1'
+}
+
+# ===== ⑤b5 결합 행 - 본류 보상 화면 꼬리(경로 참) → 두 끝(원문) → GUI 틱 (구현 명세 ⑤b5 3.1 ⑯ 결합 · 설계 v11 R6 7.2~7.5 · R1 2.2 · R3 3.6) =====
+# 워커 쪽: 실제 Start-NextCycle 이 넘긴 env → 워커 원문 읽기 문장(항목 · 다음 항목 · 항목 값의 입장 방식 덮어쓰기 · 마지막 판 · 마무리 실행 · 지정 시각 - Invoke-WorkerClearedRecord
+#   -RetryRoute) → 꼬리 전체(⓪ ~ 본류 try 끝 · 완료 마커 포함 · exit 가로챔 - 'whole'): 실제 경로 술어 · 보상 결정 · 재판단 · 클리어 기록 · 기록 확인 · 결정 사유 줄 → 두 끝 원문
+#   (그 안의 '다른 던전 가기' 대기 · 재입장 대기 · 클릭 루프 · 진단은 결과 차례 모의 - 워커 쪽 행동은 test_abyss_party_leader §9 · §10) → 끝 원문이 낸 줄 · 종료 코드 · 완료 기록
+#   (재입장 단계는 원문 기록 함수). 비커스텀의 입장 방식·매칭은 config 값(행 입력), 커스텀은 항목 토큰 해석 값입니다.
+# GUI 쪽: 그 종료 코드와 워커 줄(종료 직전 줄 - 최종 수집이 [완료] 사유를 읽음)로 실제 타이머 틱 1번 → 계상 · 완료 기록 소비 · 정지 사유 · 다음 기동 env(필요하면 다음 시작).
+# 행 이름 = 설계 v11 R6 7.2~7.5 표(SS · FB · PC) · R6-RC1 · R6-RC2(test_abyss_party_leader 의 5b-4 RC1a~RC2a 와 겹치지 않게 'R6-') · IH(재입장 11 - R1 2.2 · R3 3.6).
+# FB14 · FB18 · RC4 · RC5(재개) 는 구현 단계 ⑤c 몫입니다.
+# 구현 명세 ⑤b6(3.4 ⑯ · 3.1 ⑯): 멈춤 끝(안전 중지 · 마무리 실행 · 마지막 판 · 지정 시각)과 다음 항목의 입장 방식이 다르거나 모를 때의 결정은 'exit' = 옛 나가기(헬퍼 → 복귀 루프 모의
+#   → '[완료] 어비스 선택 화면 복귀 완료' → 스크립트 끝 exit 0, 예약이 있으면 복귀 루프 출구 ② 가 소비)라 그 행의 기대를 옛 나가기 꼴로 바꾸고, 'exit' 로는 닿지 않는 '다른 던전 가기'
+#   끝 갈래는 입구를 바꿨습니다(비커스텀 'retry' + 클릭 루프 'no-pair' 폴백 ① · 커스텀 같은 입장 방식 다른 던전). 새 행 SS1c · CX1 · MX-G1~MX-G4 는 이 절 끝입니다
+function Get-WorkerDistinctDoneReason {
+    # Get-WorkerDoneReason 과 같되 같은 글자의 [완료] 문자열이 여럿이어도 글자가 하나면 그 사유('[완료] ' 뒤 - 글자가 둘 이상 · 0 이면 멈춤). '다른 던전 가기' 끝의 재매칭 취소
+    # 문구는 확인 갈래 · 폴백 ② 두 자리에 같은 글자로 있습니다
+    param([string]$Fragment, [string]$InFunction)
+    $doneTexts = @($workerAst.FindAll({ param($node)
+                (($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -or ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst])) -and
+                $node.Value.StartsWith('[완료] ') -and $node.Value.Contains($Fragment) }, $true) | Where-Object {
+            $ownerNode = $_.Parent
+            while (($null -ne $ownerNode) -and -not ($ownerNode -is [System.Management.Automation.Language.FunctionDefinitionAst])) { $ownerNode = $ownerNode.Parent }
+            ($null -ne $ownerNode) -and ($ownerNode.Name -eq $InFunction) } | ForEach-Object { [string]$_.Value } | Sort-Object -Unique)
+    if ($doneTexts.Count -ne 1) { throw ('워커 [완료] 문구의 글자가 1개가 아닙니다: {0} @ {1} ({2}개)' -f $Fragment, $InFunction, $doneTexts.Count) }
+    return $doneTexts[0].Substring('[완료] '.Length)
+}
+function Get-RewardEntryText {
+    # 워커가 만든 새 완료 기록 항목 '단계/결정/다음 판(run · lap/index · (없음))' - 없으면 '(기록 없음)'
+    param($Worker)
+    if ($null -eq $Worker.Entry) { return '(기록 없음)' }
+    $nextText = '(없음)'
+    if ($null -ne $Worker.Entry.nextOwner) {
+        $nextText = $(if ($null -ne $Worker.Entry.nextOwner.PSObject.Properties['runId']) { 'run' } else { '{0}/{1}' -f $Worker.Entry.nextOwner.lap, $Worker.Entry.nextOwner.index })
+    }
+    return ('{0}/{1}/{2}' -f $Worker.Entry.stage, $Worker.Entry.decision, $nextText)
+}
+function Get-RewardWorkerText {
+    # 워커 쪽 요약 - 종료 코드 · 예외 · 새 기록 · 대기 호출('다른 던전 가기' o · 재입장 r · 클릭 루프 c) · 진단 · 나가기 헬퍼 · 복귀 루프 코드 · 안전 중지 예약 파일 · 결정 사유 줄
+    #   (꼬리의 결정 · 기록 갈래 줄 = '[어비스] '·'[경고] ' 로 시작해 '다른 던전 가기' 로 마치거나 '나가기' 로 돌아가는 줄 - 끝 함수 폴백 ② 의 '보상 화면 나가기' 줄은 뺌) · 마지막 줄.
+    #   구현 명세 ⑤b6(3.4 ⑯): 'exit' 갈래의 끝말 둘("'나가기'로 던전 밖에 나와 마칩니다" - 멈춤 · 시간 줄 / "… 다음 항목으로 넘어갑니다" - 이어 감)도 고릅니다(안 고르면 결정 줄이 비어도
+    #   통과). 고르개는 글자를 직접 둡니다 - 끝말이 바뀐 변이는 기대(원문 캡처 꼴)와 실제(고르지 못해 빈 값)가 갈려 드러납니다
+    param($Worker)
+    $decisionLines = @($Worker.Logs | Where-Object {
+            $logLine = [string]$_
+            ($logLine.StartsWith('[어비스] ') -or $logLine.StartsWith('[경고] ')) -and (-not $logLine.Contains("보상 화면 '나가기' 로")) -and
+            ($logLine.Contains("'다른 던전 가기' 로 선택 화면에서 마칩니다") -or $logLine.Contains("'다른 던전 가기'로 선택 화면에서 마칩니다") -or $logLine.Contains("'나가기' 로 선택 화면에 돌아갑니다") -or
+                $logLine.Contains("'나가기'로 던전 밖에 나와 마칩니다") -or $logLine.Contains("'나가기'로 던전 밖에 나와 다음 항목으로 넘어갑니다")) })
+    $lastLine = $(if (@($Worker.Logs).Count -gt 0) { [string]@($Worker.Logs)[-1] } else { '(줄 없음)' })
+    return ('exit [{0}] · 예외 [{1}] · 기록 {2} · 대기 o{3}/r{4}/c{5} · 진단 {6} · 헬퍼 {7} · 복귀 [{8}] · 예약 {9} · 결정 줄 [{10}] · 마지막 줄 [{11}]' -f $Worker.TailExit, $Worker.Error,
+        (Get-RewardEntryText $Worker), $Worker.OtherWaits, $Worker.Reentries, $Worker.RetryClicks, $Worker.Diags, $Worker.ExitClicks, ($Worker.ReturnCodes -join ','), [int]$Worker.FlagAfter,
+        ($decisionLines -join ' | '), $lastLine)
+}
+function Get-RewardWorkerWant {
+    # Get-RewardWorkerText 의 기대 - 기록 · 대기 · 진단 · 헬퍼 · 복귀 · 예약 · 결정 줄 · 마지막 줄(-Done 은 '[완료] ' 뒤 사유 · '(줄 없음)' 이면 그대로)
+    param([string]$Exit, [string]$Entry, [string]$Waits, [int]$Diags = 0, [int]$Helper = 0, [string]$Returns = '', [int]$Flag = 0, [string]$Decision = '', [string]$Done, [string]$Thrown = '')
+    $lastWant = $(if ($Done -ceq '(줄 없음)') { $Done } elseif ($Done.StartsWith('[')) { $Done } else { '[완료] ' + $Done })
+    return ('exit [{0}] · 예외 [{1}] · 기록 {2} · 대기 {3} · 진단 {4} · 헬퍼 {5} · 복귀 [{6}] · 예약 {7} · 결정 줄 [{8}] · 마지막 줄 [{9}]' -f $Exit, $Thrown, $Entry, $Waits, $Diags, $Helper,
+        $Returns, $Flag, $Decision, $lastWant)
+}
+function Start-RewardRow {
+    # ⑤b5 결합 행 준비 - 새 행(Initialize-HandoffRow 인자 그대로) · 새 실행 id(env 로 - 워커 원문 읽기가 받음) · 실제 Start-NextCycle 1번 → 그 기동 env
+    param([hashtable]$Setup = @{})
+    Initialize-HandoffRow @Setup
+    if (-not $Setup.ContainsKey('RunId')) { $script:runId = [guid]::NewGuid().ToString('D') }
+    $env:HONEYNOGI_RUN_ID = $script:runId
+    $null = Start-NextCycle
+    return $(if ($script:launches.Count -gt 0) { $script:launches[0] } else { @{} })
+}
+function Invoke-RewardTick {
+    # 워커 쪽 결과 → 실제 타이머 틱 1번(종료 코드 = 꼬리가 만난 exit(꼬리 전체가 끝까지 가면 0 - Invoke-WorkerClearedRecord) · 예외면 -CrashCode) → @{ Row; Reason(틱 뒤 GUI 가 모은 [완료] 사유) }
+    param($Worker, [int]$CrashCode = 1)
+    $tickCode = $(if ([string]$Worker.TailExit -ne '') { [int]$Worker.TailExit } else { $CrashCode })
+    $tickRow = Invoke-HandoffTick -ExitCode $tickCode -Plan @{ WorkerLines = $Worker.TimedLines }
+    return @{ Row = $tickRow; Reason = [string]$script:lastWorkerDoneReason }
+}
+
+function Test-CaseRewardTailCoupling {
+    $fixture = Get-CustomFixture
+    # 소스 캡처 - 꼬리의 결정 사유 줄(원인 조각 switch · 사유 줄 꼴 · 시간 줄 ①) · 두 끝 · 대기 초과 끝의 [완료] 사유.
+    #   구현 명세 ⑤b6(3.4 ⑯): 'exit' 갈래에 원인 조각 switch 둘($exitCause - 멈춤 · $moveCause - 이어 감)이 더해져 switch 는 조건식이 아니라 대입 대상으로 고르고, 사유 줄 꼴도
+    #   셋('${otherCause}' · '${exitCause}' · '${moveCause}')을 각각 캡처합니다(기대 = 원인 조각 + 원문 꼴 - 문구를 다시 박지 않음)
+    $tailStatements = @($workerRecordSiblings[$workerZeroAt..($workerRecordSiblings.Count - 1)])
+    $causeCaptures = @{}
+    foreach ($causeName in @('otherCause', 'exitCause', 'moveCause')) {
+        $nameSwitches = @(foreach ($tailStatement in $tailStatements) { $tailStatement.FindAll({ param($node) ($node -is [System.Management.Automation.Language.SwitchStatementAst]) -and ($node.Condition.Extent.Text -eq '[string]$rewardDecision.Reason') -and
+                    ($node.Parent -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Parent.Left.Extent.Text -ceq ('$' + $causeName)) }, $true) })
+        $nameFormats = @(foreach ($tailStatement in $tailStatements) { $tailStatement.FindAll({ param($node) ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and $node.Value.Contains('${' + $causeName + '}') }, $true) })
+        $causeCaptures[$causeName] = @{ Switches = $nameSwitches; Formats = $nameFormats }
+    }
+    $timeFormats = @(foreach ($tailStatement in $tailStatements) { $tailStatement.FindAll({ param($node) ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and $node.Value.StartsWith('[어비스] 지정 시간 ') -and $node.Value.Contains('이번 판을 마지막으로') }, $true) })
+    $captureCounts = '{0} · {1}' -f ((@('otherCause', 'exitCause', 'moveCause') | ForEach-Object { '{0}/{1}' -f @($causeCaptures[$_].Switches).Count, @($causeCaptures[$_].Formats).Count }) -join ' · '), $timeFormats.Count
+    if ($captureCounts -cne '1/1 · 1/1 · 1/1 · 1') {
+        Assert-Case '⑤b5 결합 준비 - 꼬리의 원인 조각 switch/사유 줄 꼴(other · exit · move) · 시간 줄 ① 각 1' $captureCounts '1/1 · 1/1 · 1/1 · 1'
+        return
+    }
+    $causeMaps = @{}
+    $causeLineFormats = @{}
+    foreach ($causeName in @('otherCause', 'exitCause', 'moveCause')) {
+        $nameMap = @{}
+        foreach ($causeClause in @($causeCaptures[$causeName].Switches)[0].Clauses) { $nameMap[[string]$causeClause.Item1.Value] = [string]@($causeClause.Item2.FindAll({ param($node) $node -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true))[0].Value }
+        $causeMaps[$causeName] = $nameMap
+        $causeLineFormats[$causeName] = ([string]@($causeCaptures[$causeName].Formats)[0].Value).Replace('${' + $causeName + '}', '{0}')
+    }
+    $causeMap = $causeMaps['otherCause']
+    $causeFormat = $causeLineFormats['otherCause']
+    $exitMap = $causeMaps['exitCause']
+    $exitFormat = $causeLineFormats['exitCause']
+    $moveMap = $causeMaps['moveCause']
+    $moveFormat = $causeLineFormats['moveCause']
+    $timeFormat = ([string]$timeFormats[0].Value).Replace([string]$timeFormats[0].NestedExpressions[0].Extent.Text, '{0}')
+    $otherSafeDone = Get-WorkerDoneReason -Fragment '안전 중지 예약 확인 - 선택 화면 복귀 완료 시점에서' -InFunction 'Complete-AbyssOtherSelection'
+    $otherUnconfirmedDone = Get-WorkerDoneReason -Fragment '워커가 연 것으로 확인되는 어비스 선택 화면을 보지 못해' -InFunction 'Complete-AbyssOtherSelection'
+    $otherCancelledDone = Get-WorkerDistinctDoneReason -Fragment '재매칭이 취소돼' -InFunction 'Complete-AbyssOtherSelection'
+    $timeoutPartyDone = Get-WorkerDoneReason -Fragment '매칭 취소·나가기 없이 정지합니다' -Values @{ timeoutPartyMatch = $GUI_TICK_TPM } -InFunction 'Stop-AbyssReentryTimeout'
+    $recoverySelectionDone = Get-WorkerDoneReason -Fragment '커스텀 마무리 복구 중 어비스 선택 화면이 워커가 연 화면인지 확인할 수 없어 멈춥니다'
+    $readyDone = $READY_REASON
+    $otherConfirmed = @(@{ Result = 'confirmed'; Sends = 1 })
+    $otherUnconfirmed = @(@{ Result = 'unconfirmed'; Sends = 1 })
+    $markerFailLine = '[경고] 완료 마커 기록에 실패했습니다 - 정상 종료면 GUI가 종료 코드로 계상하므로 진행을 계속합니다'
+    $soloSetup = @{ DecisionMode = 'real' }
+
+    # ── SS (설계 v11 R6 7.3 - 안전 중지 · 시간 · 마지막 판 · 마무리 실행 · 바퀴 경계) ──
+    # SS1 보상 결정 때 예약(F9 - GUI 안전 중지 요청 + 예약 파일) → 결정 exit 'safe-stop' → 멈춤 줄 → 옛 나가기(헬퍼 1 · 복귀 루프 코드 0) → 복귀 루프 출구 ② 가 예약 소비 ·
+    #     안전 중지 확인 줄 · exit 0 → (GUI 틱) +1 · '안전 중지'. 구현 명세 ⑤b6 3.4: 예전 기대('다른 던전 가기' 'confirmed' 가 소비)를 옛 나가기 꼴로 - 대기 0 · 기록 결정 exit
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -SafeStop
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS1 (GUI 틱) 예약 → 안전 중지 결정 exit → 옛 나가기 · 복귀 루프 출구 ② 예약 소비 · exit 0 → +1 · 기록 소비 · 안전 중지 정지" `
+        ('{0} || {1} · 계상 {2} · 기록 {3} · 사유 [{4}]' -f (Get-RewardWorkerText $worker), $tick.Row.Flow, $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), $tick.Reason) `
+        ('{0} || gui|=== 1회차 완료 === / decision|0 / stop|안전 중지|False · 계상 1 · 기록 cleared/pending/1 · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['safe-stop']) -Done $RETURN_SAFE_STOP_DONE),
+            $RETURN_SAFE_STOP_DONE)
+    # SS3 '다시 하기' 결정 뒤 예약(F9 - 클릭 루프가 짝을 못 찾는 사이에 들어옴, 모의가 결과를 돌려주기 직전에 만듦) → 'no-pair' 폴백 ① '다른 던전 가기' 'unconfirmed' → 예약
+    #     그대로(워커 삭제 0 - 소비는 확인 뒤만) · 진단 · 코드 4 → (GUI 틱) 이 실행의 클리어 기록으로 +1 · 그 기록 적용 · 정상 정지(예약 파일은 GUI 정지가 지움 - 실제 Stop-AllRun 몫,
+    #     이 파일의 정지는 모의). 설계 '플래그 0' = 이 행의 GUI 정지 1 + S3 의 정지 함수 예약 파일 삭제(정적 - 내부 검토 반영). 구현 명세 ⑤b6 3.4: 예약이 보상 결정 때 있으면
+    #     결정이 exit(옛 나가기)라 'unconfirmed' 에 닿지 않아 입구를 비커스텀 'retry' + 클릭 루프 'no-pair' 폴백 ① 로 바꿈(무한 반복 - 마지막 판 신호 없음)
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('no-pair'); SafeStopOnClick = $true; OtherWait = $otherUnconfirmed }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS3 (GUI 틱) 결정 뒤 예약 + 'no-pair' 폴백 ① 'unconfirmed' → 예약 그대로 · 진단 · 코드 4 → +1 · 기록 적용 · 정상 정지" `
+        ('{0} || 계상 {1} · 기록 {2} · 정지 [{3}] · 사유 [{4}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), (Get-StopFlags $tick.Row), $tick.Reason) `
+        ('{0} || 계상 1 · 기록 cleared/pending/1 · 정지 [False] · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'cleared/retry/run' -Waits 'o1/r0/c1' -Diags 1 -Flag 1 -Done $otherUnconfirmedDone), $otherUnconfirmedDone)
+    # SS5 지정 시각이 지난 보상 결정(GUI 의 UNTIL → 워커 자리7 읽기 → 재판단 'last') → 결정 exit 'time' · 시간 줄 ① → 옛 나가기 · 복귀 완료 → 스크립트 끝 exit 0(11 아님) →
+    #     (GUI 틱) +1 · '지정 시간 도달'. 구현 명세 ⑤b6 3.4: 예전 기대('다른 던전 가기' 확인)를 옛 나가기 꼴로
+    $pastTarget = [datetime]::ParseExact((Get-Date).AddMinutes(-5).ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture), 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+    $launchEnv = Start-RewardRow -Setup @{ DecisionMode = 'real'; TargetTime = $pastTarget }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남'
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS5 (GUI 틱) 지정 시각 뒤 보상 결정 → 시간 줄 ① · 옛 나가기 · exit 0 → +1 · 지정 시간 도달 정지 · 코드 11 0" `
+        ('UNTIL [{0}] · {1} || 계상 {2} · 정지 [{3}]' -f $launchEnv['HONEYNOGI_UNTIL_TIME'], (Get-RewardWorkerText $worker), $tick.Row.Completed, ((Get-StopEvents $tick.Row) -join ' / ')) `
+        ('UNTIL [{0}] · {1} || 계상 1 · 정지 [stop|지정 시간({2}) 도달|False]' -f $pastTarget.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture),
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($timeFormat -f $pastTarget.ToString('HH:mm')) -Done $readyDone),
+            $pastTarget.ToString('HH:mm'))
+    # SS6 횟수 지정 마지막 판(GUI 의 LAST_RUN 1 → 워커 원문 읽기) → 결정 exit 'last-run' · 마지막 판 줄 → 옛 나가기 · 복귀 완료 → exit 0 → (GUI 틱) +1 · '지정 횟수 완료'.
+    #     구현 명세 ⑤b6 3.4: 예전 기대('다른 던전 가기' 확인)를 옛 나가기 꼴로
+    $launchEnv = Start-RewardRow -Setup @{ DecisionMode = 'real'; TargetCycles = 1 }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남'
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS6 (GUI 틱) 마지막 판 신호 → 마지막 판 줄 · 옛 나가기 · exit 0 → +1 · 지정 횟수 완료 정지" `
+        ('LAST_RUN [{0}] · {1} || 계상 {2} · 정지 [{3}]' -f $launchEnv['HONEYNOGI_LAST_RUN'], (Get-RewardWorkerText $worker), $tick.Row.Completed, ((Get-StopEvents $tick.Row) -join ' / ')) `
+        ('LAST_RUN [1] · {0} || 계상 1 · 정지 [stop|지정 횟수 완료|False]' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['last-run']) -Done $readyDone))
+    # SS7 마무리 실행 기동(비커스텀 · 보류 안전 중지 · 넘긴 재입장 NA - GUI 의 FINISH_ONLY 1 · LAST_RUN 1 → 워커 원문 읽기) → 결정 exit 'finish-only' · 마무리 줄(마지막 판보다 먼저) →
+    #     옛 나가기 → 'done' = 복귀 완료 · 스크립트 끝 exit 0 → (GUI 틱) 완주 처리(보류 사유 정지 · NA done) / 'code4' = 옛 나가기 경로의 코드 4(복귀 중 던전 안 2연속 - 복귀 루프
+    #     모의의 코드 4 꼴) → 기록으로 +1 · NA done(클리어 근거) · 끝 정지 계획 그대로(정상 정지). 구현 명세 ⑤b6 3.4: FINISH_ONLY 1 이 전제라 순위 ① 이 늘 exit - 예전 두 절반
+    #     ('다른 던전 가기' 'confirmed' / 'unconfirmed')을 옛 나가기의 두 끝으로 바꿈(입구를 바꿀 수 없어 기대를 바꿈)
+    $ss7Texts = foreach ($ss7End in @('done', 'code4')) {
+        Initialize-HandoffRow -DecisionMode 'real'
+        $script:runId = [guid]::NewGuid().ToString('D')
+        $env:HONEYNOGI_RUN_ID = $script:runId
+        $runOwner = [pscustomobject]@{ runId = $script:runId }
+        Write-FixtureJournal -Path $script:abyssJournalPath -Entries @(New-FixtureEntry -Stage 'reentered' -Owner $runOwner -NextOwner $runOwner -Nonce $NONCE_A) -Applied @($NONCE_A)
+        $null = Start-NextCycle -FinishOnlyHold @{ Kind = 'safe-stop'; Reason = '안전 중지'; IsError = $false; Owner = @{ runId = $script:runId }; Position = ''; Snapshot = $null }
+        $finishEnv = $(if ($script:launches.Count -gt 0) { $script:launches[0] } else { @{} })
+        $finishKind = [string]$script:lastLaunchKind
+        $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ ReturnInside = ($ss7End -eq 'code4') }
+        $tick = Invoke-RewardTick $worker
+        # 정지 칸: 'done' 은 정지 사건 그대로(보류 사유) · 'code4' 는 상태줄 사유가 GUI 가 자른 글자(꼬리 제거 → 공백 정규화 → 80자 - C4-12″ 가 고정)라 그 규칙을
+        #   다시 쓰지 않고 정지 사건 수 · 조건 정지(정상) 사건 수 · 틱이 모은 [완료] 사유 원문 대조(SS3 · PC1 과 같은 대조)로 봅니다(내부 검토 반영 - 워커 문구가 80자 이하로
+        #   바뀌어도 이 행에서 멈추지 않음)
+        $ss7StopText = $(if ($ss7End -eq 'done') { (Get-StopEvents $tick.Row) -join ' / ' } else {
+                '정지 {0}개 · 조건 정지 {1} · 사유 원문 {2}' -f @(Get-StopEvents $tick.Row).Count,
+                    @(Get-StopEvents $tick.Row | Where-Object { $_.StartsWith('stop|조건 정지: ') -and $_.EndsWith('|False') }).Count, ($tick.Reason -ceq $RETURN_INSIDE_DONE) })
+        '{0}: 기동 {1}/{2} · FINISH_ONLY {3} · LAST_RUN {4} · {5} || 계상 {6} · NA {7} · 정지 [{8}]' -f $ss7End, $finishKind, (Get-NonceLabel ([string]$finishEnv['HONEYNOGI_HANDOFF_NONCE'])),
+            $finishEnv['HONEYNOGI_FINISH_ONLY'], $finishEnv['HONEYNOGI_LAST_RUN'], (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $NONCE_A), $ss7StopText
+    }
+    Assert-Case "SS7 (GUI 틱) 마무리 실행(FINISH_ONLY · LAST_RUN · 넘긴 NA) → 마무리 줄 · 옛 나가기 → done = 완주 처리(보류 사유 안전 중지 · NA done) || code4(복귀 중 던전 안) = +1 · NA done · 정상 정지(사유 원문)" `
+        ($ss7Texts -join ' ## ') `
+        (('done: 기동 finish-only/NA · FINISH_ONLY 1 · LAST_RUN 1 · {0} || 계상 1 · NA reentered/done/1 · 정지 [stop|안전 중지|False] ## ' +
+            'code4: 기동 finish-only/NA · FINISH_ONLY 1 · LAST_RUN 1 · {1} || 계상 1 · NA reentered/done/1 · 정지 [정지 1개 · 조건 정지 1 · 사유 원문 True]') -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['finish-only']) -Done $readyDone),
+            (Get-RewardWorkerWant -Exit '4' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['finish-only']) -Done $RETURN_INSIDE_DONE))
+    # SS8 커스텀 바퀴 끝 판(3/3번 - GUI 의 NEXT_BOUNDARY 1 · NEXT_OWNER 빈 값 → 워커 원문 읽기) → 경계 줄 → 확인 → exit 0 → (GUI 틱) Step(다음 바퀴 1번) · 다음 기동
+    #     HANDOFF_NONCE 빈 값(Role none - 다음 워커는 선택 화면에서 카드)
+    $launchEnv = Start-RewardRow -Setup @{ Custom = $true; DiskContext = (New-AbyssContext -Index 2 -Generation $H_GENERATION) }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ OtherWait = $otherConfirmed }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case 'SS8 (GUI 틱) 커스텀 바퀴 끝(NEXT_BOUNDARY 1 · NEXT_OWNER 빈 값) → 경계 줄 · 확인 · exit 0 → +1 · Step(2바퀴 0번) · 기록 소비 · 다음 기동 none · HANDOFF_NONCE 빈 값' `
+        ('NEXT_OWNER [{0}] · NEXT_BOUNDARY [{1}] · {2} || 계상 {3} · 전진 {4} · 진행 {5} · 기록 {6} · 다음 기동 {7}/{8}/[{9}]' -f $launchEnv['HONEYNOGI_CUSTOM_NEXT_OWNER'], $launchEnv['HONEYNOGI_CUSTOM_NEXT_BOUNDARY'],
+            (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Steps, $tick.Row.Disk, (Get-EntryText $tick.Row.Journal $workerNonce), $tick.Row.Launches, $tick.Row.Kind,
+            $tick.Row.LaunchEnv['HONEYNOGI_HANDOFF_NONCE']) `
+        ('NEXT_OWNER [] · NEXT_BOUNDARY [1] · {0} || 계상 1 · 전진 1 · 진행 2/0 · 기록 cleared/pending/1 · 다음 기동 1/none/[]' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/other/(없음)' -Waits 'o1/r0/c0' -Decision ($causeFormat -f $causeMap['boundary']) -Done $readyDone))
+    # SS11 우연한 만남 '다시 하기' 전송(commit) 뒤 예약(F9 - 클릭 루프 모의가 commit 뒤에 만듦 · 원문 루프의 직전 재검사는 commit 전에만) → 재입장 대기 초과 → 대기 초과 끝(코드 4 ·
+    #     예약 그대로 - 재입장 대기 · 대기 초과 끝은 예약을 소비하지 않음) → (GUI 틱) 재입장 클릭 기록으로 +1 · 정상 정지. 설계 '플래그 0' = 이 행의 GUI 정지 1 + S3 의 정지 함수
+    #     예약 파일 삭제(정적 - 이 파일의 정지는 모의, 내부 검토 반영). 구현 명세 ⑤b6 3.4: 직전 재검사의 'safe-stop' 은 이제 본류 옛 나가기라(끝(retry) 반환 - W2) 폴백 ② 호출 E 에
+    #     닿지 않아 입구를 '다시 하기' commit 뒤 예약으로 바꿈
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'party' -Matching '우연한 만남' -Plan @{ RetryClick = @('sent'); SafeStopOnClick = $true; Reentry = @('timeout') }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS11 (GUI 틱) '다시 하기' 전송 뒤 예약 → 재입장 대기 초과 → 예약 그대로 · 코드 4 → 재입장 클릭 기록으로 +1 · 정상 정지" `
+        ('{0} || 계상 {1} · 기록 {2} · 정지 [{3}] · 사유 [{4}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), (Get-StopFlags $tick.Row), $tick.Reason) `
+        ('{0} || 계상 1 · 기록 retry-clicked/pending/1 · 정지 [False] · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'retry-clicked/retry/run' -Waits 'o0/r1/c1' -Diags 1 -Flag 1 -Done $timeoutPartyDone), $timeoutPartyDone)
+
+    # ── FB (설계 v11 R6 7.2 - 호출부 갈래의 GUI 부분) ──
+    # FB3 '다시 하기' 결정 → 클릭 루프 'skipped'(재입장 요청 기록 · 전송 0) → 폴백 ① '다른 던전 가기' 'no-pair' → 폴백 ② 헬퍼 'matching' · 재입장 요청 판 → 호출 E 'entered' →
+    #     재입장 완료 끝(reentered · 재입장 완료 줄 · exit 0) → (GUI 틱) 재입장 판별 inside-handoff → 다음 기동 next · 같은 nonce
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' `
+        -Plan @{ RetryClick = @('skipped'); OtherWait = @(@{ Result = 'no-pair'; Sends = 0 }); ExitClick = 'matching'; Reentry = @('entered') }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "FB3 (GUI 틱) 폴백 ② 호출 E 'entered' → 재입장 완료 exit 0 → 계상 1 · 재입장 판별 → 다음 기동 next · 같은 nonce · 그 항목 launched" `
+        ('{0} || 계상 {1} · 기동 {2}/{3}/{4} · 같은 nonce {5} · 기록 {6}' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Launches, $tick.Row.Kind,
+            [int]([string]$tick.Row.LaunchEnv['HONEYNOGI_HANDOFF_NONCE'] -ceq $workerNonce), [int]([string]$script:lastLaunchNonce -ceq $workerNonce), (Get-EntryText $tick.Row.Journal $workerNonce)) `
+        ('{0} || 계상 1 · 기동 1/next/1 · 같은 nonce 1 · 기록 reentered/launched/1' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'reentered/retry/run' -Waits 'o1/r1/c1' -Helper 1 -Done ($IH_REASON + ($IH_TAIL_FORMAT -f $workerNonce))))
+    # FB4 '다른 던전 가기' 결정(커스텀 같은 입장 방식의 다른 던전 - item-change) → 'no-pair' → 폴백 ② 헬퍼 'matching' · 재입장 요청 기록 없음 → 재입장 대기 0 · 복귀 루프(안전 중지
+    #     코드 0) → 복귀 완료 exit 0 → (GUI 틱) 기록 오류 정지 0(journal-error 0) · +1 · 전진 · 다음 기동. 재입장 대기 차례에 'entered' 를 넣어 둡니다 - 재입장 요청 판이 아닌데
+    #     호출 E 로 가는 변이(R6-M13)는 빈 nonce 의 재입장 완료 줄을 내고 이 틱이 기록 오류로 멈춥니다. 구현 명세 ⑤b6 3.4: 마지막 판은 이제 옛 나가기라 'other' 의 폴백 ② 에
+    #     닿지 않아 입구를 커스텀 item-change 로 바꿈
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = $fixture.Now }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ OtherWait = @(@{ Result = 'no-pair'; Sends = 0 }); ExitClick = 'matching'; Reentry = @('entered') }
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "FB4 (GUI 틱) 커스텀 item-change · 헬퍼 'matching' · 재입장 요청 기록 없음 → 재입장 대기 0 · 복귀 루프 → exit 0 → 기록 오류 정지 0 · +1 · 전진 · 다음 기동" `
+        ('{0} || 계상 {1} · 오류 정지 {2} · 정지 [{3}] · 전진 {4} · 기동 {5}' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, @(Get-StopEvents $tick.Row | Where-Object { $_.EndsWith('|True') }).Count,
+            ((Get-StopEvents $tick.Row) -join ' / '), $tick.Row.Steps, $tick.Row.Launches) `
+        ('{0} || 계상 1 · 오류 정지 0 · 정지 [] · 전진 1 · 기동 1' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/other/(없음)' -Waits 'o1/r0/c0' -Helper 1 -Returns '0' -Decision ($causeFormat -f $causeMap['item-change']) -Done $readyDone))
+    # FB10 우연한 만남 '다시 하기' 전송 1 → 재입장 대기 'cancelled'(손 취소) → '다른 던전 가기' 끝 rematch-cancelled 'confirmed' → 정지 문구 · 코드 4 → (GUI 틱) +1 · 정지 · 다음 기동 0
+    #     (그 판 retry 전송 총 1 · 취소 뒤 재클릭 0 · other 대기 1 - R3 K19)
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'party' -Matching '우연한 만남' -Plan @{ RetryClick = @('sent'); Reentry = @('cancelled'); OtherWait = $otherConfirmed }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "FB10 (GUI 틱) 재매칭 손 취소 → 취소 끝 'confirmed' 코드 4 → +1 · 정지 · 다음 기동 0 · 재클릭 0" `
+        ('{0} || 계상 {1} · 기록 {2} · 정지 [{3}] · 기동 {4} · 사유 [{5}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), (Get-StopFlags $tick.Row),
+            $tick.Row.Launches, $tick.Reason) `
+        ('{0} || 계상 1 · 기록 retry-clicked/pending/1 · 정지 [False] · 기동 0 · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'retry-clicked/retry/run' -Waits 'o1/r1/c1' -Done $otherCancelledDone), $otherCancelledDone)
+    # FB12 우연한 만남 '다시 하기' 전송 1 → 재입장 대기 초과(매칭 지속) → 대기 초과 끝(클릭 0 · 진단 · 우연한 만남 문구 · 코드 4) → (GUI 틱) +1 · 정지
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'party' -Matching '우연한 만남' -Plan @{ RetryClick = @('sent'); Reentry = @('timeout') }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "FB12 (GUI 틱) 우연한 만남 재입장 대기 초과 → 진단 · 코드 4 → +1 · 정지" `
+        ('{0} || 계상 {1} · 기록 {2} · 정지 [{3}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), (Get-StopFlags $tick.Row)) `
+        ('{0} || 계상 1 · 기록 retry-clicked/pending/1 · 정지 [False]' -f (Get-RewardWorkerWant -Exit '4' -Entry 'retry-clicked/retry/run' -Waits 'o0/r1/c1' -Diags 1 -Done $timeoutPartyDone))
+    # FB13 정리 전용 판(커스텀 · 손으로 들어간 판)의 보상 → 경로 거짓 → 대기·결정·기록 0 · 헬퍼 1 · 복귀 루프(코드 10 · cleanup-only) → exit 10 → (GUI 틱) 코드 10 갈래 · 계상 0
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = $fixture.Now }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -CleanupOnly $true -Run 'whole' -RetryRoute
+    $tick = Invoke-RewardTick $worker
+    Assert-Case 'FB13 (GUI 틱) 정리 전용 → 옛 나가기 · 복귀 10(cleanup-only) · exit 10 → 코드 10 갈래(준비 실행 안내 · 판단) · 계상 0 · 전진 0' `
+        ('{0} · 사유 [{1}] || {2} · 계상 {3} · 전진 {4}' -f (Get-RewardWorkerText $worker), ($worker.LeaveReasons -join ','), $tick.Row.Flow, $tick.Row.Completed, $tick.Row.Steps) `
+        ('{0} · 사유 [cleanup-only] || {1} / decision|10 · 계상 0 · 전진 0' -f (Get-RewardWorkerWant -Exit '10' -Entry '(기록 없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '10' -Done $readyDone), $PREPARED_NOTICE)
+
+    # ── PC (설계 v11 R6 7.4 - GUI 계상) ──
+    # PC1 비커스텀 '다시 하기' 결정 → 클릭 루프 'no-pair' → 폴백 ① '다른 던전 가기' 'unconfirmed' 코드 4 + 이 실행의 유효 클리어 기록 → +1 · 그 기록 적용 · 정지.
+    #     구현 명세 ⑤b6 3.4: 마지막 판은 이제 옛 나가기라 입구를 'retry' + 'no-pair' 폴백 ① 로 바꿈(무한 반복)
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('no-pair'); OtherWait = $otherUnconfirmed }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "PC1 (GUI 틱) 비커스텀 'no-pair' 폴백 ① 'unconfirmed' 코드 4 + 유효 클리어 기록 → +1 · 적용 · 정상 정지" `
+        ('{0} || 계상 {1} · 기록 {2} · 정지 [{3}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), (Get-StopFlags $tick.Row)) `
+        ('{0} || 계상 1 · 기록 cleared/pending/1 · 정지 [False]' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'cleared/retry/run' -Waits 'o1/r0/c1' -Diags 1 -Done $otherUnconfirmedDone))
+    # PC2 커스텀(1번 → 다음 항목 다름) · 완료 마커 실제 씀 → 'unconfirmed' 코드 4 → (GUI 틱) 마커 경로 +1 · Step · 마커 정리 · 기록 적용
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = $fixture.Now }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ OtherWait = $otherUnconfirmed }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "PC2 (GUI 틱) 커스텀 · 유효 완료 마커 · 'unconfirmed' 코드 4 → 마커 경로 +1 · Step · 마커 정리 1 · 기록 적용" `
+        ('{0} || 계상 {1} · 전진 {2} · 마커 정리 {3} · 기록 {4} · 정지 [{5}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Steps, $tick.Row.MarkerClears,
+            (Get-EntryText $tick.Row.Journal $workerNonce), (Get-StopFlags $tick.Row)) `
+        ('{0} || 계상 1 · 전진 1 · 마커 정리 1 · 기록 cleared/pending/1 · 정지 [False]' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'cleared/other/(없음)' -Waits 'o1/r0/c0' -Diags 1 -Decision ($causeFormat -f $causeMap['item-change']) -Done $otherUnconfirmedDone))
+    # PC3 커스텀 · 완료 마커 쓰기 실패(마커 경로의 폴더 없음 - 마커 거짓이어도 결정 other 는 other 갈래) · 클리어 기록 유효 → 'unconfirmed' 코드 4 → (GUI 틱) 기록 경로 +1 · Step ·
+    #     마커 정리 0
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now
+    $script:customMarkerFile = Join-Path $script:rowFolder 'no-such-folder\abyss_custom_done.marker'
+    $script:customAbyssMarkerFile = $script:customMarkerFile
+    $script:runId = [guid]::NewGuid().ToString('D')
+    $env:HONEYNOGI_RUN_ID = $script:runId
+    $null = Start-NextCycle
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ OtherWait = $otherUnconfirmed }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "PC3 (GUI 틱) 커스텀 · 마커 쓰기 실패 · 클리어 기록 유효 · 'unconfirmed' 코드 4 → 기록 경로 +1 · Step · 마커 정리 0 · 기록 적용" `
+        ('마커 경고 {0} · {1} || 계상 {2} · 전진 {3} · 마커 정리 {4} · 기록 {5}' -f @($worker.Logs | Where-Object { $_ -ceq $markerFailLine }).Count, (Get-RewardWorkerText $worker), $tick.Row.Completed,
+            $tick.Row.Steps, $tick.Row.MarkerClears, (Get-EntryText $tick.Row.Journal $workerNonce)) `
+        ('마커 경고 1 · {0} || 계상 1 · 전진 1 · 마커 정리 0 · 기록 cleared/pending/1' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'cleared/other/(없음)' -Waits 'o1/r0/c0' -Diags 1 -Decision ($causeFormat -f $causeMap['item-change']) -Done $otherUnconfirmedDone))
+    # PC4 클리어 기록 저장 실패(다른 기록 주체가 잠금) → 비커스텀: 결정 exit(마지막 판 - 기록 결과와 무관) → 옛 나가기 · 복귀 완료 exit 0 → (GUI 틱) 종료 코드로 계상 1(예전 수용
+    #     손실 '계상 0' 소멸 - 구현 명세 ⑤b6 3.4 · 1.4: retry + 기록 실패는 legacy-exit 라 폴백 ① 에 못 가 입구를 바꿀 수 없어 기대를 바꿈) / 커스텀: 결정 other(같은 입장 방식의
+    #     다른 던전) → 'unconfirmed' 코드 4(표지 없음) → 마커 경로 1 · Step - 수용(설계 v11 R6 4.2)
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; TargetCycles = 1 }
+    $workerPlain = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -HoldLock
+    $tickPlain = Invoke-RewardTick $workerPlain
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = $fixture.Now }
+    $workerCustom = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -HoldLock -Plan @{ OtherWait = $otherUnconfirmed }
+    $tickCustom = Invoke-RewardTick $workerCustom
+    Assert-Case "PC4 (GUI 틱) 클리어 기록 저장 실패 → 비커스텀 결정 exit · 옛 나가기 exit 0 → 종료 코드로 계상 1 || 커스텀 'unconfirmed' 코드 4 → 마커 경로 계상 1 · Step (수용)" `
+        ('기록 경고 {0} · {1} || 계상 {2} ## 기록 경고 {3} · {4} || 계상 {5} · 전진 {6}' -f @($workerPlain.Logs | Where-Object { $_ -ceq $CLEARED_FAIL_LOCKED }).Count, (Get-RewardWorkerText $workerPlain),
+            $tickPlain.Row.Completed, @($workerCustom.Logs | Where-Object { $_ -ceq $CLEARED_FAIL_LOCKED }).Count, (Get-RewardWorkerText $workerCustom), $tickCustom.Row.Completed, $tickCustom.Row.Steps) `
+        ('기록 경고 1 · {0} || 계상 1 ## 기록 경고 1 · {1} || 계상 1 · 전진 1' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry '(기록 없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['last-run']) -Done $readyDone),
+            (Get-RewardWorkerWant -Exit '4' -Entry '(기록 없음)' -Waits 'o1/r0/c0' -Diags 1 -Decision ($causeFormat -f $causeMap['item-change']) -Done $otherUnconfirmedDone))
+    # PC6 커스텀 own 기동(넘긴 열린 entered NA) · 'unconfirmed' 코드 4 · 클리어 근거(마커 경로) → 계상 1 · 넘긴 NA done(-AfterClear)
+    $ownOpen = New-FixtureEntry -Stage 'entered' -Owner $fixture.FiveNow -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_A
+    $ownOpen.afterEntry = [pscustomobject]@{ index = 2; total = 2; keys = @(32, 66) }
+    $launchEnv = Start-RewardRow -Setup @{ Custom = $true; DiskContext = $fixture.Now; Entries = @($ownOpen) }
+    $launchKind = [string]$script:lastLaunchKind
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ OtherWait = $otherUnconfirmed }
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "PC6 (GUI 틱) own 기동(NA) · 'unconfirmed' 코드 4 · 클리어 근거 → 계상 1 · NA done(-AfterClear)" `
+        ('기동 {0}/{1} · {2} || 계상 {3} · NA {4}' -f $launchKind, (Get-NonceLabel ([string]$launchEnv['HONEYNOGI_HANDOFF_NONCE'])), (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $NONCE_A)) `
+        ('기동 own/NA · {0} || 계상 1 · NA entered/done/0' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'cleared/other/(없음)' -Waits 'o1/r0/c0' -Diags 1 -Decision ($causeFormat -f $causeMap['item-change']) -Done $otherUnconfirmedDone))
+    # PC7 비커스텀 next 기동(넘긴 재입장 NA · 마지막 판) · 결정 exit · 옛 나가기 · 복귀 완료 exit 0 → (GUI 틱) +1 · 이 실행의 클리어 기록 소비 · NA done → 다음 시작의 후보 0(Role none).
+    #     구현 명세 ⑤b6 3.4: 예전 기대('다른 던전 가기' 확인)를 옛 나가기 꼴로
+    Initialize-HandoffRow -DecisionMode 'real' -TargetCycles 1
+    $script:runId = [guid]::NewGuid().ToString('D')
+    $env:HONEYNOGI_RUN_ID = $script:runId
+    $runOwner = [pscustomobject]@{ runId = $script:runId }
+    Write-FixtureJournal -Path $script:abyssJournalPath -Entries @(New-FixtureEntry -Stage 'reentered' -Owner $runOwner -NextOwner $runOwner -Nonce $NONCE_A) -Applied @($NONCE_A)
+    $null = Start-NextCycle
+    $launchText = '{0}/{1}' -f $script:lastLaunchKind, (Get-NonceLabel ([string]$script:lastLaunchNonce))
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남'
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    $nextStart = Invoke-NextStartAfterTick
+    Assert-Case 'PC7 (GUI 틱) next 기동(NA) · 마지막 판 옛 나가기 exit 0 → +1 · 클리어 기록 소비 · NA done → 다음 시작 none · HANDOFF_NONCE 빈 값' `
+        ('기동 {0} · {1} || 계상 {2} · 기록 {3} · NA {4} → {5}/{6}' -f $launchText, (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce),
+            (Get-EntryText $tick.Row.Journal $NONCE_A), $nextStart.Kind, $nextStart.HandoffNonce) `
+        ('기동 next/NA · {0} || 계상 1 · 기록 cleared/pending/1 · NA reentered/done/1 → none/' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['last-run']) -Done $readyDone))
+    # PC8 비커스텀 '다시 하기' 결정 → 'no-pair' 폴백 ① 'unconfirmed' 코드 4 → +1 → 같은 보상 화면에서 수동 시작(새 실행 id) → 보상 화면 시작 분기 exit 0(픽스처 - 워커 분기는
+    #     이 행 밖) → +1 = 그 판 총 2 - 수용 결과 기록(설계 v11 R6 4.6 ① · 9절 이슈 카드 후보 ①). 구현 명세 ⑤b6 3.4: 입구를 'retry' + 'no-pair' 폴백 ① 로 바꿈(무한 반복)
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('no-pair'); OtherWait = $otherUnconfirmed }
+    $tick = Invoke-RewardTick $worker
+    $firstCount = $tick.Row.Completed
+    $null = Invoke-NextStartAfterTick -RunId ([guid]::NewGuid().ToString('D'))
+    $secondRow = Invoke-HandoffTick -ExitCode 0 -Reason $READY_REASON
+    Assert-Case "PC8 (GUI 틱) 비커스텀 'unconfirmed' 코드 4 +1 → 같은 보상 화면 수동 시작 → 시작 분기 exit 0 +1 = 총 2 (수용)" `
+        ('{0} · 첫 틱 계상 {1} || 둘째 틱 계상 {2}' -f $worker.TailExit, $firstCount, ($secondRow.Completed - $firstCount)) '4 · 첫 틱 계상 1 || 둘째 틱 계상 1'
+
+    # ── IH 재입장 11 (설계 v11 R1 2.2 · R3 3.6 - 지정 시각 전 '다시 하기' → 재입장 완료 끝이 코드 11) ──
+    # 지정 시각 전(GUI 의 UNTIL → 재판단 'continue') → '다시 하기' 전송 → 재입장 'entered' → 이어 감 안내 줄 · 재입장 완료 줄 · exit 11 → (GUI 틱) '(다음 판으로 이어 감)' ·
+    #   재입장 판별 → 다음 기동 next · 같은 nonce
+    $futureTarget = [datetime]::ParseExact((Get-Date).AddHours(2).ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture), 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; TargetTime = $futureTarget }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('sent'); Reentry = @('entered') }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    $carryLines = @($worker.Logs | Where-Object { $_.StartsWith('[어비스] 지정 시간 ') -and $_.Contains('이어 가기로 정했습니다') })
+    Assert-Case "IH (GUI 틱) 지정 시각 전 '다시 하기' → 재입장 → 이어 감 안내 1 · 재입장 완료 줄 · exit 11 → 완료 줄 '(다음 판으로 이어 감)' · 다음 기동 next · 같은 nonce" `
+        ('{0} · 이어 감 안내 {1} || 완료 줄 {2} · 계상 {3} · 기동 {4}/{5}/{6} · 기록 {7}' -f (Get-RewardWorkerText $worker), $carryLines.Count,
+            @($tick.Row.Events | Where-Object { $_ -ceq 'gui|=== 1회차 완료 (다음 판으로 이어 감) ===' }).Count, $tick.Row.Completed, $tick.Row.Launches, $tick.Row.Kind,
+            [int]([string]$tick.Row.LaunchEnv['HONEYNOGI_HANDOFF_NONCE'] -ceq $workerNonce), (Get-EntryText $tick.Row.Journal $workerNonce)) `
+        ('{0} · 이어 감 안내 1 || 완료 줄 1 · 계상 1 · 기동 1/next/1 · 기록 reentered/launched/1' -f
+            (Get-RewardWorkerWant -Exit '11' -Entry 'reentered/retry/run' -Waits 'o0/r1/c1' -Done ($IH_REASON + ($IH_TAIL_FORMAT -f $workerNonce))))
+
+    # ── R6-RC 복구 워커 (설계 v11 R6 7.5 · 사용자 결정 U-R6-1 (가) - 워커 쪽은 test_after_entry_at_most_once R6-RC1) ──
+    # R6-RC1 커스텀 · 클리어 기록(other) 판 · '다른 던전 가기' 확인 뒤 [완료] 줄 앞에서 끊김(코드 1) → (GUI 틱) 미적용 클리어 기록 → 마무리 복구 기동(RECOVERY 1 · RESTART 1) → 그 기동의
+    #     코드 4(사유 = 복구 시작 선택 화면 문구 - 워커 원문) → 마커 경로 +1 · Step → 정지
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = $fixture.Now }
+    $script:customErrorStreak = 0
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ OtherWait = $otherConfirmed; CrashBeforeDone = $true }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    $recoveryTick = Invoke-HandoffTick -ExitCode 4 -Reason $recoverySelectionDone
+    Assert-Case "R6-RC1 (GUI 틱) 커스텀 확인 뒤 끊김(코드 1) → 마무리 복구 기동(RECOVERY 1 · RESTART 1) → 복구 워커 선택 화면 코드 4 → 마커 경로 +1 · Step · 정지" `
+        ('{0} || 계상 {1} · 기동 {2} · RECOVERY {3} · RESTART {4} || 계상 {5} · 전진 {6} · 기록 {7} · 정지 [{8}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Launches,
+            $tick.Row.LaunchEnv['HONEYNOGI_CUSTOM_RECOVERY'], $tick.Row.LaunchEnv['HONEYNOGI_CUSTOM_RESTART'], $recoveryTick.Completed, $recoveryTick.Steps,
+            (Get-EntryText $recoveryTick.Journal $workerNonce), (Get-StopFlags $recoveryTick)) `
+        ('{0} || 계상 0 · 기동 1 · RECOVERY 1 · RESTART 1 || 계상 1 · 전진 1 · 기록 cleared/pending/1 · 정지 [False]' -f
+            (Get-RewardWorkerWant -Exit '' -Thrown $WORKER_CRASH_MESSAGE -Entry 'cleared/other/(없음)' -Waits 'o1/r0/c0' -Decision ($causeFormat -f $causeMap['item-change']) -Done ($causeFormat -f $causeMap['item-change'])))
+    # R6-RC2 비커스텀 같은 끊김(코드 1) - '다시 하기' 결정 → 클릭 루프 'no-pair' → 폴백 ① '다른 던전 가기' 'confirmed' 뒤 [완료] 줄 앞에서 끊김 → (GUI 틱) 오류 정지 · 계상 0 · 기동 0.
+    #     구현 명세 ⑤b6 3.4: 마지막 판은 이제 옛 나가기라 입구를 'retry' + 'no-pair' 폴백 ① 로 바꿈(무한 반복 - 결정 줄이 없어 끊기기 전 마지막 줄은 클리어 기록 저장 줄)
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('no-pair'); OtherWait = $otherConfirmed; CrashBeforeDone = $true }
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "R6-RC2 (GUI 틱) 비커스텀 'no-pair' 폴백 ① 확인 뒤 끊김(코드 1) → 오류 정지 · 계상 0 · 기동 0" `
+        ('{0} || 계상 {1} · 정지 [{2}] · 기동 {3}' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-StopFlags $tick.Row), $tick.Row.Launches) `
+        ('{0} || 계상 0 · 정지 [True] · 기동 0' -f
+            (Get-RewardWorkerWant -Exit '' -Thrown $WORKER_CRASH_MESSAGE -Entry 'cleared/retry/run' -Waits 'o1/r0/c1' -Done $CLEARED_SUCCESS_TEXT))
+
+    # ── 구현 명세 ⑤b6 3.1 ⑯ 새 행 - 결정 뒤 예약(SS1c) · 커스텀 마지막 바퀴 끝(CX1) · 섞인 목록(MX-G1~MX-G4) ──
+    # SS1c 결정 뒤 예약(최소안 SS1c): 커스텀 같은 입장 방식의 다른 던전(item-change) → '다른 던전 가기' 대기 중에 예약(F9 - 모의 대기가 결과를 돌려주기 직전에 만듦) →
+    #     'confirmed' 가 예약 소비 · 안전 중지 확인 줄 · exit 0 → (GUI 틱) +1 · 전진 · 기록 소비 · 안전 중지 정지 · 다음 기동 0 - 결정이 'other' 인 판에 남는 끝(other)의 소비 자리
+    #     (결정 때 예약이 있으면 SS1 의 옛 나가기)
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = $fixture.Now; StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ OtherWait = $otherConfirmed; SafeStopOnOtherWait = $true }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS1c (GUI 틱) 결정 뒤 예약 → 커스텀 'other' 대기 중 예약 · 확인이 소비 · exit 0 → +1 · 전진 · 기록 소비 · 안전 중지 정지 · 다음 기동 0" `
+        ('{0} || 계상 {1} · 전진 {2} · 기록 {3} · 정지 [{4}] · 기동 {5} · 사유 [{6}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Steps, (Get-EntryText $tick.Row.Journal $workerNonce),
+            ((Get-StopEvents $tick.Row) -join ' / '), $tick.Row.Launches, $tick.Reason) `
+        ('{0} || 계상 1 · 전진 1 · 기록 cleared/pending/1 · 정지 [stop|안전 중지|False] · 기동 0 · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/other/(없음)' -Waits 'o1/r0/c0' -Decision ($causeFormat -f $causeMap['item-change']) -Done $otherSafeDone), $otherSafeDone)
+    # CX1 커스텀 마지막 바퀴 끝(최소안 CX1): 1바퀴 지정 · 3/3번(GUI 의 LAST_RUN 1 · NEXT_BOUNDARY 1) → 결정 exit 'last-run'(마지막 판이 경계보다 먼저) · 마지막 판 줄 → 옛 나가기 ·
+    #     복귀 완료 exit 0 → (GUI 틱) +1 · 전진 · 기록 소비 · 완주 → 진행 초기화 → '지정 바퀴 완료' · 다음 기동 0
+    $launchEnv = Start-RewardRow -Setup @{ Custom = $true; DiskContext = (New-AbyssContext -Index 2 -Generation $H_GENERATION -ListRepeat 'count' -ListRepeatCount 1) }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "CX1 (GUI 틱) 커스텀 마지막 바퀴 끝(LAST_RUN 1 · NEXT_BOUNDARY 1) → 마지막 판 줄 · 옛 나가기 · exit 0 → +1 · 전진 · 기록 소비 · 진행 초기화 · 지정 바퀴 완료 · 다음 기동 0" `
+        ('LAST_RUN [{0}] · NEXT_BOUNDARY [{1}] · {2} || 계상 {3} · 전진 {4} · 기록 {5} · 초기화 {6} · 정지 [{7}] · 기동 {8}' -f $launchEnv['HONEYNOGI_LAST_RUN'], $launchEnv['HONEYNOGI_CUSTOM_NEXT_BOUNDARY'],
+            (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Steps, (Get-EntryText $tick.Row.Journal $workerNonce), @($tick.Row.Events | Where-Object { $_ -ceq 'reset' }).Count,
+            ((Get-StopEvents $tick.Row) -join ' / '), $tick.Row.Launches) `
+        ('LAST_RUN [1] · NEXT_BOUNDARY [1] · {0} || 계상 1 · 전진 1 · 기록 cleared/pending/1 · 초기화 1 · 정지 [stop|지정 바퀴 완료|False] · 기동 0' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['last-run']) -Done $readyDone))
+    # MX-G(섞인 픽스처 $ABYSS_ITEMS_MIX - 사용자 결정 2026-10-26 밤 섞기 허용): 다음 항목의 입장 방식이 다르거나 모르면 결정 exit → 이어 감 줄(원인 조각 $moveCause + '${moveCause}'
+    #   원문 꼴) → 옛 나가기 → 복귀 완료 exit 0 → 컨트롤 패널이 다음 항목을 시작합니다(다음 워커는 이어받을 항목이 없는 첫 판 - 필드에서 연 선택 화면에서 카드 · 탭 · 매칭). 항목 토큰은
+    #   GUI 원문 Format-CustomItemToken 으로 만듭니다
+    $mixTokens = @($ABYSS_ITEMS_MIX | ForEach-Object { [string](Format-CustomItemToken -Item $_) })
+    $mixRows = @(
+        @{ N = 'MX-G1'; Index = 0; Title = '혼자하기 → 우연한 만남'; NextIndex = 1 },
+        @{ N = 'MX-G2'; Index = 1; Title = '우연한 만남 → 혼자하기'; NextIndex = 2 })
+    foreach ($mixRow in $mixRows) {
+        # MX-G1 0번(혼자하기) → 1번(함께하기 · 우연한 만남) / MX-G2 1번 → 2번(혼자하기) - 결정 exit 'entry-change' → 이어 감 줄 → 옛 나가기 · exit 0 → (GUI 틱) +1 · Step · 기록 소비 ·
+        #   다음 기동 none · HANDOFF_NONCE 빈 값 · 다음 ITEM = 다음 항목
+        $launchEnv = Start-RewardRow -Setup @{ Custom = $true; DiskContext = (New-AbyssContext -Index $mixRow.Index -Generation $H_GENERATION -Items $ABYSS_ITEMS_MIX) }
+        $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute
+        $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+        $tick = Invoke-RewardTick $worker
+        Assert-Case ("{0} (GUI 틱) 섞인 목록 {1} → 'entry-change' 이어 감 줄 · 옛 나가기 · exit 0 → +1 · Step · 기록 소비 · 다음 기동 none · HANDOFF_NONCE 빈 값 · 다음 ITEM = 다음 항목" -f $mixRow.N, $mixRow.Title) `
+            ('ITEM [{0}] · NEXT [{1}] · {2} || 계상 {3} · 전진 {4} · 진행 {5} · 기록 {6} · 다음 기동 {7}/{8}/[{9}] · 다음 ITEM [{10}]' -f $launchEnv['HONEYNOGI_CUSTOM_ITEM'], $launchEnv['HONEYNOGI_CUSTOM_NEXT'],
+                (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Steps, $tick.Row.Disk, (Get-EntryText $tick.Row.Journal $workerNonce), $tick.Row.Launches, $tick.Row.Kind,
+                $tick.Row.LaunchEnv['HONEYNOGI_HANDOFF_NONCE'], $tick.Row.LaunchEnv['HONEYNOGI_CUSTOM_ITEM']) `
+            ('ITEM [{0}] · NEXT [{1}] · {2} || 계상 1 · 전진 1 · 진행 1/{3} · 기록 cleared/pending/1 · 다음 기동 1/none/[] · 다음 ITEM [{1}]' -f $mixTokens[$mixRow.Index], $mixTokens[$mixRow.NextIndex],
+                (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($moveFormat -f $moveMap['entry-change']) -Done $readyDone), $mixRow.NextIndex)
+    }
+    # MX-G3 랜덤 진행 · 섞인 목록의 바퀴 끝: 순열 [2, 1, 0] 의 3/3번 = 0번(혼자하기 · 허상의 정박지) · NEXT = 이번 순열 첫 칸 2번(혼자하기 · 흩어진 물길 - 같은 입장 방식이라 미정 신호를
+    #     놓치면 '다른 던전 가기' 로 감) → 실제 Start-NextCycle 의 NEXT_BOUNDARY 'mixed'(계약 값) → 결정 exit 'next-unknown' → 이어 감 줄 → 옛 나가기 · exit 0 → (GUI 틱) +1 · Step 바퀴 넘김
+    #     (2바퀴 0번 · 새 순열 [1, 0, 2] - 실제 Step 은 New-CustomShuffleOrder, 모형은 행이 정한 순열) · 기록 소비 → 다음 기동 none · 다음 ITEM = 새 순열 첫 칸(1번 우연한 만남)
+    $launchEnv = Start-RewardRow -Setup @{ Custom = $true; DiskContext = (New-AbyssContext -Index 2 -Generation $H_GENERATION -Items $ABYSS_ITEMS_MIX -Order @(2, 1, 0)) }
+    $script:stepNextOrder = @(1, 0, 2)
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "MX-G3 (GUI 틱) 랜덤 진행 · 섞인 목록 바퀴 끝 → NEXT_BOUNDARY 'mixed' → 'next-unknown' 이어 감 줄 · 옛 나가기 · exit 0 → +1 · Step 바퀴 넘김 · 새 순열 · 다음 기동 none · 다음 ITEM = 새 순열 첫 칸" `
+        ('NEXT_BOUNDARY [{0}] · NEXT_OWNER [{1}] · ITEM [{2}] · NEXT [{3}] · {4} || 계상 {5} · 전진 {6} · 진행 {7} · 기록 {8} · 다음 기동 {9}/{10}/[{11}] · 다음 ITEM [{12}]' -f
+            $launchEnv['HONEYNOGI_CUSTOM_NEXT_BOUNDARY'], $launchEnv['HONEYNOGI_CUSTOM_NEXT_OWNER'], $launchEnv['HONEYNOGI_CUSTOM_ITEM'], $launchEnv['HONEYNOGI_CUSTOM_NEXT'], (Get-RewardWorkerText $worker),
+            $tick.Row.Completed, $tick.Row.Steps, $tick.Row.Disk, (Get-EntryText $tick.Row.Journal $workerNonce), $tick.Row.Launches, $tick.Row.Kind, $tick.Row.LaunchEnv['HONEYNOGI_HANDOFF_NONCE'],
+            $tick.Row.LaunchEnv['HONEYNOGI_CUSTOM_ITEM']) `
+        ('NEXT_BOUNDARY [mixed] · NEXT_OWNER [] · ITEM [{0}] · NEXT [{1}] · {2} || 계상 1 · 전진 1 · 진행 2/0 · 기록 cleared/pending/1 · 다음 기동 1/none/[] · 다음 ITEM [{3}]' -f
+            $mixTokens[0], $mixTokens[2], (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($moveFormat -f $moveMap['next-unknown']) -Done $readyDone),
+            $mixTokens[1])
+    # MX-G4 입장 방식이 바뀌는 판(MX-G1 과 같은 0번 → 1번) + 결정 뒤 예약(F9 - 나가기 헬퍼 모의가 만듦) → 이어 감 줄 · 옛 나가기 → 복귀 루프 출구 ② 가 예약 소비 · exit 0 →
+    #     (GUI 틱) +1 · 전진 · 기록 소비 · 안전 중지 정지 · 다음 기동 0 (B-8 하니스 둘 - 복귀 루프 모의의 출구 모형 · 'whole' 꼬리 끝 0 - 위)
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = (New-AbyssContext -Index 0 -Generation $H_GENERATION -Items $ABYSS_ITEMS_MIX); StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ SafeStopOnExitClick = $true }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "MX-G4 (GUI 틱) 입장 방식 바뀜 판 + 결정 뒤 예약 → 이어 감 줄 · 옛 나가기 · 복귀 루프 출구 ② 예약 소비 · exit 0 → +1 · 전진 · 기록 소비 · 안전 중지 정지 · 다음 기동 0" `
+        ('{0} || 계상 {1} · 전진 {2} · 기록 {3} · 정지 [{4}] · 기동 {5} · 사유 [{6}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, $tick.Row.Steps, (Get-EntryText $tick.Row.Journal $workerNonce),
+            ((Get-StopEvents $tick.Row) -join ' / '), $tick.Row.Launches, $tick.Reason) `
+        ('{0} || 계상 1 · 전진 1 · 기록 cleared/pending/1 · 정지 [stop|안전 중지|False] · 기동 0 · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($moveFormat -f $moveMap['entry-change']) -Done $RETURN_SAFE_STOP_DONE),
+            $RETURN_SAFE_STOP_DONE)
 }
 
 # ===== S 정적 (단계 2.7 - 주석 뺀 GUI 사본) =====
@@ -4780,7 +5607,8 @@ function Test-CaseStaleCleanup {
 # ===== KP 클리어 전 정지의 넘긴 nonce (구현 명세 ② 2.7 G5 · 3.3 KP 표 · 0.6 J22 · 5절 A-2 R-6 (나) · C16) =====
 # own·next 기동이 클리어 전에 멈추면(코드 4 가 계상하지 않음 · 코드 1 정지 두 자리의 클리어 근거 없음) GUI 는 넘긴 nonce 를 done 으로 닫지 않고 열어 둡니다 - 다음
 # 시작이 같은 항목을 다시 받아 그 판을 이어받습니다(같은 판 B 2회 방지 - 명세 리뷰 2 P1-2). 워커가 그 항목의 판이 끝났다고 스스로 정한 선분기 정지 셋(next 3버튼·S ·
-# B2 마감 · ownFreshEntry 생성 실패)은 사유 끝 놓아줌 표지 ' (release)' 로 지금처럼 닫습니다. resume·finish-only·none 기동은 술어 밖(⑤ - 명세 5절 C2). 입력은 워커 쪽
+# B2 마감 · ownFreshEntry 생성 실패)은 사유 끝 놓아줌 표지 ' (release)' 로 지금처럼 닫습니다. resume·none 기동은 술어 밖(resume 은 ⑤c - 명세 5절 C2) · 마무리 실행은
+# 구현 명세 ⑤b5 G3 로 술어 안(KP0 · KP8 · H32e - 내부 검토 반영). 입력은 워커 쪽
 # 결과(워커 원문 [완료] 문구 · 종료 코드 · journal 파일)이고 실제 타이머 틱을 지납니다(Resolve·끝 처리 두 함수만 직접 부르는 모양 금지 - 설계 v11 R4 6.1 ③).
 # 워커 쪽 사슬(같은 nonce 이어받기 · 키 ≤ 1)은 ⑳ OK11~OK13, 워커의 놓아줌 정지 문구는 ⑱′ LG·P22 가 봅니다
 function Test-CaseKeepLaunchOnStop {
@@ -4792,8 +5620,9 @@ function Test-CaseKeepLaunchOnStop {
     $ownIndexed.afterEntry = [pscustomobject]@{ index = 2; total = 2; keys = @(32, 66) }
     $nextEntry = New-FixtureEntry -Stage 'reentered' -Owner $fixture.FiveNext -NextOwner $fixture.FiveNow -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_B
 
-    # KP0 Test-AbyssKeepLaunchOnStop 진리표(순수 · [bool] 인자) - 기동 종류 {none · own · next · resume · finish-only} × 클리어 근거 × 놓아줌 = 20칸 → 참 = own·next 의
-    #     '클리어 근거 없음 · 놓아줌 아님' 두 칸뿐 · 반환은 [bool] 하나(인자는 콜론 꼴로 넘겨 [bool]·[switch] 어느 선언이든 같은 칸)
+    # KP0 Test-AbyssKeepLaunchOnStop 진리표(순수 · [bool] 인자) - 기동 종류 {none · own · next · resume · finish-only} × 클리어 근거 × 놓아줌 = 20칸 → 참 = own·next·finish-only
+    #     의 '클리어 근거 없음 · 놓아줌 아님' 세 칸뿐(구현 명세 ⑤b5 G3 · B-8 (가) - 마무리 실행 기동은 같은 항목을 next 로 받은 기동이라 클리어 전 정지면 열어 둠, resume 은 ⑤c) ·
+    #     반환은 [bool] 하나(인자는 콜론 꼴로 넘겨 [bool]·[switch] 어느 선언이든 같은 칸)
     $kpCells = foreach ($kpKind in @('none', 'own', 'next', 'resume', 'finish-only')) {
         foreach ($kpAfterClear in @($false, $true)) {
             foreach ($kpRelease in @($false, $true)) {
@@ -4804,8 +5633,8 @@ function Test-CaseKeepLaunchOnStop {
     }
     $kpTrueCells = (@($kpCells | Where-Object { ($_.Value -is [bool]) -and $_.Value } | ForEach-Object { $_.Text })) -join ', '
     $kpTypes = (@($kpCells | ForEach-Object { if ($null -eq $_.Value) { '(없음)' } else { $_.Value.GetType().Name } } | Sort-Object -Unique)) -join ','
-    Assert-Case 'KP0 클리어 전 정지 술어 진리표(기동 종류 5 × 클리어 근거 × 놓아줌) → 참 = own·next 의 클리어 근거 없음·놓아줌 아님 두 칸 · 반환 형식 Boolean' `
-        ('{0}칸 · 참 [{1}] · 형식 {2}' -f @($kpCells).Count, $kpTrueCells, $kpTypes) '20칸 · 참 [own/False/False, next/False/False] · 형식 Boolean'
+    Assert-Case 'KP0 클리어 전 정지 술어 진리표(기동 종류 5 × 클리어 근거 × 놓아줌) → 참 = own·next·finish-only 의 클리어 근거 없음·놓아줌 아님 세 칸(⑤b5 G3) · 반환 형식 Boolean' `
+        ('{0}칸 · 참 [{1}] · 형식 {2}' -f @($kpCells).Count, $kpTrueCells, $kpTypes) '20칸 · 참 [own/False/False, next/False/False, finish-only/False/False] · 형식 Boolean'
 
     # KP1·KP2 커스텀 own 기동(넘긴 NA - 이어받은 판) + 표지 없는 코드 4 · 이 판의 클리어 기록 0 → 계상 0 · NA launched 그대로(index 그대로) · 읽기 1 · 저장 호출 1(끝 처리의 소비
     #     시도 - 바꿀 것이 없어 쓰기 0 = 폴더 그대로) · 정상 정지 1 → 다음 시작(실제 Start-NextCycle)이 같은 항목 own/NA(⑳ OK11·OK12 의 사슬). 사유 = 워커 원문 - KP1 클리어
@@ -4896,9 +5725,9 @@ function Test-CaseKeepLaunchOnStop {
     Assert-Case 'KP7 Role none + 표지 없는 코드 4 + 열린 자기 항목 → 계상 0 · 폴더 그대로 · NA launched → 다음 시작 own/NA' `
         ('{0} · {1} · {2} → {3}/{4}' -f $row.Completed, $row.StateUnchanged, (Get-EntryText $row.Journal $NONCE_A), $nextStart.Kind, $nextStart.HandoffNonce) '0 · 1 · entered/launched/0 → own/NA'
 
-    # KP8 술어 밖 기동(재개 resume · 마무리 실행 finish-only) + 표지 없는 코드 4 · 클리어 근거 0 → 지금 그대로 넘긴 nonce done(⑤ - 명세 5절 C2). 재개 행의 재입장 요청 기록은
-    #     이미 계상된(적용됨) 모형입니다 - 미적용이면 그 기록 자체가 클리어 근거(기록 경로 계상)라 술어의 기동 종류 칸에 닿지 않습니다(그 갈래는 C4-13′). 마무리 실행 행은
-    #     H32e 와 같은 모양(비커스텀 · 안전 중지 보류)
+    # KP8 재개 resume(술어 밖 - ⑤c 몫) · 마무리 실행 finish-only(구현 명세 ⑤b5 G3 · B-8 (가) 로 술어 안) + 표지 없는 코드 4 · 클리어 근거 0 → 재개는 지금 그대로 넘긴 nonce
+    #     done / 마무리 실행은 launched(열어 둠 - 다음 수동 시작이 같은 판을 이어받음, 옛 기대 done). 재개 행의 재입장 요청 기록은 이미 계상된(적용됨) 모형입니다 - 미적용이면
+    #     그 기록 자체가 클리어 근거(기록 경로 계상)라 술어의 기동 종류 칸에 닿지 않습니다(그 갈래는 C4-13′). 마무리 실행 행은 H32e 와 같은 모양(비커스텀 · 안전 중지 보류)
     $resumeEntry = New-FixtureEntry -Stage 'retry-clicked' -Owner $fixture.FiveNow -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_D
     Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($resumeEntry) -Applied @($NONCE_D) -LaunchKind 'resume' -LaunchNonce $NONCE_D
     $rowResume = Invoke-HandoffTick -ExitCode 4 -Reason $CODE4_REASON
@@ -4906,9 +5735,9 @@ function Test-CaseKeepLaunchOnStop {
     Initialize-HandoffRow -Entries @(New-FixtureEntry -Stage 'reentered' -Owner $runOwner -NextOwner $runOwner -LaunchState 'launched' -Nonce $NONCE_A) -Applied @($NONCE_A) `
         -LaunchKind 'finish-only' -LaunchNonce $NONCE_A -FinishOnlyHold $safeHold
     $rowFinish = Invoke-HandoffTick -ExitCode 4 -Reason $CODE4_REASON
-    Assert-Case 'KP8 재개 · 마무리 실행 + 표지 없는 코드 4 · 클리어 근거 0 → 계상 0 · 넘긴 nonce done (술어 밖 - 지금 그대로)' `
+    Assert-Case 'KP8 재개 · 마무리 실행 + 표지 없는 코드 4 · 클리어 근거 0 → 계상 0 · 넘긴 nonce 재개 done(술어 밖 - 지금 그대로) || 마무리 실행 launched(⑤b5 G3)' `
         ('{0} · {1} || {2} · {3}' -f $rowResume.Completed, (Get-EntryText $rowResume.Journal $NONCE_D), $rowFinish.Completed, (Get-EntryText $rowFinish.Journal $NONCE_A)) `
-        '0 · retry-clicked/done/1 || 0 · reentered/done/1'
+        '0 · retry-clicked/done/1 || 0 · reentered/launched/1'
 }
 
 # ===== (GUI 틱) 이어받기 시작 경로의 GUI 쪽 결과 (구현 명세 ② 3.2 층 ③ · 3.4 · 5절 B16 · 설계 v11 R4 5.2·5.3·5.6 · 6.1 ③) =====
@@ -5090,7 +5919,9 @@ $caseFunctions = @('Test-CaseHarness', 'Test-CaseCollectOrder', 'Test-CaseSource
     # 단계 2.9 앱 기동 때 stale 정리
     'Test-CaseStaleCleanup',
     # 구현 명세 ② 2.7 GUI - 클리어 전 정지 술어(KP) · 이어받기 시작 경로의 (GUI 틱)
-    'Test-CaseKeepLaunchOnStop', 'Test-CaseHandoffStartGuiTick')
+    'Test-CaseKeepLaunchOnStop', 'Test-CaseHandoffStartGuiTick',
+    # 구현 명세 ⑤b5 - 본류 보상 화면 꼬리(경로 참) → 두 끝 → GUI 틱 결합 행(SS · FB · PC · IH · R6-RC)
+    'Test-CaseRewardTailCoupling')
 $totalWatch = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     foreach ($caseFunction in $caseFunctions) {

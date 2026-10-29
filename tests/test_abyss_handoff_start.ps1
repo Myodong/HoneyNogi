@@ -57,6 +57,13 @@
 #        '(본류) 판독 run:18222 0' 이 늘 참(정적 R4-P4 만 지킴) → 시나리오 키 MainOverlay(본류 정리 참 · 정리 뒤 시각표)와 R4-N1e·O1e(Role≠none - 재판독 0) ·
 #        V18 정리 뒤 3버튼(Role none - HEAD 그대로 재판독이 보상 분기를 엶) ② R4-P14 가 메뉴 갈래의 앞뒤 두 조각만 봐 복구 회차의 exit 0 을 지운 변이가
 #        살아남음 → 갈래 문장 목록 전체 = HEAD 원문 다섯 · V18 복구 메뉴(RECOVERY=1·RESTART=1 × ESC 메뉴 → exit 0)
+#   [B2W] 구현 단위 ⑤a(구현 명세 ⑤a 2.2·3.3·3.4 · 설계 v11 R5 2.5): 선분기 B2 단계 = 재입장 대기 Wait-AbyssReentry(보고 끔 - 결론은 입장 2연속과 첫 패널류
+#        표본부터 조정 Tpm 마감 둘). 묶음 B2Waiter 가 대기 함수를 지나는 선분기 B2 를 봅니다 - B2W-0 스텁 자기 검사(시나리오 키 RectThrow: 선분기 단계 판독이
+#        그 창 안이면 캡처 실패를 등록(일련번호 +1 · 플래그 · 원인)한 뒤 판독 경로 문구로 throw, 창 밖 다음 판독의 성공 등록이 원인을 비움 - 문구·원인과 성공
+#        등록의 원인 대입은 소스 캡처 $RECT_THROW_MESSAGE · $RECT_FAIL_CAUSE · $RECT_SUCCESS_CAUSE_RIGHTS) · B2W-1·2(B2 중 창 좌표 throw → 대기 함수의 제한
+#        catch → 동결 → 결론 inside. HEAD 는 예외 = 코드 1 경로 - 고치기 전 재현) · B2W-3(B2 앞 선분기 자신의 판독 throw 는 그대로 예외) · B2W-4~6(B2 안
+#        3버튼·S 관측 지속 · 양보 문맥 · Tpm 마감) · WA-F7 own·next(간접 양보 시간이 필드 확정 W 에 드는 HEAD 동작 고정 - 이슈 목록 카드). 정적 R5-P5(선분기
+#        S2 0)·R5-P9(호출 1 · 인자 · 가장 가까운 갈래 조건 = 패널류 넷)는 Test-StaticFlow 에 있습니다
 # 방법:
 #   - 하니스 세 층(명세 ② 3.2): ① 함수 층 - Consume-Handoff 와 그 의존(저장소 워커 사본 묶음 · 소유자 해석 · 그 밖에 부르는 워커 최상위 함수)을 이 파일
 #     최상위에서 정의(체크리스트 6 - 클로저 mutator 가 부르는 함수는 최상위 정의만 보임) ② 본류 시작 구간 - 워커 최상위 try 의 형제 문장(이 단계 = 2.1 블록 ~
@@ -192,6 +199,7 @@ $S5_CLOSE_FAIL_FORMAT = '[경고] 이어받던 판의 기록을 닫지 못했습
 $S6_FRESH_ENTRY = '[어비스] 이어받은 항목 없이 새 입장 확인 - 새 판으로 진행합니다 (ownFreshEntry)'
 $S7_B2_START_FORMAT = '[어비스] 이어받기 시작: {0} 감지 - 입장을 기다립니다 (최대 {1}초)'
 $S8_OVERLAY_FORMAT = '[안내] 이어받기 시작: 알 수 없는 화면이 {0}초 이어져 이벤트 화면 정리를 한 번 시도합니다'
+$POPUP_NOTICE_LINE = '[안내] 권장 인원 팝업 관측(클릭 없음)'   # 재입장 대기의 보고 켬 호출만 쓰는 안내(구현 명세 ④ 1.10) - 선분기 B2 는 보고 끔이라 0(⑤a · V18)
 $ENTRY_SAVED_LINE = '[어비스] 입장 기록 저장 (입장 직후 키 전)'               # 자기 항목 생성 성공 줄(단계 2.2 · H11)
 # 계측·결과 줄은 숫자 자리가 있어 정규식으로 읽고 숫자를 하니스 기록과 견줍니다 (S1 · S2 · S3 - 명세 2.5 표의 틀 그대로)
 $S1_PATTERN = '^\[어비스\] 이어받기 시작 계측 - 던전 안 2연속 앞 알 수 없음 (?<u>\d+)표본, 필드 모양 (?<f>\d+)표본(?<part>, 첫 필드 모양 표본부터 던전 안 (?<s>-?[0-9.]+)초)?, 관측 끊김 (?<b>\d+)회 \(판정에 쓰지 않음\)$'
@@ -710,9 +718,47 @@ $timeoutExit = Get-SourceAssignmentValue 'timeoutExit'
 $ptClearCenter = @(Get-SourceAssignmentValue 'ptClearCenter')
 $ptDetailBack = @(Get-SourceAssignmentValue 'ptDetailBack')
 $allDungeonKeywords = @(Get-SourceAssignmentValue 'allDungeonKeywords')
+# 재입장 대기의 무변화 창(⑤a 부터 선분기 B2 단계가 그 함수를 부름) - 보고 끔 호출은 무변화 시계를 결론에 쓰지 않아 결과는 같지만 모형을 소스와 맞춥니다(구현 명세 ④ C3)
+$abyssReclickQuietSeconds = Get-SourceAssignmentValue 'abyssReclickQuietSeconds'
 $capturedTimeoutPartyMatch = $timeoutPartyMatch
+# RectThrow 스텁의 문구·원인 - 소스 캡처(주석 뺀 사본 AST · test_abyss_party_leader 의 판독 경로 문구·원인 캡처와 같은 방법 - 구현 명세 ⑤a 2.2-4): 판독 경로
+#   Get-GameRegionCapture 의 -ThrowOnWindowRectFailure 갈래 throw 문자열 · Get-CaptureFailInfo 'rect-failed' 갈래 Cause · Register-CaptureSuccess 실패 갈래의
+#   원인 대입 우변(B2W-0 이 스텁의 성공 등록과 함께 봄). 못 읽으면 추출 문제(FAIL)
+$RECT_THROW_MESSAGE = ''
+$RECT_FAIL_CAUSE = ''
+$RECT_SUCCESS_CAUSE_RIGHTS = '(캡처 없음)'
+$rectThrowIfs = @()
+if ($workerTopFunctions.ContainsKey('Get-GameRegionCapture')) {
+    $rectThrowIfs = @($workerTopFunctions['Get-GameRegionCapture'].FindAll({ param($node) ($node -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $node.Clauses[0].Item1) -ceq '$ThrowOnWindowRectFailure') }, $true))
+}
+$rectThrowStatements = @(if ($rectThrowIfs.Count -eq 1) { $rectThrowIfs[0].Clauses[0].Item2.Statements })
+$rectThrowValues = @(if (($rectThrowStatements.Count -eq 1) -and ($rectThrowStatements[0] -is [ThrowStatementAst]) -and ($null -ne $rectThrowStatements[0].Pipeline)) {
+        $rectThrowStatements[0].Pipeline.FindAll({ param($node) $node -is [StringConstantExpressionAst] }, $true) })
+if ($rectThrowValues.Count -eq 1) { $RECT_THROW_MESSAGE = [string]$rectThrowValues[0].Value }
+else { $extractionProblems.Add("Get-GameRegionCapture 의 -ThrowOnWindowRectFailure 갈래가 문자열 throw 하나가 아닙니다 (if $($rectThrowIfs.Count)개 · 문장 $($rectThrowStatements.Count)개)") }
+$rectCauseValues = @()
+if ($workerTopFunctions.ContainsKey('Get-CaptureFailInfo')) {
+    $rectFailedIfs = @($workerTopFunctions['Get-CaptureFailInfo'].FindAll({ param($node) ($node -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $node.Clauses[0].Item1) -ceq "`$GameWindowIssue -eq 'rect-failed'") }, $true))
+    if ($rectFailedIfs.Count -eq 1) {
+        foreach ($rectTable in @($rectFailedIfs[0].Clauses[0].Item2.FindAll({ param($node) $node -is [HashtableAst] }, $true))) {
+            foreach ($rectPair in $rectTable.KeyValuePairs) {
+                if ((Get-NormalizedCode -Node $rectPair.Item1) -ceq 'Cause') { $rectCauseValues += @($rectPair.Item2.FindAll({ param($node) $node -is [StringConstantExpressionAst] }, $true)) }
+            }
+        }
+    }
+}
+if ($rectCauseValues.Count -eq 1) { $RECT_FAIL_CAUSE = [string]$rectCauseValues[0].Value }
+else { $extractionProblems.Add("Get-CaptureFailInfo 의 'rect-failed' 갈래 Cause 문자열이 $($rectCauseValues.Count)개입니다(1개여야 함)") }
+if ($workerTopFunctions.ContainsKey('Register-CaptureSuccess')) {
+    $successFailingIfs = @($workerTopFunctions['Register-CaptureSuccess'].FindAll({ param($node) ($node -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $node.Clauses[0].Item1) -ceq '$script:screenCaptureFailing') }, $true))
+    if ($successFailingIfs.Count -eq 1) {
+        $RECT_SUCCESS_CAUSE_RIGHTS = (@($successFailingIfs[0].Clauses[0].Item2.FindAll({ param($node) ($node -is [AssignmentStatementAst]) -and ((Get-NormalizedCode -Node $node.Left) -ceq '$script:captureFailCause') }, $true) |
+                    ForEach-Object { Get-NormalizedCode -Node $_.Right }) -join ',')
+    } else { $extractionProblems.Add("Register-CaptureSuccess 의 if (`$script:screenCaptureFailing) 갈래가 $($successFailingIfs.Count)개입니다(1개여야 함)") }
+} else { $extractionProblems.Add('Register-CaptureSuccess 를 찾지 못했습니다') }
+"INFO 캡처(RectThrow): 문구 [$RECT_THROW_MESSAGE] · 원인 [$RECT_FAIL_CAUSE] · 성공 등록의 원인 대입 [$RECT_SUCCESS_CAUSE_RIGHTS]"
 $safeStopFlagPath = Join-Path ([IO.Path]::GetTempPath()) ('honeynogi_handoff_start_no_flag_' + [guid]::NewGuid().ToString('N') + '.flag')   # 선분기는 보지 않음 - 있어도 없는 경로
-"INFO 캡처: W $memberFieldSettleSeconds / 알 수 없음 $memberUnknownOverlaySeconds / 스윕 한도 $memberSweepStreakLimit / Tpm $timeoutPartyMatch"
+"INFO 캡처: W $memberFieldSettleSeconds / 알 수 없음 $memberUnknownOverlaySeconds / 스윕 한도 $memberSweepStreakLimit / Tpm $timeoutPartyMatch / 무변화 창 $abyssReclickQuietSeconds"
 
 # GUI 원문 함수 (L 행) - 이름으로 1개씩. Resolve 는 다른 이름으로 두고 같은 이름은 아래 감시가 차지합니다
 $guiTokens = $null
@@ -910,10 +956,12 @@ function Test-CustomCleanupOnly {
     return (Invoke-RealTestCustomCleanupOnly -CustomMode $CustomMode -Restart $Restart -InsideAlready $InsideAlready -OnResultScreen $OnResultScreen)
 }
 function Add-AbyssJournalClearedEntry {
-    # 감시(워커 실제 서명 - 매개변수 없음) - 부른 순서를 사건 기록에 남기고 실제 기록 함수로(임시 폴더의 실제 완료 기록 파일)
+    # 감시(워커 실제 서명 param([string]$Decision = 'exit', $NextOwner = $null) - 구현 명세 ⑤b2 1.2) - 부른 순서를 사건 기록에 남기고 실제 기록 함수로(임시 폴더의
+    # 실제 완료 기록 파일). 받은 인자를 그대로 넘기고 실제 반환(@{ Tag; Nonce })을 돌려줍니다 - 워커의 세 호출(본류 1 · own 시작 분기 2)은 [void] 로 버립니다
+    param([string]$Decision = 'exit', $NextOwner = $null)
     $script:clearedCalls++
     Add-StubEvent 'cleared'
-    Invoke-RealAddAbyssJournalClearedEntry
+    return (Invoke-RealAddAbyssJournalClearedEntry @PSBoundParameters)
 }
 function Consume-Handoff {
     # 감시 - 호출 수를 세고 실제 함수(워커 원문)로 넘깁니다. 실제 함수의 출력 개체를 그대로 돌려주고 따로 적어 둡니다(반환 'ok'/'stop' 하나 계약)
@@ -1020,11 +1068,12 @@ function Register-StubCaptureFail {
     }
 }
 function Register-StubCaptureSuccess {
-    # 캡처 성공 등록 - 운영 Register-CaptureSuccess 의 계약(플래그 해제 · 실패 구간 누적)
+    # 캡처 성공 등록 - 운영 Register-CaptureSuccess 의 계약(플래그 해제 · 실패 구간 누적 · 실패 원인 비움 - 원인은 RectThrow 만 세움, 구현 명세 ⑤a 2.2-1)
     if ($script:screenCaptureFailing) {
         $script:stubFailTotalMs = [double]$script:stubFailTotalMs + ($script:vclock - $script:stubFailSince).TotalMilliseconds
         $script:screenCaptureFailing = $false
         $script:stubFailSince = $null
+        $script:captureFailCause = $null
     }
 }
 function Get-StubFailTotalMs {
@@ -1036,7 +1085,9 @@ function Get-StubFailTotalMs {
 function Invoke-StubRead {
     # 판독 스텁 한 번 = 캡처 한 번. 캡처 실패 창 안이거나(CapFail) 판독 도중 실패 창 안 회전의 첫 판독이면(SerialFail - 그 회전의 뒤 판독은 성공 =
     # 일련번호만 바뀐 복구 회전) 실패 등록 뒤 $null, 아니면 성공 등록 뒤 화면 신호 묶음. 선분기 단계의 ReadFail 창 안이면 판독만 실패합니다(복구 탐침은
-    # 성공 - 운영의 교대 모양 '판독에서 실패 시작 → 다음 회전 동결 탐침 복구', R4-N6r)
+    # 성공 - 운영의 교대 모양 '판독에서 실패 시작 → 다음 회전 동결 탐침 복구', R4-N6r). 선분기 단계의 RectThrow 창 안이면 판독 기록(Key 'RECT') → 실패
+    # 등록 → 원인 = 소스 캡처 원인 → 소스 캡처 문구로 throw 합니다(운영 공용 판독의 창 좌표 실패 = 실패 등록 뒤 throw · 구현 명세 ⑤a 2.2-1). CapFail 확인보다
+    # 앞이라 같은 창의 CapFail 로 복구 탐침도 실패시킵니다
     param([string]$Name)
     $script:stubReadCalls++
     if ($script:stubReadCalls -gt $READ_CALL_LIMIT) { throw ('TEST-VTIMEOUT: 판독 스텁 호출 상한 {0}회를 넘었습니다' -f $READ_CALL_LIMIT) }
@@ -1045,6 +1096,12 @@ function Invoke-StubRead {
         $script:readTurnIndex++
     }
     $nowSeconds = Get-VirtualElapsed
+    if (($script:readPhase -eq 'selector') -and ($null -ne (Find-StubWindow -Windows $script:scenarioRectThrow -Time $nowSeconds))) {
+        $script:readLog.Add([pscustomobject]@{ Index = $script:readLog.Count; Turn = $script:turnId; T = $nowSeconds; Name = $Name; Phase = $script:readPhase; Key = 'RECT'; Failed = $true })
+        Register-StubCaptureFail
+        $script:captureFailCause = $RECT_FAIL_CAUSE
+        throw $RECT_THROW_MESSAGE
+    }
     $readFailed = ($null -ne (Find-StubWindow -Windows $script:scenarioCapFail -Time $nowSeconds))
     if ((-not $readFailed) -and ($script:readPhase -eq 'selector') -and ($null -ne (Find-StubWindow -Windows $script:scenarioReadFail -Time $nowSeconds))) { $readFailed = $true }
     if ((-not $readFailed) -and ($script:readPhase -eq 'selector') -and ($script:serialFailTurn -ne $script:turnId) -and
@@ -1171,6 +1228,7 @@ function Reset-FlowState {
     # 운영 공용 상태(캡처 계층 · 양보 누적 · 클릭 메타 · 하단 스태시)
     $script:screenCaptureFailing = $false
     $script:captureFailSerial = 0
+    $script:captureFailCause = $null
     $script:stubFailTotalMs = [double]0
     $script:stubFailSince = $null
     $script:userYieldTotalMs = [double]0
@@ -1184,7 +1242,7 @@ function Set-Scenario {
     # 행 화면 시나리오 - Timeline(New-Timeline) / Cycle(판독 회전마다 순환할 화면 키) · CapFail · Active · Sweep · SerialFail(New-Windows) · AfterOverlay(정리 뒤
     # 시각표 - 상대 초) + AfterOverlayAt(몇 번째 정리에서) · Main(본류 단계 덮어쓰기) · MainOverlay(본류 run:18221 의 정리가 참 - 정리 뒤 시각표, 상대 초) ·
     # ReturnLoop('return' / 'exit4' - 복귀 루프가 던전 안 2연속 + 20초로 코드 4 인 모양) · LockPlan(@{ Phase; Ordinal; Mode }) · SleepMap(요청 ms → 가상 ms) ·
-    # SweepSkip · SweepYield · ReadFail(New-Windows - 위 스텁 주석)
+    # SweepSkip · SweepYield · ReadFail · RectThrow(New-Windows - 위 스텁 주석)
     param([hashtable]$Scenario)
     # 배열 값은 '$(if …)' 로 받지 않습니다 - 원소 하나짜리 배열이 풀려 스칼라가 됩니다(순환 화면 키를 글자로 색인하게 됨 - 규칙 3 의 배열 함정)
     $script:scenarioTimeline = @(New-Timeline -Pairs @(0, 'U'))
@@ -1193,6 +1251,8 @@ function Set-Scenario {
     if ($Scenario.ContainsKey('Cycle')) { $script:scenarioCycle = @($Scenario.Cycle) }
     $script:scenarioCapFail = @()
     if ($Scenario.ContainsKey('CapFail')) { $script:scenarioCapFail = @($Scenario.CapFail) }
+    $script:scenarioRectThrow = @()
+    if ($Scenario.ContainsKey('RectThrow')) { $script:scenarioRectThrow = @($Scenario.RectThrow) }
     $script:scenarioActive = @()
     if ($Scenario.ContainsKey('Active')) { $script:scenarioActive = @($Scenario.Active) }
     $script:scenarioSweep = @()
@@ -2557,7 +2617,7 @@ function Test-RowNextSelector {
         (J @(1, '', 'inside', 'False', 'NB', 'True', 0, ''))
 
     # R4-N10 마감 - next B2 단계 마감 → HEAD 문구 + 놓아줌 표지 코드 4 (재전달 표지 없음 - J22). 첫 패널 표본(10초 뒤)부터 조정 Tpm - 미결 마감(선분기 시작부터)은
-    #   B2 단계에서 멈춰야 합니다(R4-M21: 멈추지 않으면 300초에 (start-unknown))
+    #   B2 단계(재입장 대기 호출) 동안 선분기 루프가 돌지 않아 닿지 않습니다(M5a-10: 대기 함수가 미결 시계를 쓰면 300초에 S18)
     $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'R4-N10b' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'U', 10.0, 'ready')) }) -FlowLayer 'selector'
     Save-ObservedStop -Key 'S18' -Result $result
     Assert-Case "R4-N10 B2 마감(next) - U 10초 뒤 ready 지속 → 진단 '$DIAG_B2' · S18(준비 패널 · Tpm · 끝 (release)) · exit 4 · (start-unknown) 0 · 기록 0 · 예외 0" `
@@ -2598,10 +2658,10 @@ function Test-RowNextSelector {
 
     # V18 팝업 시작 × next - B2 단계는 정리하지 않음(B2 안 알 수 없음 45초에도 Clear-EventOverlay 0 - P17)
     $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'V18 팝업×next' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'popup', 5.0, 'U', 50.0, 'I')) }) -FlowLayer 'selector'
-    Assert-Case 'V18 팝업 시작 × next → B2 시작 줄(권장 인원 팝업) · B2 안 U 45초에도 Clear-EventOverlay 0 · (start-unknown) 0 · 입장 2연속 → 결론 inside · 닫기 0 · 예외 0' `
+    Assert-Case 'V18 팝업 시작 × next → B2 시작 줄(권장 인원 팝업) · B2 안 U 45초에도 Clear-EventOverlay 0 · (start-unknown) 0 · 입장 2연속 → 결론 inside · 닫기 0 · 예외 0 · 권장 인원 팝업 관측 안내 0(보고 끔 - ⑤a)' `
         (J @((Get-LineCount -Result $result -Line ($S7_B2_START_FORMAT -f $B2_LABELS.popup, $Tpm)), @(Get-OverlayTimes -Result $result).Count, ((Get-StopLines $result).Contains('(start-unknown)')),
-            $result.StartScreen, $result.Unchanged, $result.Thrown)) `
-        (J @(1, 0, 'False', 'inside', 'True', ''))
+            $result.StartScreen, $result.Unchanged, $result.Thrown, (Get-LineCount -Result $result -Line $POPUP_NOTICE_LINE))) `
+        (J @(1, 0, 'False', 'inside', 'True', '', 0))
 }
 
 function Test-RowOwnSelector {
@@ -2626,8 +2686,8 @@ function Test-RowOwnSelector {
         (J @($result.StartScreen, $result.Unchanged, (Format-JournalEntry (Find-JournalEntry $result.Journal 'NA')), (Get-ReturnText $result), $result.Nonce, $result.AfterEntry, $measureProblem, $result.Thrown)) `
         (J @('inside', 'True', 'NA:entered/launched//', '', 'NA', '2/32,66', '', ''))
 
-    # R4-O4′ - ready → 입장 없이 B2 마감 → 닫기 1 · S18(+ (release)) 코드 4 · (start-unknown) 0 · 클릭 0. U 20초 뒤 ready(B2 시작) → 미결 마감은 B2 에서 멈춤(R4-M21) ·
-    #   B2 안 알 수 없음에도 이벤트 정리 0(P17)
+    # R4-O4′ - ready → 입장 없이 B2 마감 → 닫기 1 · S18(+ (release)) 코드 4 · (start-unknown) 0 · 클릭 0. U 20초 뒤 ready(B2 시작) → 호출 동안 선분기 루프가
+    #   돌지 않아 미결 마감이 닿지 않음(M5a-10: 대기 함수가 미결 시계를 쓰면 300초에 S18) · B2 안 알 수 없음에도 이벤트 정리 0(P17)
     $scenario = @{ Timeline = @(New-Timeline -Pairs @(0, 'U', 20.0, 'ready', 25.0, 'U')) }
     $result = Invoke-FlowRow -FlowRow (New-OwnFlowRow -Name 'R4-O4′' -Scenario $scenario) -FlowLayer 'selector'
     Assert-Case "R4-O4′ U@0~20 · ready · B2 안 U 지속 → 닫기 1(NA done · $CLOSE_REASON · ready) · own 닫기 성공 줄(S4) · B2 시작 줄 · 진단 '$DIAG_B2' · S18(준비 패널 · Tpm · (release)) · exit 4 · (start-unknown) 0 · 이벤트 정리 0 · 입력 0 · 예외 0" `
@@ -3074,6 +3134,75 @@ function Test-RowRS0 {
         (J @('resume', 1, $S19_RESUME, '4', 0, 0, 'True', ''))
 }
 
+function Test-RowB2Waiter {
+    # B2Waiter (구현 명세 ⑤a 3.4 · 설계 v11 R5 2.5) - 선분기 B2 단계 = 재입장 대기 Wait-AbyssReentry(보고 끔 · 새 시계 = 첫 패널류 표본부터 조정 Tpm · 양보
+    #   문맥 '이어받기 시작'). 층 ① · 가상 초(판독 시간 0). B2W-0 은 스텁 자신, B2W-1·2 는 HEAD 와 갈리는 행(HEAD 는 B2 판독의 창 좌표 throw 를 받지 않아
+    #   예외 = 코드 1 경로 - 고치기 전 재현), B2W-3~6 · WA-F7 은 HEAD 에서도 통과하는 고정 행입니다
+    $Tpm = [int]$capturedTimeoutPartyMatch
+    $W = [double]$memberFieldSettleSeconds
+
+    # B2W-0 RectThrow 자기 검사(명세 리뷰 2 P2 - 묶음 맨 앞 1회 · 행 하니스 없이 스텁 직접): 선분기 단계 판독이 RectThrow 창 안이면 캡처 실패 등록(일련번호 +1 ·
+    #   플래그 · 원인) 뒤 소스 문구로 throw · 판독 기록 Key RECT, 창 밖 다음 판독은 성공 등록으로 플래그·원인을 비움(운영 공용 판독의 '실패 등록 뒤 throw' ·
+    #   Get-CaptureFailInfo 의 원인 · Register-CaptureSuccess 의 원인 비움 사본) + 소스 Register-CaptureSuccess 실패 갈래의 원인 대입 우변 = $null.
+    #   B2W-1·2 의 'RECT 1 이상' 은 던지는 창이 판독에 닿았다는 것까지라 throw 대신 $null 을 돌려주는 스텁(고치기 전 재현이 사라짐)을 막지 못합니다
+    Reset-FlowState
+    Set-Scenario -Scenario @{ RectThrow = @(New-Windows -Pairs @(0.0, 1.0)) }
+    $script:readPhase = 'selector'
+    $selfSerialBefore = [int]$script:captureFailSerial
+    $selfThrown = ''
+    try { [void](Invoke-StubRead -Name 'B2W-0') } catch { $selfThrown = [string]$_.Exception.Message }
+    $selfAfterThrow = @($selfThrown, ([int]$script:captureFailSerial - $selfSerialBefore), [string]$script:screenCaptureFailing, [string]$script:captureFailCause,
+        ((@($script:readLog) | ForEach-Object { [string]$_.Key }) -join ','))
+    Step-VirtualClock -Milliseconds 1000
+    $selfScreen = Invoke-StubRead -Name 'B2W-0'
+    $selfAfterSuccess = @([string]($null -ne $selfScreen), [string]$script:screenCaptureFailing, [string]$script:captureFailCause)
+    Reset-FlowState
+    Assert-Case "B2W-0 RectThrow 자기 검사 - 선분기 판독 1회: 소스 문구 throw · 일련번호 +1 · 실패 플래그 · 원인 '$RECT_FAIL_CAUSE' · 판독 기록 RECT / 창 밖 다음 판독: 성공 · 플래그 거짓 · 원인 비움 / 소스 성공 등록의 원인 대입 = `$null" `
+        (J @($selfAfterThrow + $selfAfterSuccess + @($RECT_SUCCESS_CAUSE_RIGHTS))) (J @($RECT_THROW_MESSAGE, 1, 'True', $RECT_FAIL_CAUSE, 'RECT', 'True', 'False', '', '$null'))
+
+    # B2W-1·2 - ready@10 첫 표본 → 호출 A → B2 판독 중 창 좌표 throw @11.5~14(같은 창 CapFail - 복구 탐침도 실패) → 대기 함수의 제한 catch → 다음 회전 동결 →
+    #   창이 돌아오면 같은 호출 안에서 입장 확인(I@20) → own 은 ownFreshEntry · next 는 같은 항목. 'RECT 1 이상'(11.9초 무렵)이 예외 0 과 함께면 던진 판독은
+    #   대기 함수 안입니다(던지는 창이 판독을 비켜 가면 '예외 0 · inside' 만으로는 HEAD·⑤a 모두 통과 - 공허 방지)
+    $base = @(New-Timeline -Pairs @(0, 'U', 10.0, 'ready', 20.0, 'I'))
+    $r = Invoke-FlowRow -FlowRow (New-OwnFlowRow -Name 'B2W-1' -Scenario @{ Timeline = $base; RectThrow = @(New-Windows -Pairs @(11.5, 14.0)); CapFail = @(New-Windows -Pairs @(11.5, 14.0)) }) -FlowLayer 'selector'
+    Assert-Case 'B2W-1 own · ready@10 · B2 중 창 좌표 throw @11.5~14 → 예외 0 · 동결(안전 확인·탐침 1 이상) · 결론 inside · FreshEntry 참 · S2 1 · exit 없음 · RECT 판독 1 이상 · 입력 0' `
+        (J @($r.Thrown, (($r.SafeStopCalls -ge 1) -and ($r.ProbeCalls -ge 1)), $r.StartScreen, $r.FreshEntry, @(Get-PatternLines -Result $r -Pattern $S2_PATTERN).Count, $r.ExitCode,
+            (@(@($r.ReadLog) | Where-Object { $_.Key -eq 'RECT' }).Count -ge 1), $r.Inputs)) (J @('', 'True', 'inside', 'True', 1, '', 'True', 0))
+    $r = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'B2W-2' -Scenario @{ Timeline = $base; RectThrow = @(New-Windows -Pairs @(11.5, 14.0)); CapFail = @(New-Windows -Pairs @(11.5, 14.0)) }) -FlowLayer 'selector'
+    Assert-Case 'B2W-2 next · 같은 꼴 → 예외 0 · 결론 inside · FreshEntry 거짓 · RECT 판독 1 이상 · 입력 0' `
+        (J @($r.Thrown, $r.StartScreen, $r.FreshEntry, (@(@($r.ReadLog) | Where-Object { $_.Key -eq 'RECT' }).Count -ge 1), $r.Inputs)) (J @('', 'inside', 'False', 'True', 0))
+
+    # B2W-3 - 패널 앞(@5~6) 선분기 자신의 판독 throw 는 그대로 예외(코드 1 경로 - ⑤a 밖, 대조)
+    $r = Invoke-FlowRow -FlowRow (New-OwnFlowRow -Name 'B2W-3' -Scenario @{ Timeline = $base; RectThrow = @(New-Windows -Pairs @(5.0, 6.0)) }) -FlowLayer 'selector'
+    Assert-Case 'B2W-3 own · B2 앞 창 좌표 throw @5~6 → 예외 그대로(선분기 자신의 판독 - 소스 캡처 문구)' $r.Thrown $RECT_THROW_MESSAGE
+
+    # B2W-4 - B2 안 3버튼·S 는 누르지 않고 관측 지속(보고 끔 - 'cancelled' 없음) → 첫 패널 표본부터 조정 Tpm 에 S18
+    $r = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'B2W-4' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'U', 10.0, 'ready', 12.0, 'R3', 14.0, 'S')) }) -FlowLayer 'selector'
+    Assert-Case 'B2W-4 next · ready@10 · R3@12 · S@14 → 관측 지속 · S18(준비 패널 · Tpm) · exit 4 · 끝 = 10 + Tpm 무렵' `
+        (J @((Get-StopLines $r), $r.ExitCode, (($r.EndT -ge (10 + $Tpm - $TIME_EPSILON)) -and ($r.EndT -lt (10 + $Tpm + 2))))) (J @(($S18_B2_TIMEOUT_FORMAT -f $B2_LABELS.ready, $Tpm), '4', 'True'))
+
+    # B2W-5 - B2 안 조작 양보의 문맥 = '이어받기 시작'(HEAD 선분기 게이트와 같은 문맥)
+    $r = Invoke-FlowRow -FlowRow (New-OwnFlowRow -Name 'B2W-5' -Scenario @{ Timeline = $base; Active = @(New-Windows -Pairs @(12.0, 17.0)) }) -FlowLayer 'selector'
+    Assert-Case "B2W-5 own · B2 중 양보 @12~17 → 양보 문맥 '$YIELD_CONTEXT' · 결론 inside" (J @($r.YieldContexts, $r.StartScreen)) (J @($YIELD_CONTEXT, 'inside'))
+
+    # B2W-6 - Tpm 20 행(-Extra) → B2 마감 = 첫 패널 표본(10초)부터 20초
+    $r = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'B2W-6' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'U', 10.0, 'matching')) } -Extra @{ Tpm = 20 }) -FlowLayer 'selector'
+    Assert-Case 'B2W-6 next · Tpm 20 · matching@10 지속 → S18(재매칭 패널 · 20) · 끝 = 10 + 20 무렵' `
+        (J @((Get-StopLines $r), (($r.EndT -ge (30 - $TIME_EPSILON)) -and ($r.EndT -lt 32)))) (J @(($S18_B2_TIMEOUT_FORMAT -f $B2_LABELS.matching, 20), 'True'))
+
+    # WA-F7 own·next - 선분기 ⑥ 간접 양보(스윕 커서 대피 · 1초 = 스텁 고정 값)는 필드 모양 연속을 끊지 않아 양보 시간이 W 에 듭니다(HEAD 동작 그대로 고정 - 이슈 목록
+    #   '선분기 own·next 간접 양보 필드 연속' 카드가 닫히면 기대가 바뀜). 양보 누적(= 스텁 1초)도 함께 봅니다 - 끝 시각 창 [W, W+0.7) 은 양보가 비켜 가
+    #   나지 않아도 들어가(양보 없는 확정도 첫 표본부터 W 이상인 첫 회전) 끝 시각만으로는 공허하게 통과합니다
+    foreach ($role in @('own', 'next')) {
+        $scenario = @{ Timeline = @(New-Timeline -Pairs @(0, 'F')); SweepYield = @(New-Windows -Pairs @(1.4, 2.0)) }
+        $row = $(if ($role -eq 'own') { New-OwnFlowRow -Name "WA-F7 $role" -Scenario $scenario } else { New-NextFlowRow -Name "WA-F7 $role" -Scenario $scenario })
+        $r = Invoke-FlowRow -FlowRow $row -FlowLayer 'selector'
+        'INFO WA-F7 {0} 끝 {1}초 · 필드 확정 줄 [{2}]' -f $role, (Format-Seconds $r.EndT), (@(Get-PatternLines -Result $r -Pattern $S3_PATTERN) -join '')
+        Assert-Case "WA-F7 $role · F 지속 · 간접 양보 1회(@1.4 · 1초 - 양보 누적 = 스텁 1초) → 결론 field · 확정 = 첫 표본부터 W 이상인 첫 회전(양보 시간이 W 에 듦 - HEAD 그대로)" `
+            (J @($r.StartScreen, $r.YieldTotalMs, (($r.EndT -ge ($W - $TIME_EPSILON)) -and ($r.EndT -lt ($W + 0.7))))) (J @('field', $SWEEP_STUB_MS, 'True'))
+    }
+}
+
 function Test-RowRoleHarness {
     # 하니스 단언 (명세 2.6 · R4 4.3 '두지 않는 것' 의 근거): 층 ② 의 Role≠none 행은 전부 run:18527 앞에서 exit 하거나 $startInsideDetected 참으로 나옵니다 -
     #   카드 클릭(run:18558)의 Role 정지가 필요 없는 이유(결론 넷이 모두 앞에서 끝남). 예외로 끝난 행(V18 복구 throw 는 Role none 이라 밖)도 실패로 셉니다
@@ -3306,8 +3435,9 @@ function Test-StaticFlow {
     Assert-Case 'R4-P7 own 닫기 호출 2 · 각 호출 바로 다음 문장 = $script:handoff.CleanupOnly = $false(닫기 결과 조건 밖 - 성공·실패 무관) · 비움 대입 2 · 한 자리 -Screen ''field''' `
         (J @($closeCalls.Count, (@($closeNext | Select-Object -Unique) -join ','), $clearAssigns.Count, ($closeScreens -contains "'field'"))) (J @(2, '$script:handoff.CleanupOnly = $false', 2, 'True'))
 
-    # R4-P8 - 계측 줄 2(B2 입장 계측 · 시작 직후 계측) · 결과 줄 2(필드 확정 · own 닫기 성공) - 넷 다 Write-RunLog 의 확장 문자열 인자(-f 식 0) · 계측 변수는 조건 안 0
-    $p8Scope = @($selectorNode, $closeNode | Where-Object { $null -ne $_ })
+    # R4-P8 - 계측 줄 2(B2 입장 계측 · 시작 직후 계측) · 결과 줄 2(필드 확정 · own 닫기 성공) - 넷 다 Write-RunLog 의 확장 문자열 인자(-f 식 0) · 계측 변수는 조건 안 0.
+    #   B2 입장 계측은 ⑤a 부터 재입장 대기가 씁니다 - 범위에 그 함수(조건 수집은 선분기 그대로 - 대기 함수 조건의 계측 변수 0 은 test_abyss_party_leader R5-P5)
+    $p8Scope = @($selectorNode, $closeNode, (Get-FlowFunctionNode 'Wait-AbyssReentry') | Where-Object { $null -ne $_ })
     $p8Rows = @()
     $measureVariables = @()
     foreach ($p8Spec in @(
@@ -3338,6 +3468,33 @@ function Test-StaticFlow {
     Assert-Case 'R4-P8 계측 줄 2 · 결과 줄 2 = Write-RunLog 확장 문자열 인자 1씩(-f 식 등 그 밖 0) · 계측 줄 변수가 조건문 안 0' `
         (J @(($p8Rows -join ' / '), ($measureInConditions -join ','))) (J @('B2 입장 계측 확장 1 · 그 밖 0 / 시작 직후 계측 확장 1 · 그 밖 0 / 필드 확정 확장 1 · 그 밖 0 / own 닫기 성공 확장 1 · 그 밖 0', ''))
 
+    # R5-P5(선분기 몫 - ⑤a) - 선분기 안 S2(입장 계측) 확장 문자열 0 - 그 줄은 재입장 대기가 씁니다. 조각은 $S2_PATTERN 과 한 줄 동치로 묶습니다(조각만 어긋나면
+    #   기대 0 이 HEAD 에서도 공허하게 통과 - 파생 안 함, 구현 명세 ⑤a 2.2-6)
+    $selectorS2Fragment = '입장 계측 - 던전 안 2연속 앞 로딩'
+    Assert-Case 'R5-P5(선분기) 조각 ≡ $S2_PATTERN (역슬래시를 뺀 정규식 글자에 조각이 듦 · 파생 안 함)' (($S2_PATTERN -replace '\\', '').Contains($selectorS2Fragment)) 'True'
+    $selectorS2 = @(Get-CommandNodes -Node $selectorNode -Name 'Write-RunLog' | Where-Object { (@($_.CommandElements).Count -ge 2) -and ([string]$_.CommandElements[1].Extent.Text).Contains($selectorS2Fragment) }).Count
+    Assert-Case 'R5-P5(선분기) 선분기 안 S2 줄 0' $selectorS2 0
+
+    # R5-P9(⑤a) - 선분기의 재입장 대기 호출 1 · 인자 이름(그 밖 0) · -LimitSeconds $timeoutPartyMatch · -Context '이어받기 시작' · 호출을 품은 가장 가까운 if 갈래
+    #   조건 = 패널류 넷의 -contains $screen(주석 뺀 사본 정규화 글자 정확 일치 - 집합에 하나를 더하거나 빼면 다른 글자) · $b2Stage·$b2Clock 참조 0 · S7 줄 1.
+    #   ⑤c 가 resume 갈래 호출을 더하면 '역할별 2' 로, ⑥d 가 파티장 판에 -ChallengeFewMembers 를 더하면 인자 이름 기대를 갱신합니다
+    $panelBranchCondition = "@('popup', 'ready', 'matching', 'entry-waiting') -contains `$screen"
+    $waitCalls = @(Get-CommandNodes -Node $selectorNode -Name 'Wait-AbyssReentry')
+    $waitArgs = @($waitCalls | ForEach-Object { (@($_.CommandElements | Where-Object { $_ -is [CommandParameterAst] } | ForEach-Object { $_.ParameterName }) -join ',') })
+    $waitLimit = (@($waitCalls | ForEach-Object { Get-CommandArgumentText -Command $_ -Parameter 'LimitSeconds' }) -join ',')
+    $waitContext = (@($waitCalls | ForEach-Object { Get-CommandArgumentText -Command $_ -Parameter 'Context' }) -join ',')
+    $waitNearest = @($waitCalls | ForEach-Object { [string](@(Get-EnclosingConditions -Node $_) | Select-Object -First 1) })
+    $waitInPanel = $(if (($waitNearest.Count -ge 1) -and (@($waitNearest | Where-Object { $_ -cne $panelBranchCondition }).Count -eq 0)) { 'OK' } else { '가장 가까운 조건=[' + ($waitNearest -join '] [') + ']' })
+    $b2Vars = @($selectorNode.FindAll({ param($node) ($node -is [VariableExpressionAst]) -and (@('b2Stage', 'b2Clock') -contains $node.VariablePath.UserPath) }, $true)).Count
+    $s7Lines = @(Get-CommandNodes -Node $selectorNode -Name 'Write-RunLog' | Where-Object { (@($_.CommandElements).Count -ge 2) -and ([string]$_.CommandElements[1].Extent.Text).Contains(' 감지 - 입장을 기다립니다 (최대 ') }).Count
+    Assert-Case "R5-P9(⑤a) 선분기 재입장 대기 호출 1 · 인자 이름 · -LimitSeconds · -Context · 가장 가까운 갈래 조건 = $panelBranchCondition · b2Stage·b2Clock 0 · S7 줄 1" `
+        (J @($waitCalls.Count, ($waitArgs -join '/'), $waitLimit, $waitContext, $waitInPanel, $b2Vars, $s7Lines)) (J @(1, 'Game,LimitSeconds,Context', '$timeoutPartyMatch', "'이어받기 시작'", 'OK', 0, 1))
+
+    # V18 안내 줄 고정 사본($POPUP_NOTICE_LINE) ≡ 재입장 대기 소스 - V18 의 '안내 0' 이 문구 어긋남으로 공허하게 통과하지 않게 묶습니다(R5-P5(선분기) 조각
+    #   동치와 같은 이유 - 워커 문구가 바뀌면 이 줄이 FAIL. 이 사본을 소스와 견주는 곳은 이 줄뿐 - test_abyss_party_leader N4-P14 는 자기 사본을 견줌)
+    $noticeTies = @(Get-CommandNodes -Node (Get-FlowFunctionNode 'Wait-AbyssReentry') -Name 'Write-RunLog' | Where-Object { (@($_.CommandElements).Count -ge 2) -and ($_.CommandElements[1] -is [StringConstantExpressionAst]) -and ([string]$_.CommandElements[1].Value -ceq $POPUP_NOTICE_LINE) }).Count
+    Assert-Case 'V18 안내 줄 고정 사본($POPUP_NOTICE_LINE) ≡ 재입장 대기 Write-RunLog 상수 - 정확히 1' $noticeTies 1
+
     # R4-P9 · R2-S7(개정) - 자기 항목 생성 2자리(ownFreshEntry -CleanupOnly $false 1 · 본류 키 지점 ([bool]$script:customCleanupOnly) 1) · 값은 mutator 밖에서 항목에 ·
     #   mutator 안 $script: 0 · $cleanupByScreen 식 1
     $enteredCalls = @(Get-CommandNodes -Node $workerAst -Name 'Add-AbyssJournalEnteredEntry')
@@ -3355,6 +3512,18 @@ function Test-StaticFlow {
             (@($mainEntered | ForEach-Object { Get-CommandArgumentText -Command $_ -Parameter 'CleanupOnly' }) -join ','), ($cleanupFieldAssigns.Count -ge 1),
             @($cleanupFieldAssigns | Where-Object { Test-InsideScriptBlockExpression -Node $_ }).Count, $mutatorScriptVariables.Count, $cleanupByScreenAssigns.Count)) `
         (J @(2, '$false', '([bool]$script:customCleanupOnly)', 'True', 0, 0, 1))
+
+    # V18r (구현 명세 ⑤b5 W4 · 3.1 ⑱′ 정적 V18r · 명세② C2 · 범위 ⑤-45) - 본류(함수 밖) Test-CustomCleanupOnly 호출 2곳(첫 판정 · 재판독 정정)의 -InsideAlready ·
+    #   -OnResultScreen 인자 글자가 두 곳 모두 명세 1.5 W4 그대로(주석 뺀 사본 · 공백 정규화 - R4-P9 꼴) - 같은 판정 두 자리의 일치입니다(마무리 실행 기동은 시작 화면만으로
+    #   정리 전용을 정하지 않음 - 재판독 정정이 옛 꼴이면 Role none + 마무리 실행에서 첫 판독이 던전 안을 놓친 판이 정리 전용 참 → 옛 나가기 → exit 10 = 설계 v11 R2 M4 위반).
+    #   앞부분 '($cleanupByScreen -and ' 만 보면 한 인자의 뒷항만 바꾼 꼴(예: 재판독 정정만 -OnResultScreen ($cleanupByScreen -and $startExitDetected))이 살아남아 두 인자의
+    #   전체 글자를 봅니다(내부 검토 반영). 행으로 가르려면 Role none 본류 판독의 '첫 판독 거짓 · 재판독 참' 모의(판독 횟수 기반)가 새로 필요해 정적으로 둡니다(명세 어-72 ·
+    #   B-10 · 변이 MW15)
+    $cleanupCalls = @(Get-CommandNodes -Node $workerAst -Name 'Test-CustomCleanupOnly' | Where-Object { -not (Test-AstInsideFunction $_) })
+    $cleanupArgTexts = @($cleanupCalls | ForEach-Object { '{0} / {1}' -f (Get-CommandArgumentText -Command $_ -Parameter 'InsideAlready'), (Get-CommandArgumentText -Command $_ -Parameter 'OnResultScreen') })
+    $cleanupWant = '($cleanupByScreen -and $startInsideDetected) / ($cleanupByScreen -and ($startExitDetected -or $startClearDetected))'
+    Assert-Case 'V18r 본류 Test-CustomCleanupOnly 호출 2곳 · 두 화면 인자(-InsideAlready / -OnResultScreen) 글자가 두 곳 모두 명세 1.5 W4 그대로(첫 판정 = 재판독 정정 - ⑤b5 W4)' `
+        (J @($cleanupCalls.Count, ($cleanupArgTexts -join ' || '))) (J @(2, ('{0} || {0}' -f $cleanupWant)))
 
     # R4-P10 · P19 - 선분기·새 함수에 $abyssPartyMemberRun 0 · `$startMatchingDetected = ` 0 · HEAD 입장 대기 성공 줄 0(주석 뺀 사본) · 'if (Clear-EventOverlay -Game $game)' 0(원문·사본)
     $p19Rows = @()
@@ -3640,6 +3809,7 @@ try {
         @{ Name = 'V18'; Function = 'Test-RowV18'; Needs = $flowReady },
         @{ Name = 'RS0'; Function = 'Test-RowRS0'; Needs = $flowReady },
         @{ Name = 'RoleHarness'; Function = 'Test-RowRoleHarness'; Needs = $flowReady },
+        @{ Name = 'B2Waiter'; Function = 'Test-RowB2Waiter'; Needs = $selectorReady },
         @{ Name = 'LG'; Function = 'Test-RowLG'; Needs = ($staticReady -and $flowReady) })
     foreach ($rowGroup in $FLOW_ROW_GROUPS) {
         if (-not $rowGroup.Needs) {

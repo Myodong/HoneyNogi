@@ -141,7 +141,9 @@ Assert-Case '워커: referenceResolution 1272x717 강제' `
 Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Test-CheckpointLeaveReason')))
 Assert-Case 'GUI: 거점 퇴장 사유 판정 - 워커 실제 문구' (Test-CheckpointLeaveReason -Reason '거점 부활 상한으로 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)') $true
 Assert-Case 'GUI: 거점 퇴장 사유 판정 - 다른 코드 10 사유 3종·빈 값은 거짓' ((@('어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)', '안전 중지 예약 확인 - 수동 진행분 정리 중이라 판으로 계상하지 않고 마칩니다 (준비 실행)', '파티원: 거점 부활 상한으로 던전을 나왔습니다 - 파티원은 퇴장 뒤 자동 재입장 흐름이 없어 정지합니다', '') | ForEach-Object { Test-CheckpointLeaveReason -Reason $_ }) -join ',') 'False,False,True,False'
-Assert-Case 'GUI: 워커의 퇴장 [완료] 문구가 원인 조각(기본 거점 부활 상한으로)으로 조합돼 판정 조각을 포함 (09-26 부활 불가 대기 초과 추가)' (($workerSource -match "\`$leaveCause = \`$\(if \(\`$script:abyssLeaveCause\) \{ \`$script:abyssLeaveCause \} else \{ '거점 부활 상한으로' \}\)\s*\r?\n\s*Write-RunLog `"\[완료\] \`$\{leaveCause\} 던전을 나왔습니다 - 선택 화면 복귀 완료") -and (Test-CheckpointLeaveReason -Reason '부활 불가 화면 대기 초과로 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)')) $true
+# 2026-10-25 구현 명세 ⑤b5 W3: 원인 대입과 준비 실행 [완료] 줄 사이에 마무리 실행(finish-only) 갈래 if 블록(같은 원인 조각의 코드 4 [완료] 줄 + exit 4 -
+#   설계 v11 R2 M4)이 들어갈 수 있습니다 - 그 블록은 정확한 글자로만 허용합니다(다른 문장이 끼면 FAIL)
+Assert-Case 'GUI: 워커의 퇴장 [완료] 문구가 원인 조각(기본 거점 부활 상한으로)으로 조합돼 판정 조각을 포함 (09-26 부활 불가 대기 초과 추가)' (($workerSource -match "\`$leaveCause = \`$\(if \(\`$script:abyssLeaveCause\) \{ \`$script:abyssLeaveCause \} else \{ '거점 부활 상한으로' \}\)\s*\r?\n(?:\s*if \(\`$script:finishOnly\) \{\s*\r?\n\s*Write-RunLog `"\[완료\] \`$\{leaveCause\} 던전을 나왔습니다 - 마무리 실행이라 다시 입장하지 않고 멈춥니다`"\s*\r?\n\s*exit 4\s*\r?\n\s*\}\s*\r?\n)?\s*Write-RunLog `"\[완료\] \`$\{leaveCause\} 던전을 나왔습니다 - 선택 화면 복귀 완료") -and (Test-CheckpointLeaveReason -Reason '부활 불가 화면 대기 초과로 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)')) $true
 # 2026-09-26 거점 부활 상한 GUI 노출 (사용자 요청, 설계 리뷰 조건부 승인: 0~1000·기본 3·체크 해제 시 비활성이지만 값 유지·항상 저장·객체 교체 금지)
 Assert-Case 'GUI: 거점 부활 상한 NumericUpDown 0~1000·기본 3 + 라벨·힌트 (설정 그룹 y=80 줄)' ($guiSource -match '(?s)\$numCheckpointLimit = New-Object System\.Windows\.Forms\.NumericUpDown\s*\r?\n\s*\$numCheckpointLimit\.Location = New-Object System\.Drawing\.Point\(135, 79\)[\s\S]{0,200}?\$numCheckpointLimit\.Minimum = 0\s*\r?\n\s*\$numCheckpointLimit\.Maximum = 1000\s*\r?\n\s*\$numCheckpointLimit\.Value = 3\s*\r?\n\s*\$grpSettings\.Controls\.Add\(\$numCheckpointLimit\)') $true
 Assert-Case 'GUI: 자동부활 체크 해제 시 상한 숫자만 비활성 (값 유지)' ($guiSource -match '\$chkRevive\.Add_CheckedChanged\(\{ \$numCheckpointLimit\.Enabled = \$chkRevive\.Checked \}\)') $true
@@ -297,8 +299,10 @@ Assert-Case '3차: 카드 다중 스케일 1~2회전' `
 #   옮겼습니다(워커 자신의 '어비스' 클릭 출처가 살아 있는 판독이 예약 → 다음 회전 서두에서 소비·종료·완료 로그). 앵커만 그 블록으로 바꾸고 3요소는 그대로
 $abyssBackBody = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection'))
 $abyssBackCode = (($abyssBackBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+# 2026-10-25 구현 명세 ⑤b5 명세 리뷰 2 RV-9: 삭제와 종료 사이에 마무리 실행 'left'(거점 퇴장 - 코드 4)의 문구 갈래(elseif)가 들어가 그 거리가 266 → 418자 -
+#   삭제 → 종료 창만 400 → 600 (다음 'exit $SafeStopExitCode' 는 1만 자 넘게 떨어진 W 확정 뒤 블록이라 이 블록의 종료를 지운 변이는 그대로 잡힘)
 Assert-Case '3차: 선택 화면 복귀 직전 안전 중지 소비(게이트+삭제+종료)' `
-  ([bool]($abyssBackCode -match '(?s)if \(\$selectionConfirmed\) \{.{0,600}?Test-Path -LiteralPath \$safeStopFlagPath.{0,400}?Remove-Item -LiteralPath \$safeStopFlagPath.{0,400}?exit \$SafeStopExitCode')) $true
+  ([bool]($abyssBackCode -match '(?s)if \(\$selectionConfirmed\) \{.{0,600}?Test-Path -LiteralPath \$safeStopFlagPath.{0,400}?Remove-Item -LiteralPath \$safeStopFlagPath.{0,600}?exit \$SafeStopExitCode')) $true
 # GUI: 혼합 잠금 이전 상태 저장/복원 왕복
 Assert-Case '3차: 혼합 잠금 진입 시 이전 상태 저장' `
   ($guiSource -match '\$mixState\.PrevInfinite = -not \[bool\]\$RbCount\.Checked[\s\S]{0,60}\$mixState\.PrevLaps') $true

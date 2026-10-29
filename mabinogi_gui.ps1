@@ -1480,9 +1480,9 @@ function Convert-WorkerLogLineForGui {
   $Line = $Line -replace ' \((?:Y=|링크 탐색 |판독: |표본: |글자 탐색 |아이콘 탐색 |화면좌표 )[^\r\n]*\)\s*$', ''
   # 클릭 지점의 '기준좌표 (x,y)' 꼬리도 같은 진단 꼬리입니다 (2026-10-02 사용자 요청 - "[어비스] 나가기 클릭
   # - 글자 탐색 기준좌표 (491,662)" 의 좌표는 쓰는 사람에게 의미가 없음). 위 규칙은 괄호로 '시작하는' 꼬리만
-  # 지워 이 모양이 그대로 보이고 있었습니다. 워커가 찍는 모양은 두 가지뿐입니다 (워커 4곳 - 소스 전수는
+  # 지워 이 모양이 그대로 보이고 있었습니다. 워커가 찍는 모양은 두 가지뿐입니다 (워커 6곳 - 소스 전수는
   # tests\test_log_tail_offset.ps1 이 고정):
-  #  ① 줄 끝 ' - 글자 탐색 기준좌표 (x,y)' / ' - 기준좌표 (x,y)' (어비스·파티원 나가기, 퇴장 절차의 패널 다시 펼침)
+  #  ① 줄 끝 ' - 글자 탐색 기준좌표 (x,y)' / ' - 기준좌표 (x,y)' (어비스·파티원 나가기, 퇴장 절차의 패널 다시 펼침, 어비스 '다시 하기'·'다른 던전 가기' 클릭)
   #     → 꼬리째 지웁니다
   #  ② 줄 끝 괄호 안의 ', 기준좌표 (x,y)' ('입장 대기 중' 다시 펼침의 '(1/2, 기준좌표 (x,y))')
   #     → 좌표만 지우고 횟수 괄호는 남깁니다 → '(1/2)'
@@ -3922,7 +3922,13 @@ $pnlAcrMatching.Controls.Add($rbAcrPartyLead)
 # WinForms 는 비활성 컨트롤에 마우스 이벤트를 주지 않아 SetToolTip 이 통하지 않으므로,
 # 부모 패널의 MouseMove 로 커서가 어느 라디오 영역에 있는지 직접 판정해 띄웁니다.
 # 같은 컨트롤 위에서는 Show 를 다시 부르지 않아 깜박이지 않습니다(2026-07-22 실기 반영).
-$acrLockTipText = '리스트의 방식·매칭과 같아야 합니다. 리스트의 방식/매칭 칸을 클릭하면 전체를 한 번에 바꿀 수 있습니다.'
+# 문구 둘 (2026-10-26 섞기 허용): 전체 고정 리스트(파티 찾기·파티(파티장))는 같아야 한다는 안내, 섞을 수 있는 리스트(혼자하기·우연한 만남)는
+# 파티 찾기·파티장만 막힌 이유. 지금 쓸 문구는 Update-AbyssInputLock 이 $script:acrLockTipText 에 고릅니다.
+# 2026-10-27 사용자 결정: 방식/매칭 칸 편집은 그 행만 바꾸고 리스트 규칙에 어긋나면 알림만 띄우므로(Invoke-AcrCellEdit) '칸에서 고르면 전체가
+# 한 번에 바뀐다'는 안내를 뺐습니다 - 리스트 전체를 다른 방식으로 바꾸는 길은 비우고 다시 추가하는 것뿐입니다.
+$script:acrLockTipTextFixed = '리스트의 방식·매칭과 같아야 합니다. 다른 방식·매칭으로 바꾸려면 리스트를 비우고 다시 추가해 주세요.'
+$script:acrLockTipTextMixable = "'파티 찾기'·'파티(파티장)'는 리스트의 모든 항목이 같은 매칭일 때만 쓸 수 있습니다. 쓰려면 리스트를 비운 뒤 다시 추가해 주세요."
+$script:acrLockTipText = $script:acrLockTipTextFixed
 $acrLockTipMove = {
   param($tipSender, $tipArgs)
   if (-not $script:acrLockOn) { return }
@@ -3934,7 +3940,7 @@ $acrLockTipMove = {
   if ($tipHit) {
     if ($script:acrTipShownFor -ne $tipHit) {
       $script:acrTipShownFor = $tipHit
-      $toolTip.Show($acrLockTipText, $tipSender, $tipHit.Left, ($tipHit.Bottom + 2), 8000)
+      $toolTip.Show($script:acrLockTipText, $tipSender, $tipHit.Left, ($tipHit.Bottom + 2), 8000)
     }
   } elseif ($script:acrTipShownFor) {
     $script:acrTipShownFor = $null
@@ -4118,7 +4124,7 @@ $btnAcrAdd.Add_Click({
     Add-AbyssCustomListRow -Mode $acrMode -Difficulty ([string]$cboAcrDifficulty.SelectedItem) `
       -Dungeon ([string]$cboAcrDungeon.SelectedItem) -Matching $acrMatchingText
     Update-AbyssCustomListNumbers
-    # 첫 항목이 들어오면 방식·매칭 입력을 그 값으로 잠급니다 (리스트 전체 통일 규칙)
+    # 입력 잠금을 다시 맞춥니다 (파티 찾기·파티장 리스트는 다섯 다, 혼자하기·우연한 만남 리스트는 파티 찾기·파티장만 - 2026-10-26)
     Update-AbyssInputLock
     if ($script:uiReady) { Save-CustomRepeatToConfig }
   })
@@ -6173,6 +6179,37 @@ function New-CustomMarkerOwnerJson {
   return (ConvertTo-CustomMarkerOwnerJson -Owner (Get-CustomCanonicalOwner -Context $Context))
 }
 
+function Get-CustomNextHandoffEnv {
+  # 커스텀 다음 판의 이어받기 env 두 값 (구현 명세 ⑤b5 · ⑤b6 · 설계 v10 6.1 env 목록 · 사용자 결정 U-⑤-2 (가)) → @{ Owner; Boundary }. 어비스 '다시 하기' 의
+  # 보상 결정(순위 ④ 입장 방식 미정 'mixed' · ⑥ 바퀴 경계 '1' · ⑧ 다음 판 owner)과 클리어 기록의 nextOwner 가 씁니다. 다른 콘텐츠의 워커는 [설정] 스냅샷에만 적습니다.
+  #  Owner    = HONEYNOGI_CUSTOM_NEXT_OWNER - 같은 바퀴의 다음 칸(index+1)의 owner JSON(완료 마커 소유자와 같은 version 3 직렬화 - 워커 ConvertTo-AbyssJournalOwner
+  #             가 읽음). 지문·순서 키·바퀴·세대는 이 판과 같고 item 은 실행 순서의 다음 칸입니다. 바퀴 끝 판(index+1 = 칸 수 - 1항목 리스트는 매 판)이면 빈 값 -
+  #             커스텀 반복은 바퀴 끝 판을 '다른 던전 가기'(같은 입장 방식) 또는 '나가기'(멈출 때 · 다음 판 입장 방식이 다르거나 모를 때 - 구현 명세 ⑤b6)로 마치고 다음 바퀴 owner·바퀴 넘김을 만들지 않습니다(U-⑤-2 (가))
+  #  Boundary = HONEYNOGI_CUSTOM_NEXT_BOUNDARY - 바퀴 끝 판이면 '1'(순차 · 입장 방식이 한 가지인 랜덤 - 섞인 랜덤은 아래 'mixed'), 아니면 빈 값. 랜덤 진행의 바퀴 끝 NEXT 는 이번 순열의 첫 칸이라(다음 바퀴의
+  #             새 순열이 아님) 워커가 그 판을 '같은 항목' 으로 잇지 않게 합니다. 랜덤 진행의 바퀴 끝 판인데 등록 항목의 입장 방식(혼자하기·함께하기와
+  #             매칭)이 섞여 있으면 'mixed' - 다음 바퀴 첫 칸의 입장 방식을 아직 모르므로(순열은 Step 의 바퀴 전환이 만듦) 워커가 '나가기' 로 필드에
+  #             나가 다음 판이 필드에서 연 선택 화면에서 시작하게 합니다(2026-10-26 사용자 결정 '랜덤 + 섞인 리스트 바퀴 경계 = 필드'). 순차 진행의
+  #             바퀴 끝 NEXT 는 다음 바퀴 첫 칸 그대로라 '1' 이고 입장 방식 대조는 워커가 NEXT 로 합니다
+  # 컨텍스트 값만 읽는 순수 판정입니다(config·파일 0)
+  param($Context)
+  $nextIndex = [int]$Context.Index + 1
+  if ($nextIndex -ge [int]$Context.Total) {
+    $entryKindList = @()
+    if (($null -ne $Context.Order) -or [bool]$Context.RandomOrder) {
+      foreach ($registeredItem in @($Context.Items)) {
+        # 입장 방식 = 어비스 토큰(A|방식|난이도|던전|매칭)의 방식 · 매칭(공백 무시). 어비스가 아닌 토큰은 한 종류로 셉니다(그 워커는 이 값을 읽지 않음)
+        $entryParts = @((Format-CustomItemToken -Item $registeredItem) -split '\|')
+        $entryKindList += $(if (($entryParts.Count -eq 5) -and ($entryParts[0] -eq 'A')) { '{0}|{1}' -f $entryParts[1], ($entryParts[4] -replace '\s', '') } else { '' })
+      }
+    }
+    $entryKindCount = @($entryKindList | Select-Object -Unique).Count
+    return @{ Owner = ''; Boundary = $(if ($entryKindCount -gt 1) { 'mixed' } else { '1' }) }
+  }
+  $nextContext = @{ Items = $Context.Items; Order = $Context.Order; Lap = $Context.Lap; Index = $nextIndex
+    Item = @($Context.ExecutionItems)[$nextIndex]; Generation = $Context.Generation }
+  return @{ Owner = (ConvertTo-CustomMarkerOwnerJson -Owner (Get-CustomCanonicalOwner -Context $nextContext)); Boundary = '' }
+}
+
 function Read-CustomMarkerOwner {
   # 구버전 타임스탬프 마커나 부분 파일은 소유자를 확인할 수 없으므로 $null 처리합니다.
   # version 3 만 인정합니다(스키마 11 - 설계 v10 1.7): 필수 6필드 = 5필드(fingerprint·orderKey·lap·index·item) + 진행 세대
@@ -6645,9 +6682,10 @@ function Invoke-CrCellEdit {
 }
 
 function Invoke-AcrCellEdit {
-  # 어비스 리스트 셀 편집 적용. 난이도/어비스 던전은 행 단위, 방식/매칭은 통일 규칙에 따라
-  # 리스트 전체 일괄 변경입니다. 함께→혼자 전환으로 지옥 난이도가 강등될 때는 사전 확인창을
-  # 띄웁니다 (원래 난이도를 잃는 변경 - 사용자 버튼 조작 즉답 팝업이라 무인 운용과 무관).
+  # 어비스 리스트 셀 편집 적용. 난이도/어비스 던전/방식/매칭 모두 그 행 하나만 바꿉니다 (2026-10-27 사용자 결정 - 방식·매칭 칸 하나로
+  # 리스트 전체를 바꾸던 일괄 변경은 없앰). 방식·매칭을 바꾼 결과가 리스트 규칙(파티 찾기·파티(파티장) 항목이 든 리스트는 전체가 같은
+  # 방식·매칭 - Convert-AcrItemsForModeEdit)에 어긋나면 알림을 띄우고 아무것도 바꾸지 않습니다(커스텀 던전 [추가]의 '추가 불가' 알림과 같은 꼴).
+  # 함께→혼자 전환으로 지옥 난이도가 강등될 때는 사전 확인창을 띄웁니다 (원래 난이도를 잃는 변경 - 사용자 버튼 조작 즉답 팝업이라 무인 운용과 무관).
   param([int]$RowIndex, [int]$ColumnIndex, [string]$Value)
   $editItems = @(Get-AbyssCustomItemsFromList)
   if ($RowIndex -ge $editItems.Count) { return }
@@ -6677,11 +6715,27 @@ function Invoke-AcrCellEdit {
     return
   }
   if ($ColumnIndex -ne 2 -and $ColumnIndex -ne 5) { return }
-  # 방식(2)/매칭(5) = 리스트 전체 일괄 변경 (통일 규칙 유지)
-  $globalTarget = $(if ($ColumnIndex -eq 2) { ConvertFrom-AcrModeOption -OptionText $Value }
+  # 방식(2)/매칭(5) = 그 행 하나만 (2026-10-27 - 바꾼 결과가 리스트 규칙에 어긋나면 Convert-AcrItemsForModeEdit 가 Scope 'blocked')
+  $editTarget = $(if ($ColumnIndex -eq 2) { ConvertFrom-AcrModeOption -OptionText $Value }
     else { @{ Mode = 'party'; Matching = $Value } })
-  if (-not $globalTarget) { return }
-  $convertResult = Convert-AcrItemsForGlobalSetting -Items $editItems -Mode ([string]$globalTarget.Mode) -Matching ([string]$globalTarget.Matching)
+  if (-not $editTarget) { return }
+  $convertResult = Convert-AcrItemsForModeEdit -Items $editItems -RowIndex $RowIndex -Mode ([string]$editTarget.Mode) -Matching ([string]$editTarget.Matching)
+  if ([string]$convertResult.Scope -eq 'blocked') {
+    # 바꿀 수 없음: 로그 + 알림만 남기고 아무것도 바꾸지 않습니다(행 표시·저장·잠금 갱신 없음 - 리스트가 그대로라 잠금도 그대로).
+    # 'GUI 팝업 금지' 규칙의 예외 ②(사용자가 직접 고른 값에 대한 즉답 - CLAUDE.md): 실행 중에는 셀 클릭·드롭다운이 running 가드로 막히고,
+    # 고른 값이 적용되기 전에 [시작]을 누른 경우(Set-UiRunning 이 커밋된 편집을 마저 적용)도 사용자가 [시작]을 누른 그 자리입니다.
+    if ([string]$convertResult.Reason -eq 'fixed-target') {
+      $blockReasonText = ("'함께하기 · {0}'은(는) 리스트의 모든 항목이 같은 매칭일 때만 쓸 수 있어 이 줄만 바꿀 수 없습니다." -f [string]$editTarget.Matching)
+      $blockHintText = '다른 항목을 모두 지운 뒤 이 칸에서 다시 고르거나, 리스트를 비운 뒤 다시 추가해 주세요.'
+    } else {
+      $blockReasonText = ("'{0}' 리스트는 모든 항목이 같은 매칭이어야 해서 이 줄만 바꿀 수 없습니다." -f [string]$convertResult.FixedMatching)
+      $blockHintText = '다른 방식·매칭으로 바꾸려면 리스트를 비우고 다시 추가해 주세요.'
+    }
+    Add-GuiLog ('[안내] 변경 차단: 어비스 항목 {0} - {1} {2}' -f ($RowIndex + 1), $blockReasonText, $blockHintText)
+    [System.Windows.Forms.MessageBox]::Show(("{0}`n`n{1}" -f $blockReasonText, $blockHintText), '커스텀 반복 - 변경 불가',
+      [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+    return
+  }
   $convertedItems = @($convertResult.Items)
   $isSame = ($convertedItems.Count -eq $editItems.Count)
   if ($isSame) {
@@ -6717,19 +6771,19 @@ function Invoke-AcrCellEdit {
       }
     } finally { $script:crLoading = $prevLoading }
     Update-AbyssInputLock
-    Add-GuiLog '[경고] 방식·매칭 일괄 변경 저장에 실패해 리스트를 되돌렸습니다.'
+    Add-GuiLog '[경고] 셀 수정 저장에 실패해 항목을 되돌렸습니다.'
     return
   }
   Update-AbyssInputLock
-  $modeLabel = $(if ([string]$globalTarget.Mode -eq 'party') { "함께하기/$([string]$globalTarget.Matching)" } else { '혼자하기' })
+  $modeLabel = $(if ([string]$editTarget.Mode -eq 'party') { "함께하기/$([string]$editTarget.Matching)" } else { '혼자하기' })
   $downgradeTag = $(if ([int]$convertResult.DowngradeCount -gt 0) { " (지옥 → 매우 어려움 강등 $([int]$convertResult.DowngradeCount)건)" } else { '' })
-  Add-GuiLog ('[안내] 어비스 리스트 방식·매칭 전체 변경: {0}항목 → {1}{2}' -f $convertedItems.Count, $modeLabel, $downgradeTag)
+  Add-GuiLog ('[안내] 어비스 항목 {0} 방식 변경: {1}{2}' -f ($RowIndex + 1), $modeLabel, $downgradeTag)
 }
 
 # ============================================================
 #  커스텀 리스트 셀 편집 판정 (2026-07-25) - 순수 함수 (진리표 테스트 대상)
-#  셀 클릭 → 오버레이 드롭다운으로 값 변경. 어비스의 방식/매칭 열은 통일 규칙 때문에
-#  '리스트 전체 일괄 변경' 진입점으로 동작합니다 (설계 합의).
+#  셀 클릭 → 오버레이 드롭다운으로 값 변경. 어비스의 방식/매칭 열도 그 행만 바꿉니다 - 바꾼 결과가 리스트 규칙(파티 찾기·파티장
+#  항목이 든 리스트는 전체가 같은 방식·매칭)에 어긋나면 알림을 띄우고 바꾸지 않습니다 (2026-10-27 사용자 결정 - 옛 '리스트 전체 일괄 변경'은 없앰).
 # ============================================================
 function Get-CrCellEditPlan {
   # 던전 리스트 셀 편집 계획: 편집 가능하면 @{ Options; Current }, 아니면 $null.
@@ -6785,16 +6839,16 @@ function Set-CrItemCellValue {
 }
 
 function Get-AcrCellEditPlan {
-  # 어비스 리스트 셀 편집 계획. Scope='row'(행 단위: 난이도/어비스 던전) 또는
-  # 'all'(리스트 전체 일괄: 방식/매칭 - 통일 규칙). 혼자하기 항목의 매칭 열은 편집 불가.
-  # 방식 열은 방식+매칭을 한 번에 고르는 원자 옵션 4개 (혼자→함께 전환 시 매칭 명시 선택 보장).
+  # 어비스 리스트 셀 편집 계획. Scope 는 늘 'row'(난이도/어비스 던전/방식/매칭 모두 그 행 하나 - 2026-10-27 사용자 결정으로 방식/매칭의
+  # 옛 'all'(리스트 전체 일괄)을 없앰. 읽는 코드가 없는 정보 값이고, 방식/매칭이 리스트 규칙에 어긋나는지는 적용 때 Convert-AcrItemsForModeEdit 가 봄).
+  # 혼자하기 항목의 매칭 열은 편집 불가. 방식 열은 방식+매칭을 한 번에 고르는 원자 옵션 4개 (혼자→함께 전환 시 매칭 명시 선택 보장).
   param([int]$ColumnIndex, $Item)
   $planMode = $(if ([string]$Item.mode -eq 'party') { 'party' } else { 'solo' })
   switch ($ColumnIndex) {
     2 {
       $planCurrent = $(if ($planMode -eq 'party') { "함께하기 · $([string]$Item.matching)" } else { '혼자하기' })
       return @{ Options = @('혼자하기', '함께하기 · 우연한 만남', '함께하기 · 파티 찾기', '함께하기 · 파티(파티장)')
-                Current = $planCurrent; Scope = 'all' }
+                Current = $planCurrent; Scope = 'row' }
     }
     3 {
       $planOptions = @('게임 그대로', '입문', '어려움', '매우 어려움')
@@ -6806,7 +6860,7 @@ function Get-AcrCellEditPlan {
     4 { return @{ Options = @('허상의 정박지', '광기의 동굴', '흩어진 물길'); Current = [string]$Item.dungeon; Scope = 'row' } }
     5 {
       if ($planMode -ne 'party') { return $null }
-      return @{ Options = @('우연한 만남', '파티 찾기', '파티(파티장)'); Current = [string]$Item.matching; Scope = 'all' }
+      return @{ Options = @('우연한 만남', '파티 찾기', '파티(파티장)'); Current = [string]$Item.matching; Scope = 'row' }
     }
   }
   return $null
@@ -6827,6 +6881,7 @@ function ConvertFrom-AcrModeOption {
 function Convert-AcrItemsForGlobalSetting {
   # 방식/매칭 리스트 일괄 변환 (순수). 함께→혼자 전환 시 함께하기 전용 난이도(지옥N)는
   # '매우 어려움'으로 강등하고 강등 건수를 반환합니다 (호출부가 1건 이상이면 사전 확인창).
+  # 2026-10-27 부터 칸 편집은 고친 행 하나만 넘깁니다 (Convert-AcrItemsForModeEdit - 리스트 전체 일괄 변경은 없앰).
   # 반환: 단일 해시테이블 @{ Items = [array]; DowngradeCount = N } (PS 5.1 배열 풀림 방지)
   param($Items, [string]$Mode, [string]$Matching)
   $convertedItems = @()
@@ -6845,6 +6900,43 @@ function Convert-AcrItemsForGlobalSetting {
     }
   }
   return @{ Items = $convertedItems; DowngradeCount = $downgradeCount }
+}
+
+function Convert-AcrItemsForModeEdit {
+  # 방식(2)/매칭(5) 칸 편집의 결과 (순수 - 2026-10-26 섞기 허용 · 2026-10-27 사용자 결정 '바꿀 수 없으면 알림을 띄우고 바꾸지 않음'):
+  #  - 늘 그 행 하나만 바꾼 후보를 만듭니다(함께→혼자로 그 행이 지옥이면 그 행만 강등). 방식·매칭 칸 하나로 리스트 전체를 한 번에
+  #    바꾸던 일괄 변경(2026-07-25 셀 편집 설계)은 없앴습니다 - 리스트 전체를 다른 방식으로 바꾸려면 비우고 다시 추가합니다.
+  #  - 후보가 시작 게이트와 같은 규칙(Get-AbyssMatchingIssues - 파티 찾기·파티(파티장)·모르는 매칭 항목이 다른 방식·매칭과 섞임)에
+  #    어긋나면 Scope = 'blocked' 로 원래 리스트를 그대로 돌려줍니다(호출부가 알림만 띄움). Reason = 'fixed-target'(바꾼 행이 파티 찾기·
+  #    파티(파티장)처럼 리스트 전체가 같아야 하는 매칭) / 'fixed-list'(다른 항목에 그런 매칭이 있어 이 행만 다른 방식·매칭으로 바꿀 수
+  #    없음 - FixedMatching = 그 항목의 매칭 표기). 항목이 1개인 리스트는 무엇으로든 바뀝니다.
+  #  - 행 번호가 범위 밖이면 바꾸지 않습니다(Scope = 'none' - 호출부가 범위를 먼저 거릅니다).
+  # 반환: 단일 해시테이블 @{ Items = [array]; DowngradeCount = N; Scope = 'row' | 'blocked' | 'none'; Reason; FixedMatching } (PS 5.1 배열 풀림 방지)
+  param($Items, [int]$RowIndex, [string]$Mode, [string]$Matching)
+  $meList = @()
+  foreach ($meItem in @($Items)) { if ($null -ne $meItem) { $meList += $meItem } }
+  if (($RowIndex -lt 0) -or ($RowIndex -ge $meList.Count)) {
+    return @{ Items = $meList; DowngradeCount = 0; Scope = 'none'; Reason = ''; FixedMatching = '' }
+  }
+  $meOne = Convert-AcrItemsForGlobalSetting -Items @($meList[$RowIndex]) -Mode $Mode -Matching $Matching
+  $meRowItem = @($meOne.Items)[0]
+  $meOut = @()
+  for ($meIndex = 0; $meIndex -lt $meList.Count; $meIndex++) {
+    if ($meIndex -eq $RowIndex) { $meOut += $meRowItem } else { $meOut += $meList[$meIndex] }
+  }
+  if (@(Get-AbyssMatchingIssues -Items $meOut).Count -eq 0) {
+    return @{ Items = $meOut; DowngradeCount = [int]$meOne.DowngradeCount; Scope = 'row'; Reason = ''; FixedMatching = '' }
+  }
+  # 막힘 - 바꾼 행이 '전체가 같아야 하는 매칭'(고정 판정은 Get-AbyssListLock 의 Fixed 와 같은 식)이면 fixed-target,
+  # 아니면(혼자하기·우연한 만남으로 바꿈) 다른 항목에 그런 매칭이 있어서이므로 fixed-list
+  if ([bool](Get-AbyssListLock -Items @($meRowItem)).Fixed) {
+    return @{ Items = $meList; DowngradeCount = 0; Scope = 'blocked'; Reason = 'fixed-target'; FixedMatching = '' }
+  }
+  $meFixedMatching = ''
+  for ($meIndex = 0; $meIndex -lt $meList.Count; $meIndex++) {
+    if (($meIndex -ne $RowIndex) -and [bool](Get-AbyssListLock -Items @($meList[$meIndex])).Fixed) { $meFixedMatching = [string]$meList[$meIndex].matching; break }
+  }
+  return @{ Items = $meList; DowngradeCount = 0; Scope = 'blocked'; Reason = 'fixed-list'; FixedMatching = $meFixedMatching }
 }
 
 function Set-CustomListRowTexts {
@@ -7598,7 +7690,7 @@ function Get-LifeSkillTargets {
 
 function Get-LcrCellEditPlan {
   # 생활 리스트 셀 편집 계획: 편집 가능하면 @{ Options; Current }, 아니면 $null (순수 - 진리표 대상).
-  # 어비스의 Scope 키(리스트 전체 일괄)는 쓰지 않습니다 - 생활은 스킬 혼합이 자유라
+  # 어비스 계획의 Scope 키(정보 값 - 2026-10-27 부터 어비스도 전 열 'row')는 쓰지 않습니다 - 생활은 스킬 혼합이 자유라
   # 전 열이 행 단위입니다 (Save-LifeCustomRepeatToConfig 주석의 계약).
   # 현재값이 옵션에 없으면 **목록 끝에** 덧붙입니다: 콤보가 DropDownList 라 현재값이 목록에
   # 없으면 선택이 비어 사용자가 지금 값을 못 봅니다. 끝에 붙이는 이유는 낚시 같은 미지원
@@ -7689,10 +7781,14 @@ function Set-LcrItemCellValue {
 }
 
 function Get-AbyssListLock {
-  # 어비스 커스텀 리스트의 '방식·매칭 고정값'을 첫 항목에서 뽑습니다 (2026-07-22 사용자 확정:
-  # 리스트 전체가 같은 방식+매칭이어야 함 - 항목마다 다르면 파티 상태가 항목 간에 꼬임).
-  # 반환: 리스트가 비었으면 $null, 아니면 단일 해시테이블 @{ Mode; Matching }
-  #       (Mode = 'solo'/'party', Matching = 혼자하기면 '없음', 함께하기면 GUI 표기 문구).
+  # 어비스 커스텀 리스트의 '방식·매칭 고정값'을 첫 항목에서 뽑습니다 (2026-07-22 사용자 확정: 리스트 전체가 같은 방식+매칭 - 항목마다
+  # 다르면 파티 상태가 항목 간에 꼬임). 2026-10-26 사용자 결정으로 좁힘: 혼자하기와 함께하기·우연한 만남(던전이 끝나면 풀리는 임시 파티)은
+  # 한 리스트에 섞을 수 있고, 파티 찾기·파티(파티장) 항목이 하나라도 있으면 지금처럼 리스트 전체가 같은 방식+매칭입니다(파티가 있으면
+  # 혼자하기를 할 수 없음). Fixed = 그 '전체 고정' 리스트인지 - 함께하기인데 매칭이 우연한 만남이 아닌 항목(파티 찾기·파티장·직접 편집된
+  # 모르는 값)이 하나라도 있으면 참. 섞인 리스트의 입장 방식 전환은 워커 보상 결정이 '나가기' 로 필드에 나가 받습니다(던전 안 선택 화면에서는
+  # 혼자하기 ↔ 함께하기 탭이 바뀌지 않음 - 2026-10-26 실기 관측, 구현 명세 ⑤b6).
+  # 반환: 리스트가 비었으면 $null, 아니면 단일 해시테이블 @{ Mode; Matching; Fixed }
+  #       (Mode = 'solo'/'party', Matching = 혼자하기면 '없음', 함께하기면 GUI 표기 문구 - 둘 다 첫 항목 값, Fixed 가 거짓이면 잠금값이 아님).
   # 단일 객체 반환이라 PS 5.1 배열 풀림과 무관합니다 - 호출부는 $null 검사만 하면 됩니다.
   param($Items)
   $alList = @()
@@ -7711,12 +7807,36 @@ function Get-AbyssListLock {
       default        { $alMatching = '우연한 만남' }
     }
   }
-  return @{ Mode = $alMode; Matching = $alMatching }
+  $alFixed = $false
+  foreach ($alEach in $alList) {
+    $alEachParty = ([string]$alEach.mode -eq 'party' -or [string]$alEach.mode -eq '함께하기')
+    if ($alEachParty -and ((([string]$alEach.matching) -replace '\s', '') -ne '우연한만남')) { $alFixed = $true; break }
+  }
+  return @{ Mode = $alMode; Matching = $alMatching; Fixed = $alFixed }
+}
+
+function Get-AbyssFixedItemNumbers {
+  # 어비스 커스텀 리스트를 '전체 고정'으로 만드는 항목(Get-AbyssListLock 의 Fixed 와 같은 판정 - 함께하기인데 매칭(공백 무시)이
+  # 우연한 만남이 아닌 항목)의 번호(1부터, null 을 뺀 순번 - Get-AbyssMatchingIssues 의 Index 와 같은 기준)를 돌려줍니다.
+  # 시작 게이트의 [경고] 한 줄용입니다(구현 명세 ⑤b6 C-11 · B-14 둘째 안).
+  # 반환: 번호 배열(없으면 빈 배열). PS 5.1 배열 풀림 주의: 열거용이므로 return 그대로 + 호출부 @() 감싸기 규약.
+  param($Items)
+  $fnNumbers = @()
+  $fnList = @()
+  foreach ($fnItem in @($Items)) { if ($null -ne $fnItem) { $fnList += $fnItem } }
+  for ($fnIdx = 0; $fnIdx -lt $fnList.Count; $fnIdx++) {
+    $fnEach = $fnList[$fnIdx]
+    $fnEachParty = ([string]$fnEach.mode -eq 'party' -or [string]$fnEach.mode -eq '함께하기')
+    if ($fnEachParty -and ((([string]$fnEach.matching) -replace '\s', '') -ne '우연한만남')) { $fnNumbers += ($fnIdx + 1) }
+  }
+  return $fnNumbers
 }
 
 function Get-AbyssMatchingIssues {
-  # 첫 항목과 방식·매칭이 다른 항목들을 찾아 돌려줍니다 (config 를 직접 편집해 섞인 리스트가
-  # 들어온 경우의 시작 게이트용 - GUI 에서는 라디오 잠금으로 애초에 섞이지 않습니다).
+  # '전체 고정' 리스트(파티 찾기·파티(파티장) 항목이 든 리스트 - Get-AbyssListLock 의 Fixed)에서 첫 항목과 방식·매칭이 다른 항목들을 찾아
+  # 돌려줍니다 (config 를 직접 편집해 섞인 리스트가 들어온 경우의 시작 게이트용 - GUI 에서는 라디오 잠금·칸 편집 규칙으로 생기지 않습니다).
+  # 칸 편집도 같은 함수로 '바꾼 결과가 어긋나는지'를 봅니다(Convert-AcrItemsForModeEdit - 어긋나면 알림만, 2026-10-27).
+  # 혼자하기·함께하기 우연한 만남만 든 리스트는 섞여 있어도 위반이 아닙니다(2026-10-26 사용자 결정).
   # 반환: 위반 배열 [{Index; Mode; Matching; Reason}] (없으면 빈 배열).
   # PS 5.1 배열 풀림 주의: 열거용이므로 return $issues 그대로 + 호출부 @() 감싸기 규약.
   param($Items)
@@ -7726,6 +7846,7 @@ function Get-AbyssMatchingIssues {
   if ($amList.Count -lt 2) { return $issues }
   $amLock = Get-AbyssListLock -Items $amList
   if ($null -eq $amLock) { return $issues }
+  if (-not [bool]$amLock.Fixed) { return $issues }
   $amLockKey = ([string]$amLock.Matching) -replace '\s', ''
   for ($amIdx = 1; $amIdx -lt $amList.Count; $amIdx++) {
     $amItemCur = $amList[$amIdx]
@@ -7753,9 +7874,11 @@ function Get-AbyssMatchingIssues {
 }
 
 function Update-AbyssInputLock {
-  # 어비스 커스텀 입력 줄 잠금: 리스트에 항목이 하나라도 있으면 그 리스트의 방식·매칭으로
-  # 라디오를 맞추고 비활성화합니다 (팝업 대신 애초에 못 고르게 하는 방식 - 사용자 확정).
-  # 리스트가 비면 전부 다시 활성화합니다. 항목 추가/삭제/이동/설정 복원/카테고리 전환 후 호출.
+  # 어비스 커스텀 입력 줄 잠금 (팝업 대신 애초에 못 고르게 하는 방식 - 사용자 확정):
+  #  - '전체 고정' 리스트(파티 찾기·파티(파티장) 항목이 있음 - Get-AbyssListLock 의 Fixed): 그 리스트의 방식·매칭으로 라디오를 맞추고 다섯 다 비활성
+  #  - 섞을 수 있는 리스트(혼자하기·함께하기 우연한 만남만 - 2026-10-26 사용자 결정): 혼자하기·함께하기·우연한 만남은 그대로 두고
+  #    파티 찾기·파티(파티장)만 비활성(골라져 있었으면 우연한 만남으로)
+  #  - 빈 리스트: 전부 다시 활성화. 항목 추가/삭제/이동/설정 복원/카테고리 전환/칸 편집 후 호출.
   # 라디오 Checked 를 코드로 바꾸면 CheckedChanged → 패널 갱신 → 이 함수 재호출로 이어질 수
   # 있어 $script:acrLockUpdating 로 재진입을 막습니다.
   if ($script:acrLockUpdating) { return }
@@ -7763,10 +7886,15 @@ function Update-AbyssInputLock {
   try {
     $acrLock = Get-AbyssListLock -Items @(Get-AbyssCustomItemsFromList)
     $acrLockOn = ($null -ne $acrLock)
+    $acrFixed = ($acrLockOn -and [bool]$acrLock.Fixed)
     $prevLoading = $script:crLoading
     $script:crLoading = $true
     try {
-      if ($acrLockOn) {
+      if ($acrLockOn -and -not $acrFixed) {
+        # 섞을 수 있는 리스트: 파티 찾기·파티장이 골라져 있으면 우연한 만남으로 (비활성 라디오가 Checked 로 남으면 [추가]가 그 값을 씁니다)
+        if ($rbAcrFindParty.Checked -or $rbAcrPartyLead.Checked) { $rbAcrChance.Checked = $true }
+      }
+      if ($acrFixed) {
         if ($acrLock.Mode -eq 'party') {
           if (-not $rbAcrParty.Checked) { $rbAcrParty.Checked = $true }
           if ($acrLock.Matching -eq '파티 찾기') {
@@ -7780,9 +7908,9 @@ function Update-AbyssInputLock {
           if (-not $rbAcrSolo.Checked) { $rbAcrSolo.Checked = $true }
         }
       }
-      $rbAcrSolo.Enabled = -not $acrLockOn
-      $rbAcrParty.Enabled = -not $acrLockOn
-      $rbAcrChance.Enabled = -not $acrLockOn
+      $rbAcrSolo.Enabled = -not $acrFixed
+      $rbAcrParty.Enabled = -not $acrFixed
+      $rbAcrChance.Enabled = -not $acrFixed
       $rbAcrFindParty.Enabled = -not $acrLockOn
       $rbAcrPartyLead.Enabled = -not $acrLockOn
     } finally { $script:crLoading = $prevLoading }
@@ -7792,6 +7920,8 @@ function Update-AbyssInputLock {
     # 툴팁은 아래 MouseMove 핸들러가 잠긴 라디오 위에서만 직접 띄웁니다
     # (비활성 컨트롤은 마우스 이벤트를 받지 못해 SetToolTip 이 동작하지 않는 WinForms 특성)
     $script:acrLockOn = $acrLockOn
+    # 잠긴 라디오 위 툴팁 문구 - 전체 고정 리스트는 같아야 한다는 안내, 섞을 수 있는 리스트는 파티 찾기·파티장이 막힌 이유
+    $script:acrLockTipText = $(if ($acrFixed) { $script:acrLockTipTextFixed } else { $script:acrLockTipTextMixable })
     if (-not $acrLockOn -and $script:acrTipShownFor) {
       $script:acrTipShownFor = $null
       $toolTip.Hide($pnlAcrInput)
@@ -8627,10 +8757,11 @@ function Clear-CustomEnv {
   # (HONEYNOGI_REPEAT_INFO 는 기존 변수라 매 회차 덮어쓰므로 정리 불필요)
   # HONEYNOGI_CUSTOM_GENERATION(진행 세대 - OWNER 와 같은 계산, 구현 명세 ① 5절 A3)도 커스텀 전용이라 여기서 지웁니다 - 남으면 다음
   # 비커스텀 회차 워커의 [설정] 스냅샷에 앞 실행의 세대가 찍힙니다
+  # 다음 판 이어받기 env 둘(NEXT_OWNER · NEXT_BOUNDARY - 구현 명세 ⑤b5)도 커스텀 기동만 넣으므로 여기서 지웁니다
   foreach ($envName in @('HONEYNOGI_CUSTOM_ITEM', 'HONEYNOGI_CUSTOM_PREV', 'HONEYNOGI_CUSTOM_NEXT',
       'HONEYNOGI_CUSTOM_RESTART', 'HONEYNOGI_CUSTOM_RECOVERY', 'HONEYNOGI_CUSTOM_POSITION',
       'HONEYNOGI_CUSTOM_LIST', 'HONEYNOGI_CUSTOM_MARKER', 'HONEYNOGI_CUSTOM_OWNER',
-      'HONEYNOGI_CUSTOM_GENERATION', 'HONEYNOGI_LAST_RUN')) {
+      'HONEYNOGI_CUSTOM_GENERATION', 'HONEYNOGI_CUSTOM_NEXT_OWNER', 'HONEYNOGI_CUSTOM_NEXT_BOUNDARY', 'HONEYNOGI_LAST_RUN')) {
     Remove-Item -LiteralPath "Env:\$envName" -ErrorAction SilentlyContinue
   }
 }
@@ -8871,7 +9002,7 @@ function Load-SettingsToUi {
         try { $numAcrLaps.Value = [Math]::Min(999, [Math]::Max(1, [int]$acr.listRepeatCount)) } catch { $numAcrLaps.Value = 1 }
         $numAcrLaps.Enabled = $rbAcrCount.Checked
       } finally { $script:crLoading = $false }
-      # 복원된 리스트 기준으로 방식·매칭 입력 잠금을 맞춥니다 (통일 규칙)
+      # 복원된 리스트 기준으로 방식·매칭 입력 잠금을 맞춥니다 (파티 찾기·파티장 리스트는 다섯 다, 섞을 수 있는 리스트는 파티 찾기·파티장만)
       Update-AbyssInputLock
     }
   } catch { $script:crLoading = $false }
@@ -9772,7 +9903,10 @@ function Start-NextCycle {
     # 랜덤 진행 주의: 바퀴 마지막 항목의 NEXT 는 '현재 순열의 첫 항목'입니다 (다음 바퀴의 새
     # 순열이 아님). 랜덤은 같은 층 전용 + 워커가 NEXT 를 마무리 갈림길에만 쓰는 불변식 덕에
     # 동작상 안전 - 혼합 랜덤을 허용하거나 워커가 NEXT 항목을 실제 소비하게 되면 다음 바퀴
-    # 순열을 미리 계산해야 합니다 (리뷰 계약, test_custom_random 가드).
+    # 순열을 미리 계산하거나, 어비스처럼 그 판에서 NEXT 를 믿지 않는 경계 신호('mixed')를 넘겨야 합니다 (리뷰 계약, test_custom_random 가드). 어비스 '다시 하기' 의 보상 결정도 NEXT 를
+    # 갈림길에만 쓰고, 바퀴 끝 판은 아래 바퀴 경계 신호('1')·빈 NEXT_OWNER 로 '다른 던전 가기' 입니다(구현 명세 ⑤b5 - 멈출 때와 다음 바퀴 첫 칸의 입장 방식이 다른 판은 '나가기', ⑤b6). 어비스 랜덤 진행에서
+    # 입장 방식(혼자하기 · 함께하기 우연한 만남)이 섞인 리스트의 바퀴 끝 판은 경계 신호 'mixed' 로 워커가 '나가기' 로 필드에 나갑니다 - 다음 바퀴
+    # 순열은 미리 계산하지 않습니다(2026-10-26 사용자 결정 '랜덤 + 섞인 리스트 바퀴 경계 = 필드', 구현 명세 ⑤b6)
     $customNextIndex = ($customContext.Index + 1) % [Math]::Max(1, [int]$customContext.Total)
     $env:HONEYNOGI_CUSTOM_NEXT = Format-CustomItemToken -Item (@($customContext.ExecutionItems)[$customNextIndex])
     $env:HONEYNOGI_CUSTOM_RESTART = $(if ($script:customRestart) { '1' } else { '' })
@@ -9788,10 +9922,14 @@ function Start-NextCycle {
     $env:HONEYNOGI_CUSTOM_OWNER = New-CustomMarkerOwnerJson -Context $customContext
     # 진행 세대 - 위 OWNER(version 3)의 generation 과 같은 계산(같은 컨텍스트)에서 만듭니다(구현 명세 ① 5절 A3). 워커 [설정] 스냅샷 기록용
     $env:HONEYNOGI_CUSTOM_GENERATION = [string][int]$customContext.Generation
+    # 다음 판 이어받기 env 둘(NEXT_OWNER · NEXT_BOUNDARY - Get-CustomNextHandoffEnv · 구현 명세 ⑤b5). 마무리 실행 기동은 Get-FinishOnlyCustomEnv 가 둘 다 빈 값
+    $customNextHandoff = Get-CustomNextHandoffEnv -Context $customContext
+    $env:HONEYNOGI_CUSTOM_NEXT_OWNER = $customNextHandoff.Owner
+    $env:HONEYNOGI_CUSTOM_NEXT_BOUNDARY = $customNextHandoff.Boundary
     $repeatModeText = $(if ($customContext.ListRepeat -eq 'count') { "$($customContext.ListRepeatCount)바퀴" } else { '무한' })
     $env:HONEYNOGI_REPEAT_INFO = "커스텀 반복(항목 $($customContext.Total)개, $($customContext.Lap)바퀴째 $($customContext.Index + 1)번, $repeatModeText)"
-    # 마지막 판 신호: N바퀴 모드의 마지막 바퀴 마지막 항목이면 워커가 결과 화면에서
-    # '나가기'로 필드에 나가며 마칩니다 (마무리 복구 회차도 같은 컨텍스트로 자연 판정)
+    # 마지막 판 신호: N바퀴 모드의 마지막 바퀴 마지막 항목이면 워커가 결과 화면에서 '나가기'로 필드에 나가며 마칩니다(어비스 '다시 하기'
+    # 경로 - 혼자하기·우연한 만남 - 도 보상 화면의 '나가기' 로 필드, 구현 명세 ⑤b6) (마무리 복구 회차도 같은 컨텍스트로 자연 판정)
     $env:HONEYNOGI_LAST_RUN = $(if (Test-CustomLastRun -ListRepeat ([string]$customContext.ListRepeat) `
         -ListRepeatCount ([int]$customContext.ListRepeatCount) -Lap ([int]$customContext.Lap) `
         -Index ([int]$customContext.Index) -Total ([int]$customContext.Total)) { '1' } else { '' })
@@ -10024,7 +10162,7 @@ function Stop-AllRun {
 # 함수에 두고(tests\test_abyss_handoff_gui.ps1 이 이름으로 돌림), 호출 자리는 tests\test_time_until_mode.ps1 T4-e 원문 패턴이 지킵니다.
 # 이 묶음의 함수는 예외를 밖으로 내지 않습니다(명세 5절 A4) - 타이머 종료 처리는 $script:worker = $null 뒤라 예외가 나가면 다음 워커 없이
 # 실행 상태로 남습니다. 정지하는 함수는 사유·심각도를 Stop-AllRun 앞에서 정합니다(Stop-AllRun 이 기동 종류·보류를 비움).
-# 이 빌드의 워커는 재입장 표지·reentered 를 내지 않아 재입장 실행부·마무리 실행은 실제로 생기지 않습니다 - 진리표 회귀로만 돕니다.
+# 재입장 꼬리·reentered 는 어비스 '다시 하기'(혼자하기·우연한 만남)의 재입장 확인이 내므로 재입장 실행부·마무리 실행이 실제 게임에서 생깁니다(구현 명세 ⑤b4·⑤b5). 재개(resume) 기동은 이 빌드에서 꺼져 있어(구현 단계 ⑤c) 진리표 회귀로만 돕니다.
 
 function Get-AbyssExitStopReason {
   # 종료 처리의 완료 기록 오류 정지 사유 꼬리 (설계 v11 R1 3.5 ⓑ) - 워커 [완료] 사유에 재입장 표지([terminal=InsideHandoff …])가 있으면
@@ -10049,8 +10187,8 @@ function Get-WorkerDoneMarkers {
   #  - PostClear         ' (post-clear)'        : 클리어 뒤 조건 정지 - 유효한 클리어 기록이 없을 때 이 표지로 1회 계상(설계 v10 6.1 ④)
   #  - InsideHandoffNonce : 재입장 완료 줄 꼬리 '[terminal=InsideHandoff nonce=<guid>]' 의 nonce(없으면 빈 값)
   # 잠금 표지는 어비스 시작의 완료 기록 읽기(워커 Consume-Handoff)가, 선택 화면·ESC 메뉴·시작 화면 미확인·놓아줌 표지는 이어받기 기동(own·next)이 냅니다
-  # (구현 명세 ② 2.1·2.5). 재입장·재개·클리어 뒤 표지는 뒤 단위입니다 - 이 빌드에서는 생기지 않고, 판별 자리를 먼저 두어 진리표로 지킵니다.
-  # own·next 기동의 클리어 전 정지는 표지와 무관하게 넘긴 nonce 를 열어 둡니다(구현 명세 ② 5절 A-2 R-6 (나) - 코드 4·코드 1 정지 끝 처리가 부르는
+  # (구현 명세 ② 2.1·2.5). 재입장 꼬리는 어비스 '다시 하기' 의 재입장 확인이 냅니다(구현 명세 ⑤b4·⑤b5). 재개·클리어 뒤 표지는 뒤 단위입니다 - 이 빌드에서는 생기지 않고, 판별 자리를 먼저 두어 진리표로 지킵니다.
+  # own·next·마무리 실행 기동의 클리어 전 정지는 표지와 무관하게 넘긴 nonce 를 열어 둡니다(구현 명세 ② 5절 A-2 R-6 (나) · ⑤b5 G3 - 코드 4·코드 1 정지 끝 처리가 부르는
   # Test-AbyssKeepLaunchOnStop) - 그중 놓아줌 표지만 닫습니다
   param([string]$Reason)
   $markerText = [string]$Reason
@@ -10076,10 +10214,12 @@ function Test-AbyssKeepLaunchOnStop {
   #  -AfterClear : 클리어 근거 - 코드 4 = 이번 계상(완료 마커·완료 기록·클리어 뒤 표지 경로) / 코드 1 정지 = 복구 대기·유효 마커·이 판의 미적용 클리어 기록
   #                (같은 항목 3회째 정지는 $markerExists, 그 밖 오류 정지는 라우팅의 'legacy-cleared') - 클리어한 판은 지금처럼 닫습니다
   #  -Release    : 놓아줌 표지 ' (release)'(Get-WorkerDoneMarkers) - 워커가 그 항목의 판이 끝났다고 스스로 정한 정지는 지금처럼 닫습니다(코드 4 만 넘김)
-  # resume·finish-only·none 은 늘 거짓입니다(지금 그대로 - 그 기동의 클리어 전 정지는 뒤 단위 몫). 부르는 곳 = 코드 4 계상(Invoke-Code4Accounting)의 끝 처리와
+  # 마무리 실행(finish-only) 기동도 같습니다 - 그 워커는 같은 항목을 Role next 로 받은 기동이라 클리어 전 정지면 다음 수동 시작이 같은 항목을 이어받습니다(커스텀 - 비커스텀은 시작마다 실행 id 가 새로 나 이어받지 못하고 이어받기 없이 시작, 구현 명세 ⑤b5 5 A ③)
+  # (구현 명세 ⑤b5 · 범위 ⑤-42 - 코드 1 은 마무리 실행 판별이 끝 처리 앞에서 정지해 이미 열어 둠). resume·none 은 늘 거짓입니다(resume 은 구현 단계 ⑤c 몫).
+  # 부르는 곳 = 코드 4 계상(Invoke-Code4Accounting)의 끝 처리와
   # 타이머 코드 1 갈래의 정지 두 곳(같은 항목 3회째 · 그 밖 오류). 인자 값만 보는 순수 판정이라 실패 경로가 없습니다
   param([string]$LaunchKind, [bool]$AfterClear, [bool]$Release = $false)
-  return [bool]((@('own', 'next') -contains $LaunchKind) -and -not $AfterClear -and -not $Release)
+  return [bool]((@('own', 'next', 'finish-only') -contains $LaunchKind) -and -not $AfterClear -and -not $Release)
 }
 
 function Get-AbyssExitHandoffKind {
@@ -10176,7 +10316,7 @@ function Complete-AbyssExitJournal {
   # 종료 처리의 완료 기록 끝 처리 (설계 v10 6.1 'GUI 계상 규칙' 끝 문단 · v11 R1 3.3 · R2 3.7 · 구현 명세 ① 2.6) - 저장 1회(잠금 아래 한 mutation):
   #  ① 소비: 지금 owner 의 '클리어 이상'·미적용 항목 nonce 를 applied 에(그 판의 계상이 끝났다는 표시 - 다음 시작이 다시 세지 않음)
   #  ② 이번 기동에 넘긴 nonce($script:lastLaunchNonce) 항목을 launchState done 으로 - 이미 done 이면 그 항목을 건드리지 않습니다(워커가 남긴
-  #     reason·screen 보존). -KeepLaunched 면 하지 않습니다(재전달 예외 - 다음 시작이 같은 nonce 를 다시 받음). own·next 기동의 클리어 전 정지도 열어
+  #     reason·screen 보존). -KeepLaunched 면 하지 않습니다(재전달 예외 - 다음 시작이 같은 nonce 를 다시 받음). own·next·마무리 실행 기동의 클리어 전 정지도 열어
   #     둡니다 - 코드 4 계상의 끝 처리와 코드 1 정지 두 곳이 Test-AbyssKeepLaunchOnStop 으로 이 인자를 정합니다(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) -
   #     놓아줌 표지 ' (release)' 만 지금처럼 닫음)
   # 소비하는 종료·안 하는 종료:
@@ -10501,7 +10641,9 @@ function Invoke-InsideHandoffExit {
       }
       $launchPlan = @{ Kind = 'finish-only'; Hold = $hold }
       $noticeTag = $(if ($holdIsError) { '[경고]' } else { '[안내]' })
-      Add-GuiLog ("{0} 마무리 실행: {1} - '다시 하기'로 이미 들어간 판을 끝까지 하고 선택 화면에서 멈춥니다" -f $noticeTag, $holdReason)
+      # 끝 화면(구현 명세 ⑤b6): 마무리 실행 워커는 보상 결정 ①(exit)로 '나가기' 를 눌러 던전 밖에서 끝납니다 - 보류 사유가 안전 중지면 필드(예약 파일이
+      # 남아 있어 복귀 루프가 필드 확정에서 소비), 그 밖은 필드에서 연 어비스 선택 화면
+      Add-GuiLog ("{0} 마무리 실행: {1} - '다시 하기'로 이미 들어간 판을 끝까지 하고 '나가기'로 던전 밖에 나와 멈춥니다" -f $noticeTag, $holdReason)
     }
   } catch {
     Stop-AllRun -IsError (Get-InsideHandoffStopReason -Reason ('재입장 처리 중 예외 - 기동을 보류하고 정지 ({0})' -f $_.Exception.Message))
@@ -10621,7 +10763,7 @@ function Invoke-Code4Accounting {
   #  4 읽기 실패(사용 중·손상·읽기 실패·예외)면 기록 규칙은 보류하고(마커 경로는 마커로 셈 - 설계 v10 6.1 'locked' 호출부 규칙) 오류 정지 - 코드 4
   #    사유는 워커 [완료] 줄로 창에 이미 있습니다(명세 5절 B3). 문구는 넷 다 실제 상태(계상 보류 · 마커 경로가 셌으면 진행은 반영됨)와 보존 범위를 적습니다
   #  5 끝 처리 Complete-AbyssExitJournal -ExitCode 4 -Context i: 지금 owner 의 미적용 클리어 기록 소비 + 이번 기동 nonce done. 재전달 표지가
-  #    있거나 own·next 기동의 클리어 전 정지(이번 계상 'none')면 nonce 를 열어 둡니다(-KeepLaunched - 다음 시작이 같은 항목을 다시 받음 · own·next 는 구현
+  #    있거나 own·next·마무리 실행(finish-only - 구현 명세 ⑤b5 G3) 기동의 클리어 전 정지(이번 계상 'none')면 nonce 를 열어 둡니다(-KeepLaunched - 다음 시작이 같은 항목을 다시 받음 · own·next 는 구현
   #    명세 ② 2.7 G5 · 5절 A-2 R-6 (나) - 이어받은 판의 입장 직후 키를 다시 보내지 않게). 계상한 판(마커·기록·클리어 뒤 표지)과 놓아줌 표지 ' (release)' 는
   #    지금처럼 닫습니다. 소비(applied)는 열어 두어도 그대로 합니다. i 를 못 읽었으면 $null 을 그대로 넘겨 소비를 건너뜁니다
   # 반환 $true = 이어서 타이머가 사유대로 정지 / $false = 이 함수 안에서 오류 정지까지 함(타이머는 return - 정지 두 번 금지).
@@ -10634,7 +10776,14 @@ function Invoke-Code4Accounting {
     if ($script:customActive) { $finishedContext = Get-CustomCurrentContext }
     # 마커 경로 조건 = 예전 코드 4 갈래의 조건식 그대로 - 파일 존재가 아니라 **지금 항목의 유효한 소유자 마커**인지로 판단합니다
     # (무효화된 '{}' 잔존 파일을 완료로 오계상하던 구멍 - 2026-08-09 6차 점검)
-    $markerValid = [bool]($script:customActive -and -not $script:customMarkerIgnore -and (Test-CustomMarkerValidForCurrent))
+    # 진행 저장 실패 보류(step-failed)의 마무리 실행은 이 마커를 이번 판의 클리어 근거로 쓰지 않습니다(구현 명세 ⑤b5 명세 리뷰 2 RV-11): 재입장 실행부가 진행
+    # 저장에 실패해 디스크 진행이 앞 판(i)에 머물러 있으므로 '지금 항목의 유효 마커' 는 늘 앞 판 i 의 마커입니다 - 그 판은 재입장 실행부 틱(코드 0·11)이 이미 셌고,
+    # 이 기동이 받은 판(i+1)의 마커는 owner 가 i+1 이라 디스크 i 와 맞지 않습니다. 그 마커로 세면 앞 판을 한 번 더 세고 전진·넘긴 nonce 닫기까지 해 다음 시작이 그 판을
+    # 이어받지 못합니다(입장 직후 키 재전송). 그래서 클리어 전 코드 4 는 계상 0 · 전진 0 · 넘긴 nonce launched(아래 열어 둠 - ⑤b5 G3)로 두고, 다음 시작이 대기열을
+    # 1회 반영(i → i+1)한 뒤 같은 nonce 로 그 판을 이어받습니다. 그 판을 클리어한 뒤의 코드 4 는 워커의 클리어 기록이 넘긴 nonce 를 이미 닫았고 계상은 다음 시작의
+    # 마무리 복구 몫입니다(PC5 - 그 판의 마커는 owner i+1 이라 여기서도 원래 무효)
+    $stepFailedFinishOnly = [bool](([string]$script:lastLaunchKind -eq 'finish-only') -and ([string]$script:finishOnlyHold.Kind -eq 'step-failed'))
+    $markerValid = [bool]((-not $stepFailedFinishOnly) -and $script:customActive -and -not $script:customMarkerIgnore -and (Test-CustomMarkerValidForCurrent))
     $inRange = [bool](Test-AbyssHandoffRunActive)
     $readStatus = ''
     $readDetail = ''
@@ -10732,7 +10881,7 @@ function Invoke-Code4Accounting {
       $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
       return $false
     }
-    # 이번 기동 nonce 를 열어 둘지(위 5): 재전달 표지 넷($relayMarker) 또는 own·next 기동의 클리어 전 정지(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) -
+    # 이번 기동 nonce 를 열어 둘지(위 5): 재전달 표지 넷($relayMarker) 또는 own·next·마무리 실행 기동의 클리어 전 정지(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) · ⑤b5 G3 -
     # Test-AbyssKeepLaunchOnStop). 클리어 근거 = 이번 코드 4 가 계상한 판(규칙 marker·journal·post-clear - 계상한 판은 지금처럼 닫음)이고, 놓아줌 표지
     # ' (release)'(워커가 그 항목의 판이 끝났다고 정한 정지)도 지금처럼 닫습니다. 위 0 의 재개 보류는 $relayMarker 그대로입니다
     $keepLaunched = [bool]($relayMarker -or (Test-AbyssKeepLaunchOnStop -LaunchKind ([string]$script:lastLaunchKind) -AfterClear ([string]$plan.Rule -ne 'none') -Release ([bool]$doneMarkers.Release)))
@@ -11749,9 +11898,9 @@ function Invoke-StartAutomation {
         # 심층도 같은 1층/2층 구역 지도 구조라 던전과 동일한 층 전환 규칙을 적용합니다
         $crGateIssues = @(Get-CustomTransitionIssues -Items $crItems -ListRepeat $crGateRepeat -ListRepeatCount $crGateLaps)
       }
-      # 어비스 방식·매칭 통일 게이트: GUI 에서는 라디오 잠금으로 섞일 수 없지만 config 를 직접
-      # 편집하면 섞인 리스트가 들어올 수 있어 시작을 거부하고 어떤 항목이 다른지 로그로 알립니다
-      # (무인 운용 보호 - 팝업 없이 로그만).
+      # 어비스 방식·매칭 게이트: 파티 찾기·파티(파티장) 항목이 든 리스트는 전체가 같은 방식·매칭이어야 합니다(혼자하기·우연한 만남끼리는
+      # 섞기 허용 - 2026-10-26 사용자 결정). GUI 에서는 라디오 잠금·칸 편집 규칙으로 생기지 않지만 config 를 직접 편집하면 들어올 수 있어
+      # 시작을 거부하고 어떤 항목이 다른지 로그로 알립니다 (무인 운용 보호 - 팝업 없이 로그만).
       # 생활 미지원 스킬 게이트: [추가] 시점에서 이미 막지만 config 를 직접 편집하면 낚시가
       # 들어올 수 있습니다. 그 항목 차례에 반드시 멈추므로 시작 전에 거부합니다 (팝업 없이 로그만)
       if ($script:customConfigSection -eq 'lifeCustomRepeat') {
@@ -11774,11 +11923,16 @@ function Invoke-StartAutomation {
       if ($script:customConfigSection -eq 'abyssCustomRepeat') {
         $acrGateIssues = @(Get-AbyssMatchingIssues -Items $crItems)
         if ($acrGateIssues.Count -gt 0) {
-          Add-GuiLog '[경고] 어비스 커스텀 반복: 리스트의 방식·매칭이 서로 달라 시작할 수 없습니다 - 리스트 전체가 같은 방식·매칭이어야 합니다.'
+          Add-GuiLog "[경고] 어비스 커스텀 반복: '파티 찾기'·'파티(파티장)' 항목이 있는 리스트는 전체가 같은 방식·매칭이어야 해서 시작할 수 없습니다 (혼자하기·우연한 만남끼리는 섞어도 됩니다)."
+          # 직접 편집한 [혼자하기, 우연한 만남, 파티 찾기] 같은 리스트는 머리 문구의 '섞어도 됩니다' 바로 아래에 우연한 만남 항목이 위반으로
+          # 찍혀 헷갈릴 수 있어, 리스트를 고정으로 만든 항목 번호와 '첫 항목 기준' 임을 한 줄로 알립니다 (구현 명세 ⑤b6 C-11 · B-14 둘째 안)
+          $acrGateFixedNumbers = @(Get-AbyssFixedItemNumbers -Items $crItems)
+          Add-GuiLog ("[경고] 이 리스트에는 '파티 찾기'·'파티(파티장)' 항목({0}번)이 있어 모든 항목이 같은 방식·매칭이어야 합니다 (첫 항목 기준으로 다른 항목을 표시합니다)." -f ($acrGateFixedNumbers -join ', '))
           foreach ($acrGateIssue in $acrGateIssues) {
             Add-GuiLog ('[경고] {0}번({1} 매칭 ''{2}''): {3}' -f $acrGateIssue.Index, $acrGateIssue.Mode, $acrGateIssue.Matching, $acrGateIssue.Reason)
           }
-          Add-GuiLog '[안내] 리스트의 방식/매칭 칸을 클릭해 전체를 한 번에 바꾸거나, 리스트를 비우고 다시 추가해 주세요.'
+          # 칸 하나로 전체를 바꾸는 길은 없앴습니다(2026-10-27) - 위 항목을 지우면 남는 항목이 모두 첫 항목과 같아 늘 시작할 수 있습니다
+          Add-GuiLog '[안내] 위 항목을 지우거나, 리스트를 비우고 다시 추가해 주세요.'
           $script:customActive = $false
           return
         }

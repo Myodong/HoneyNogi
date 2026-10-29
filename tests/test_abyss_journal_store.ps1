@@ -61,6 +61,12 @@
 #   표의 칸(try 0 · 저장 1 · 클로저 2(Expect·Mutator) · 그 안 $script: 0 · 그 안 명령 = 필드 쓰기만), 변경 표식(⑦)은 열쇠 닫기와 같은 모양(Mutator 에만 1 -
 #   찾은 항목 갈래 안 마지막 · 바로 앞 = 필드 쓰기 명령 · Expect 0 · Mutator 의 무변경 갈래는 continue 뿐)입니다. 동작 행은 test_abyss_handoff_start O·N 과
 #   test_after_entry_at_most_once OK3~OK5·R2-E4 입니다.
+# 구현 명세 ⑤b2(2026-10-23 - 3.3·3.4): 클리어 기록이 -Decision·-NextOwner 를 받고 @{ Tag; Nonce } 를 돌려줘 X4 의 출력 단언이 0 → 1(+ 반환 글자 X4-a·d·e)로
+#   바뀌었습니다. 워커 전용 목록에 '다시 하기' 단계 기록 셋(Set-AbyssJournalRetryAttempt · RetryClicked · Reentered)을 더했습니다 - 자리·exit 0 은 기존 W-ONLY
+#   단언이 함께 보고, 모양(W-ONLY ⑨)은 표의 칸(try·trap·throw 0 · 저장 1 · 클로저 2(Expect·Mutator) · 그 안 $script: 0 · 그 안 명령 = 필드 쓰기만 · Mutator 의
+#   무변경 갈래는 continue 뿐), 변경 표식(⑦)은 own 닫기와 같은 모양입니다. X12~X14 는 셋을 실제 파일로 봅니다(바뀜 + JSON 대조 · 막힘(다른 nonce 의 허용 단계
+#   항목 동반) · 저장 실패 3종 · 복구 경고 전달 · 출력 개수 - 바뀜 행은 대상 항목을 가운데 둠). X15 는 클리어 기록의 결정·다음 판 owner·반환과 원 워커 사슬
+#   (cleared → retry-attempt → retry-clicked → reentered)입니다.
 # J14 토큰 비교: 주석 토큰만 빼고 줄바꿈(NewLine) 토큰과 문자열 원문은 그대로 비교합니다(명세 리뷰 1·확인 라운드). 주석만 있는
 #   줄도 줄바꿈 토큰은 남으므로 두 사본은 주석까지 같은 글자로 유지합니다.
 $ErrorActionPreference = 'Stop'
@@ -92,14 +98,20 @@ $WARNING_TEMP_LIST_FRAGMENT = '임시본 목록을 읽지 못했습니다'      
 # 구현 명세 ② 2.1: 이어받기 시작 함수 Consume-Handoff 를 더함(3.3 ㉑ 표 - 표지 뒤 · GUI 0 · try 0 · 잠금 읽기 1 · 저장 0 · exit 0). ② 의 뒤 단계가 함수를 더합니다
 # 구현 명세 ② 2.2·2.3: 자기 항목 생성 · 키 인덱스 기록 · 코드 10 출구의 열쇠 닫기를 더함(3.3 ㉑ 표 - 모양 W-ONLY ⑥ · 변경 표식 ⑦)
 # 구현 명세 ② 2.5: own 던전 밖 시작의 기존 항목 닫기를 더함(3.3 ㉑ 표 - 모양 W-ONLY ⑧ · 변경 표식 ⑦)
+# 구현 명세 ⑤b2: '다시 하기' 단계 기록 셋을 더함(3.4 ㉑ W-ONLY - 모양 W-ONLY ⑨ · 변경 표식 ⑦)
 $WORKER_ONLY_FUNCTION_NAMES = @('ConvertTo-AbyssJournalOwner', 'Add-AbyssJournalClearedEntry', 'Consume-Handoff',
-    'Add-AbyssJournalEnteredEntry', 'Set-AbyssAfterEntryIndex', 'Close-AbyssKeyEntryOnLeave', 'Close-AbyssOwnEntryBeforeEntry')
+    'Add-AbyssJournalEnteredEntry', 'Set-AbyssAfterEntryIndex', 'Close-AbyssKeyEntryOnLeave', 'Close-AbyssOwnEntryBeforeEntry',
+    'Set-AbyssJournalRetryAttempt', 'Set-AbyssJournalRetryClicked', 'Set-AbyssJournalReentered')
 # X4(클리어 기록 동작)가 실제로 돌리는 워커 전용 함수 - 이 둘이 있으면 X4 를 돌립니다
 $X4_FUNCTION_NAMES = @('ConvertTo-AbyssJournalOwner', 'Add-AbyssJournalClearedEntry')
 $CLEARED_SUCCESS_LINE = '[어비스] 클리어 완료 기록 저장 (결과 화면 도달)'
 $CLEARED_OWNER_WARNING = '[경고] 커스텀 항목 소유자 정보를 읽지 못해 클리어 완료 기록을 남기지 않습니다 - GUI/워커 버전을 확인해 주세요'
 $CLEARED_FAIL_FORMAT = '[경고] 클리어 완료 기록을 저장하지 못했습니다 ({0}) - 정상 종료면 GUI가 종료 코드로 계상하므로 진행을 계속합니다'
 $INJECTED_STORE_THROW = '주입: 저장 함수 예외'
+# 구현 명세 ⑤b2: '다시 하기' 단계 기록 셋(묶음 끝 표지 뒤 워커 전용)과 그 실패 줄(설계 R2 3.6 낱말 - 클릭·재입장 완료 기록만 줄을 남기고 retry-attempt 실패 줄은 부르는 쪽 몫)
+$RETRY_CLICKED_FAIL_FORMAT = '[경고] 재입장 클릭 기록을 저장하지 못했습니다 ({0}) - 재입장 확인을 계속합니다'
+$REENTERED_FAIL_FORMAT = '[경고] 재입장 완료 기록을 저장하지 못했습니다 ({0}) - 재입장 완료 줄을 남기고 이어 갑니다'
+$STAGE_WRITER_NAMES = @('Set-AbyssJournalRetryAttempt', 'Set-AbyssJournalRetryClicked', 'Set-AbyssJournalReentered')
 
 # 자식 프로세스 스크립트 - 실행할 때마다 임시 폴더에 UTF-8 BOM 으로 씁니다(한글 문구가 있어 BOM 없으면 5.1 이 cp949 로 읽음)
 $CHILD_SCRIPT_TEXT = @'
@@ -889,8 +901,10 @@ function Test-WorkerOnlyStatic {
     # 잠금 읽기 0 · mutator 는 클로저 1개이고 그 안에서 $script: 를 읽지 않고(클로저는 빈 값으로 읽음) 명령도 부르지 않음(체크리스트 5·6)
     # ③ 해석 함수: $script: 0(순수) · try 1개에 catch 1절 ④ 목록 함수 안 exit 문 0(단계 2.10 구현 검증 - 없는 함수는 '(없음)' 으로 적어 FAIL)
     # ⑤ 이어받기 시작 함수 Consume-Handoff(구현 명세 ② 2.1 · 3.3 ㉑ 표): try 0 · 잠금 읽기 1 · 저장 0
-    # ⑥ 자기 항목 생성 · 키 인덱스 기록 · 열쇠 닫기(구현 명세 ② 2.2·2.3 · 3.3 ㉑ 표의 칸만) ⑦ 클리어 기록과 ②·⑧ 의 mutator 변경 표식 자리(명세 ② 2.0-10)
+    # ⑥ 자기 항목 생성 · 키 인덱스 기록 · 열쇠 닫기(구현 명세 ② 2.2·2.3 · 3.3 ㉑ 표의 칸만) ⑦ 클리어 기록과 ②·⑧·⑨ 의 mutator 변경 표식 자리(명세 ② 2.0-10)
     # ⑧ own 던전 밖 시작의 기존 항목 닫기(구현 명세 ② 2.5 · 3.3 ㉑ 표의 칸만)
+    # ⑨ '다시 하기' 단계 기록 셋(구현 명세 ⑤b2 1.3 · 3.4 - 표의 칸만): try·trap·throw 0 · 저장 1 · 클로저 2(Expect·Mutator) · 그 안 $script: 0 · 그 안 명령 = 필드 쓰기만 ·
+    #    Mutator 의 무변경 갈래는 continue 뿐
     param([hashtable]$WorkerOnly, [hashtable]$WorkerBundle, [hashtable]$GuiBundle)
     $prefix = '[워커 전용]'
     $placement = foreach ($functionName in $WORKER_ONLY_FUNCTION_NAMES) {
@@ -948,6 +962,18 @@ function Test-WorkerOnlyStatic {
             ('{0}/{1}/{2}/{3}/[{4}]' -f $ownCloseFacts.Tries, $ownCloseFacts.Updates, $ownCloseFacts.Closures, $ownCloseFacts.ClosureScriptVariables, $ownCloseFacts.ClosureCommands) `
             '0/1/2/0/[Set-AbyssJournalProperty]'
     }
+    # ⑨ 구현 명세 ⑤b2 1.3 의 '다시 하기' 단계 기록 셋 - 표의 칸만(exit 0 은 아래 ④ · 함수가 없으면 위 자리 단언이 FAIL): try·trap·throw 0 · 저장 1 ·
+    #    클로저 2(Expect·Mutator) · 그 안 $script: 0 · 그 안 명령 = 필드 쓰기만 · Mutator 의 무변경 갈래는 continue 뿐
+    foreach ($stageWriterName in $STAGE_WRITER_NAMES) {
+        $stageWriterAst = $WorkerOnly.Functions[$stageWriterName]
+        if ($null -eq $stageWriterAst) { continue }
+        $stageWriterFacts = Get-WorkerOnlyFunctionFacts -FunctionAst $stageWriterAst
+        Assert-Case ("$prefix W-ONLY 단계 기록 {0} - try·trap·throw 0 · 저장 1 · 클로저 2(Expect·Mutator) · 그 안 `$script: 0 · 그 안 명령 = 필드 쓰기만" -f $stageWriterName) `
+            ('{0}/{1}/{2}/{3}/{4}/{5}/[{6}]' -f $stageWriterFacts.Tries, $stageWriterFacts.Traps, $stageWriterFacts.Throws, $stageWriterFacts.Updates, $stageWriterFacts.Closures,
+                $stageWriterFacts.ClosureScriptVariables, $stageWriterFacts.ClosureCommands) '0/0/0/1/2/0/[Set-AbyssJournalProperty]'
+        Assert-Case ("$prefix W-ONLY 변경 표식 - 단계 기록 {0} Mutator 의 무변경 갈래(받은 항목이 아님)는 continue 뿐" -f $stageWriterName) `
+            (Get-NoChangeBranchStatementCount -FunctionAst $stageWriterAst -MutatorOnly) 0
+    }
     # ⑦ mutator 변경 표식의 자리(구현 명세 ② 2.0-10 · 3.3 ㉑ 'Changed' 칸 - 명세 리뷰 2 P1-1): 저장 계약은 mutator 가 '$change.Changed = $true' 를 둔 저장만
     #    씁니다(없으면 unchanged = 임시 파일·Replace 0 - 호출부는 실패로 처리해 키 지점이 늘 코드 4, 닫기는 저장되지 않음). 표식은 실제 필드 변경 바로 뒤 1번이고
     #    무변경 갈래에는 없습니다 - 덧붙이는 둘(클리어 기록 · 생성)은 클로저 최상위 마지막 문장 · 바로 앞 = entries 덧붙임(덧붙임은 늘 변경 - 클리어 기록의 열쇠 닫기
@@ -963,7 +989,10 @@ function Test-WorkerOnlyStatic {
         @{ Name = 'Add-AbyssJournalEnteredEntry'; Place = $appendMarkerPlace },
         @{ Name = 'Set-AbyssAfterEntryIndex'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 멤버 대입 index]' },
         @{ Name = 'Close-AbyssKeyEntryOnLeave'; Place = 'Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' },
-        @{ Name = 'Close-AbyssOwnEntryBeforeEntry'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' })
+        @{ Name = 'Close-AbyssOwnEntryBeforeEntry'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' },
+        @{ Name = 'Set-AbyssJournalRetryAttempt'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' },
+        @{ Name = 'Set-AbyssJournalRetryClicked'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' },
+        @{ Name = 'Set-AbyssJournalReentered'; Place = 'Expect: Changed 0 | Mutator: Changed 1 [최상위 False · 마지막 True · foreach 안 True · 앞 형제 Set-AbyssJournalProperty]' })
     foreach ($markerSpec in $markerSpecs) {
         $markerFunctionAst = $WorkerOnly.Functions[$markerSpec.Name]
         if ($null -eq $markerFunctionAst) { continue }
@@ -2486,13 +2515,15 @@ function Get-WorkerStateSnapshot {
 
 function Invoke-ClearedEntryCall {
     # X4 한 호출 - 워커 상태($script:abyssRunId · customMode · customOwnerJson)와 경로를 두고 실제 Add-AbyssJournalClearedEntry 1번 →
-    # @{ Error(메시지 - 없으면 빈 값); Outputs(출력 개수 - 반환값 없음 계약); Logs; Before; After(호출 앞뒤 시각) }. 경로는 그 함수가 이름 그대로 읽는
+    # @{ Error(메시지 - 없으면 빈 값); Outputs(출력 개수 - 반환 해시 하나 계약, 구현 명세 ⑤b2 1.2); Returned(출력 배열); ReturnText('Tag|Nonce' - 해시 하나가
+    # 아니면 '(출력 n개)'); Logs; Before; After(호출 앞뒤 시각) }. 경로는 그 함수가 이름 그대로 읽는
     # 스크립트 수준 $abyssJournalPath 에 둡니다(워커와 같은 모양 - 이 함수 안에 같은 이름의 지역 변수를 두지 않음: 동적 스코프로 가려짐).
     # 나머지 워커 상태는 보통 판의 값으로 두고 호출 앞뒤를 비교해, 달라진 것을 $script:x4StateChanges 에 '실행 id: 내용' 으로 적습니다(Test-CaseX4 끝 단언)
     # 열쇠(구현 명세 ② 2.2 - X4-i~l): -HandoffNonce 를 $script:handoff.Nonce 로 둡니다(기록 함수가 클로저 밖 지역 사본으로 읽는 열쇠 - 빈 값 = 열쇠 없음. 기록
     # 함수가 읽는 이어받기 상태는 이 필드 하나). -NoHandoff 면 $script:handoff 를 지운 채 부릅니다(⑯ 결합 행처럼 이어받기 상태가 없는 실행). -EnvHandoffNonce 는
     # 그 호출 동안만 HONEYNOGI_HANDOFF_NONCE 로 둡니다(Role none 기동이 받은 nonce - 열쇠가 아님, 설계 R2 3.3 ⑥) - 그 밖의 호출은 그 env 를 비운 채 부릅니다
-    param([string]$JournalPath, [string]$RunId, [bool]$Custom, [string]$OwnerJson = '', [string]$HandoffNonce = '', [switch]$NoHandoff, [string]$EnvHandoffNonce = '')
+    param([string]$JournalPath, [string]$RunId, [bool]$Custom, [string]$OwnerJson = '', [string]$HandoffNonce = '', [switch]$NoHandoff, [string]$EnvHandoffNonce = '',
+        [string]$Decision = 'exit', $NextOwner = $null, [switch]$UseArgs)
     $script:abyssJournalPath = $JournalPath
     $script:abyssRunId = $RunId
     $script:customMode = $Custom
@@ -2517,7 +2548,7 @@ function Invoke-ClearedEntryCall {
     $stateBefore = Get-WorkerStateSnapshot
     $callBefore = Get-Date
     try {
-        $callOutputs = @(Add-AbyssJournalClearedEntry)
+        if ($UseArgs) { $callOutputs = @(Add-AbyssJournalClearedEntry -Decision $Decision -NextOwner $NextOwner) } else { $callOutputs = @(Add-AbyssJournalClearedEntry) }
     } catch {
         $callError = $_.Exception.Message
     } finally {
@@ -2530,7 +2561,9 @@ function Invoke-ClearedEntryCall {
         if ($stateBefore.Values[$stateIndex] -cne $stateAfter.Values[$stateIndex]) { $stateDiffs += ('{0} → {1}' -f $stateBefore.Values[$stateIndex], $stateAfter.Values[$stateIndex]) }
     }
     if ($stateDiffs.Count -gt 0) { $script:x4StateChanges.Add(('{0}: {1}' -f $RunId, ($stateDiffs -join ', '))) }
-    return @{ Error = $callError; Outputs = $callOutputs.Count; Logs = @($script:workerRunLogLines); Before = $callBefore; After = $callAfter }
+    # 반환(구현 명세 ⑤b2 1.2) - 해시 하나면 'Tag|Nonce', 아니면 '(출력 n개)'
+    $returnText = $(if (($callOutputs.Count -eq 1) -and ($callOutputs[0] -is [hashtable])) { '{0}|{1}' -f $callOutputs[0].Tag, $callOutputs[0].Nonce } else { '(출력 {0}개)' -f $callOutputs.Count })
+    return @{ Error = $callError; Outputs = $callOutputs.Count; Returned = $callOutputs; ReturnText = $returnText; Logs = @($script:workerRunLogLines); Before = $callBefore; After = $callAfter }
 }
 
 function New-KeyEntryJson {
@@ -2580,10 +2613,11 @@ function Test-CaseX4 {
     $call = Invoke-ClearedEntryCall -JournalPath $path -RunId 'run-x4a' -Custom $false
     $raw = Read-JournalFile $path
     $entry = @($raw.entries)[0]
-    Assert-Case "$prefix X4-a 비커스텀 - 새 파일 seq 1 · 항목 1 · applied·pending 0 · 작성자 = 워커 표지 · 줄 = 성공 1 · 예외·출력 0 · 임시·잠금 0" `
+    Assert-Case "$prefix X4-a 비커스텀 - 새 파일 seq 1 · 항목 1 · applied·pending 0 · 작성자 = 워커 표지 · 줄 = 성공 1 · 예외 0 · 출력 1(반환 해시) · 임시·잠금 0" `
         ('{0}/{1}/{2}/{3}/{4}/[{5}]/{6}/{7}/{8}' -f $raw.seq, @($raw.entries).Count, @($raw.applied).Count, @($raw.pending).Count, $raw.savedBy,
-            ($call.Logs -join ' | '), $call.Error, $call.Outputs, (Get-LeftoverCount $folder)) ('1/1/0/0/{0}/[{1}]//0/0' -f $Context.SavedBy, $CLEARED_SUCCESS_LINE)
+            ($call.Logs -join ' | '), $call.Error, $call.Outputs, (Get-LeftoverCount $folder)) ('1/1/0/0/{0}/[{1}]//1/0' -f $Context.SavedBy, $CLEARED_SUCCESS_LINE)
     Assert-Case "$prefix X4-a 필드 목록 = 기본값 항목과 같은 이름·순서(빠짐·덧붙임 0)" ((@($entry.PSObject.Properties | ForEach-Object { $_.Name }) -join ',') -ceq $defaultNames) 'True'
+    Assert-Case "$prefix X4-a 반환 = 해시 하나 @{ Tag changed; Nonce = 새 항목 nonce } (구현 명세 ⑤b2 1.2)" $call.ReturnText ('changed|' + $entry.nonce)
     Assert-Case "$prefix X4-a 값 - nonce GUID(D) · runId · section '' · generation 0(Int32) · owner = { runId } 하나 · nextOwner null · stage · decision · launchState" `
         ('{0}/{1}/[{2}]/{3}/{4}/{5}/{6}/{7}/{8}/{9}' -f ([string]$entry.nonce -cmatch $guidPattern), $entry.runId, $entry.section, $entry.generation, (Get-TypeNameText $entry.generation),
             ((@($entry.owner.PSObject.Properties | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }) -join ',')), ($null -eq $entry.nextOwner), $entry.stage, $entry.decision, $entry.launchState) `
@@ -2609,7 +2643,7 @@ function Test-CaseX4 {
     $call = Invoke-ClearedEntryCall -JournalPath $path -RunId 'run-x4b' -Custom $true -OwnerJson $ownerJson
     $raw = Read-JournalFile $path
     $entry = @($raw.entries)[0]
-    Assert-Case "$prefix X4-b 커스텀 - 항목 1 · 줄 = 성공 1 · 예외·출력 0" ('{0}/[{1}]/{2}/{3}' -f @($raw.entries).Count, ($call.Logs -join ' | '), $call.Error, $call.Outputs) ('1/[{0}]//0' -f $CLEARED_SUCCESS_LINE)
+    Assert-Case "$prefix X4-b 커스텀 - 항목 1 · 줄 = 성공 1 · 예외 0 · 출력 1" ('{0}/[{1}]/{2}/{3}' -f @($raw.entries).Count, ($call.Logs -join ' | '), $call.Error, $call.Outputs) ('1/[{0}]//1' -f $CLEARED_SUCCESS_LINE)
     Assert-Case "$prefix X4-b 값 - section abyssCustomRepeat · generation 4(Int32) · owner 5필드(이름·순서) · lap·index Int32 · runId · stage · decision · launchState · nextOwner null" `
         ('{0}/{1}/{2}/{3}/{4}/{5}/{6}/{7}/{8}/{9}/{10}' -f $entry.section, $entry.generation, (Get-TypeNameText $entry.generation),
             (@($entry.owner.PSObject.Properties | ForEach-Object { $_.Name }) -join ','), (Get-TypeNameText $entry.owner.lap), (Get-TypeNameText $entry.owner.index),
@@ -2642,10 +2676,10 @@ function Test-CaseX4 {
         $folder = New-CaseFolder $Context ('x4-owner-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $path = Get-JournalPath $folder
         $call = Invoke-ClearedEntryCall -JournalPath $path -RunId 'run-x4d' -Custom $true -OwnerJson $badOwner
-        '[{0}]/{1}/{2}/{3}' -f ($call.Logs -join ' | '), (Get-FolderListing $folder), $call.Error, $call.Outputs
+        '[{0}]/{1}/{2}/{3}/{4}' -f ($call.Logs -join ' | '), (Get-FolderListing $folder), $call.Error, $call.Outputs, $call.ReturnText
     }
-    Assert-Case "$prefix X4-d 소유자 JSON 해석 실패 5모양(빈 값·JSON 아님·배열·null·세대 정수 아님) → [경고] 1 · 파일 생성 0 · 예외·출력 0" ($ownerFailures -join ' || ') `
-        (@(1..5 | ForEach-Object { '[{0}]///0' -f $CLEARED_OWNER_WARNING }) -join ' || ')
+    Assert-Case "$prefix X4-d 소유자 JSON 해석 실패 5모양(빈 값·JSON 아님·배열·null·세대 정수 아님) → [경고] 1 · 파일 생성 0 · 예외 0 · 반환 owner-unreadable(nonce 빈 값)" ($ownerFailures -join ' || ') `
+        (@(1..5 | ForEach-Object { '[{0}]///1/owner-unreadable|' -f $CLEARED_OWNER_WARNING }) -join ' || ')
 
     # X4-e 저장 실패 3종 - 같은 프로세스가 잠금을 쥠(locked) / 본 파일·직전본 손상(corrupt) / 본 파일을 FileShare.Read 로 쥐어 교체 실패(io-failed)
     $storeFailures = foreach ($failKind in @('locked', 'corrupt', 'io-failed')) {
@@ -2669,11 +2703,11 @@ function Test-CaseX4 {
         } finally {
             if ($null -ne $holder) { $holder.Dispose() }
         }
-        '{0}: [{1}]/{2}/{3}/{4}/{5}' -f $failKind, ($call.Logs -join ' | '), $call.Error, $call.Outputs, ((Get-FolderState $folder) -eq $stateBefore), (Get-LeftoverCount $folder)
+        '{0}: [{1}]/{2}/{3}/{4}/{5}/{6}' -f $failKind, ($call.Logs -join ' | '), $call.Error, $call.Outputs, ((Get-FolderState $folder) -eq $stateBefore), (Get-LeftoverCount $folder), $call.ReturnText
     }
-    Assert-Case "$prefix X4-e 저장 실패 사용 중·손상·기록 실패 → [경고] 1(설계 R2 3.6 낱말) · 예외·출력 0 · 파일 그대로 · 임시·잠금 0" ($storeFailures -join ' || ') `
+    Assert-Case "$prefix X4-e 저장 실패 사용 중·손상·기록 실패 → [경고] 1(설계 R2 3.6 낱말) · 예외 0 · 반환 태그(nonce 빈 값) · 파일 그대로 · 임시·잠금 0" ($storeFailures -join ' || ') `
         ((@(@('locked', '파일 사용 중'), @('corrupt', '파일 손상'), @('io-failed', '기록 실패')) | ForEach-Object {
-                    '{0}: [{1}]//0/True/0' -f $_[0], ($CLEARED_FAIL_FORMAT -f $_[1]) }) -join ' || ')
+                    '{0}: [{1}]//1/True/0/{0}|' -f $_[0], ($CLEARED_FAIL_FORMAT -f $_[1]) }) -join ' || ')
 
     # X4-f 저장소 밖 예외(구현 결함 - 저장 함수가 던짐)는 감싸지 않고 밖으로 - 경고·성공 줄 0. 저장 함수는 이 케이스 동안만 바꿔 끼우고 워커 사본 원문으로 되돌립니다
     $folder = New-CaseFolder $Context 'x4-throw'
@@ -2763,18 +2797,276 @@ function Test-CaseX4 {
             $expectedTexts += (Get-KeyEntryText $beforeEntries[$entryIndex])
         }
         $lastEntry = $afterEntries[$afterEntries.Count - 1]
-        Assert-Case ('{0} {1} - 같은 저장 1번(seq 6 · 직전본 = 앞 내용) · 항목 상태 [{2}] · applied [{3}] · 그 밖 필드·순서·다른 항목 그대로 · cleared 1 · 성공 줄 1 · 예외·출력 0' -f
+        Assert-Case ('{0} {1} - 같은 저장 1번(seq 6 · 직전본 = 앞 내용) · 항목 상태 [{2}] · applied [{3}] · 그 밖 필드·순서·다른 항목 그대로 · cleared 1 · 성공 줄 1 · 예외 0 · 출력 1(반환 해시)' -f
                 $prefix, $keyCase.N, $keyCase.States, $keyCase.ExpectApplied) `
             ('{0} · 항목 {1} · [{2}] · 끝 {3}/{4} · applied [{5}] · 직전본 {6} · 줄 [{7}] · 예외 [{8}] · 출력 {9} · 임시·잠금 {10}' -f $raw.seq, $afterEntries.Count,
                 ($actualTexts -join ' ## '), $lastEntry.stage, $lastEntry.runId, (@($raw.applied) -join ','), ((Get-FileDigest ($path + '.bak')) -eq $beforeDigest),
                 ($call.Logs -join ' | '), $call.Error, $call.Outputs, (Get-LeftoverCount $folder)) `
-            ('6 · 항목 {0} · [{1}] · 끝 cleared/{2} · applied [{3}] · 직전본 True · 줄 [{4}] · 예외 [] · 출력 0 · 임시·잠금 0' -f ($beforeEntries.Count + 1),
+            ('6 · 항목 {0} · [{1}] · 끝 cleared/{2} · applied [{3}] · 직전본 True · 줄 [{4}] · 예외 [] · 출력 1 · 임시·잠금 0' -f ($beforeEntries.Count + 1),
                 ($expectedTexts -join ' ## '), $keyRunId, $keyCase.ExpectApplied, $CLEARED_SUCCESS_LINE)
     }
 
     # 전 호출 공통(단계 2.10 구현 검증 - 생존 변이 t5·t6): 기록 함수는 성공·실패·예외 어느 경우에도 스크립트 변수를 새로 만들거나 워커 상태 값을 바꾸지 않음
     Assert-Case "$prefix X4 전 호출 - 기록 함수가 스크립트 변수 이름 집합·워커 상태 값(정리 전용·재시작·마무리 복구·소유자·마커 경로·실행 id·마지막 판)을 바꾸지 않음" `
         ('{0}건 [{1}]' -f $script:x4StateChanges.Count, ($script:x4StateChanges -join ' || ')) '0건 []'
+}
+
+function Invoke-StageWriterCall {
+    # X12~X14 한 호출 - 워커 상태와 경로를 두고 실제 단계 기록 함수 1번 → @{ Error; Outputs(출력 배열); Logs; Before; After } (X4 의 Invoke-ClearedEntryCall 과 같은 모양 - 구현 명세 ⑤b2 3.1)
+    param([string]$Name, [string]$JournalPath, [string]$Nonce)
+    $script:abyssJournalPath = $JournalPath
+    $script:abyssRunId = 'run-x12'
+    $script:customMode = $false
+    $script:customOwnerJson = ''
+    $script:customCleanupOnly = $false
+    $script:customRestart = $false
+    $script:customRecoveryOnly = $false
+    $script:customMarkerPath = ''
+    $script:dgLastRun = $false
+    $script:handoff = @{ Nonce = '' }
+    $script:workerRunLogLines.Clear()
+    $callError = ''
+    $callOutputs = @()
+    $stateBefore = Get-WorkerStateSnapshot
+    $callBefore = Get-Date
+    try {
+        $callOutputs = @(& $Name -Nonce $Nonce)
+    } catch {
+        $callError = $_.Exception.Message
+    }
+    $callAfter = Get-Date
+    $stateAfter = Get-WorkerStateSnapshot
+    $stateDiffs = @(@(Compare-Object -ReferenceObject $stateBefore.Names -DifferenceObject $stateAfter.Names) | ForEach-Object { '변수 {0}{1}' -f $_.SideIndicator, $_.InputObject })
+    for ($stateIndex = 0; $stateIndex -lt $WORKER_STATE_NAMES.Count; $stateIndex++) {
+        if ($stateBefore.Values[$stateIndex] -cne $stateAfter.Values[$stateIndex]) { $stateDiffs += ('{0} → {1}' -f $stateBefore.Values[$stateIndex], $stateAfter.Values[$stateIndex]) }
+    }
+    if ($stateDiffs.Count -gt 0) { $script:x4StateChanges.Add(('{0}/{1}: {2}' -f $Name, $Nonce, ($stateDiffs -join ', '))) }
+    return @{ Error = $callError; Outputs = $callOutputs; Logs = @($script:workerRunLogLines); Before = $callBefore; After = $callAfter }
+}
+
+function New-StageEntryJson {
+    # X12~X14 픽스처 항목 한 건(JSON) - 워커 사본 기본값(New-AbyssJournalEntry) 위에 그 단계까지 온 비커스텀 retry 판의 클리어 기록 모양(owner { runId } ·
+    # nextOwner { runId } · decision retry · at.cleared · 단계에 맞는 attempts·retryClicks·at.* - 구현 명세 ⑤b2 1.2 값 표)
+    param([string]$Nonce, [string]$Stage)
+    $fixtureEntry = New-AbyssJournalEntry -Stage $Stage
+    $fixtureEntry.nonce = $Nonce
+    $fixtureEntry.runId = 'run-x12'
+    $fixtureEntry.owner = [pscustomobject]@{ runId = 'run-x12' }
+    $fixtureEntry.nextOwner = [pscustomobject]@{ runId = 'run-x12' }
+    $fixtureEntry.decision = 'retry'
+    $fixtureEntry.at.cleared = '2026-10-22T09:00:00.0000000+09:00'
+    if (@('retry-attempt', 'retry-clicked', 'reentered') -contains $Stage) { $fixtureEntry.attempts = 1; $fixtureEntry.at.retryAttempt = '2026-10-22T09:00:01.0000000+09:00' }
+    if (@('retry-clicked', 'reentered') -contains $Stage) { $fixtureEntry.retryClicks = 1; $fixtureEntry.at.retryClicked = '2026-10-22T09:00:02.0000000+09:00' }
+    if ($Stage -eq 'reentered') { $fixtureEntry.at.reentered = '2026-10-22T09:00:09.0000000+09:00' }
+    return (ConvertTo-Json -InputObject $fixtureEntry -Depth 10 -Compress)
+}
+
+function Get-StageEntryText {
+    # X12~X14 항목 대조 글자 - 필드 이름 순서 | at 필드 순서 | nonce/stage/attempts/retryClicks/decision/launchState/at.cleared/at.retryAttempt/at.retryClicked/at.reentered
+    # (시각은 'call' = 이 호출 동안의 왕복 형식 시각 · 'old' = 픽스처 값 그대로 · 'null' · 그 밖은 글자 그대로)
+    param($Entry, $Call = $null, [hashtable]$OldTimes = @{})
+    if ($null -eq $Entry) { return '(없음)' }
+    $timeTexts = foreach ($timeName in @('cleared', 'retryAttempt', 'retryClicked', 'reentered')) {
+        $timeValue = [string]$Entry.at.$timeName
+        if ([string]::IsNullOrEmpty($timeValue)) { 'null'; continue }
+        if ($OldTimes.ContainsKey($timeName) -and ($timeValue -ceq [string]$OldTimes[$timeName])) { 'old'; continue }
+        $parsedTime = ConvertFrom-AbyssJournalTime -Text $timeValue
+        if (($null -ne $Call) -and ($null -ne $parsedTime) -and ($timeValue -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}[+-]\d{2}:\d{2}$') -and
+            ($parsedTime -ge $Call.Before.AddMilliseconds(-1)) -and ($parsedTime -le $Call.After.AddMilliseconds(1))) { 'call'; continue }
+        $timeValue
+    }
+    return ('{0} | {1} | {2}/{3}/{4}/{5}/{6}/{7}/{8}' -f (@($Entry.PSObject.Properties | ForEach-Object { $_.Name }) -join ','), (@($Entry.at.PSObject.Properties | ForEach-Object { $_.Name }) -join ','),
+        $Entry.nonce, $Entry.stage, $Entry.attempts, $Entry.retryClicks, $Entry.decision, $Entry.launchState, ($timeTexts -join '/'))
+}
+
+function Format-StageOutputs {
+    # 출력 글자 - '개수:[값,…]' (빈 문자열·$null 한 개도 1 로 셉니다 - '[]' 만으로는 출력 0 과 갈리지 않음, 명세 리뷰 2 P3)
+    param($Outputs)
+    return ('{0}:[{1}]' -f @($Outputs).Count, (@($Outputs) -join ','))
+}
+
+function Test-CaseStageWriters {
+    # X12~X15 '다시 하기' 단계 기록 셋 + 클리어 기록의 결정·다음 판 owner (구현 명세 ⑤b2 3.3 · 설계 v10 6.1 기록 시점 표·저장 계약 ③ · v11 R5 4.3 ⑤⑥ · R1 2.2)
+    #   (X12~X14 바뀜 행은 '바꾸는 필드 밖은 그대로' 를 JSON 으로 함께 봅니다 - 대상 항목 = 앞 원문 + 바꾸는 필드만 · 다른 항목 = 앞 원문 전체)
+    #   (출력은 개수까지 봅니다 - X12 는 태그 1개, X13·X14 는 모든 결과에서 0개(반환값 없음). 막힘 행에는 다른 nonce 의 허용 단계 항목을 함께 둡니다 -
+    #    -Expect 가 nonce 를 안 보면 그 항목 때문에 참이 되어 대상 항목을 바꾸게 되는 꼴을 이 행이 잡습니다(명세 리뷰 2 P3))
+    #   X12 retry-attempt: cleared → retry-attempt · attempts 1 · at.retryAttempt(이 호출) · 다른 필드·순서·다른 항목 그대로 / 같은 워커 두 번째 · 항목 없음 · retry-clicked
+    #      (재개 갱신은 ⑤c 몫) · reentered · entered → expect-failed · 파일 그대로 / 저장 실패 3종 → 태그 · 파일 그대로 · 줄 0(실패 줄은 부르는 쪽 몫) /
+    #      본 파일 손상·직전본 유효 → 복구 경고 전달 1줄 · changed
+    #   X13 retry-clicked: retry-attempt → retry-clicked · retryClicks 1 · at.retryClicked / 두 번째 전송 → retryClicks 2 · at.retryClicked 이번 시각(마지막 전송 기준) /
+    #      cleared · reentered · entered → [경고] 기록 실패 · 파일 그대로 / 저장 실패 3종 → [경고](설계 R2 3.6 낱말) / 복구 → 복구 경고 1줄 · 반환값 없음
+    #   X14 reentered: retry-attempt · retry-clicked → reentered · at.reentered / cleared · reentered · entered → [경고] 기록 실패 / 저장 실패 3종 → [경고] / 복구 → 복구 경고 1줄
+    #   X15 클리어 기록 -Decision·-NextOwner · 반환 @{ Tag; Nonce } 와 원 워커 사슬(cleared → retry-attempt → retry-clicked → reentered)
+    param([hashtable]$Context)
+    $prefix = $Context.Prefix
+    $stateChangeBase = $script:x4StateChanges.Count   # 앞 케이스(X4)가 남긴 상태 변화 수 - 끝 단언은 X12~X15 가 더한 것만 셉니다
+    $oldTimes = @{ cleared = '2026-10-22T09:00:00.0000000+09:00'; retryAttempt = '2026-10-22T09:00:01.0000000+09:00'; retryClicked = '2026-10-22T09:00:02.0000000+09:00'; reentered = '2026-10-22T09:00:09.0000000+09:00' }
+    $defaultNames = (@((New-AbyssJournalEntry -Stage 'cleared').PSObject.Properties | ForEach-Object { $_.Name }) -join ',')
+    $atNames = (@((New-AbyssJournalEntry -Stage 'cleared').at.PSObject.Properties | ForEach-Object { $_.Name }) -join ',')
+    $writerSpecs = @(
+        @{ Name = 'Set-AbyssJournalRetryAttempt'; Key = 'X12'; Ok = @('cleared'); Bad = @('retry-attempt', 'retry-clicked', 'reentered', 'entered'); Warn = ''; Fields = @('stage', 'attempts', 'at.retryAttempt') },
+        @{ Name = 'Set-AbyssJournalRetryClicked'; Key = 'X13'; Ok = @('retry-attempt', 'retry-clicked'); Bad = @('cleared', 'reentered', 'entered'); Warn = $RETRY_CLICKED_FAIL_FORMAT; Fields = @('stage', 'retryClicks', 'at.retryClicked') },
+        @{ Name = 'Set-AbyssJournalReentered'; Key = 'X14'; Ok = @('retry-attempt', 'retry-clicked'); Bad = @('cleared', 'reentered', 'entered'); Warn = $REENTERED_FAIL_FORMAT; Fields = @('stage', 'at.reentered') })
+    $okExpect = @{
+        'Set-AbyssJournalRetryAttempt|cleared'       = 'retry-attempt/1/0/retry/pending/old/call/null/null'
+        'Set-AbyssJournalRetryClicked|retry-attempt' = 'retry-clicked/1/1/retry/pending/old/old/call/null'
+        'Set-AbyssJournalRetryClicked|retry-clicked' = 'retry-clicked/1/2/retry/pending/old/old/call/null'
+        'Set-AbyssJournalReentered|retry-attempt'    = 'reentered/1/0/retry/pending/old/old/null/call'
+        'Set-AbyssJournalReentered|retry-clicked'    = 'reentered/1/1/retry/pending/old/old/old/call'
+    }
+    foreach ($spec in $writerSpecs) {
+        # 바뀌는 갈래 - 대상 항목 하나만 바뀜 · 같은 저장 1번(seq +1 · 직전본 = 앞 내용) · 다른 항목 그대로
+        # 대상을 가운데 둡니다(앞 · 대상 · 뒤 - 셋 다 같은 허용 단계): Mutator 가 nonce 대신 위치(첫·마지막)나 단계(첫 허용 단계 항목)로 고르면 앞·뒤 항목이
+        # 바뀌어 걸립니다 - 운영에서는 클리어 기록이 entries 끝에 붙고 지난 판 항목이 앞에 남을 수 있습니다(⑤b2 구현 검토 - 생존 변이 MW31 · MW32)
+        foreach ($okStage in $spec.Ok) {
+            $folder = New-CaseFolder $Context ('{0}-ok-{1}' -f $spec.Key.ToLower(), $okStage)
+            $path = Get-JournalPath $folder
+            Write-Fixture $path (New-JournalJson -Seq 5 -EntriesJson ('[' + (New-StageEntryJson -Nonce 'n-before' -Stage $okStage) + ',' + (New-StageEntryJson -Nonce 'n-target' -Stage $okStage) + ',' + (New-StageEntryJson -Nonce 'n-other' -Stage $okStage) + ']') -AppliedJson '["old-a"]')
+            $beforeDigest = Get-FileDigest $path
+            $beforeOther = (@(@((Read-JournalFile $path).entries)[0, 2] | ForEach-Object { Get-StageEntryText -Entry $_ -OldTimes $oldTimes }) -join ' ## ')
+            $beforeEntries = @((Read-JournalFile $path).entries)
+            $beforeTargetJson = ConvertTo-Json -InputObject $beforeEntries[1] -Depth 10 -Compress
+            $beforeOtherJson = (@($beforeEntries[0], $beforeEntries[2]) | ForEach-Object { ConvertTo-Json -InputObject $_ -Depth 10 -Compress }) -join ' ## '
+            $call = Invoke-StageWriterCall -Name $spec.Name -JournalPath $path -Nonce 'n-target'
+            $raw = Read-JournalFile $path
+            $target = @($raw.entries)[1]
+            $outputText = $(if ($spec.Key -eq 'X12') { '1:[changed]' } else { '0:[]' })
+            Assert-Case ('{0} {1} {2} {3} → 바뀜 - seq 6 · 직전본 = 앞 내용 · 필드·at 이름 순서 그대로 · 다른 항목 그대로 · applied 그대로 · 줄 0 · 예외 0 · 출력 {4} · 임시·잠금 0' -f $prefix, $spec.Key, $spec.Name, $okStage, $outputText) `
+                ('{0}/{1}/{2}/{3}/{4}/{5}/[{6}]/[{7}]/{8}/{9}' -f $raw.seq, ((Get-FileDigest ($path + '.bak')) -eq $beforeDigest), ((@($target.PSObject.Properties | ForEach-Object { $_.Name }) -join ',') -ceq $defaultNames),
+                    ((@($target.at.PSObject.Properties | ForEach-Object { $_.Name }) -join ',') -ceq $atNames), ((@(@($raw.entries)[0, 2] | ForEach-Object { Get-StageEntryText -Entry $_ -OldTimes $oldTimes }) -join ' ## ') -ceq $beforeOther), (@($raw.applied) -join ','),
+                    ($call.Logs -join ' | '), $call.Error, (Format-StageOutputs $call.Outputs), (Get-LeftoverCount $folder)) `
+                ('6/True/True/True/True/old-a/[]/[]/{0}/0' -f $outputText)
+            $targetText = Get-StageEntryText -Entry $target -Call $call -OldTimes $oldTimes
+            Assert-Case ('{0} {1} {2} {3} → 단계·횟수·시각(stage/attempts/retryClicks/decision/launchState/at.cleared·retryAttempt·retryClicked·reentered)' -f $prefix, $spec.Key, $spec.Name, $okStage) `
+                ($targetText.Split('|')[2].Trim().Substring('n-target/'.Length)) $okExpect[('{0}|{1}' -f $spec.Name, $okStage)]
+            # 바꾸는 필드 밖은 그대로(구현 명세 ⑤b2 3.3) - 위 단언은 고른 필드만 보므로 owner · nextOwner · runId · generation · section · afterEntry · reason · screen ·
+            # cleanupOnly 를 바꾸는 쓰기는 여기서 걸립니다: 대상 항목 = 앞 원문에 이 함수가 바꾸는 필드(stage · 횟수 · 해당 at)만 지금 값으로 옮긴 것 · 다른 항목 = 앞 원문 전체
+            $expectTarget = ConvertFrom-Json -InputObject $beforeTargetJson
+            foreach ($changedField in $spec.Fields) {
+                $fieldPath = $changedField.Split('.')
+                if ($fieldPath.Count -eq 2) { $expectTarget.($fieldPath[0]).($fieldPath[1]) = $target.($fieldPath[0]).($fieldPath[1]) } else { $expectTarget.($changedField) = $target.($changedField) }
+            }
+            Assert-Case ('{0} {1} {2} {3} → 바꾸는 필드({4}) 밖은 그대로 - 대상 항목 = 앞 원문 + 그 필드만 · 다른 항목 원문 전체 같음(JSON 비교)' -f $prefix, $spec.Key, $spec.Name, $okStage, ($spec.Fields -join '·')) `
+                ('{0}/{1}' -f ((ConvertTo-Json -InputObject $target -Depth 10 -Compress) -ceq (ConvertTo-Json -InputObject $expectTarget -Depth 10 -Compress)),
+                    (((@(@($raw.entries)[0, 2]) | ForEach-Object { ConvertTo-Json -InputObject $_ -Depth 10 -Compress }) -join ' ## ') -ceq $beforeOtherJson)) 'True/True'
+        }
+        # 안 바뀌는 갈래 - expect-failed · 파일 그대로(쓰기 0). 대상 항목(n-target · 맞지 않는 단계) 옆에 다른 nonce 의 허용 단계 항목(n-other · 이 함수의 첫 허용
+        # 단계)을 함께 둡니다 - -Expect 의 nonce 조건이 빠지면 그 항목 때문에 참이 되어 Mutator 가 대상 항목을 바꿉니다(명세 리뷰 2 P3 - 변이 MW20~MW22)
+        $badTexts = foreach ($badStage in $spec.Bad) {
+            $folder = New-CaseFolder $Context ('{0}-bad-{1}' -f $spec.Key.ToLower(), $badStage)
+            $path = Get-JournalPath $folder
+            Write-Fixture $path (New-JournalJson -Seq 5 -EntriesJson ('[' + (New-StageEntryJson -Nonce 'n-target' -Stage $badStage) + ',' + (New-StageEntryJson -Nonce 'n-other' -Stage $spec.Ok[0]) + ']'))
+            $stateBefore = Get-FolderState $folder
+            $call = Invoke-StageWriterCall -Name $spec.Name -JournalPath $path -Nonce 'n-target'
+            '{0}: [{1}]/{2}/{3}/{4}/{5}' -f $badStage, ($call.Logs -join ' | '), $call.Error, (Format-StageOutputs $call.Outputs), ((Get-FolderState $folder) -eq $stateBefore), (Get-LeftoverCount $folder)
+        }
+        $missingFolder = New-CaseFolder $Context ('{0}-missing' -f $spec.Key.ToLower())
+        $missingPath = Get-JournalPath $missingFolder
+        Write-Fixture $missingPath (New-JournalJson -Seq 5 -EntriesJson ('[' + (New-StageEntryJson -Nonce 'n-other' -Stage $spec.Ok[0]) + ']'))
+        $missingBefore = Get-FolderState $missingFolder
+        $missingCall = Invoke-StageWriterCall -Name $spec.Name -JournalPath $missingPath -Nonce 'n-target'
+        $badTexts += ('(항목 없음): [{0}]/{1}/{2}/{3}/{4}' -f ($missingCall.Logs -join ' | '), $missingCall.Error, (Format-StageOutputs $missingCall.Outputs), ((Get-FolderState $missingFolder) -eq $missingBefore), (Get-LeftoverCount $missingFolder))
+        $badWant = foreach ($badStage in @($spec.Bad + @('(항목 없음)'))) {
+            if ($spec.Key -eq 'X12') { '{0}: []//1:[expect-failed]/True/0' -f $badStage } else { '{0}: [{1}]//0:[]/True/0' -f $badStage, ($spec.Warn -f '기록 실패') }
+        }
+        Assert-Case ('{0} {1} {2} 단계가 맞지 않음({3}) · 항목 없음 - 다른 nonce 의 허용 단계 항목이 함께 있어도 → expect-failed · 파일 그대로 · {4}' -f $prefix, $spec.Key, $spec.Name,
+                ($spec.Bad -join '·'), $(if ($spec.Key -eq 'X12') { '줄 0(실패 줄은 부르는 쪽) · 출력 1(태그)' } else { '[경고] 기록 실패 1 · 출력 0' })) `
+            ($badTexts -join ' || ') ($badWant -join ' || ')
+        # 저장 실패 3종
+        $failTexts = foreach ($failKind in @('locked', 'corrupt', 'io-failed')) {
+            $folder = New-CaseFolder $Context ('{0}-fail-{1}' -f $spec.Key.ToLower(), $failKind)
+            $path = Get-JournalPath $folder
+            if ($failKind -eq 'corrupt') {
+                Write-Fixture $path '{"version":1,"seq":'
+                Write-Fixture ($path + '.bak') 'not json'
+            } else {
+                Write-Fixture $path (New-JournalJson -Seq 5 -EntriesJson ('[' + (New-StageEntryJson -Nonce 'n-target' -Stage $spec.Ok[0]) + ']'))
+            }
+            $stateBefore = Get-FolderState $folder
+            $holder = $null
+            if ($failKind -eq 'locked') {
+                $holder = New-Object System.IO.FileStream((Get-LockPath $folder), [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None, 4096, [IO.FileOptions]::DeleteOnClose)
+            } elseif ($failKind -eq 'io-failed') {
+                $holder = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            }
+            try {
+                $call = Invoke-StageWriterCall -Name $spec.Name -JournalPath $path -Nonce 'n-target'
+            } finally {
+                if ($null -ne $holder) { $holder.Dispose() }
+            }
+            '{0}: [{1}]/{2}/{3}/{4}/{5}' -f $failKind, ($call.Logs -join ' | '), $call.Error, (Format-StageOutputs $call.Outputs), ((Get-FolderState $folder) -eq $stateBefore), (Get-LeftoverCount $folder)
+        }
+        $failWant = foreach ($failPair in @(@('locked', '파일 사용 중'), @('corrupt', '파일 손상'), @('io-failed', '기록 실패'))) {
+            if ($spec.Key -eq 'X12') { '{0}: []//1:[{0}]/True/0' -f $failPair[0] } else { '{0}: [{1}]//0:[]/True/0' -f $failPair[0], ($spec.Warn -f $failPair[1]) }
+        }
+        Assert-Case ('{0} {1} {2} 저장 실패 사용 중·손상·기록 실패 → {3} · 예외 0 · 파일 그대로 · 임시·잠금 0' -f $prefix, $spec.Key, $spec.Name, $(if ($spec.Key -eq 'X12') { '태그 반환(출력 1) · 줄 0' } else { '[경고] 1(설계 R2 3.6 낱말) · 출력 0' })) `
+            ($failTexts -join ' || ') ($failWant -join ' || ')
+        # 복구 경고 전달 - 본 파일 손상 · 직전본 유효(대상 항목 = 첫 허용 단계)면 저장소가 잠금 아래 (c) 복구 뒤 저장하고 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소
+        # 계약 · X4-g 선례). 줄 = 복구 경고 1 · 그 밖 0(X13·X14 는 changed 라 실패 [경고] 없음) · 대상 항목만 다음 단계 · seq 6(복원이 아는 최대 4 + 1 = 5 를 쓰고
+        # 이 저장이 + 1 - 저장소 (c) 복원 규칙) (명세 리뷰 2 P3 - 변이 MW25~MW27)
+        $folder = New-CaseFolder $Context ('{0}-recover' -f $spec.Key.ToLower())
+        $path = Get-JournalPath $folder
+        Write-Fixture ($path + '.bak') (New-JournalJson -Seq 4 -EntriesJson ('[' + (New-StageEntryJson -Nonce 'n-target' -Stage $spec.Ok[0]) + ',' + (New-StageEntryJson -Nonce 'n-other' -Stage $spec.Ok[0]) + ']'))
+        Write-Fixture $path '{"version":1,"seq":'
+        $call = Invoke-StageWriterCall -Name $spec.Name -JournalPath $path -Nonce 'n-target'
+        $raw = Read-JournalFile $path
+        $recoverStage = @{ X12 = 'retry-attempt'; X13 = 'retry-clicked'; X14 = 'reentered' }[$spec.Key]
+        Assert-Case ('{0} {1} {2} 본 파일 손상·직전본 유효 → 줄 = 복구 경고 1 · 예외 0 · 출력 {3} · 대상 {4} · 다른 항목 {5} 그대로 · seq 6 · 임시·잠금 0' -f $prefix, $spec.Key, $spec.Name,
+                $(if ($spec.Key -eq 'X12') { '1:[changed]' } else { '0:[]' }), $recoverStage, $spec.Ok[0]) `
+            ('[{0}]/{1}/{2}/{3}/{4}/{5}/{6}' -f ($call.Logs -join ' | '), $call.Error, (Format-StageOutputs $call.Outputs), @($raw.entries)[0].stage, @($raw.entries)[1].stage, $raw.seq, (Get-LeftoverCount $folder)) `
+            ('[{0}]//{1}/{2}/{3}/6/0' -f $WARNING_BAK_RESTORE, $(if ($spec.Key -eq 'X12') { '1:[changed]' } else { '0:[]' }), $recoverStage, $spec.Ok[0])
+    }
+
+    # X15 클리어 기록의 -Decision · -NextOwner · 반환 @{ Tag; Nonce }
+    $customFingerprint = 'A|solo|어려움|허상의 정박지|없음;A|solo|어려움|허상의 정박지|없음'
+    $customItem = 'A|solo|어려움|허상의 정박지|없음'
+    $ownerJson = '{{"version":3,"fingerprint":"{0}","orderKey":"","lap":1,"index":0,"item":"{1}","generation":2}}' -f $customFingerprint, $customItem
+    $nextOwner = [pscustomobject]@{ fingerprint = $customFingerprint; orderKey = ''; lap = 1; index = 1; item = $customItem }
+    $folder = New-CaseFolder $Context 'x15-custom-retry'
+    $path = Get-JournalPath $folder
+    $call = Invoke-ClearedEntryCall -JournalPath $path -RunId 'run-x15a' -Custom $true -OwnerJson $ownerJson -Decision 'retry' -NextOwner $nextOwner -UseArgs
+    $raw = Read-JournalFile $path
+    $entry = @($raw.entries)[0]
+    Assert-Case "$prefix X15-a 커스텀 retry - decision retry · nextOwner 5필드(이름·순서·값) · owner 그대로 · 반환 changed + 그 항목 nonce · 줄 = 성공 1" `
+        ('{0}/{1}/{2}/{3}/[{4}]' -f $entry.decision, ((@($entry.nextOwner.PSObject.Properties | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }) -join ',')), $entry.owner.index,
+            ($call.ReturnText -ceq ('changed|' + $entry.nonce)), ($call.Logs -join ' | ')) `
+        ('retry/fingerprint={0},orderKey=,lap=1,index=1,item={1}/0/True/[{2}]' -f $customFingerprint, $customItem, $CLEARED_SUCCESS_LINE)
+    $nextNow = @{ fingerprint = $customFingerprint; orderKey = ''; lap = 1; index = 1; item = $customItem }
+    $ownerNow = @{ fingerprint = $customFingerprint; orderKey = ''; lap = 1; index = 0; item = $customItem }
+    Assert-Case "$prefix X15-a GUI 대조(-Field nextOwner) - 다음 칸·같은 세대 참 · 세대 다름 거짓 · 지금 칸 거짓" `
+        ('{0}/{1}/{2}' -f (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $nextNow -Generation 2 -Field 'nextOwner'), (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $nextNow -Generation 3 -Field 'nextOwner'),
+            (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $ownerNow -Generation 2 -Field 'nextOwner')) 'True/False/False'
+    # 원 워커 사슬 - 반환 nonce 로 retry-attempt → retry-clicked → reentered (다음 판 기동 후보 = nextOwner == 다음 칸 · stage reentered - GUI 의 같은 대조 함수)
+    $chainNonce = [string]$call.Returned[0].Nonce
+    $chainCalls = foreach ($chainName in @('Set-AbyssJournalRetryAttempt', 'Set-AbyssJournalRetryClicked', 'Set-AbyssJournalReentered')) {
+        $chainCall = Invoke-StageWriterCall -Name $chainName -JournalPath $path -Nonce $chainNonce
+        '{0}{1}' -f (Format-StageOutputs $chainCall.Outputs), $chainCall.Error
+    }
+    $raw = Read-JournalFile $path
+    $entry = @($raw.entries)[0]
+    Assert-Case "$prefix X15-b 원 워커 사슬 cleared → retry-attempt → retry-clicked → reentered - 출력 1:[changed] 0:[] 0:[] · seq 4 · 순위 4 · attempts 1 · retryClicks 1 · at 넷 채움 · 다음 칸 대조 참" `
+        ('{0} · {1} · {2} · {3}/{4} · {5} · {6}' -f ($chainCalls -join ' '), $raw.seq, (Get-AbyssJournalStageRank -Stage ([string]$entry.stage)), $entry.attempts, $entry.retryClicks,
+            (@(@('cleared', 'retryAttempt', 'retryClicked', 'reentered') | Where-Object { -not [string]::IsNullOrEmpty([string]$entry.at.$_) }).Count),
+            (Test-AbyssJournalOwnerMatch -Entry $entry -Owner $nextNow -Generation 2 -Field 'nextOwner')) `
+        '1:[changed] 0:[] 0:[] · 4 · 4 · 1/1 · 4 · True'
+    # 비커스텀 retry - nextOwner { runId }(GUI 재입장 실행부가 확정하는 값과 같은 모양 - 설계 v11 R1 3.4 순서 2)
+    $folder = New-CaseFolder $Context 'x15-plain-retry'
+    $path = Get-JournalPath $folder
+    $call = Invoke-ClearedEntryCall -JournalPath $path -RunId 'run-x15c' -Custom $false -Decision 'retry' -NextOwner ([pscustomobject]@{ runId = 'run-x15c' }) -UseArgs
+    $entry = @((Read-JournalFile $path).entries)[0]
+    Assert-Case "$prefix X15-c 비커스텀 retry - decision retry · nextOwner { runId } · GUI 대조(-Field nextOwner) 같은 실행 id 참 · 다른 실행 id 거짓 · 반환 changed + nonce" `
+        ('{0}/{1}/{2}/{3}/{4}' -f $entry.decision, ((@($entry.nextOwner.PSObject.Properties | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }) -join ',')),
+            (Test-AbyssJournalOwnerMatch -Entry $entry -Owner @{ runId = 'run-x15c' } -Field 'nextOwner'), (Test-AbyssJournalOwnerMatch -Entry $entry -Owner @{ runId = 'run-other' } -Field 'nextOwner'),
+            ($call.ReturnText -ceq ('changed|' + $entry.nonce))) 'retry/runId=run-x15c/True/False/True'
+    # other - nextOwner 없음
+    $folder = New-CaseFolder $Context 'x15-other'
+    $path = Get-JournalPath $folder
+    $call = Invoke-ClearedEntryCall -JournalPath $path -RunId 'run-x15d' -Custom $false -Decision 'other' -UseArgs
+    $entry = @((Read-JournalFile $path).entries)[0]
+    Assert-Case "$prefix X15-d other - decision other · nextOwner null · stage cleared · 반환 changed + nonce" `
+        ('{0}/{1}/{2}/{3}' -f $entry.decision, ($null -eq $entry.nextOwner), $entry.stage, ($call.ReturnText -ceq ('changed|' + $entry.nonce))) 'other/True/cleared/True'
+    $stageStateChanges = @($script:x4StateChanges | Select-Object -Skip $stateChangeBase)
+    Assert-Case "$prefix X12~X15 전 호출 - 기록 함수가 스크립트 변수 이름 집합·워커 상태 값을 바꾸지 않음" ('{0}건 [{1}]' -f $stageStateChanges.Count, ($stageStateChanges -join ' || ')) '0건 []'
 }
 
 function Invoke-JournalStorePass {
@@ -2888,6 +3180,18 @@ try {
         }
     } else {
         "FAIL {0} X4 워커 전용 함수를 찾지 못했습니다({1})" -f $copyPrefixes.worker, (@($workerOnly.Names) -join ',')
+        $fails++
+    }
+    # 구현 명세 ⑤b2 단계 기록 셋(X12~X15) - 셋과 클리어 기록 함수가 있으면 돕니다(빠진 함수는 W-ONLY 자리 단언이 FAIL)
+    if (@(@($STAGE_WRITER_NAMES + $X4_FUNCTION_NAMES) | Where-Object { @($workerOnly.Names) -ccontains $_ }).Count -eq ($STAGE_WRITER_NAMES.Count + $X4_FUNCTION_NAMES.Count)) {
+        try {
+            Test-CaseStageWriters -Context @{ Key = 'worker'; Prefix = $copyPrefixes.worker; Root = (Join-Path $testRoot 'worker-stage'); SavedBy = 'test-worker' }
+        } catch {
+            "FAIL {0} X12~X15 실행 중 예상 밖 예외: {1}" -f $copyPrefixes.worker, $_.Exception.Message
+            $fails++
+        }
+    } else {
+        "FAIL {0} X12~X15 단계 기록 함수를 찾지 못했습니다({1})" -f $copyPrefixes.worker, (@($workerOnly.Names) -join ',')
         $fails++
     }
 } catch {

@@ -107,8 +107,8 @@ Check-Pattern '완료 복구 두 블록의 옛 복구 완료 문구 0건 (어비
 
 # ── 완료 마커 기록 함수의 반환값 (2026-10-09 구현 명세 ① 2.10 W5 · 5절 A9) ──
 # 기록함 $true · 경로가 빈 값 $true(GUI 가 이번 회차 마커를 일부러 비움 - 기록 대상이 아니라 실패가 아님) · 소유자 정보 없음 $false · 쓰기 20회 실패
-# $false. 결과를 실제로 받는 호출은 뒤 단위(⑤ - 다시 하기 가능 여부)에서 생기고, 지금 호출 4곳은 [void] 로 버립니다 - 감싸지 않으면 반환값이 그 자리의
-# 출력으로 흘러(던전 사이클 함수 안이면 그 함수의 반환값에 섞임) 오염시킵니다(명세 리뷰 2 P3). 실제 함수를 추출해 임시 파일로 돌리고 Write-RunLog 는
+# $false. 결과를 받는 호출은 어비스 본류의 보상 화면 1곳('다시 하기' 가능 여부 - 구현 명세 ⑤b5)이고 나머지 호출 3곳은 [void] 로 버립니다 - 감싸지 않으면
+# 반환값이 그 자리의 출력으로 흘러(던전 사이클 함수 안이면 그 함수의 반환값에 섞임) 오염시킵니다(명세 리뷰 2 P3). 실제 함수를 추출해 임시 파일로 돌리고 Write-RunLog 는
 # 줄을 모으는 모의입니다. 20회 실패는 이 프로세스가 마커 파일을 FileShare.None 으로 쥐어 Set-Content 가 매번 막히게 합니다(재시도 사이 대기는 그 행 동안
 # Start-Sleep 모의로 셈 - 실제로는 자지 않음, 20번·합 1000ms 단언).
 $markerDefinitionText = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Write-CustomClearMarker'))
@@ -177,8 +177,9 @@ try {
 } finally {
   try { [IO.Directory]::Delete($markerFolder, $true) } catch { "참고: 임시 폴더 정리 실패 - $($_.Exception.Message)" }
 }
-# 호출 4곳(던전 사이클 1 · 어비스 보상 화면 시작 1 · 클리어 화면 시작 1 · 본류 1)은 전부 [void](…) 로 반환값을 버림 - 감싸지 않은 호출 0
-# (주석 뺀 사본의 AST - 호출 소유자 함수와 감싼 모양을 함께 봅니다)
+# 호출 4곳 = 최상위 3(본류 보상 화면 1 · 어비스 보상 화면 시작 1 · 클리어 화면 시작 1) + 던전 사이클 1. 결과를 받는 곳은 본류 보상 화면 하나이고
+# ('$markerOk = Write-CustomClearMarker' - 아래 기록 확인이 거짓이면 '다시 하기' 금지, 구현 명세 ⑤b5 · ⑤b2 1.4) 나머지 3곳은 [void](…) 로 반환값을
+# 버립니다 - 감싸지도 받지도 않은 호출 0 (주석 뺀 사본의 AST - 호출 소유자 함수와 감싼·받은 모양을 함께 봅니다)
 $markerWorkerAst = [System.Management.Automation.Language.Parser]::ParseInput((Remove-SourceComments -Text $worker), [ref]$null, [ref]$null)
 $markerCalls = @($markerWorkerAst.FindAll({ param($node)
       ($node -is [System.Management.Automation.Language.CommandAst]) -and ($node.GetCommandName() -eq 'Write-CustomClearMarker') }, $true))
@@ -189,9 +190,15 @@ $markerCallShapes = foreach ($markerCall in $markerCalls) {
     ($markerCall.Parent.Parent -is [System.Management.Automation.Language.ParenExpressionAst]) -and
     ($markerCall.Parent.Parent.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) -and
     ($markerCall.Parent.Parent.Parent.Type.TypeName.Name -eq 'void')
-  '{0}:{1}' -f $(if ($ownerNode) { $ownerNode.Name } else { '(최상위)' }), $(if ($wrapped) { '[void]' } else { '감싸지 않음' })
+  # 결과 받음 = 파이프라인 원소 하나인 호출이 '$markerOk = …' 대입의 오른쪽 전체 (본류 보상 화면의 기록 확인 입력 - 구현 명세 ⑤b5)
+  $received = ($markerCall.Parent -is [System.Management.Automation.Language.PipelineAst]) -and
+    ($markerCall.Parent.PipelineElements.Count -eq 1) -and
+    ($markerCall.Parent.Parent -is [System.Management.Automation.Language.AssignmentStatementAst]) -and
+    ($markerCall.Parent.Parent.Left.Extent.Text -ceq '$markerOk')
+  $shape = $(if ($wrapped) { '[void]' } elseif ($received) { '$markerOk 대입' } else { '감싸지 않음' })
+  '{0}:{1}' -f $(if ($ownerNode) { $ownerNode.Name } else { '(최상위)' }), $shape
 }
-Assert-Case 'W5 호출 4곳 전부 [void](Write-CustomClearMarker) (던전 사이클 1 · 최상위 흐름 3)' ((@($markerCallShapes) | Sort-Object) -join ', ') `
-  '(최상위):[void], (최상위):[void], (최상위):[void], Invoke-NormalDungeonCycle:[void]'
+Assert-Case 'W5 호출 4곳 = 최상위 3(본류 보상 화면 1 = $markerOk 대입 · 시작 분기 2 = [void]) + 던전 사이클 1([void])' ((@($markerCallShapes) | Sort-Object) -join ', ') `
+  '(최상위):$markerOk 대입, (최상위):[void], (최상위):[void], Invoke-NormalDungeonCycle:[void]'
 
 exit $fails

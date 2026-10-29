@@ -268,7 +268,7 @@ Check-Equal 'GUI: 괄호가 줄 끝에서 닫히지 않는 기준좌표는 보�
   (Convert-WorkerLogLineForGui '12:00:00 [파티원] 다시 펼침 (1/2, 기준좌표 (1,2)) 후속문구' $false) `
   '12:00:00 [파티원] 다시 펼침 (1/2, 기준좌표 (1,2)) 후속문구'
 
-# 워커 소스 전수 가드: '기준좌표' 를 담은 워커 문자열을 AST 로 모두 찾아 정확히 아래 4곳의 Write-RunLog 첫 인자인지,
+# 워커 소스 전수 가드: '기준좌표' 를 담은 워커 문자열을 AST 로 모두 찾아 정확히 아래 5곳의 Write-RunLog 첫 인자인지,
 # 소속 함수와 템플릿이 그대로인지 고정하고, 표본 값으로 펼친 원문(필터 전)과 화면 표시(필터 뒤)를 둘 다 정확
 # 일치로 단언합니다 - 실측이 없는 모양(퇴장 절차의 패널 다시 펼침)도 소스에서 잡고, 새 정적 '기준좌표' 문자열이
 # 생기거나 문구·따옴표·변수 이름이 바뀌면 여기서 실패합니다 (그때는 화면 표시를 다시 확인한 뒤 기대값을 갱신할 것).
@@ -286,6 +286,12 @@ $coordExpected = @(
      Template = '[파티원] 접힌 준비 패널 다시 펼침(퇴장 절차 - 준비 상태 확인, ${probeSends}/2) - 기준좌표 ($($probeAnchor.X),$($probeAnchor.Y))' }
   @{ Function = 'Invoke-AbyssPartyMemberCycle'
      Template = '[파티원] 접힌 준비 패널 다시 펼침 - ''입장 대기 중'' 클릭 (${reexpandSends}/2, 기준좌표 ($($reexpandAnchor.X),$($reexpandAnchor.Y)))' }
+  # 2026-10-23 구현 명세 ⑤b3 3.4: '다른 던전 가기' 대기의 클릭 줄 (본류 배선은 5b-5 - 그 뒤 화면에 보임 · 꼬리는 GUI 가 지움)
+  @{ Function = 'Wait-AbyssOtherSelection'
+     Template = '[어비스] ''다른 던전 가기'' 클릭 - 글자 탐색 기준좌표 ($($pairRead.Other.X),$($pairRead.Other.Y))' }
+  # 2026-10-24 구현 명세 ⑤b4 3.4: '다시 하기' 클릭 루프의 클릭 줄 (본류 배선은 5b-5 - 그 뒤 화면에 보임 · 꼬리는 GUI 가 지움)
+  @{ Function = 'Invoke-AbyssRetryClick'
+     Template = '[어비스] ''다시 하기'' 클릭 - 글자 탐색 기준좌표 ($($pairRead.Retry.X),$($pairRead.Retry.Y))' }
 )
 $coordNodes = @($workerAst.FindAll({ param($node)
       ($node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
@@ -304,9 +310,9 @@ $coordActual = @(foreach ($coordNode in $coordNodes) {
     '{0}|{1}|{2}' -f $isFirstArg, $ownerName, $coordNode.Extent.Text
   })
 # 소스 토큰 원문(Extent.Text)으로 비교합니다 - .Value 는 바깥 따옴표("…"/'…')나 `$ 이스케이프가 달라도 같게 나와
-# 확장 여부가 바뀐 변이를 놓칩니다 (구현 리뷰 P2). 네 곳 모두 큰따옴표 확장 문자열입니다.
+# 확장 여부가 바뀐 변이를 놓칩니다 (구현 리뷰 P2). 여섯 곳 모두 큰따옴표 확장 문자열입니다.
 $coordWant = @(foreach ($coordItem in $coordExpected) { 'True|{0}|"{1}"' -f $coordItem.Function, $coordItem.Template })
-Check-Equal "워커: '기준좌표' 문자열 = Write-RunLog 첫 인자 4곳 (소속 함수·템플릿 그대로)" `
+Check-Equal "워커: '기준좌표' 문자열 = Write-RunLog 첫 인자 6곳 (소속 함수·템플릿 그대로)" `
   ((@($coordActual) | Sort-Object) -join "`n") ((@($coordWant) | Sort-Object) -join "`n")
 $read = @{ Point = @{ X = 491; Y = 662 } }
 $leaveWord = @{ X = 515; Y = 654 }
@@ -314,6 +320,7 @@ $probeSends = 1
 $probeAnchor = @{ X = 743; Y = 654 }
 $reexpandSends = 2
 $reexpandAnchor = @{ X = 0; Y = 0 }   # 좌표는 0 이상 정수 - (0,0) 도 지워져야 함
+$pairRead = @{ Other = @{ X = 778; Y = 654 }; Retry = @{ X = 636; Y = 654 } }   # '다른 던전 가기' 점 - 09-18 보관 프레임의 3버튼 점 (구현 명세 ⑤b3 3.4 펼침 표본) · '다시 하기' 점 - 관측 0 3버튼 점 (구현 명세 ⑤b4 3.4)
 $coordRenderCases = @(
   @{ Index = 0; LogPrefix = '[어비스]'; Context = '나가기 클릭'
      Raw = '[어비스] 나가기 클릭 - 글자 탐색 기준좌표 (491,662)'
@@ -330,6 +337,12 @@ $coordRenderCases = @(
   @{ Index = 3; LogPrefix = ''; Context = ''
      Raw = '[파티원] 접힌 준비 패널 다시 펼침 - ''입장 대기 중'' 클릭 (2/2, 기준좌표 (0,0))'
      Shown = '[파티원] 접힌 준비 패널 다시 펼침 - ''입장 대기 중'' 클릭 (2/2)' }
+  @{ Index = 4; LogPrefix = ''; Context = ''
+     Raw = '[어비스] ''다른 던전 가기'' 클릭 - 글자 탐색 기준좌표 (778,654)'
+     Shown = '[어비스] ''다른 던전 가기'' 클릭' }
+  @{ Index = 5; LogPrefix = ''; Context = ''
+     Raw = '[어비스] ''다시 하기'' 클릭 - 글자 탐색 기준좌표 (636,654)'
+     Shown = '[어비스] ''다시 하기'' 클릭' }
 )
 foreach ($coordCase in $coordRenderCases) {
   $LogPrefix = $coordCase.LogPrefix
@@ -830,9 +843,10 @@ if ($clearedSuccessTexts.Count -eq 1 -and $clearedWarningTexts.Count -eq 1 -and 
 #     H13 [파티원] 퇴장 절차 계측: 시각 접두 있음·없음 모두 숨김, 근접 변형(뒤에 글이 더 붙음 · 다른 태그 · 다른 줄 안에 인용)은 그대로. H10 은 파티원 경로라 혼자
 #     실기(G-H1)로 못 보는 줄이어서(명세 ② 4.3) 워커 -f 의 왼쪽 형식 문자열 원문을 표본 값으로 채워 실제 변환에 넣는 것으로 대신합니다. H13(파티원 P 계측 줄 -
 #     명세 ② 5절 B12 (가) · 구현 리뷰 2.7 조건)도 같은 파티원 경로라 같은 방법으로 보고, 값 자리를 숫자로만 받는 규칙이라 -f 오른쪽 값 원문을 고정하고 근접 변형
-#     ([어비스] 태그 · '(퇴장 절차)' 없음 · 다른 머리 낱말 · 문장 중간 인용)을 더 봅니다. H8w 재입장 대기의 같은 입장 계측 줄(구현 명세 ④)은 H8 규칙의 표본입니다
+#     ([어비스] 태그 · '(퇴장 절차)' 없음 · 다른 머리 낱말 · 문장 중간 인용)을 더 봅니다. H8 의 표본은 재입장 대기의 입장 계측 줄입니다 - 구현 단위 ⑤a 부터 선분기
+#     B2 단계의 줄도 그 함수가 써서 옛 H8(선분기)·H8w(재입장 대기) 두 표본을 하나로 합쳤습니다
 #  ③ 보존 줄(명세 ② 2.7 '보이는 그대로 둘 줄' · 3.4): [경고] 닫기 실패(R2·own) · cleared 저장 실패 · 필드 확정 결과 줄 · 키 '이미 보낸 키' 줄 · [안내] 복구 기동 ·
-#     B2 단계 시작 줄 · 이벤트 정리 안내 줄 · 권장 인원 팝업 관측 안내(재입장 대기 - 구현 명세 ④)
+#     B2 단계 시작 줄 · 이벤트 정리 안내 줄 · 권장 인원 팝업 관측 안내(재입장 대기 - 구현 명세 ④) · [경고] 재입장 클릭·완료 기록 실패(구현 명세 ⑤b2)
 #  ④ 판별은 원문(명세 ② 2.7 · J11): 타이머 통상 tail 의 수집 식(기본·복구 로그)과 공통 최종 수집(Invoke-ExitLogFinalCollect)이 남기는 [완료] 사유에는 꼬리가
 #     남고 창 줄에서만 빠집니다. 코드 4 상태줄($code4Reason)의 꼬리 0 은 tests\test_abyss_handoff_gui.ps1 가 실제 타이머 틱으로 봅니다
 function Get-WorkerOwnerFunctionName {
@@ -855,7 +869,7 @@ function Get-EnclosingCommandName {
 
 function Get-SubExpressionVariableName {
   # 부분식 자리 $( … ) 가 변수 하나뿐($($이름) · $(${이름}))이면 그 이름, 아니면 $null. 그 꼴은 실행 결과가 ${이름} 과 같습니다 - 구현 명세 ④ N4-P9 가 재입장 대기
-  #   S2 줄의 채움 표기로 ${x} · $($x) · $x 를 함께 허용하는데, 이 절이 $($x) 를 채우지 못하면 같은 뜻의 줄을 H8w 가 '채울 수 없는 자리' 로 거부합니다(구현 리뷰 P3)
+  #   S2 줄의 채움 표기로 ${x} · $($x) · $x 를 함께 허용하는데, 이 절이 $($x) 를 채우지 못하면 같은 뜻의 줄을 H8 이 '채울 수 없는 자리' 로 거부합니다(구현 리뷰 P3)
   param($Node)
   if (-not ($Node -is [System.Management.Automation.Language.SubExpressionAst])) { return $null }
   $innerBlock = $Node.SubExpression
@@ -1072,10 +1086,7 @@ $hideSpecs = @(
      Fills = @(@{ Reason = 'abandoned-death-exit' }, @{ Reason = 'cleanup-only' }) }
   @{ Id = 'H7'; Label = 'own 닫기 성공'; Function = 'Close-AbyssOwnEntryBeforeEntry'; Prefix = '[어비스]'
      Fills = @(@{ closeScreen = 'field' }, @{ closeScreen = 'popup' }, @{ closeScreen = 'ready' }, @{ closeScreen = 'matching' }, @{ closeScreen = 'entry-waiting' }) }
-  @{ Id = 'H8'; Label = '[어비스] 입장 계측'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 입장 계측 - '
-     Fills = @(@{ entryUnknown = '3'; entryField = '0'; entryFieldPart = ''; entryBreaks = '0'; memberFieldSettleSeconds = $hideSettleSeconds },
-               @{ entryUnknown = '0'; entryField = '2'; entryFieldPart = $hideAbyssFieldPart; entryBreaks = '1'; memberFieldSettleSeconds = $hideSettleSeconds }) }
-  @{ Id = 'H8w'; Label = '[어비스] 입장 계측(재입장 대기)'; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 입장 계측 - '
+  @{ Id = 'H8'; Label = '[어비스] 입장 계측(재입장 대기 - 선분기 B2 단계 포함)'; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 입장 계측 - '
      Fills = @(@{ entryUnknown = '3'; entryField = '0'; entryFieldPart = ''; entryBreaks = '0'; memberFieldSettleSeconds = $hideSettleSeconds },
                @{ entryUnknown = '0'; entryField = '2'; entryFieldPart = $hideAbyssFieldPart; entryBreaks = '1'; memberFieldSettleSeconds = $hideSettleSeconds }) }
   @{ Id = 'H9'; Label = '[어비스] 이어받기 시작 계측'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 이어받기 시작 계측 - '
@@ -1119,7 +1130,7 @@ if ($hideLeaveFormat) {
   }
   $hideSamples += @{ Id = 'H13'; Label = '[파티원] 퇴장 절차 계측(-f 형식)'; Lines = $hideLeaveLines }
 }
-Check-Equal '워커: 줄 전체 숨김 7규칙의 표본 = H6·H7·H8·H8w·H9·H11·H10·H13' ((@($hideSamples) | ForEach-Object { $_.Id }) -join '·') 'H6·H7·H8·H8w·H9·H11·H10·H13'
+Check-Equal '워커: 줄 전체 숨김 7규칙의 표본 = H6·H7·H8·H9·H11·H10·H13' ((@($hideSamples) | ForEach-Object { $_.Id }) -join '·') 'H6·H7·H8·H9·H11·H10·H13'
 foreach ($hideSample in $hideSamples) {
   for ($hideIndex = 0; $hideIndex -lt @($hideSample.Lines).Count; $hideIndex++) {
     $hideLine = [string]@($hideSample.Lines)[$hideIndex]
@@ -1176,6 +1187,10 @@ $keepSpecs = @(
      Fills = @(@{ b2Label = '준비 패널'; timeoutPartyMatch = '300' }, @{ b2Label = '권장 인원 팝업'; timeoutPartyMatch = '300' }) }
   @{ Label = '이벤트 정리 안내 줄(S8)'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[안내] 이어받기 시작: 알 수 없는 화면이 '; Want = 1
      Fills = @(@{ memberUnknownOverlaySeconds = $hideUnknownSeconds }) }
+  @{ Label = '[경고] 재입장 클릭 기록 실패(구현 명세 ⑤b2)'; Function = 'Set-AbyssJournalRetryClicked'; Prefix = '[경고] 재입장 클릭 기록을 저장하지 못했습니다'; Want = 1
+     Fills = @(@{ failureKind = '파일 사용 중' }, @{ failureKind = '파일 손상' }, @{ failureKind = '기록 실패' }) }
+  @{ Label = '[경고] 재입장 완료 기록 실패(구현 명세 ⑤b2)'; Function = 'Set-AbyssJournalReentered'; Prefix = '[경고] 재입장 완료 기록을 저장하지 못했습니다'; Want = 1
+     Fills = @(@{ failureKind = '파일 사용 중' }, @{ failureKind = '파일 손상' }, @{ failureKind = '기록 실패' }) }
   @{ Label = '권장 인원 팝업 관측 안내(재입장 대기)'; Function = 'Wait-AbyssReentry'; Prefix = '[안내] 권장 인원 팝업 관측'; Want = 1; Fills = @(@{}) }
 )
 foreach ($keepSpec in $keepSpecs) {

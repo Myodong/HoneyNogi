@@ -15,7 +15,7 @@
 #      ESC 메뉴는 증거 아님(2026-09-21 설계 합의 A4) / 재매칭 패널 → 'matching'(설계 합의 A3) / 커서 미확인 3회 → 'skipped' / 후속 판정 도중 캡처 실패는 동결(미소모)
 #      부모 마감(-ParentDeadline - ⑥e 설계 2.13, 09-30 리뷰4 P1-2): 판독 도중 캡처가 끊겼다 돌아오는 회전(같은 회전 복구·탐침 복구 뒤)만 이어지면
 #      미검출 예산·20초 창에 닿지 않으므로 그 회전에서 부모의 조정 마감(양보·캡처 실패 차분)만 보고 넘으면 'expired' (2-11~2-15)
-#   ③ 배선: 고정 좌표 클릭 0곳, 헬퍼 호출 4곳(복귀 루프 1 + 본류 3 - 모두 부모 마감 전달), 복구 루프는 헬퍼 FrozenMs 를 마감에 더하지 않음
+#   ③ 배선: 고정 좌표 클릭 0곳, 헬퍼 호출 5곳(복귀 루프 1 + 본류 3 + '다른 던전 가기' 끝 함수 1 - 모두 부모 마감 전달), 복구 루프는 헬퍼 FrozenMs 를 마감에 더하지 않음
 #      (만료 판정이 캡처 실패 누적 차분이라 이중 가산 - ⑥e 설계 2.13), 부모 마감 분기 순서(양보 → 선택 화면 예외 → 조정 마감 → 300ms)
 #   ④ ⑥a(2026-09-26 설계 합의): 헬퍼 패널 게이트 3종 - 재매칭 'matching' / 준비 패널 'ready-panel' / 접힌 준비 패널 'entry-waiting' 은 전부
 #      클릭 0 (준비 패널 위 '나가기' 는 패널 닫기, 접힌 패널의 '나가기' 는 던전 퇴장 - 실기 -1), 파티원 보상 2버튼은 '나가기'@515 클릭.
@@ -415,12 +415,15 @@ $workerSource = Remove-SourceComments -Text ([IO.File]::ReadAllText($workerPath)
 Check-Equal '배선: 고정 좌표 $ptExitButton 클릭 0곳' ([regex]::Matches($workerSource, 'Click-GamePoint[^\r\n]*\$ptExitButton').Count) 0
 # 2026-09-30 ⑥e: 옛 파티원 두 호출(클릭·재클릭)은 관측 루프 D·퇴장 절차 P 로 바뀌며 사라졌습니다 - D·P 는 이 헬퍼를 쓰지 않습니다
 #   (커서가 가린 접힌 패널에서 (492,654) = 던전 퇴장을 누르는 헬퍼, 09-29 재생 - D·P 쪽 0건 단언은 test_abyss_party_member §3)
-Check-Equal '배선: 헬퍼 호출 4곳 (본류·시작 보상·시작 클리어·복구 루프)' ([regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game').Count) 4
-# 부모 마감 (⑥e 설계 2.13 - 09-30 리뷰4 P1-2 · 반영본 검증): 워커의 네 호출 모두 넘깁니다 - 복귀 루프 1곳은 호출 직전 조정한 자기 마감,
-# 본류 세 호출은 뒤이어 부를 복귀 루프와 같은 예산(`[void]` 호출 다음 줄이 Return-ToAbyssSelection)
+Check-Equal '배선: 헬퍼 호출 5곳 (본류·시작 보상·시작 클리어·복구 루프·다른 던전 가기 끝 함수)' ([regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game').Count) 5
+# 부모 마감 (⑥e 설계 2.13 - 09-30 리뷰4 P1-2 · 반영본 검증): 워커의 다섯 호출 모두 넘깁니다 - 복귀 루프 1곳은 호출 직전 조정한 자기 마감,
+# 본류 세 호출은 뒤이어 부를 복귀 루프와 같은 예산(`[void]` 호출 다음 줄이 Return-ToAbyssSelection). 넷째 항 = '다른 던전 가기' 끝 함수(Complete-AbyssOtherSelection)의
+# 폴백 ② - 같은 예산이고 `$Game` 대문자 · 헬퍼 결과를 `$exitClick` 에 받아 같은 블록의 다음 문장이 호출 E if(패널 셋 ∧ 재입장 요청 판이면 재입장 대기 Wait-AbyssReentry),
+# 그다음 문장이 복귀 루프 · 복귀 루프 종료 코드는 앞에서 계산한 변수 하나(구현 명세 ⑤b3 3.4 · B-9 · ⑤b4 3.4 - '[void] 헬퍼 → 바로 다음 줄 복귀 루프' 꼴에서 바뀜)
 $parentReturnCalls = [regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game \$Game [^\r\n]*-ParentDeadline \$exitParentDeadline').Count
 $parentMainCalls = [regex]::Matches($workerSource, '\[void\]\(Invoke-AbyssExitClick -Game \$game [^\r\n]*-ParentDeadline \(\(Get-Date\)\.AddSeconds\(\$timeoutHud \+ \$timeoutAbyssMenu \+ \$timeoutAbyssSelect\)\)\)\s*\r?\n\s*Return-ToAbyssSelection -Game \$game').Count
-Check-Equal '배선: -ParentDeadline 을 넘기는 헬퍼 호출 4곳 = 복귀 루프 1(조정 마감) + 본류 3(복귀 루프 예산, 다음 줄 Return-ToAbyssSelection)' ("$([regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game [^\r\n]*-ParentDeadline').Count)/$parentReturnCalls/$parentMainCalls") '4/1/3'
+$parentOtherCalls = [regex]::Matches($workerSource, '\$exitClick = Invoke-AbyssExitClick -Game \$Game [^\r\n]*-ParentDeadline \(\(Get-Date\)\.AddSeconds\(\$timeoutHud \+ \$timeoutAbyssMenu \+ \$timeoutAbyssSelect\)\)\s*\r?\n(?<indent>[ \t]*)if \([^\r\n]*\$exitClick\.Result[^\r\n]*\{\s*\r?\n(?:[^\r\n]*\r?\n)*?[^\r\n]*Wait-AbyssReentry -Game \$Game[^\r\n]*\r?\n(?:[^\r\n]*\r?\n)*?\k<indent>\}\s*\r?\n\k<indent>Return-ToAbyssSelection -Game \$Game -SafeStopExitCode \$returnExitCode').Count
+Check-Equal '배선: -ParentDeadline 을 넘기는 헬퍼 호출 5곳 = 복귀 루프 1(조정 마감) + 본류 3 + 다른 던전 가기 끝 함수 1(복귀 루프 예산, 호출 E if 다음 문장 Return-ToAbyssSelection)' ("$([regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game [^\r\n]*-ParentDeadline').Count)/$parentReturnCalls/$parentMainCalls/$parentOtherCalls") '5/1/3/1'
 $returnDef = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection')))
 # ★ 뒤집음(⑥e 설계 2.13): 복구 루프의 만료 판정은 Get-FreezeAdjustedDeadline(캡처 실패 누적 차분 포함)이라 헬퍼 FrozenMs 를 더하면 같은 실패 시간이
 #   두 번 더해집니다(⑥a 필드 복귀 루프의 선례). 'expired' 는 호출 바로 다음 줄에서 break(→ 기존 throw)

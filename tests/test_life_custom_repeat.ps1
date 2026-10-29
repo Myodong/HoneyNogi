@@ -307,7 +307,7 @@ foreach ($editCase in @($editDaily, $editHerb, $editFishing, $editBroken)) {
   }
 }
 Assert-Case '편집: 현재값은 언제나 옵션 안에' $currentInOptions 'True'
-# Scope 키는 어비스 전용 (리스트 전체 일괄) - 생활은 스킬 혼합이 자유라 전 열이 행 단위
+# Scope 키는 어비스 전용 (어비스 계획의 정보 값 — 2026-10-27 부터 전 열 row) - 생활은 스킬 혼합이 자유라 전 열이 행 단위
 $noScope = $true
 foreach ($editCol in @(2, 3, 4)) {
   $scopePlan = Get-LcrCellEditPlan -ColumnIndex $editCol -Item $editDaily

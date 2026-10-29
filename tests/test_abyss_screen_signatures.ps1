@@ -100,9 +100,10 @@ Check-Equal '배선(⑥a): 클리어 감시 - 접힌 패널은 같은 폴의 하
 Check-Equal '배선: 클리어 감시 마감 시 불명 오버레이·필드 관측이면 진단 + 코드 4' ([bool]($clearWait -match '\$ambiguousOverlaySeen -or \$fieldSeen\) \{[\s\S]{0,400}Write-LifeDiagnostics[\s\S]{0,600}exit 4')) 'True'
 Check-Equal '배선: 클리어 감시 최종 탐침에 선택 화면 조항 없음 (있으면 불명 오버레이가 마감을 영영 넘김)' ([regex]::Matches($clearWait, 'Test-AbyssSelectionScreen -Game \$Game\) -and -not \(Test-HomeEndEscHud').Count) 0
 Check-Equal '배선: 클리어 감시 필드 증거는 HUD + 추적기 던전명 없음 2연속' ([bool]($clearWait -match '\$questNow = Test-InDungeonQuest -Game \$Game[\s\S]{0,300}\$fieldStreak -ge 2')) 'True'
-# 2026-10-09 구현 명세 ① 2.10 W5: 마커 함수가 기록 성공 여부(bool)를 돌려주게 되어 결과를 쓰지 않는 호출은 [void] 로 버립니다(호출 4곳 전부 -
-#   반환값 정의·4곳 단언은 test_abyss_custom_worker). 이 단언은 본류 호출의 모양만 W5 로 바꿨고 '클리어·보상 문맥에서만' 은 그대로입니다
-Check-Equal "배선: 본류 마커는 clear/reward 문맥에서만" ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\[void\]\(Write-CustomClearMarker\)")) 'True'
+# 2026-10-09 구현 명세 ① 2.10 W5: 마커 함수가 기록 성공 여부(bool)를 돌려주게 되어 결과를 쓰지 않는 호출은 [void] 로 버립니다(반환값 정의·4곳 단언은
+#   test_abyss_custom_worker). 2026-10-25 구현 명세 ⑤b5: 본류 호출은 결과를 받습니다('$markerOk = Write-CustomClearMarker' - 아래 기록 확인이 거짓이면
+#   '다시 하기' 금지). '클리어·보상 문맥에서만'(조건식)은 그대로입니다
+Check-Equal "배선: 본류 마커는 clear/reward 문맥에서만" ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\`$markerOk = Write-CustomClearMarker\s*\}")) 'True'
 # 2.10 W3: 어비스 완료 기록(cleared)은 마커 블록 바로 뒤 · 나가기 헬퍼 바로 앞의 별도 if 이고, 조건 = 클리어·보상 문맥 ∧ 정리 전용 아님(커스텀·비커스텀
 #   모두 - 마커를 썼는지와 무관). 마커 블록 안에 넣으면 비커스텀·마커 실패 판이 빠지고, 헬퍼 뒤로 가면 나가기 위치 미발견 코드 4(클리어 뒤 정지)의 근거가
 #   사라집니다. 호출은 본류 1곳 + 아래 시작 분기 2곳
@@ -110,8 +111,12 @@ Check-Equal "배선: 본류 마커는 clear/reward 문맥에서만" ([bool]($src
 #   항목의 판을 보상·S 화면에서 마무리하는 own 수동·RESTART 시작이 마커 줄 뒤·나가기 헬퍼 앞에서 그 항목을 applied·done 으로 닫습니다(명세 J4 · 설계 R4 4.3 -
 #   본류와 같은 '마커 → 기록 → 헬퍼' 모양, Role none·next 갈래는 기록 0). 시작 분기의 조건(own ∧ 정리 전용 아님)은 test_abyss_handoff_start P16 이,
 #   행동(마커 + cleared + exit 0 → 계상 1)은 test_after_entry_at_most_once OK9·R2-C6 이 봅니다. 본류 정규식(위 조항)은 그대로입니다
-Check-Equal '배선(2.10 W3 · ② 2.6): 마커 블록 → 완료 기록 if(조건 = clear/reward ∧ 정리 전용 아님) → 나가기 헬퍼 순 · 호출 3곳(본류 1 + own 시작 분기 2)' (
-  ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\[void\]\(Write-CustomClearMarker\)\s*\}\s*if \(\(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\) -and -not \(\`$script:customMode -and \`$script:customCleanupOnly\)\) \{\s*Add-AbyssJournalClearedEntry\s*\}\s*\[void\]\(Invoke-AbyssExitClick -Game \`$game ")) -and
+# 2026-10-25 구현 명세 ⑤b5 (3.4 · 설계 v11 R6 8.3 '⑤ 갱신'): 본류는 완료 기록 if 와 나가기 헬퍼 사이에 보상 결정 갈래(if ($retryRoute) - 기록 확인 → '다시 하기' /
+#   '다른 던전 가기' / 옛 나가기)가 들어가고, 기록 if 앞에 '$clearedRecord = $null' 이 섭니다(기록 확인이 그 반환을 읽음 - 기록 if 를 지나지 않은 판은 $null).
+#   기록 호출은 결정·다음 판 owner 를 실어 결과를 받습니다(한 자리 - 명세 B-2). 순서 = 마커 if → $clearedRecord = $null → 기록 if(조건 그대로) → if ($retryRoute)
+#   → 헬퍼 · 이름 수 4(정의 1 + 호출 3) 그대로
+Check-Equal '배선(2.10 W3 · ② 2.6 · ⑤b5): 마커 블록 → $clearedRecord = $null → 완료 기록 if(조건 = clear/reward ∧ 정리 전용 아님 · 결정·다음 판 owner 를 실은 호출) → if ($retryRoute) → 나가기 헬퍼 순 · 호출 3곳(본류 1 + own 시작 분기 2)' (
+  ([bool]($src -match "customCleanupOnly -and \(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\)\) \{\s*\`$markerOk = Write-CustomClearMarker\s*\}\s*\`$clearedRecord = \`$null\s*if \(\(\`$clearOutcome -eq 'clear' -or \`$clearOutcome -eq 'reward'\) -and -not \(\`$script:customMode -and \`$script:customCleanupOnly\)\) \{[\s\S]*?\`$clearedRecord = Add-AbyssJournalClearedEntry -Decision \`$clearedDecision -NextOwner \`$nextOwnerValue\s*\}\s*if \(\`$retryRoute\) \{[\s\S]*?\}\s*\[void\]\(Invoke-AbyssExitClick -Game \`$game ")) -and
   ([regex]::Matches($src, 'Add-AbyssJournalClearedEntry').Count -eq 4)) 'True'
 $ret = Body 'Return-ToAbyssSelection'
 Check-Equal '배선: 복귀 루프 - 재매칭·준비·접힌 준비 패널이면 대기 (선택 화면 판정보다 앞)' (($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -gt 0) -and ($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -lt $ret.IndexOf('if (Test-AbyssSelectionScreen -Game $Game) {')) -and ([bool]($ret -match '\$entryWaitingNow = \(\$panelKindNow -eq ''none''\) -and \(-not \$script:screenCaptureFailing\) -and \(Test-AbyssEntryWaiting -Game \$Game\)'))) 'True'

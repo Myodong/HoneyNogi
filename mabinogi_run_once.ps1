@@ -864,9 +864,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:HONEYNOGI_CUSTOM_ITEM)) {
   }
 }
 # 마지막 판 신호 (GUI가 사전 판정: 커스텀 N바퀴의 마지막 바퀴 마지막 항목 / 횟수 지정 마지막 회차).
-# 던전 흐름은 결과 화면에서 '다시 하기' 대신 '나가기'로 필드에 나가며 마치고, 어비스 파티원은 판 경계 G 의 'last-run' 으로 씁니다.
+# 던전 흐름은 결과 화면에서 '다시 하기' 대신 '나가기'로 필드에 나가며 마치고, 어비스 파티원은 판 경계 G 의 'last-run' 으로, 어비스 '다시 하기' 경로는
+# 보상 결정 순위 1(마지막 판 → '나가기' 로 필드 - 구현 명세 ⑤b6 · 사용자 결정 2026-10-26)로 씁니다.
 # 시간 지정에는 GUI 가 이 신호를 넘기지 않습니다 - 던전·심층은 결과 화면 14-T 가 지정 시각을 보고 이 플래그를 판 중간에 세우고,
-# 파티원은 G 의 'time' 이 같은 역할을 합니다 (시간 지정 '그 판까지' 설계 3.2·4.1).
+# 파티원은 G 의 'time' 이, 어비스 '다시 하기' 경로는 '다시 하기' 판단(Update-AbyssRetryTimeVerdict - 설계 v11 R3)이 같은 역할을 합니다(어비스 옛 나가기
+# 경로는 GUI 가 판단) (시간 지정 '그 판까지' 설계 3.2·4.1).
 $script:dgLastRun = ([string]$env:HONEYNOGI_LAST_RUN -eq '1')
 # 이번 실행 id (GUI 가 시작 버튼마다 새로 만드는 HONEYNOGI_RUN_ID - 구현 명세 ① 2.10 W2). 어비스 본류의 클리어 완료 기록
 # (Add-AbyssJournalClearedEntry)이 항목의 runId 와 비커스텀 owner { runId } 로 씁니다 - 비커스텀은 GUI 의 코드 4 계상이 지금 실행 id 와
@@ -4110,14 +4112,29 @@ function Get-DgTimeVerdict {
   param($UntilTime = $null, [datetime]$Now)
 
   # 던전·심층 결과 화면의 시간 지정 판단 (순수 - 진리표 tests\test_last_run_exit.ps1 T3, 시간 지정 '그 판까지' 설계 3.2).
-  # 호출은 Invoke-NormalDungeonCycle 의 14-T 한 곳뿐이고, 그 결과를 14-0 진입과 함수 꼬리의 종료 코드가 그대로 씁니다.
+  # 호출은 두 곳 - 던전 14-T(Invoke-NormalDungeonCycle - 결과를 14-0 진입과 함수 꼬리의 종료 코드가 씀)와 어비스 '다시 하기' 판단(Update-AbyssRetryTimeVerdict -
+  # 순위 1 시간 항·commit 판단값·재입장 종료 코드가 씀, 설계 v11 R3). 이름의 Dg 는 처음 쓴 곳의 이름입니다 - 진리표 T3 가 이 이름으로 추출합니다.
   # 반환: ''         = 시간 지정 아님(지정 시각을 못 받았거나 해석 실패 - 기존 흐름, 코드 0)
-  #       'last'     = 지정 시각 이후(같은 시각 포함 = -ge, 파티원 G 와 같음) - 이 판이 마지막, 14-0 '나가기'
-  #       'continue' = 지정 시각 전 - '다시 하기'로 이어 가고 꼬리에서 종료 코드 11 (GUI 가 지정 시각을 보지 않고 이어받음)
+  #       'last'     = 지정 시각 이후(같은 시각 포함 = -ge, 파티원 G 와 같음) - 이 판이 마지막, 던전 14-0 '나가기' / 어비스도 '나가기'(구현 명세 ⑤b6)
+  #       'continue' = 지정 시각 전 - '다시 하기'로 이어 가고 던전 꼬리 · 어비스 재입장 완료 끝에서 종료 코드 11 (GUI 가 지정 시각을 보지 않고 이어받음)
   # $UntilTime 은 타입 없이 받습니다 - [datetime] 로 두면 $null 이 변환 실패 (파티원 G 의 같은 인자와 같은 이유, 규칙 3)
   if ($null -eq $UntilTime) { return '' }
   if ($Now -ge [datetime]$UntilTime) { return 'last' }
   return 'continue'
+}
+
+function Get-AbyssUntilTime {
+  # 어비스 '다시 하기' 시간 판단의 지정 시각 (설계 v11 R3 4.3 · 구현 명세 ⑤b1 1.4) - GUI 는 비커스텀 어비스 전 모드에 넘깁니다(Test-WorkerTimeJudgeActive).
+  # 워커당 한 번 읽습니다 - 재판단(Update-AbyssRetryTimeVerdict)은 이 값을 쓰고 env 를 다시 읽지 않습니다(해석 실패 경고도 한 번)
+  return (Get-LifeUntilDeadline -Raw ([string]$env:HONEYNOGI_UNTIL_TIME))
+}
+
+function Update-AbyssRetryTimeVerdict {
+  # 어비스 '다시 하기' 의 시간 판단 (설계 v11 R3 3.3 · 구현 명세 ⑤b1 1.4). commit(전송이 확인된 첫 '다시 하기' 클릭) 전에만 부릅니다 - 보상 결정, retry 클릭 자리의
+  # 클릭 직전 재검사(commit 표지가 거짓일 때만 도는 갈래). commit 뒤에는 클릭 자리가 재검사를 건너뛰어 이 값이
+  # 그대로 남습니다 - 그 뒤의 재클릭·매칭·입장은 같은 판단의 실행입니다(규칙 문서 '시간 지정 = 그 회차까지')
+  $script:abyssRetryTimeVerdict = Get-DgTimeVerdict -UntilTime $script:abyssUntil -Now (Get-Date)
+  return $script:abyssRetryTimeVerdict
 }
 
 function Get-DgSelectionFocusFloor {
@@ -4621,7 +4638,7 @@ function Wait-ForDungeonClearScreen {
   # 파티원 클리어 S 를 놓쳐 한 판이 이미 넘어간 화면을 모른 채 마감까지 기다리던 판 합쳐짐(09-29 관측 2)을 막습니다. 재매칭 패널은 관측을 이어 갑니다.
 
   # 반환값: 'clear' = 클리어 화면 감지 / 'reward' = 이미 보상 화면(사용자가 직접 터치해 넘긴 경우) /
-  #         'left' = 거점 부활 상한으로 사망 화면에서 던전을 나와 필드 확인 (어비스 전용 - 호출부가 코드 10 으로 마침, 2026-09-25)
+  #         'left' = 거점 부활 상한으로 사망 화면에서 던전을 나와 필드 확인 (어비스 전용 - 호출부가 코드 10 으로 마침, 2026-09-25 · 마무리 실행 기동은 코드 4 - 구현 명세 ⑤b5 W3)
   #         ('selection' 은 2026-09-21 부터 돌려주지 않습니다 - 선택 화면 오버레이는 전투 중에도 열려 완료 증거가 못 됨.
   #          호출부의 'selection' 분기는 남아 있지만 도달하지 않음 - 설계 합의 A2)
   #         'member-reward' / 'ready' / 'entry-waiting' = -MemberMode 전용 - 파티원 보상 화면·준비 패널·접힌 준비 패널(HUD 없음)이 보여 클리어 증거로
@@ -4935,7 +4952,7 @@ function Wait-ForDungeonClearScreen {
     #   - 계상은 전송이 아니라 **성공 확인**(전송 뒤 다음 유효 표본이 사망·전멸 아님)으로만. 거점 부활 성공 수는 revive.checkpointReviveLimit 의 대상
     #   - 사망 1회당 실제 전송은 $reviveDispatchBudget 회까지. 그 뒤에도 유효 사망 표본이면 진단 캡처 + [완료] 코드 4
     #   - 거점 부활(캠프파이어·여신상·전멸 재도전) 성공이 $reviveCheckpointLimit 회에 닿은 뒤 다시 거점 부활이 필요하면 어비스는 부활 대신
-    #     던전 퇴장 → 'left' 반환 → 호출부가 선택 화면 복귀 + 코드 10 (2026-09-25 사용자 확정 - 옛 '전체 상한 뒤 코드 4' 폐기). 마감 판정
+    #     던전 퇴장 → 'left' 반환 → 호출부가 선택 화면 복귀 + 코드 10 (2026-09-25 사용자 확정 - 옛 '전체 상한 뒤 코드 4' 폐기 · 마무리 실행 기동은 코드 4 - 구현 명세 ⑤b5 W3). 마감 판정
     #     블록이 사망 화면·pending 에서 물러서는 게이트는 그대로 (Test-CombatStillRunning 은 추적기만 봐서 사망 화면도 '전투 중')
     #   - 캡처 실패 중·판독 도중 실패가 있던 표본은 무효 - 빈 판독(Dead=false)이 '부활 성공' 으로 읽히면 거짓 '부활 완료' +
     #     클리어 마감 초기화가 나므로 (규칙 15) 성공도 실패도 아닌 것으로 둡니다. 앵커 탐색·재확인 판독도 같은 일련번호 게이트
@@ -6070,7 +6087,7 @@ function Find-AbyssRewardButtonPair {
   param([System.Diagnostics.Process]$Game)
 
   # 보상 화면 '다시 하기'·'다른 던전 가기' 짝을 글자로 찾습니다 - Test-ExitButton·Find-AbyssExitButtonPoint 와 같은 영역·배율·엔진의 **한 번의 판독**이라
-  # 호출부가 같은 판독문으로 3버튼 서명·접힌 패널을 보고 같은 판독의 점을 누를 수 있습니다 (구현 명세 ③ 2.1 - 호출 배선은 구현 단위 ⑤, 지금은 호출 0).
+  # 호출부가 같은 판독문으로 3버튼 서명·접힌 패널을 보고 같은 판독의 점을 누를 수 있습니다 (구현 명세 ③ 2.1 - 부르는 곳은 '다시 하기' 클릭 루프와 '다른 던전 가기' 대기 두 곳이고, 본류 보상 화면의 두 끝 함수를 거쳐 돕니다 - 구현 명세 ⑤b3·⑤b4·⑤b5).
   # 반환: @{ Text = 공백 뺀 판독문; Retry; Other } (점은 @{X;Y} 기준 좌표 또는 $null - 클릭은 Click-GamePoint 로만, 화면 좌표 클릭에 그대로 넘기지 않음).
   # 캡처가 성공하면 Text 는 같은 프레임의 Get-GameOcrText 판독문과 같습니다 (보관 프레임 960장 재생에서 글자 단위 일치).
   # 캡처 실패(창 사각형 실패 포함 - Get-GameOcrText 와 달리 throw 없음)면 Get-GameRegionOcrWords 가 빈 배열 → Text '' · 두 점 $null 이고, 캡처는 성공했는데
@@ -6106,7 +6123,7 @@ function Invoke-AbyssExitClick {
   #  미확인으로 3회 전송 실패 - 호출부 복귀 루프가 재클릭·마감을 담당 / 'matching' = 재매칭 패널('다시 하기' 뒤)이라 하단
   #  '나가기' 가 매칭 취소 버튼 - 누르지 않음 (설계 합의 A3). 'ready-panel' = 파티 준비 패널이 떠 있어 하단 '나가기' 가 패널 닫기 /
   #  'entry-waiting' = 접힌 준비 패널('입장 대기 중')이라 하단 '나가기' 가 **던전 퇴장** - 둘 다 누르지 않음 (⑥a, 2026-09-26 설계 합의
-  #  R1-P1-1 · 실기 -1 L5·M6). 세 결과 모두 호출부가 패널 대기(클릭 없음)로 이어받습니다.
+  #  R1-P1-1 · 실기 -1 L5·M6). 세 결과 모두 호출부가 클릭 없이 이어받습니다 - 재입장 요청 판(이 워커의 재입장 요청 기록 · 재개)이면 '다른 던전 가기' 끝 함수가 재입장 대기로, 그 밖은 복귀 루프가 패널 대기로.
   #  위치도 후속 화면도 확인되지 않는 판독(캡처 성공)이 **3회 이상이고 첫 미검출부터 20초(동결 시간 제외)** 가
   #  지나면 진단 캡처를 남기고 코드 4 로 정지합니다 - '다시 하기' 자리를 누르는 재입장 오클릭보다 정지가 낫습니다
   #  (사용자 결정 2026-09-18, 설계 리뷰 반영). 20초는 옛 복구 루프의 '알 수 없는 화면' 허용치와 같은 값입니다 -
@@ -8936,8 +8953,8 @@ function Write-CustomClearMarker {
   # 같은 20회 재시도 패턴으로 흡수하고, 끝내 실패해도 진행은 계속합니다
   # (마커는 보험이지 필수가 아님 - 정상 코드 0이면 GUI가 종료 코드로 전진).
   # 반환(구현 명세 ① 2.10 W5 · 5절 A9): 기록함 $true · 경로가 빈 값 $true(GUI 가 이번 회차 마커를 일부러 비운 것 - 기록 대상이 아니라
-  # 실패가 아님) · 소유자 정보 없음 $false · 쓰기 20회 실패 $false. 결과를 실제로 받는 호출은 뒤 단위(⑤ - 다시 하기 가능 여부)뿐이라 지금
-  # 호출 4곳은 [void] 로 버립니다 - 감싸지 않으면 반환값이 그 자리의 출력으로 흘러 함수 반환·로그를 오염시킵니다(명세 리뷰 2 P3).
+  # 실패가 아님) · 소유자 정보 없음 $false · 쓰기 20회 실패 $false. 결과를 받는 호출은 어비스 본류의 보상 화면 1곳(기록 확인 - 거짓이면 '다시 하기'
+  # 금지, 구현 명세 ⑤b2 1.4 · ⑤b5)이고 나머지 3곳은 [void] 로 버립니다 - 감싸지 않으면 반환값이 그 자리의 출력으로 흘러 함수 반환·로그를 오염시킵니다(명세 리뷰 2 P3).
   if ([string]::IsNullOrWhiteSpace($script:customMarkerPath)) { return $true }
   if ([string]::IsNullOrWhiteSpace($script:customOwnerJson)) {
     Write-RunLog '[경고] 완료 마커 소유자 정보가 없어 마커를 기록하지 않습니다 - GUI/워커 버전을 확인해 주세요'
@@ -9601,18 +9618,25 @@ function Add-AbyssJournalClearedEntry {
   # 어비스 본류의 클리어 완료 기록 - journal 항목 1건(stage 'cleared'). 부르는 곳은 본류의 결과 화면 도달 직후(완료 마커 블록 뒤 · 나가기 헬퍼 앞)와
   # 보상·클리어 화면 시작 분기의 같은 자리(이어받은 own 만 - 구현 명세 ② 2.6)이고, 정리 전용 판은 부르는 쪽 조건이 뺍니다 (구현 명세 ① 2.10 W3 ·
   # 설계 v10 6.1 기록 시점 표 'cleared').
-  # 항목 = 기본값(New-AbyssJournalEntry - 새 nonce · nextOwner 없음 · launchState pending · afterEntry { index 0 }) 위에
-  #  - 공통: runId = 이번 실행 id($script:abyssRunId) · stage cleared · decision exit(다시 하기가 꺼진 빌드라 옛 나가기) · at.cleared
+  # 항목 = 기본값(New-AbyssJournalEntry - 새 nonce · launchState pending · afterEntry { index 0 }) 위에
+  #  - 공통: runId = 이번 실행 id($script:abyssRunId) · stage cleared · decision = -Decision · nextOwner = -NextOwner · at.cleared
   #  - 커스텀: section abyssCustomRepeat · owner = GUI 가 넘긴 소유자 JSON 의 5필드 · generation = 그 JSON 의 세대(ConvertTo-AbyssJournalOwner)
   #  - 비커스텀: section '' · owner { runId } · generation 0
+  # -Decision = 그 판의 마무리 동작(설계 v10 6.1 스키마 retry / other / exit) - 기본 exit(옛 나가기 경로). 보상 결정을 거친 판은 그 결정 그대로이고, 뒤의
+  #  재판단·기록 확인으로 갈래가 바뀌어도 고치지 않습니다(설계 v11 R6 1.2 - 결정한 순간의 값). 읽는 쪽은 없습니다(GUI 의 decision 읽기 0 - 기록용).
+  # -NextOwner = 다음 판의 owner(커스텀 5필드 / 비커스텀 { runId }) - 보상 결정이 retry 일 때만 주고(기록 확인으로 갈래가 바뀌어도 그대로) 그 밖은 없음. 세대는
+  #  항목의 형제 필드 하나라 owner 와 같은 세대로 읽힙니다. GUI 는 재입장 실행부에서 다시 확정합니다 - 비커스텀은 늘 이번 실행 id, 커스텀은 진행 전진 뒤 위치이고 전진에 실패했거나 그 위치를 못 읽으면 이 값을 그대로 씁니다(설계 v11 R1 3.4).
   # 같은 저장에서 이 판의 열쇠 항목(입장 직후 키 계약에 쓴 항목)을 applied·done 으로 닫습니다(구현 명세 ② 2.2 - 아래 mutator 앞 주석).
   # GUI 는 이 기록으로 클리어 뒤 조건 정지(코드 4)를 1회 계상하고(마커를 못 쓴 커스텀 판 포함), 코드 0·11 에서는 소비만 합니다. 커스텀은 오류
   # 종료(코드 1)와 다음 시작에서 완료 마커와 같은 마무리 복구 근거로도 씁니다(구현 명세 ① 5절 A10 · 2.9 S3).
   # 커스텀인데 소유자 JSON 을 못 읽으면 기록하지 않고 [경고] 한 줄 - owner 없는 기록은 GUI 가 어느 판과도 대조하지 못합니다.
-  # 저장 실패(locked·corrupt·io-failed)는 [경고] 한 줄 뒤 그대로 돌아갑니다 - 종료 코드·흐름은 바뀌지 않습니다. 실패 낱말은 설계 R2 3.6 과
+  # 저장 실패(locked·corrupt·io-failed)는 [경고] 한 줄 뒤 태그를 돌려줍니다 - 이 함수는 멈추지 않고(exit·throw 0) 판의 갈래는 부르는 쪽이 정합니다. 실패 낱말은 설계 R2 3.6 과
   # 같습니다(파일 사용 중 / 파일 손상 / 기록 실패). 성공 줄은 파일 로그 전용이라 GUI 가 화면에서 숨깁니다(W7).
+  # 반환 @{ Tag; Nonce } - Tag = 저장 태그(changed 만 성공) 또는 owner-unreadable(소유자 JSON 해석 실패 - 기록 0), Nonce = 새 항목의 nonce(changed 일 때만 - 그 밖은
+  #  빈 값). 결과를 쓰지 않는 호출은 [void] 로 버립니다 - 감싸지 않으면 반환값이 그 자리의 출력으로 흐릅니다(구현 명세 ⑤b2 1.2).
   # 예외는 감싸지 않습니다(설계 R2-5): 저장소가 잠금·IO 실패를 태그로 바꾸므로 남는 예외는 구현 결함이고, 최상위 catch 의 코드 1 + 오류 세트로
-  # 드러나야 합니다. 클릭·키·캡처가 없어 클릭·대기 계약(규칙 4)·캡처 실패 동결(규칙 15) 대상이 아닙니다. 반환값 없음.
+  # 드러나야 합니다. 클릭·키·캡처가 없어 클릭·대기 계약(규칙 4)·캡처 실패 동결(규칙 15) 대상이 아닙니다.
+  param([string]$Decision = 'exit', $NextOwner = $null)
   $runIdValue = [string]$script:abyssRunId
   $sectionName = ''
   $generationValue = 0
@@ -9621,7 +9645,7 @@ function Add-AbyssJournalClearedEntry {
     $parsedOwner = ConvertTo-AbyssJournalOwner -OwnerJson ([string]$script:customOwnerJson)
     if ($null -eq $parsedOwner) {
       Write-RunLog '[경고] 커스텀 항목 소유자 정보를 읽지 못해 클리어 완료 기록을 남기지 않습니다 - GUI/워커 버전을 확인해 주세요'
-      return
+      return @{ Tag = 'owner-unreadable'; Nonce = '' }
     }
     $sectionName = 'abyssCustomRepeat'
     $generationValue = [int]$parsedOwner.Generation
@@ -9632,7 +9656,8 @@ function Add-AbyssJournalClearedEntry {
   $clearedEntry.section = $sectionName
   $clearedEntry.generation = $generationValue
   $clearedEntry.owner = $ownerValue
-  $clearedEntry.decision = 'exit'
+  $clearedEntry.nextOwner = $NextOwner
+  $clearedEntry.decision = $Decision
   $clearedEntry.at.cleared = Get-AbyssJournalTimeText
   # 이 판의 열쇠 항목(입장 직후 키 계약에 쓴 자기 항목 또는 이어받은 항목 - $script:handoff.Nonce)을 같은 저장에서 닫습니다 (구현 명세 ② 2.2 · J4 ·
   # 설계 v10 6.1 기록 시점 표 'cleared' - 같은 mutation 에서 이 판의 entered 항목 applied·done): 그 항목이 있으면 launchState done + 그 nonce 를
@@ -9659,7 +9684,7 @@ function Add-AbyssJournalClearedEntry {
   foreach ($recordWarning in @($record.Warnings)) { Write-RunLog ([string]$recordWarning) }
   if ([string]$record.Tag -eq 'changed') {
     Write-RunLog '[어비스] 클리어 완료 기록 저장 (결과 화면 도달)'
-    return
+    return @{ Tag = 'changed'; Nonce = [string]$clearedEntry.nonce }
   }
   $failureKind = switch ([string]$record.Tag) {
     'locked' { '파일 사용 중' }
@@ -9670,6 +9695,7 @@ function Add-AbyssJournalClearedEntry {
   # 문구는 -f 식이 아니라 문자열로 둡니다 - 워커 로그 심각도 회귀(test_log_severity)는 Write-RunLog 의 문자열 인자만 모아 분류하므로
   # 식으로 쓰면 이 줄이 그 검사 밖으로 빠집니다(구현 명세 ① 2.10 W3 '새 로그 줄은 그 회귀 대상' - 단계 2.10 명세 대조 P3-1)
   Write-RunLog "[경고] 클리어 완료 기록을 저장하지 못했습니다 ($failureKind) - 정상 종료면 GUI가 종료 코드로 계상하므로 진행을 계속합니다"
+  return @{ Tag = [string]$record.Tag; Nonce = '' }
 }
 
 function Consume-Handoff {
@@ -9986,6 +10012,126 @@ function Close-AbyssOwnEntryBeforeEntry {
     default { '기록 실패' }
   }
   Write-RunLog "[경고] 이어받던 판의 기록을 닫지 못했습니다 (${failureKind}) - 새 판의 기록이 남은 기록을 함께 닫습니다"
+}
+
+# ===== 어비스 '다시 하기' 단계 기록 (구현 명세 ⑤b2 1.3 · 설계 v10 6.1 기록 시점 표 retry-attempt / retry-clicked / reentered · v11 R3 3.2 · R5 2.7 · 4.3) =====
+# 셋 다 -Nonce 항목(원 워커 = 그 판의 클리어 기록이 돌려준 nonce · 재개 워커 = 이어받은 항목의 nonce - 뒤 단위)의 단계를 같은 잠금 아래 -Expect 로 확인한 뒤 바꿉니다. 클로저는 지역 사본만 읽고($script: 0)
+# Mutator 는 필드 쓰기 Set-AbyssJournalProperty 만 부릅니다(없는 필드는 더하고 있는 필드는 자리 유지 - 구현 명세 ② J5). 변경 표식은 찾은 항목 갈래의 마지막
+# 문장 한 곳입니다(구현 명세 ② 2.0-10). 예외는 감싸지 않습니다(설계 R2-5 - 남는 예외는 최상위 catch 의 코드 1 + 오류 세트) · exit·throw 0. 클릭·키·캡처가
+# 없어 클릭·대기 계약(규칙 4)·캡처 실패 동결(규칙 15) 대상이 아닙니다. 성공 줄은 두지 않습니다 - 부르는 쪽의 클릭·입장 줄이 그 순간을 남깁니다.
+
+function Set-AbyssJournalRetryAttempt {
+  # 재입장 요청 기록(retry-attempt) - retry 클릭 자리가 이 워커의 첫 시도에서 짝 좌표를 잡은 뒤·클릭 전에 부릅니다(설계 v10 2.2 B1 · R3 3.3 순서).
+  # -Expect = 그 항목이 있고 stage cleared(원 워커의 전제 - 방금 쓴 클리어 기록. 아니면 expect-failed · 쓰기 0). 바꾸는 것 = stage retry-attempt ·
+  # attempts +1 · at.retryAttempt(같은 저장 - 재개 시계의 기준, 설계 v11 R5 4.3). 반환 = 저장 태그 - changed 만 성공. 첫 기록 실패는 클릭 0 · 옛 나가기로
+  # 끝내는 fail-closed 이고(설계 v10 2.2 B1 '클릭 뒤 crash 를 GUI 가 라우팅할 근거가 없으면 누르지 않는다' · 6.1 기록 시점 표 'retry 금지 → 2.6 ②') 그 판정·로그는 부르는 쪽 몫입니다. 워커당 한 번(이 워커의
+  # 첫 시도)만 부르는 것도 부르는 쪽 표식입니다(설계 v10 B1 '멱등'). 재개 워커의 갱신(설계 v10 6.1 resume 3버튼 행 - attempts +1)은 그 계약을 뒤 단위(⑤c)가 정해 지금은 받지 않습니다.
+  param([string]$Nonce)
+  $attemptNonce = $Nonce
+  $attemptAt = Get-AbyssJournalTimeText
+  $expect = {
+    param($journal)
+    $attemptReady = $false
+    foreach ($attemptEntry in @($journal.entries)) {
+      $attemptReady = $attemptReady -or (($null -ne $attemptEntry) -and ([string]$attemptEntry.nonce -eq $attemptNonce) -and ([string]$attemptEntry.stage -eq 'cleared'))
+    }
+    return $attemptReady
+  }.GetNewClosure()
+  $mutator = {
+    param($journal, $change)
+    foreach ($attemptEntry in @($journal.entries)) {
+      if (($null -eq $attemptEntry) -or ([string]$attemptEntry.nonce -ne $attemptNonce)) { continue }
+      Set-AbyssJournalProperty -Object $attemptEntry -Name 'stage' -Value 'retry-attempt'
+      Set-AbyssJournalProperty -Object $attemptEntry -Name 'attempts' -Value ([int]$attemptEntry.attempts + 1)
+      Set-AbyssJournalProperty -Object $attemptEntry.at -Name 'retryAttempt' -Value $attemptAt
+      $change.Changed = $true
+    }
+  }.GetNewClosure()
+  $record = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+  # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+  foreach ($recordWarning in @($record.Warnings)) { Write-RunLog ([string]$recordWarning) }
+  return [string]$record.Tag
+}
+
+function Set-AbyssJournalRetryClicked {
+  # 재입장 클릭 기록(retry-clicked) - '다시 하기' 전송이 확인될 때마다(commit 문 바로 뒤) 부릅니다(설계 v10 2.2 B1 ③ · R3 3.3). -Expect = 그 항목이 있고 stage
+  # retry-attempt 또는 retry-clicked. 바꾸는 것 = stage retry-clicked · retryClicks +1 · at.retryClicked = 이번 전송 시각(전송마다 갱신 - 재개 시계는 마지막 전송
+  # 기준, 설계 v11 R5 4.3 ⑥). 실패는 [경고] 한 줄 뒤 그대로 돌아갑니다 - 재입장 확인은 계속하고(재개는 retry-attempt 만으로도 성립 · 이 전송은 부르는 쪽의 지역
+  # 카운터가 셉니다 - 설계 v10 6.1 기록 시점 표), 실패 낱말은 설계 R2 3.6 과 같습니다(expect-failed·unchanged 는 기록 실패). 반환값 없음.
+  param([string]$Nonce)
+  $clickNonce = $Nonce
+  $clickAt = Get-AbyssJournalTimeText
+  $expect = {
+    param($journal)
+    $clickReady = $false
+    foreach ($clickEntry in @($journal.entries)) {
+      $clickReady = $clickReady -or (($null -ne $clickEntry) -and ([string]$clickEntry.nonce -eq $clickNonce) -and
+        (([string]$clickEntry.stage -eq 'retry-attempt') -or ([string]$clickEntry.stage -eq 'retry-clicked')))
+    }
+    return $clickReady
+  }.GetNewClosure()
+  $mutator = {
+    param($journal, $change)
+    foreach ($clickEntry in @($journal.entries)) {
+      if (($null -eq $clickEntry) -or ([string]$clickEntry.nonce -ne $clickNonce)) { continue }
+      Set-AbyssJournalProperty -Object $clickEntry -Name 'stage' -Value 'retry-clicked'
+      Set-AbyssJournalProperty -Object $clickEntry -Name 'retryClicks' -Value ([int]$clickEntry.retryClicks + 1)
+      Set-AbyssJournalProperty -Object $clickEntry.at -Name 'retryClicked' -Value $clickAt
+      $change.Changed = $true
+    }
+  }.GetNewClosure()
+  $record = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+  # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+  foreach ($recordWarning in @($record.Warnings)) { Write-RunLog ([string]$recordWarning) }
+  $recordTag = [string]$record.Tag
+  if ($recordTag -eq 'changed') { return }
+  $failureKind = switch ($recordTag) {
+    'locked' { '파일 사용 중' }
+    'corrupt' { '파일 손상' }
+    default { '기록 실패' }
+  }
+  # 문구는 -f 식이 아니라 문자열로 둡니다(워커 로그 심각도 회귀가 문자열 인자만 분류)
+  Write-RunLog "[경고] 재입장 클릭 기록을 저장하지 못했습니다 (${failureKind}) - 재입장 확인을 계속합니다"
+}
+
+function Set-AbyssJournalReentered {
+  # 재입장 완료 기록(reentered) - 원 워커 B2 대기(또는 재개 워커)가 던전 안 2연속을 본 직후, 재입장 완료 줄과 종료 코드 앞에 부릅니다(설계 v11 R1 2.2 순서 2 ·
+  # 설계 v10 6.1 기록 시점 표). -Expect = 그 항목이 있고 stage retry-attempt 또는 retry-clicked(설계 v10 6.1 저장 계약 ③). 바꾸는 것 = stage reentered · at.reentered.
+  # 실패는 [경고] 한 줄 뒤 그대로 돌아갑니다 - 항목이 retry-* 로 남으면 GUI 가 재입장 완료 줄의 nonce 로 이어받아 필수 기록에서 단계를 보정하고(설계 v11 R1 3.2 표 4행)
+  # 손상·단계 다름이면 기록 오류로 정지하므로 [경고] 꼬리는 워커가 하는 일만 적습니다(설계 R2 3.6). 실패 낱말도 R2 3.6 과 같습니다(expect-failed·unchanged 는 기록 실패). 반환값 없음.
+  param([string]$Nonce)
+  $reenterNonce = $Nonce
+  $reenterAt = Get-AbyssJournalTimeText
+  $expect = {
+    param($journal)
+    $reenterReady = $false
+    foreach ($reenterEntry in @($journal.entries)) {
+      $reenterReady = $reenterReady -or (($null -ne $reenterEntry) -and ([string]$reenterEntry.nonce -eq $reenterNonce) -and
+        (([string]$reenterEntry.stage -eq 'retry-attempt') -or ([string]$reenterEntry.stage -eq 'retry-clicked')))
+    }
+    return $reenterReady
+  }.GetNewClosure()
+  $mutator = {
+    param($journal, $change)
+    foreach ($reenterEntry in @($journal.entries)) {
+      if (($null -eq $reenterEntry) -or ([string]$reenterEntry.nonce -ne $reenterNonce)) { continue }
+      Set-AbyssJournalProperty -Object $reenterEntry -Name 'stage' -Value 'reentered'
+      Set-AbyssJournalProperty -Object $reenterEntry.at -Name 'reentered' -Value $reenterAt
+      $change.Changed = $true
+    }
+  }.GetNewClosure()
+  $record = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+  # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+  foreach ($recordWarning in @($record.Warnings)) { Write-RunLog ([string]$recordWarning) }
+  $recordTag = [string]$record.Tag
+  if ($recordTag -eq 'changed') { return }
+  $failureKind = switch ($recordTag) {
+    'locked' { '파일 사용 중' }
+    'corrupt' { '파일 손상' }
+    default { '기록 실패' }
+  }
+  # 문구는 -f 식이 아니라 문자열로 둡니다(워커 로그 심각도 회귀가 문자열 인자만 분류)
+  Write-RunLog "[경고] 재입장 완료 기록을 저장하지 못했습니다 (${failureKind}) - 재입장 완료 줄을 남기고 이어 갑니다"
 }
 
 function Invoke-NormalDungeonCycle {
@@ -13016,8 +13162,8 @@ function Resolve-AbyssReentryVerdict {
   #     대기 함수에서는 아직 닿지 않습니다
   #  4 목표 'entry' · 보고 켬 · 분류 'reward3' · 패널 관측 → 'cancelled' - 패널류를 본 뒤의 3버튼은 사용자 취소라 재클릭 요청이 아닙니다(설계 v11 R3 3.1).
   #     5 보다 앞이라 무변화 창이 지났어도 같습니다. 1표본입니다 - 분류기에서 패널류가 3버튼보다 앞 순위라 패널이 읽힌 회전은 'reward3' 이 될 수 없습니다.
-  #     보관 프레임(2026-09-21·09-26)의 정상 전이 셋(팝업 → 패널 둘 · 준비 패널 → 로딩 하나)에도 3버튼 표본은 없었지만 저장 간격이 약 1초라, 정상
-  #     '다시 하기' 전이의 오검출 0 은 배선(구현 단위 ⑤) 전 실기에서 확인하는 조건입니다(하나라도 나오면 배선 전에 1표본 규격을 다시 정함)
+  #     보관 프레임(2026-09-21·09-26)의 정상 전이 셋(팝업 → 패널 둘 · 준비 패널 → 로딩 하나)에도 3버튼 표본은 없었지만 저장 간격이 약 1초라, 보고 켬 호출(원 워커
+  #     재입장 대기)의 정상 전이 오검출 0 은 배선(구현 단계 ⑤b) 전 관측 0 프레임 재생(2026-10-24 - 정상 전이 여섯 0 · 손 취소 하나 1표본)으로 확인했고 배선 뒤 실기가 판마다 다시 봅니다(하나라도 나오면 1표본 규격을 다시 정함)
   #  5 목표 'entry' · 보고 켬 · 분류 'reward3' · 무변화 창 만료 → 'reclick' - 패널류 없이 3버튼이 무변화 창 동안 그대로면 '다시 하기' 가 먹지 않은 것으로
   #     봅니다(설계 v10)
   #  6 그 밖 → '' (관측 지속 - 로딩·검은 화면·알 수 없는 프레임·패널류·보고 끔의 3버튼은 대기 함수가 다음 회전에 다시 읽음)
@@ -13027,6 +13173,132 @@ function Resolve-AbyssReentryVerdict {
   if (($Target -eq 'entry') -and $ReportRewardReturn -and ($Kind -eq 'reward3') -and $PanelSeen) { return 'cancelled' }
   if (($Target -eq 'entry') -and $ReportRewardReturn -and ($Kind -eq 'reward3') -and $QuietExpired) { return 'reclick' }
   return ''
+}
+
+# 어비스 보상 화면의 마무리 판정 둘과 '다른 던전 가기' 대기 분류 - 위 재입장 대기 결론과 같은 모양(화면을 읽지 않고 값만 받음)이라 이 자리에 둡니다 (구현 명세 ⑤b1 1절)
+function Test-AbyssRetryRoute {
+  param(
+    [bool]$CleanupOnly,          # 정리 전용 판 - 손으로 들어간 판 (커스텀이고 $script:customCleanupOnly)
+    [string]$Mode,               # 입장 방식 $dungeonMode ('solo' / 'party' - 커스텀은 항목 값)
+    [string]$Matching            # 매칭 $abyssMatching (커스텀은 항목 값 - 혼자하기 항목은 '없음')
+  )
+
+  # 이 판의 보상 화면이 '다시 하기' 경로인지 (순수 판정 - 진리표 대상, 구현 명세 ⑤b1 1.1 · 설계 v11 R3 6.6 '다시 하기 분기 술어' · R6 3.5 ③ · R4 U1).
+  # 거짓이면 옛 나가기 경로(본류 끝 그대로 - 기록의 결정 'exit', 정리 전용 판은 완료 기록 없음)이고, 부르는 쪽은 시간 판단·마무리 결정을 부르지 않습니다(설계 v11 R3 K21·K22 '받기만').
+  # 위 조건이 이깁니다 - 순서가 곧 계약입니다:
+  #  1 정리 전용 판 → 거짓 - '다시 하기' 도 '다른 던전 가기' 도 쓰지 않고 지금처럼 나가기 → 선택 화면 → 코드 10 (설계 v11 R6 3.5 ③)
+  #  2 혼자하기 → 참 - 매칭 값은 보지 않습니다(혼자하기에도 config 의 매칭 라디오 값이 남아 있음)
+  #  3 함께하기 · 우연한 만남 → 참
+  #  4 그 밖(함께하기의 파티 찾기 · 파티장 · 모르는 매칭) → 거짓 - 파티 찾기는 마지막 판도 나가기(사용자 결정 2026-10-12), 파티장은 구현 단위 ⑥d 까지 옛 경로
+  if ($CleanupOnly) { return $false }
+  if ($Mode -eq 'solo') { return $true }
+  return (($Mode -eq 'party') -and ($Matching -eq '우연한 만남'))
+}
+
+function Resolve-AbyssRewardDecision {
+  param(
+    [bool]$SafeStopRequested,    # 안전 중지 예약 파일이 있음 (부르는 쪽 Test-Path -LiteralPath $safeStopFlagPath)
+    [bool]$FinishOnly,           # 마무리 실행 기동 ($script:finishOnly - HONEYNOGI_FINISH_ONLY)
+    [bool]$LastRun,              # 마지막 판 신호 ($script:dgLastRun - HONEYNOGI_LAST_RUN)
+    [string]$TimeVerdict = '',   # 시간 판단값 '' / 'continue' / 'last' (Update-AbyssRetryTimeVerdict 의 반환 - 이 함수는 시계를 읽지 않음)
+    [bool]$CustomMode,           # 커스텀 반복 ($script:customMode) - 아래 ③~⑨ 는 커스텀만
+    [bool]$NextGiven,            # 다음 항목 토큰(HONEYNOGI_CUSTOM_NEXT)이 비어 있지 않음(공백만이면 빈 값 - 파서와 같은 IsNullOrWhiteSpace)
+    $NextItem = $null,           # 다음 항목 해석 결과 ($script:customNext - 비었거나 해석 실패면 $null) - 타입 없이 받음(규칙 3)
+    $CurrentItem = $null,        # 지금 항목 ($script:customItem)
+    [bool]$NextBoundary,         # 바퀴 경계 신호 (HONEYNOGI_CUSTOM_NEXT_BOUNDARY '1' - GUI 가 바퀴 끝 판마다 넣음, 구현 명세 ⑤b5)
+    [bool]$NextOwnerGiven,       # 다음 항목 소유자(HONEYNOGI_CUSTOM_NEXT_OWNER)를 해석함(빈 값·해석 실패 = 거짓 - 구현 명세 ⑤b2 1.2)
+    [bool]$NextEntryUnknown      # 다음 판 입장 방식 미정 (HONEYNOGI_CUSTOM_NEXT_BOUNDARY 'mixed' - GUI 가 랜덤 진행 바퀴 끝 판에서 리스트의 입장 방식이 섞였을 때 넣음, 구현 명세 ⑤b6)
+  )
+
+  # '다시 하기' 경로(Test-AbyssRetryRoute 참)인 판의 보상 화면 결정 (순수 판정 - 진리표 대상, 구현 명세 ⑤b1 1.2 · ⑤b6 1.3 · 설계 v10 2.1(2) 순위 ①~⑥ - 아래 ② 는
+  # 커스텀 관문이라 설계 ②~⑥ 이 아래 ③ · ⑥~⑨ · v11 R3 2.1~2.3 · 사용자 결정 2026-10-26).
+  # 반환 @{ Action = 'retry' | 'other' | 'exit'; Reason }. 'retry' = '다시 하기', 'other' = '다른 던전 가기' 로 선택 화면에서 마침, 'exit' = 옛 나가기(필드로
+  # 나갑니다: 안전 중지는 필드 확정에서 끝나고, 그 밖은 필드에서 연 선택 화면까지 갑니다 - 구현 명세 ⑤b6 1.2). exit 는 멈출 때(①)와 다음 판의 입장 방식이
+  # 다르거나 모를 때(③~⑤ - 이어 감: 컨트롤 패널이 코드 0 뒤 다음 항목을 그 선택 화면에서 시작)입니다.
+  # 던전 안 선택 화면('다른 던전 가기')에서는 혼자하기 ↔ 함께하기 탭이 바뀌지 않으므로(2026-10-26 실기 관측) 입장 방식(방식 · 매칭) 비교가 경계 · 항목 바뀜보다
+  # 먼저입니다 - 그래서 'other' 의 다음 판은 늘 같은 입장 방식입니다. 커스텀 리스트는 혼자하기와 함께하기·우연한 만남을 섞을 수 있습니다(파티 찾기·파티장
+  # 항목이 있으면 리스트 전체가 한 방식 - GUI Get-AbyssListLock · 시작 게이트, 사용자 결정 2026-10-26). 위 조건이 이깁니다 - 순서가 곧 계약입니다:
+  #  ① 안전 중지 'safe-stop' > 마무리 실행 'finish-only' > 마지막 판 'last-run' > 지정 시각 'time' → exit. 동작은 같고 사유(로그)만 갈립니다(설계 v11 R3 2.3 -
+  #     GUI 의 안전 중지 > 횟수 > 시간 순서). 마무리 실행 기동은 마지막 판 신호를 함께 받으므로(GUI 가 둘 다 '1') 마무리가 마지막 판보다 먼저입니다.
+  #     시간은 판단값 'last'(지정 시각 이후 - 같은 시각 포함)일 때만 서고, 'continue'·''(시간 지정 아님·해석 실패)는 서지 않습니다
+  #  ② 커스텀이 아니면 → retry (③~⑧ 은 커스텀 리스트의 다음 항목 판정)
+  #  ③ 다음 항목 토큰이 있는데 해석 실패 'next-invalid' → exit - 다음 판 입장 방식을 모름(필드에서 연 선택 화면은 어느 방식으로도 시작됩니다)
+  #  ④ 다음 판 입장 방식 미정 'next-unknown' → exit - GUI 경계 신호 'mixed'(랜덤 진행 바퀴 끝 판 · 입장 방식이 섞인 리스트: 바퀴 끝 NEXT 는 이번 순열의
+  #     첫 칸이고 다음 바퀴 순열은 아직 없음 - 사용자 결정 2026-10-26 '랜덤 + 섞인 리스트 바퀴 경계 = 필드')
+  #  ⑤ 다음 항목과 입장 방식(방식 · 매칭)이 다름(다음 항목 없음 포함) 'entry-change' → exit - 경계보다 먼저입니다(순차 진행 바퀴 끝 NEXT 는 다음 바퀴 첫 칸
+  #     그대로라 방식이 다르면 여기서 받음)
+  #  ⑥ 바퀴 경계 'boundary' → other
+  #  ⑦ 다음 항목과 던전·난이도 중 하나라도 다름 'item-change' → other - '다시 하기' 는 같은 던전·같은 조건으로 들어갑니다.
+  #     같은 입장 방식의 다른 던전·난이도가 던전 안 선택 화면에서 바뀌는지는 실기 1-M(②③⑤⑥)이 봅니다(막히면 ⑥ · ⑦ 을 옛 나가기로 - 결정 갈래 · 원인 조각 · 끝말 ·
+  #     회귀를 함께 고치는 보완 명세, 사용자 결정 2026-10-26 ④. 실기 결과가 나오면 이 줄을 닫습니다)
+  #  ⑧ 다음 항목 소유자가 빈 값·해석 실패 'next-owner-empty' → other - 이어받을 항목을 만들 수 없음(GUI 는 바퀴 끝 판에서 비우고 경계 신호를 함께 넣어 ⑥ 이
+  #     먼저 받습니다 - 사용자 결정 U-⑤-2 (가). 바퀴 중간의 빈 값은 GUI 가 만들지 못한 판)
+  #  ⑨ 그 밖 → retry
+  if ($SafeStopRequested) { return @{ Action = 'exit'; Reason = 'safe-stop' } }
+  if ($FinishOnly) { return @{ Action = 'exit'; Reason = 'finish-only' } }
+  if ($LastRun) { return @{ Action = 'exit'; Reason = 'last-run' } }
+  if ($TimeVerdict -eq 'last') { return @{ Action = 'exit'; Reason = 'time' } }
+  if (-not $CustomMode) { return @{ Action = 'retry'; Reason = '' } }
+  if ($NextGiven -and ($null -eq $NextItem)) { return @{ Action = 'exit'; Reason = 'next-invalid' } }
+  if ($NextEntryUnknown) { return @{ Action = 'exit'; Reason = 'next-unknown' } }
+  $sameEntry = ($null -ne $CurrentItem) -and ($null -ne $NextItem) -and
+    ([string]$CurrentItem.Mode -ceq [string]$NextItem.Mode) -and ([string]$CurrentItem.Matching -ceq [string]$NextItem.Matching)
+  if (-not $sameEntry) { return @{ Action = 'exit'; Reason = 'entry-change' } }
+  if ($NextBoundary) { return @{ Action = 'other'; Reason = 'boundary' } }
+  $sameItem = ([string]$CurrentItem.Dungeon -ceq [string]$NextItem.Dungeon) -and ([string]$CurrentItem.Difficulty -ceq [string]$NextItem.Difficulty)
+  if (-not $sameItem) { return @{ Action = 'other'; Reason = 'item-change' } }
+  if (-not $NextOwnerGiven) { return @{ Action = 'other'; Reason = 'next-owner-empty' } }
+  return @{ Action = 'retry'; Reason = '' }
+}
+
+function Resolve-AbyssOtherWaitScreen {
+  param(
+    [string]$BottomText,         # 하단 판독문 (짝 찾기 Find-AbyssRewardButtonPair 의 Text - 같은 영역·배율·엔진의 한 판독)
+    [string]$PanelKind,          # Get-AbyssPanelKind ('ready' / 'matching' / 'none')
+    [bool]$SelectionVisible,     # Test-AbyssSelectionScreen (패널·접힌 패널이면 이미 거짓)
+    [bool]$HudVisible,
+    [bool]$InDungeonQuest,       # 추적기 던전명 (HUD 일 때만 읽음 - 거짓이면 필드 모양)
+    [bool]$MenuVisible = $false  # ESC 메뉴 - 앞 순위가 모두 음성인 회전에만 읽어도 됩니다
+  )
+
+  # '다른 던전 가기' 대기 회전의 화면 분류 (순수 판정 - 진리표 대상, 구현 명세 ⑤b1 1.3 · 설계 v11 R6 2.6). 화면을 읽지 않고 같은 회전의 판독값만 받습니다.
+  # 위 조건이 이깁니다 - 순서가 곧 계약입니다:
+  #  1 패널(준비·재매칭) 또는 하단 접힌 패널 서명 → 'panel' - 패널 위 '나가기' 는 매칭 취소·패널 접기·던전 퇴장이라 누르지 않습니다
+  #  2 선택 화면 → 'selection' - 3버튼보다 먼저입니다: 둘이 함께 읽히는 회전에서 3버튼이 이기면 재클릭이 선택 화면 오버레이 위를 누릅니다(규칙 4).
+  #     이어받기 시작 분류(Resolve-AbyssHandoffStartScreen)는 3버튼이 선택 화면보다 먼저입니다 - 결론의 쓰임이 달라 순서가 반대입니다
+  #  3 3버튼 보상 서명 + HUD 없음 → 'reward3' - '다른 던전 가기' 클릭이 열리는 유일한 분류
+  #  4 HUD + 추적기 던전명 → 'inside' (표본 - 2연속은 부르는 루프가 셈)
+  #  5 HUD(추적기 던전명 없음) → 'field' - 필드 모양일 뿐 이 대기의 결론이 아닙니다
+  #  6 ESC 메뉴 → 'menu' (HUD 가 보이는 회전은 4·5 가 먼저 가져감)
+  #  7 그 밖 → 'unknown' (로딩·검은 화면·S('화면을 터치')·팝업 - 구현 명세 ⑤b1 1.3)
+  # 부르는 쪽 계약: 세 [bool] 판독 인자(SelectionVisible · HudVisible · InDungeonQuest)는 같은 유효 회전의 판독값을 이름 그대로 넘깁니다 - 빠뜨리거나 이름이 틀리면 오류 없이 거짓입니다(정적 P5b-8)
+  if (($PanelKind -ne 'none') -or (Test-AbyssEntryWaitingText -Text $BottomText)) { return 'panel' }
+  if ($SelectionVisible) { return 'selection' }
+  if ((Test-AbyssRewardText -Text $BottomText) -and (-not $HudVisible)) { return 'reward3' }
+  if ($HudVisible -and $InDungeonQuest) { return 'inside' }
+  if ($HudVisible) { return 'field' }
+  if ($MenuVisible) { return 'menu' }
+  return 'unknown'
+}
+
+# 보상 화면 기록 확인 - 결정 뒤 완료 마커·클리어 기록 결과로 갈래를 고르는 순수부(구현 명세 ⑤b2 1.4). 위 분류기 묶음과 같은 모양이라 이 자리에 둡니다
+function Resolve-AbyssRewardBranch {
+  # 보상 결정(retry / other / exit) 뒤 기록 확인 (순수 판정 - 진리표 대상, 구현 명세 ⑤b2 1.4 · ⑤b6 1.4 · 설계 v10 2.1(1)·B0·6.1 기록 시점 표 · v11 R6 1.1·2.7). 위 조건이
+  # 이깁니다 - 순서가 곧 계약입니다:
+  #  0 결정이 exit(멈출 때 · 다음 판 입장 방식이 다르거나 모를 때 - 구현 명세 ⑤b6 · 사용자 결정 2026-10-26) → exit - 기록 결과와 무관하게 옛 나가기입니다(필드로
+  #    나감 - 안전 중지는 필드 확정에서, 그 밖은 필드에서 연 선택 화면까지)
+  #  1 결정이 retry 가 아님(other) → other - 기록 결과와 무관합니다(other 의 끝은 선택 화면 exit 0 이라 계상이 종료 코드로 서고, 기록 실패의 몫은 코드 4 끝의
+  #    계상뿐 - 설계 v11 R6 2.7 '저장 실패 판 수용')
+  #  2 완료 마커를 못 씀(커스텀 - 소유자 정보 없음·쓰기 20회 실패) → other (설계 v10 2.1(1) ① 'retry 금지' - 갈래는 범위 기-18)
+  #  3 클리어 기록을 못 씀(사용 중·손상·기록 실패·소유자 해석 실패) → legacy-exit = 폴백 ② 옛 나가기만(지금 본류 끝 줄 - 설계 v10 B0 · 6.1 'cleared 실패 → retry 금지 → 2.6 ②')
+  #  4 그 밖 retry
+  #  -MarkerOk 는 커스텀이 아니면 참(마커 없음), 빈 마커 경로(GUI 가 이번 회차 마커를 일부러 비움)도 참입니다(구현 명세 ① A9). -ClearedOk = 기록 태그 changed
+  param([string]$Action, [bool]$MarkerOk, [bool]$ClearedOk)
+  if ($Action -eq 'exit') { return 'exit' }
+  if ($Action -ne 'retry') { return 'other' }
+  if (-not $MarkerOk) { return 'other' }
+  if (-not $ClearedOk) { return 'legacy-exit' }
+  return 'retry'
 }
 
 function Test-AbyssPanelOverRewardText {
@@ -14460,6 +14732,7 @@ function Test-AbyssSelectionProvenance {
   #    그 단계 안(양성 판독 전)의 같은 회전 실패는 허용합니다 - 양성은 마지막 실패 뒤 새로 찍은 성공 캡처 셋(증거 → 패널 배제 → 접힌 패널 배제)이라
   #    무효 표본이 아닙니다. 발급부터 그 단계 직전까지의 실패는 모두 거부합니다 (캡처 공백 중 게임 상태는 멈추지 않음 - 필드 토큰 3차 리뷰와 같은 근거)
   #  - YieldMs: 판정 시점의 양보 누적 - 발급 뒤 어디서든(게이트 밖 헬퍼 안 양보 포함) 양보가 있었으면 거부 (양보 중 재입장·오버레이 가능 - 09-22 01:48)
+  # '다른 던전 가기' 대기(Wait-AbyssOtherSelection)도 이 함수를 씁니다 - 출처 상태는 루프마다 지역 변수이고 서로 넘기지 않습니다(설계 v11 R6 2.8)
   return ($Expected -and ($ExpectedSerial -eq $ReferenceSerial) -and ($ExpectedYieldMs -eq $YieldMs))
 }
 
@@ -14472,7 +14745,8 @@ function Return-ToAbyssSelection {
     [int]$SafeStopExitCode = 0,
     # 던전을 나온 판의 열쇠 항목을 닫을 때 남길 사유 (구현 명세 ② 2.3 · 설계 R2 3.3 ①): 'left'(거점 퇴장 - 'abandoned-death-exit')와 정리 전용
     # ('cleanup-only') 출구만 넘깁니다. 넘기면 이 루프가 던전 밖 확정으로 끝나는 두 출구(출처 완료 블록 · 필드 확정 뒤 안전 중지 블록) 직전에 닫고,
-    # 빈 값이면 닫지 않습니다 - ESC 메뉴·필드 시작(입장 전)과 정상 판(cleared 가 이미 닫음)은 빈 값입니다
+    # 빈 값이면 닫지 않습니다 - ESC 메뉴·필드 시작(입장 전)과 정상 판(cleared 가 이미 닫음)은 빈 값입니다. 'abandoned-death-exit' 인데 안전 중지 코드가 10 이
+    # 아니면(마무리 실행의 'left' - 코드 4) 두 출구의 안전 중지 [완료] 문구를 '거점 퇴장한 판은 회차로 세지 않고 …' 로 적습니다(명세 리뷰 2 RV-9)
     [string]$LeaveEntryReason = ''
   )
 
@@ -14540,6 +14814,9 @@ function Return-ToAbyssSelection {
         Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
         if ($SafeStopExitCode -eq 10) {
           Write-RunLog '[완료] 안전 중지 예약 확인 - 선택 화면 복귀 완료, 준비/정리 실행이라 회차로 세지 않고 마칩니다'
+        } elseif ($LeaveEntryReason -eq 'abandoned-death-exit') {
+          # 마무리 실행의 'left'(거점 퇴장 - 코드 4, 구현 명세 ⑤b5 W3): 클리어하지 않은 판이라 회차로 세지 않습니다(GUI 계상 0 - 명세 리뷰 2 RV-9)
+          Write-RunLog '[완료] 안전 중지 예약 확인 - 거점 퇴장한 판은 회차로 세지 않고 선택 화면 복귀 완료 시점에서 마칩니다'
         } else {
           Write-RunLog '[완료] 안전 중지 예약 확인 - 선택 화면 복귀 완료 시점에서 회차를 마칩니다'
         }
@@ -14847,6 +15124,9 @@ function Return-ToAbyssSelection {
         Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
         if ($SafeStopExitCode -eq 10) {
           Write-RunLog '[완료] 안전 중지 예약 확인 - 준비/정리 실행 중이라 회차로 세지 않고 마칩니다'
+        } elseif ($LeaveEntryReason -eq 'abandoned-death-exit') {
+          # 마무리 실행의 'left'(거점 퇴장 - 코드 4): 위 출처 완료 출구와 같은 이유(명세 리뷰 2 RV-9)
+          Write-RunLog '[완료] 안전 중지 예약 확인 - 거점 퇴장한 판은 회차로 세지 않고 던전 밖(HUD) 확인 시점에서 마칩니다'
         } else {
           Write-RunLog '[완료] 안전 중지 예약 확인 - 던전 밖(HUD) 확인 시점에서 회차를 마칩니다'
         }
@@ -15054,8 +15334,8 @@ function Invoke-AbyssHandoffStart {
   #    이벤트 화면 정리를 한 번 하고(굶김·복구 회전 제외 - 파티원 관측 루프와 같은 규칙), 결론 없이 조정 $timeoutPartyMatch 가 지나면 미결 마감 코드 4
   #    입니다(사유 끝 ' (start-unknown)' - 안·밖 불명이라 넘긴 기록을 보존하는 재전달 표지)
   #  - B2 단계: 준비·재매칭 패널·권장 인원 팝업·접힌 준비 패널의 첫 표본에서 들어갑니다(own 은 그 순간 받은 항목 닫기를 시도하고 - 성공·실패와 무관하게 -
-  #    정리 전용 표지를 비움). 결론은 입장 2연속뿐이고(own 은 새 자기 항목 = ownFreshEntry, next 는 같은 항목) 그 밖의 화면은 누르지 않고 관측합니다. 마감은
-  #    첫 패널류 표본부터 조정 $timeoutPartyMatch 이고, 미결 마감·이벤트 정리는 보지 않습니다(시작 패널 입장 대기와 같은 결론 집합)
+  #    정리 전용 표지를 비움). B2 단계 = 재입장 대기 Wait-AbyssReentry(보고 끔 - 결론은 입장 2연속뿐, 그 밖의 화면은 누르지 않고 관측. own 은 새 자기 항목 =
+  #    ownFreshEntry, next 는 같은 항목). 마감은 첫 패널류 표본부터 조정 $timeoutPartyMatch 이고, 미결 마감·이벤트 정리는 보지 않습니다(시작 패널 입장 대기와 같은 결론 집합)
   #  - 정지 출구: 선택 화면·ESC 메뉴·상세 화면 1회 → Stop-AbyssHandoffOverlay(재전달 표지) / next 3버튼·S · B2 마감 · ownFreshEntry 생성 실패 → 사유 끝
   #    ' (release)'(그 항목의 판이 끝났다고 워커가 정한 정지 - GUI 가 넘긴 기록을 닫아 다음 시작이 같은 항목을 받지 않음)
   # 회전 순서 (구현 명세 ② 2.5 회전 골격 = 시작 패널 입장 대기 + 파티원 관측 루프의 스윕 굶김·분류): 서두(메타 비움·필드 연속 이어받기) → ① 동결 → ② 조작
@@ -15070,8 +15350,6 @@ function Invoke-AbyssHandoffStart {
   $ownRole = ($script:handoff.Role -eq 'own')
   # --- 선분기 지역 상태 ---
   $pendingClock = New-AbyssMemberClock -LimitSeconds $timeoutPartyMatch   # 미결 마감 - 선분기 시작부터 조정 매칭 대기 (B2 단계에 들어가면 보지 않음)
-  $b2Stage = $false                  # B2 단계 - 패널류 첫 표본부터 (입장 2연속·B2 마감만 봄)
-  $b2Clock = $null                   # B2 마감 - 첫 패널류 표본부터 조정 매칭 대기
   $b2Label = ''                      # B2 단계를 연 화면의 라벨 (시작 줄·마감 줄)
   $unknownClock = $null              # 알 수 없음 연속 시계 ($memberUnknownOverlaySeconds → 이벤트 화면 정리 1회)
   $overlayTried = $false
@@ -15160,8 +15438,8 @@ function Invoke-AbyssHandoffStart {
           $insideStreak = 0
           $insideSince = $null
         }
-        if ((-not $b2Stage) -and ($screen -eq 'field')) {
-          # 필드 모양 표본 - 직전 회전이 필드 확정 대기로 끝났을 때만 앞 표본에 이어 셉니다 (B2 단계는 필드 확정을 결론으로 쓰지 않음)
+        if ($screen -eq 'field') {
+          # 필드 모양 표본 - 직전 회전이 필드 확정 대기로 끝났을 때만 앞 표본에 이어 셉니다
           $settlePrevious = $(if ($settleAlive) { $settleState } else { $null })
           $settleState = Step-AbyssFieldSettle -State $settlePrevious -IsFieldSample $true -TurnStart $turnStart -SettleSeconds $memberFieldSettleSeconds
           if (-not $settleState.Confirmed) { $settleNext = $true }
@@ -15185,109 +15463,97 @@ function Invoke-AbyssHandoffStart {
           $overlayTried = $false
         }
         # ⑨ 결론·출구 - 결론이 같은 회전의 마감보다 먼저입니다
-        if ($b2Stage) {
-          # B2 단계 - 결론은 입장 2연속뿐입니다. 그 밖의 화면(패널·팝업·접힌 패널·S·3버튼·선택 화면·메뉴·상세·필드 모양·알 수 없음)은 누르지 않고 관측을
-          # 잇습니다(권장 인원 팝업의 도전 클릭은 뒤 단위)
-          if ($insideStreak -ge 2) {
-            $entryUnknown = $runUnknown; $entryField = $runField; $entryBreaks = $runBreaks
-            $entryFieldPart = (@($runFieldSince) | Where-Object { $null -ne $_ } | ForEach-Object { ", 첫 필드 모양 표본부터 던전 안 $([Math]::Round(($insideSince - $_).TotalSeconds, 1))초" }) -join ''
-            Write-RunLog "[어비스] 입장 계측 - 던전 안 2연속 앞 로딩(알 수 없음) ${entryUnknown}표본, 필드 모양 ${entryField}표본${entryFieldPart}, 관측 끊김 ${entryBreaks}회 (필드 확정 폭 ${memberFieldSettleSeconds}초 계측 - 판정에 쓰지 않음)"
-            if ($ownRole) {
-              # ownFreshEntry - 받은 항목의 판은 패널을 본 순간 끝났고 이 입장은 자동화가 B2 로 확인한 새 판입니다. 새 자기 항목(index 0 · 새 nonce · 정리 전용
-              # 아님)을 남기고 그 항목이 열쇠가 됩니다 - 같은 저장이 받은 항목과 같은 소유자의 남은 열린 항목을 닫습니다(닫기 실패분 포함). 남기지 못하면 키를
-              # 보내지 않고 정지 - 받은 항목의 판은 끝났으므로 놓아줌 표지로 GUI 가 그 기록을 닫게 합니다
-              $enteredTag = Add-AbyssJournalEnteredEntry -CleanupOnly $false
-              if ($enteredTag -ne 'changed') {
-                Write-RunLog '[완료] 입장 기록 실패 - 재화 중복 소모를 막기 위해 입장 직후 키를 보내지 않고 정지합니다 (캐릭터는 던전 안) (release)'
-                exit 4
-              }
-              $script:handoff.FreshEntry = $true
-              Write-RunLog '[어비스] 이어받은 항목 없이 새 입장 확인 - 새 판으로 진행합니다 (ownFreshEntry)'
-            }
-            $script:handoff.StartScreen = 'inside'
-            return
+        if (@('popup', 'ready', 'matching', 'entry-waiting') -contains $screen) {
+          # 패널·팝업·접힌 패널 첫 표본 → B2 단계(취소·나가기·준비·도전 클릭 없이 입장을 기다림). own 은 받은 항목 닫기를 시도하고 - 성공·실패와 무관하게 -
+          # 정리 전용 표지를 비웁니다(그 뒤의 입장은 자동화가 확인한 새 판). next 는 닫지 않습니다(그 항목으로 재입장을 기다림)
+          $b2Label = $(if ($screen -eq 'popup') { '권장 인원 팝업' } elseif ($screen -eq 'matching') { '재매칭 패널' } elseif ($screen -eq 'ready') { '준비 패널' } else { '접힌 준비 패널' })
+          if ($ownRole) {
+            Close-AbyssOwnEntryBeforeEntry -Screen $screen
+            $script:handoff.CleanupOnly = $false
           }
-        } else {
-          if (@('popup', 'ready', 'matching', 'entry-waiting') -contains $screen) {
-            # 패널·팝업·접힌 패널 첫 표본 → B2 단계(취소·나가기·준비·도전 클릭 없이 입장을 기다림). own 은 받은 항목 닫기를 시도하고 - 성공·실패와 무관하게 -
-            # 정리 전용 표지를 비웁니다(그 뒤의 입장은 자동화가 확인한 새 판). next 는 닫지 않습니다(그 항목으로 재입장을 기다림)
-            $b2Label = $(if ($screen -eq 'popup') { '권장 인원 팝업' } elseif ($screen -eq 'matching') { '재매칭 패널' } elseif ($screen -eq 'ready') { '준비 패널' } else { '접힌 준비 패널' })
-            if ($ownRole) {
-              Close-AbyssOwnEntryBeforeEntry -Screen $screen
-              $script:handoff.CleanupOnly = $false
-            }
-            Write-RunLog "[어비스] 이어받기 시작: ${b2Label} 감지 - 입장을 기다립니다 (최대 ${timeoutPartyMatch}초)"
-            $b2Stage = $true
-            $b2Clock = New-AbyssMemberClock -LimitSeconds $timeoutPartyMatch
-          } elseif (($screen -eq 'inside') -and ($insideStreak -ge 2)) {
-            # 던전 안 2연속 → 이어받기 (own = 받은 항목의 판 · next = 재입장한 판). 입장 직후 키는 본류 키 지점이 받은 항목의 인덱스부터 보냅니다
-            $startUnknown = $runUnknown; $startField = $runField; $startBreaks = $runBreaks
-            $startFieldPart = (@($runFieldSince) | Where-Object { $null -ne $_ } | ForEach-Object { ", 첫 필드 모양 표본부터 던전 안 $([Math]::Round(($insideSince - $_).TotalSeconds, 1))초" }) -join ''
-            Write-RunLog "[어비스] 이어받기 시작 계측 - 던전 안 2연속 앞 알 수 없음 ${startUnknown}표본, 필드 모양 ${startField}표본${startFieldPart}, 관측 끊김 ${startBreaks}회 (판정에 쓰지 않음)"
-            $script:handoff.StartScreen = 'inside'
-            return
-          } elseif (($screen -eq 'prompt') -or ($screen -eq 'reward3')) {
-            if ($ownRole) {
-              # own 3버튼 보상·S → 본류 보상·S 분기가 그 판을 마무리합니다 (마커 + 클리어 완료 기록 + 코드 0 - 구현 명세 ② 2.6)
-              $script:handoff.StartScreen = $screen
-              return
-            }
-            # next 3버튼 보상·S → 재입장 확인이 틀렸을 수 있어(재입장한 판이 아닌 앞 판의 보상일 수 있음) 마무리·기록 없이 정지합니다. 그 항목의 판은 끝났다고
-            # 보고 놓아줌 표지로 GUI 가 넘긴 기록을 닫게 합니다 - 다음 시작은 Role none (커스텀 = 정리 전용 뒤 같은 항목 / 비커스텀 = 이 보상 화면 마무리)
-            Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 보상 화면' -CaptureOnly
-            if ($script:customMode) {
-              Write-RunLog '[완료] 이어받은 판의 시작 화면이 보상 화면입니다 - 재입장 확인이 틀렸을 수 있어 계상 없이 정지합니다 (이 판은 계상되지 않으며, 다음 시작은 정리 전용(코드 10) 뒤 같은 항목을 다시 돕니다) (release)'
-            } else {
-              Write-RunLog '[완료] 이어받은 판의 시작 화면이 보상 화면입니다 - 재입장 확인이 틀렸을 수 있어 계상 없이 정지합니다 (다음 시작이 이 보상 화면을 마무리하며 그때 1회 계상합니다) (release)'
-            }
+          Write-RunLog "[어비스] 이어받기 시작: ${b2Label} 감지 - 입장을 기다립니다 (최대 ${timeoutPartyMatch}초)"
+          # B2 단계 = 재입장 대기(설계 v11 R5 2.5 - 보고 끔): 결론은 입장 2연속('entered' - 입장 계측 줄은 대기 함수가 씀)과 첫 패널류 표본부터 조정
+          # $timeoutPartyMatch 마감('timeout')뿐이고 미결 마감·이벤트 정리는 보지 않습니다. 대기 판독 중 창 좌표 실패는 대기 함수의 제한 catch 가 동결로 받습니다
+          $b2 = Wait-AbyssReentry -Game $Game -LimitSeconds $timeoutPartyMatch -Context '이어받기 시작'
+          if ($b2.Result -ne 'entered') {
+            Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 입장 대기 초과' -CaptureOnly
+            Write-RunLog "[완료] ${b2Label} 에서 시작해 ${timeoutPartyMatch}초 안에 입장을 확인하지 못했습니다 - 취소·나가기 없이 정지합니다. 화면을 확인하고 다시 시작해 주세요. (release)"
             exit 4
-          } elseif (($screen -eq 'selection') -or ($screen -eq 'menu') -or ($screen -eq 'detail')) {
-            # 선택 화면·ESC 메뉴·상세 화면 1회 → 던전 안에 겹친 화면일 수 있어 안·밖을 모릅니다. 누르지도 기록하지도 않고 정지합니다(넘긴 기록 보존)
-            Stop-AbyssHandoffOverlay -Game $Game -Kind $screen
-          } elseif (($screen -eq 'field') -and $settleState.Confirmed) {
-            # 필드 확정(W) → 던전 밖. own 은 받은 항목 닫기를 시도하고 - 성공·실패와 무관하게 - 정리 전용 표지를 비웁니다. 본류 필드 분기가 선택 화면으로
-            # 복귀해 준비 실행(코드 10)으로 끝나고, 새 판은 다음 기동(Role none)이 들어갑니다
-            if ($ownRole) {
-              Close-AbyssOwnEntryBeforeEntry -Screen 'field'
-              $script:handoff.CleanupOnly = $false
+          }
+          if ($ownRole) {
+            # ownFreshEntry - 받은 항목의 판은 패널을 본 순간 끝났고 이 입장은 자동화가 B2 로 확인한 새 판입니다. 새 자기 항목(index 0 · 새 nonce · 정리 전용
+            # 아님)을 남기고 그 항목이 열쇠가 됩니다 - 같은 저장이 받은 항목과 같은 소유자의 남은 열린 항목을 닫습니다(닫기 실패분 포함). 남기지 못하면 키를
+            # 보내지 않고 정지 - 받은 항목의 판은 끝났으므로 놓아줌 표지로 GUI 가 그 기록을 닫게 합니다
+            $enteredTag = Add-AbyssJournalEnteredEntry -CleanupOnly $false
+            if ($enteredTag -ne 'changed') {
+              Write-RunLog '[완료] 입장 기록 실패 - 재화 중복 소모를 막기 위해 입장 직후 키를 보내지 않고 정지합니다 (캐릭터는 던전 안) (release)'
+              exit 4
             }
-            $settleSpan = [Math]::Round(($turnStart - [datetime]$settleState.Since).TotalSeconds, 1)
-            $settleCount = [int]$settleState.Count
-            Write-RunLog "[어비스] 이어받기 시작: 던전 밖(HUD) 확인 - 필드 모양이 ${memberFieldSettleSeconds}초 이어졌습니다 (첫 표본부터 ${settleSpan}초, ${settleCount}표본)"
-            $script:handoff.StartScreen = 'field'
+            $script:handoff.FreshEntry = $true
+            Write-RunLog '[어비스] 이어받은 항목 없이 새 입장 확인 - 새 판으로 진행합니다 (ownFreshEntry)'
+          }
+          $script:handoff.StartScreen = 'inside'
+          return
+        } elseif (($screen -eq 'inside') -and ($insideStreak -ge 2)) {
+          # 던전 안 2연속 → 이어받기 (own = 받은 항목의 판 · next = 재입장한 판). 입장 직후 키는 본류 키 지점이 받은 항목의 인덱스부터 보냅니다
+          $startUnknown = $runUnknown; $startField = $runField; $startBreaks = $runBreaks
+          $startFieldPart = (@($runFieldSince) | Where-Object { $null -ne $_ } | ForEach-Object { ", 첫 필드 모양 표본부터 던전 안 $([Math]::Round(($insideSince - $_).TotalSeconds, 1))초" }) -join ''
+          Write-RunLog "[어비스] 이어받기 시작 계측 - 던전 안 2연속 앞 알 수 없음 ${startUnknown}표본, 필드 모양 ${startField}표본${startFieldPart}, 관측 끊김 ${startBreaks}회 (판정에 쓰지 않음)"
+          $script:handoff.StartScreen = 'inside'
+          return
+        } elseif (($screen -eq 'prompt') -or ($screen -eq 'reward3')) {
+          if ($ownRole) {
+            # own 3버튼 보상·S → 본류 보상·S 분기가 그 판을 마무리합니다 (마커 + 클리어 완료 기록 + 코드 0 - 구현 명세 ② 2.6)
+            $script:handoff.StartScreen = $screen
             return
           }
-          # 확정 전 필드 모양 · 알 수 없음 · 던전 안 1표본 → 관측 지속 (기록·클릭·통과 0)
+          # next 3버튼 보상·S → 재입장 확인이 틀렸을 수 있어(재입장한 판이 아닌 앞 판의 보상일 수 있음) 마무리·기록 없이 정지합니다. 그 항목의 판은 끝났다고
+          # 보고 놓아줌 표지로 GUI 가 넘긴 기록을 닫게 합니다 - 다음 시작은 Role none (커스텀 = 정리 전용 뒤 같은 항목 / 비커스텀 = 이 보상 화면 마무리)
+          Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 보상 화면' -CaptureOnly
+          if ($script:customMode) {
+            Write-RunLog '[완료] 이어받은 판의 시작 화면이 보상 화면입니다 - 재입장 확인이 틀렸을 수 있어 계상 없이 정지합니다 (이 판은 계상되지 않으며, 다음 시작은 정리 전용(코드 10) 뒤 같은 항목을 다시 돕니다) (release)'
+          } else {
+            Write-RunLog '[완료] 이어받은 판의 시작 화면이 보상 화면입니다 - 재입장 확인이 틀렸을 수 있어 계상 없이 정지합니다 (다음 시작이 이 보상 화면을 마무리하며 그때 1회 계상합니다) (release)'
+          }
+          exit 4
+        } elseif (($screen -eq 'selection') -or ($screen -eq 'menu') -or ($screen -eq 'detail')) {
+          # 선택 화면·ESC 메뉴·상세 화면 1회 → 던전 안에 겹친 화면일 수 있어 안·밖을 모릅니다. 누르지도 기록하지도 않고 정지합니다(넘긴 기록 보존)
+          Stop-AbyssHandoffOverlay -Game $Game -Kind $screen
+        } elseif (($screen -eq 'field') -and $settleState.Confirmed) {
+          # 필드 확정(W) → 던전 밖. own 은 받은 항목 닫기를 시도하고 - 성공·실패와 무관하게 - 정리 전용 표지를 비웁니다. 본류 필드 분기가 선택 화면으로
+          # 복귀해 준비 실행(코드 10)으로 끝나고, 새 판은 다음 기동(Role none)이 들어갑니다
+          if ($ownRole) {
+            Close-AbyssOwnEntryBeforeEntry -Screen 'field'
+            $script:handoff.CleanupOnly = $false
+          }
+          $settleSpan = [Math]::Round(($turnStart - [datetime]$settleState.Since).TotalSeconds, 1)
+          $settleCount = [int]$settleState.Count
+          Write-RunLog "[어비스] 이어받기 시작: 던전 밖(HUD) 확인 - 필드 모양이 ${memberFieldSettleSeconds}초 이어졌습니다 (첫 표본부터 ${settleSpan}초, ${settleCount}표본)"
+          $script:handoff.StartScreen = 'field'
+          return
         }
+        # 확정 전 필드 모양 · 알 수 없음 · 던전 안 1표본 → 관측 지속 (기록·클릭·통과 0)
       }
     }
-    # ⑩ 마감·이벤트 정리 - 유효 표본 회전과 굶김·복구 회전이 봅니다(조작 생략·아직 캡처 실패 중인 회전은 위에서 넘어가 확정하지 않음 - 규칙 4·15). 두 마감
-    #    모두 조정 시간입니다(파티원 시계 - 양보·캡처 실패 시간 제외, 경계 -ge)
-    if ($b2Stage) {
-      if (Test-AbyssMemberClockExpired -Clock $b2Clock) {
-        Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 입장 대기 초과' -CaptureOnly
-        Write-RunLog "[완료] ${b2Label} 에서 시작해 ${timeoutPartyMatch}초 안에 입장을 확인하지 못했습니다 - 취소·나가기 없이 정지합니다. 화면을 확인하고 다시 시작해 주세요. (release)"
-        exit 4
+    # ⑩ 마감·이벤트 정리 - 유효 표본 회전과 굶김·복구 회전이 봅니다(조작 생략·아직 캡처 실패 중인 회전은 위에서 넘어가 확정하지 않음 - 규칙 4·15). 마감은
+    #    조정 시간입니다(파티원 시계 - 양보·캡처 실패 시간 제외, 경계 -ge). B2 단계의 마감은 재입장 대기 안에 있습니다
+    if (Test-AbyssMemberClockExpired -Clock $pendingClock) {
+      Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 화면 미확인' -CaptureOnly
+      if ($ownRole) {
+        Write-RunLog "[완료] 이어받은 판의 시작 화면을 ${timeoutPartyMatch}초 안에 확인하지 못해 조작 없이 정지합니다 - 던전 안이면 그 판을 마친 뒤, 던전 밖이면 필드(HUD 가 보이는 곳)에서 다시 시작해 주세요 (start-unknown)"
+      } else {
+        Write-RunLog "[완료] 이어받은 판의 시작 화면을 ${timeoutPartyMatch}초 안에 확인하지 못해 조작 없이 정지합니다 - 판을 수동으로 마치지 말고 던전 안에서 즉시 다시 시작해 주세요 (던전 밖이면 필드에서) (start-unknown)"
       }
-    } else {
-      if (Test-AbyssMemberClockExpired -Clock $pendingClock) {
-        Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 화면 미확인' -CaptureOnly
-        if ($ownRole) {
-          Write-RunLog "[완료] 이어받은 판의 시작 화면을 ${timeoutPartyMatch}초 안에 확인하지 못해 조작 없이 정지합니다 - 던전 안이면 그 판을 마친 뒤, 던전 밖이면 필드(HUD 가 보이는 곳)에서 다시 시작해 주세요 (start-unknown)"
-        } else {
-          Write-RunLog "[완료] 이어받은 판의 시작 화면을 ${timeoutPartyMatch}초 안에 확인하지 못해 조작 없이 정지합니다 - 판을 수동으로 마치지 말고 던전 안에서 즉시 다시 시작해 주세요 (던전 밖이면 필드에서) (start-unknown)"
-        }
-        exit 4
-      }
-      if ((-not $sweepStarved) -and (-not $turnRecovered) -and ($null -ne $unknownClock) -and (-not $overlayTried) -and (Test-AbyssMemberClockExpired -Clock $unknownClock)) {
-        # 알 수 없는 화면이 끊김 없이 이어짐 → 이벤트 화면 정리 1회 (Test-KnownScreen 이 참이면 아무것도 안 함). 굶김·복구 회전은 보지 않습니다 - 판독 없는
-        # 회전(스윕 팝업 위이거나 이 회전 화면을 모름)에서 이벤트 정리의 중앙·X 후보 클릭을 여는 새 경로를 만들지 않기 위해서 (규칙 8)
-        Write-RunLog "[안내] 이어받기 시작: 알 수 없는 화면이 ${memberUnknownOverlaySeconds}초 이어져 이벤트 화면 정리를 한 번 시도합니다"
-        $overlayTried = $true
-        [void](Clear-EventOverlay -Game $Game)
-        $insideStreak = 0
-        continue
-      }
+      exit 4
+    }
+    if ((-not $sweepStarved) -and (-not $turnRecovered) -and ($null -ne $unknownClock) -and (-not $overlayTried) -and (Test-AbyssMemberClockExpired -Clock $unknownClock)) {
+      # 알 수 없는 화면이 끊김 없이 이어짐 → 이벤트 화면 정리 1회 (Test-KnownScreen 이 참이면 아무것도 안 함). 굶김·복구 회전은 보지 않습니다 - 판독 없는
+      # 회전(스윕 팝업 위이거나 이 회전 화면을 모름)에서 이벤트 정리의 중앙·X 후보 클릭을 여는 새 경로를 만들지 않기 위해서 (규칙 8)
+      Write-RunLog "[안내] 이어받기 시작: 알 수 없는 화면이 ${memberUnknownOverlaySeconds}초 이어져 이벤트 화면 정리를 한 번 시도합니다"
+      $overlayTried = $true
+      [void](Clear-EventOverlay -Game $Game)
+      $insideStreak = 0
+      continue
     }
     # ⑪ 대기 - 굶김 회전은 스윕이 이미 기다렸고, 복구 회전은 2초(복구 뒤 대기가 마감을 흘림), 그 밖은 700ms(필드 확정 W 의 표본 간격)
     if ($sweepStarved) { continue }
@@ -15366,7 +15632,7 @@ function Wait-AbyssReentry {
   #     (클릭 직전 새 판독의 팝업 서명 + '나가기' 없음 + 조정 3초 재도전 - HEAD 의 3초 Space 반복을 대신함)
   #  ⑥ 창 좌표 throw: 창 좌표를 못 읽은 캡처 실패(원인 gameWindowGone) 중의 두 문구 - 공용 판독(캡처 실패를 등록한 뒤 던짐)과 스윕 예비 좌표
   #     클릭(방어선 - 스윕의 주간 리셋 경로는 캡처 실패 게이트(구현 단위 ④′)가 클릭 전에 끊음) - 만 catch 하나에서 정확 일치로 받아 다음 회전 동결로 보냅니다. 그 밖의 예외는 그대로 다시 던집니다 -
-  #     이어받기 선분기·시작 패널 대기 등 기존 루프는 이 throw 를 받지 않습니다(설계 v11 R5 3.7 · 구현 명세 ④ B-4)
+  #     이어받기 선분기 자신의 판독(B2 단계 앞)·시작 패널 대기 등 기존 루프는 받지 않습니다 - 선분기 B2 단계는 구현 단위 ⑤a 부터 이 함수라 받습니다(설계 v11 R5 3.7 · 구현 명세 ④ B-4)
   $reentryClock = $(if ($null -ne $Clock) { $Clock } else { New-AbyssMemberClock -LimitSeconds $LimitSeconds })
   $quietClock = New-AbyssMemberClock -LimitSeconds $abyssReclickQuietSeconds   # 보고와 무관하게 만듦 - 순수 판정 입력·3버튼·첫 유효 회전 전 유예가 봄 (구현 명세 ④ J6)
   $insideGraceClock = New-AbyssMemberClock -LimitSeconds $abyssReclickQuietSeconds -Paused   # 던전 안 유예 시계 - 정지로 만들고 처음 미루는 회전(첫 유예 · 조작 양보가 연속을 끊은 뒤 새 표본 전 회전)에서 진행 (구현 명세 ④ J1·J29)
@@ -15535,6 +15801,526 @@ function Wait-AbyssReentry {
     Start-Sleep -Milliseconds 700
   }
   return @{ Result = $result; LastKind = $lastKind; PanelSeen = $panelObserved }
+}
+
+function Wait-AbyssOtherSelection {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$Context = "'다른 던전 가기' 대기"   # 양보 안내 문맥 (Wait-UserYieldEnd)
+  )
+
+  # '다른 던전 가기' 대기 (구현 명세 ⑤b3 1.2 · 설계 v11 R6 2절 · R5 2.6). 머리 주석 다섯:
+  #  ① 회전 순서는 Wait-AbyssReentry 와 같은 골격입니다 - 서두(메타·이 회전 판독값 비움) → ① 동결 → ② 조작 양보 → ③ 탐침 복구 뒤 → ④ 팝업 스윕 → ⑤ 판독
+  #     (짝(하단 판독문 겸함) → HUD → (HUD 일 때) 추적기 → 선택 화면 → 패널 - 패널이 클릭 앞 마지막 판독) → ⑥ 간접 양보 → 선택 화면 양성(⑦ 앞 예외) → ⑦ 유효성
+  #     → ⑧ 분류 → ⑨ 결론(둘 다 같은 회전의 마감보다 먼저) → ⑩ 마감 → ⑪ 클릭(분류 'reward3' · 같은 판독의 '다른 던전 가기' 점) → ⑫ 대기(굶김 0 · 복구 2초 · 짝 재판독 1초 · 그 밖 700ms)
+  #  ② 출처(설계 v11 R6 2.2~2.4 · 사용자 결정 D7): 발급은 클릭 전송 확인 직후 한 곳, 확인 창(전송 뒤 2초 + 1초×6)의 비선택 판독만 출처를 유지하고 그 밖의
+  #     비선택 회전·조작 양보·캡처 실패·스윕 참은 모두 폐기합니다. 선택 화면 양성만으로는 완료가 아닙니다 - 이 선택 화면은 던전 안 보상 화면 위 오버레이입니다
+  #  ③ 결과 @{ Result; Sends; LastKind } - 'confirmed' / 'no-pair'(전송 0 · 짝 없음 2회) / 'reward'(전송 2 뒤 3버튼 · 전송 뒤 짝 없음 2회) / 'skipped'(커서
+  #     미확인 3회) / 'inside'(던전 안 2연속) / 'unconfirmed'(조정 마감). 소비·문구·exit·폴백은 부르는 쪽(Complete-AbyssOtherSelection)
+  #  ④ 마감 = 파티원 시계 하나($timeoutAbyssSelect) - 진입부터 세고 전송마다 그 전송부터 다시 셉니다(양보·캡처 실패 차분만 더함, 되돌림 없음)
+  #  ⑤ 안전 중지 예약(규칙 15 안전 확인이 캡처 실패 120초 뒤 소비하는 것만 예외 - 코드 4)·지정 시각·journal·이벤트 정리·닫기(X) 후보·게임 키 입력은 직접 보지도 쓰지도 않습니다. 창 좌표 throw 는 두 문구만 try 마다 catch 하나에서 정확 일치로 받습니다
+  $selectClock = New-AbyssMemberClock -LimitSeconds $timeoutAbyssSelect
+  $otherSends = 0
+  $cursorMisses = 0
+  $pairMisses = 0
+  $otherExpected = $false
+  $otherExpectedSerial = 0
+  $otherExpectedYieldMs = [double]0
+  $otherUnprovenLogged = $false
+  $insideStreak = 0
+  $lastKind = ''
+  $sweepStreak = 0
+  $probeRecovered = $false
+  while ($true) {
+    # 서두 - 규칙 4: 직전 회전 클릭의 생략 메타와 직전 회전의 판독값을 비웁니다(복구 회전이 옛 분류·옛 점으로 누르지 않게)
+    $turnSerial = $script:captureFailSerial
+    $script:lastClickSkipReason = ''
+    $turnYieldMs = [double]$script:userYieldTotalMs
+    $sweepStarved = $false
+    $turnRecovered = $false
+    $pairRecheck = $false
+    $screen = ''
+    $pairRead = $null
+    # ① 동결 (규칙 15) - 출처 폐기(캡처가 끊긴 사이 화면이 바뀌었을 수 있음). 마감은 되돌리지 않습니다(시계가 캡처 실패 차분을 더함). 던전 안 연속 유지
+    if ($script:screenCaptureFailing) {
+      $otherExpected = $false
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+      $probeRecovered = -not $script:screenCaptureFailing
+      continue
+    }
+    # ② 조작 양보 (규칙 4) - 시간 상한 없음. 양보 중 재입장·오버레이가 가능해 출처를 폐기하고 던전 안 연속을 끊습니다
+    if (Test-UserRecentlyActive) {
+      $otherExpected = $false
+      $insideStreak = 0
+      Wait-UserYieldEnd -Game $Game -Context $Context
+      continue
+    }
+    if ($probeRecovered) {
+      # ③ 탐침 복구 뒤 회전 - 스윕·판독 없이 마감만 보고 2초 뒤 다음 회전
+      $probeRecovered = $false
+      $turnRecovered = $true
+    }
+    try {
+      # ④ 팝업 스윕 (순위 1 - 판독 전 커서를 창 밖으로 뺌). 참이면 출처 폐기(팝업 처리 클릭) · 던전 안 연속 끊김 · 생략 사유로 가름
+      if ((-not $turnRecovered) -and (Invoke-PurchasePopupSweep -Game $Game)) {
+        $otherExpected = $false
+        $sweepTurn = Resolve-AbyssMemberSweepTurn -CaptureFailingNow $script:screenCaptureFailing -CaptureFailedInTurn ($script:captureFailSerial -ne $turnSerial) `
+          -Performed $script:lastClickPerformed -SkipReason $script:lastClickSkipReason -Streak $sweepStreak -Limit $memberSweepStreakLimit
+        $sweepStreak = [int]$sweepTurn.Streak
+        $insideStreak = 0
+        if ($sweepTurn.Action -eq 'freeze' -or $sweepTurn.Action -eq 'yield' -or $sweepTurn.Action -eq 'counted') {
+          continue
+        }
+        $sweepStarved = ($sweepTurn.Action -eq 'starved')
+        $turnRecovered = ($sweepTurn.Action -eq 'recovered')
+      }
+      # ⑤ 판독 (순서 고정 - 짝이 클릭 점과 하단 판독문을, 패널이 클릭 앞 마지막 게이트를 줍니다. 메뉴는 읽지 않습니다 - 'menu' 와 'unknown' 은 같은 처리)
+      if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+        $pairRead = Find-AbyssRewardButtonPair -Game $Game
+        $hudNow = Test-HomeEndEscHud -Game $Game
+        $questNow = $false
+        if ($hudNow) { $questNow = Test-InDungeonQuest -Game $Game }
+        $selectionNow = Test-AbyssSelectionScreen -Game $Game
+        $panelKind = Get-AbyssPanelKind -Game $Game
+      }
+    } catch {
+      # 창 좌표 throw 제한 catch - 캡처 실패(원인 gameWindowGone) 중의 두 문구(공용 판독 · 스윕 예비 좌표 클릭)만 정확 일치로 받습니다(아래 ⑦ 이 다음 회전 동결로 보냄)
+      if (-not ($script:screenCaptureFailing -and ($script:captureFailCause -eq 'gameWindowGone') -and (@('OCR용 게임 창 좌표를 읽지 못했습니다.', '게임 창 좌표를 읽지 못했습니다.') -contains $_.Exception.Message))) {
+        throw
+      }
+    }
+    if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+      # ⑥ 간접 양보 (스윕 안 커서 대피 양보 - 게이트가 못 보는 조작) - 던전 안 연속을 끊습니다. 출처는 양보 누적 차분이 거부합니다(Test-AbyssSelectionProvenance)
+      if ([double]$script:userYieldTotalMs -ne $turnYieldMs) { $insideStreak = 0 }
+      # 선택 화면 양성 - 아래 ⑦ 유효성보다 먼저 봅니다 (설계 v11 R6 2.4 · 구현 명세 ⑤b3 명세 리뷰 1 P2 - 복귀 루프 1) 과 같은 순서: 양성은 이 회전의 마지막
+      #   캡처 실패 뒤 새로 찍은 성공 캡처 셋이라 무효 표본이 아닙니다 - ⑦ 뒤로 두면 판독 도중 실패가 낀 회전·마감 경계의 성공이 'unconfirmed' 가 됨).
+      #   분류 순위 1(패널 - 같은 조건)이 이기는 회전과 지금 실패 중인 회전(패널 = 마지막 판독)은 빼고, 출처 기준은 회전 서두 일련번호(같은 회전 실패 허용)
+      if ($selectionNow -and (-not (($panelKind -ne 'none') -or (Test-AbyssEntryWaitingText -Text ([string]$pairRead.Text)))) -and (-not $script:screenCaptureFailing)) {
+        if (Test-AbyssSelectionProvenance -Expected $otherExpected -ExpectedSerial $otherExpectedSerial `
+              -ExpectedYieldMs $otherExpectedYieldMs -ReferenceSerial $turnSerial -YieldMs ([double]$script:userYieldTotalMs)) {
+          return @{ Result = 'confirmed'; Sends = $otherSends; LastKind = 'selection' }
+        }
+        # 출처 없는 선택 화면 - 누르지도(오버레이 X 는 미관측 조작) 완료로 치지도 않고 명시 폐기 뒤 지켜봅니다 (continue 없이 아래로 - 복구 회전은 마감만, 유효 회전은 ⑧~⑩)
+        $otherExpected = $false
+        if (-not $otherUnprovenLogged) {
+          $otherUnprovenLogged = $true
+          Write-RunLog "[어비스] '다른 던전 가기' 대기 중 선택 화면이 보이지만 워커가 연 화면인지 확인할 수 없습니다 (출처 없음) - 누르지 않고 지켜봅니다"
+        }
+      }
+      # ⑦ 유효성 - 아직 실패 중이면 다음 회전 ① 동결, 판독 도중 실패했다가 이미 복구면 복구 회전(판정·클릭 없이 마감만)
+      if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) {
+        $turnRecovered = -not $script:screenCaptureFailing
+        if (-not $turnRecovered) {
+          continue
+        }
+      } else {
+        $sweepStreak = 0
+        # ⑧ 분류 (구현 명세 ⑤b1 1.3 - 세 판독 인자는 이 회전의 판독값) · 던전 안 연속 · 바깥 회전의 비선택 분류 = 단계 전환 출처 폐기(설계 v11 R6 2.3)
+        $screen = Resolve-AbyssOtherWaitScreen -BottomText ([string]$pairRead.Text) -PanelKind $panelKind -SelectionVisible $selectionNow -HudVisible $hudNow -InDungeonQuest $questNow
+        $lastKind = $screen
+        if ($screen -eq 'inside') { $insideStreak++ } else { $insideStreak = 0 }
+        if ($screen -ne 'selection') { $otherExpected = $false }
+        if (-not (($screen -eq 'reward3') -and ($null -eq $pairRead.Other))) { $pairMisses = 0 }
+        # ⑨ 결론 - 같은 회전의 마감보다 먼저 (선택 화면 결론은 위 ⑦ 앞 블록 한 곳 - 여기 닿는 'selection' 은 출처 거짓을 이미 폐기한 회전)
+        if ($insideStreak -ge 2) { return @{ Result = 'inside'; Sends = $otherSends; LastKind = $screen } }
+        if ($screen -eq 'reward3') {
+          if ($null -eq $pairRead.Other) {
+            # 짝 없음 - 1초 뒤 한 번 더 읽습니다(유효 회전만 셈 - 캡처 실패 회전은 미산입). 두 번째도 없으면 끝(설계 v10 2.5 · v11 R6 2.5)
+            if ($pairMisses -ge 1) {
+              return @{ Result = $(if ($otherSends -eq 0) { 'no-pair' } else { 'reward' }); Sends = $otherSends; LastKind = $screen }
+            }
+            $pairMisses = 1
+            $pairRecheck = $true
+            Write-RunLog "[어비스] 보상 화면에서 '다른 던전 가기' 글자를 찾지 못했습니다 - 1초 뒤 다시 읽습니다 (판독: '$([string]$pairRead.Text)')"
+          } elseif ($otherSends -ge 2) {
+            return @{ Result = 'reward'; Sends = $otherSends; LastKind = $screen }
+          }
+        }
+      }
+    }
+    # ⑩ 마감 - 유효·굶김·복구·탐침 복구 뒤 회전이 봅니다 (조정 시간 - 양보·캡처 실패 제외, 경계 -ge). 마감 회전은 누르지 않습니다
+    if (Test-AbyssMemberClockExpired -Clock $selectClock) {
+      return @{ Result = 'unconfirmed'; Sends = $otherSends; LastKind = $lastKind }
+    }
+    # ⑪ 클릭 - 이 회전 분류 'reward3'(3버튼 서명 · 패널·접힌 패널·선택 화면·HUD 아님) ∧ 같은 판독의 점. 확인 창은 게이트 밖의 짧은 고리입니다
+    if (($screen -eq 'reward3') -and ($null -ne $pairRead.Other)) {
+      $script:lastClickSkipReason = ''
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $pairRead.Other.X -ReferenceY $pairRead.Other.Y
+      if ($script:lastClickPerformed) {
+        $otherSends++
+        Write-RunLog "[어비스] '다른 던전 가기' 클릭 - 글자 탐색 기준좌표 ($($pairRead.Other.X),$($pairRead.Other.Y))"
+        # 출처 발급 - 전송 확인 뒤 한 곳 · 마감은 이 전송부터 다시 셈
+        $otherExpected = $true; $otherExpectedSerial = $script:captureFailSerial; $otherExpectedYieldMs = [double]$script:userYieldTotalMs
+        Set-AbyssMemberClock -Clock $selectClock
+        Start-Sleep -Seconds 2
+        foreach ($confirmTry in 1..6) {
+          Start-Sleep -Seconds 1
+          if ($script:screenCaptureFailing) { continue }
+          $confirmSerial = $script:captureFailSerial
+          $confirmSelection = $false
+          try {
+            $confirmSelection = Test-AbyssSelectionScreen -Game $Game
+          } catch {
+            if (-not ($script:screenCaptureFailing -and ($script:captureFailCause -eq 'gameWindowGone') -and (@('OCR용 게임 창 좌표를 읽지 못했습니다.', '게임 창 좌표를 읽지 못했습니다.') -contains $_.Exception.Message))) {
+              throw
+            }
+          }
+          if ($confirmSelection) {
+            if (Test-AbyssSelectionProvenance -Expected $otherExpected -ExpectedSerial $otherExpectedSerial `
+                  -ExpectedYieldMs $otherExpectedYieldMs -ReferenceSerial $confirmSerial -YieldMs ([double]$script:userYieldTotalMs)) {
+              return @{ Result = 'confirmed'; Sends = $otherSends; LastKind = 'selection' }
+            }
+            $otherExpected = $false
+            break
+          }
+        }
+        continue
+      }
+      if ($script:lastClickSkipReason -eq 'user-active') {
+        # 조작 생략은 예산 미소모 - 양보 뒤 새 판독의 점으로만 누릅니다(옛 좌표 재클릭 금지 - 규칙 4)
+        $otherExpected = $false
+        $insideStreak = 0
+        Wait-UserYieldEnd -Game $Game -Context $Context
+        continue
+      }
+      $cursorMisses++
+      if ($cursorMisses -ge 3) { return @{ Result = 'skipped'; Sends = $otherSends; LastKind = $screen } }
+    }
+    # ⑫ 대기
+    if ($sweepStarved) { continue }
+    if ($turnRecovered) {
+      Start-Sleep -Seconds 2
+      continue
+    }
+    if ($pairRecheck) {
+      Start-Sleep -Seconds 1
+      continue
+    }
+    Start-Sleep -Milliseconds 700
+  }
+}
+
+function Complete-AbyssOtherSelection {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [ValidateSet('ready', 'rematch-cancelled')][string]$Ending = 'ready',   # 'ready' = 선택 화면에서 회차 완료(ReadySelection) / 'rematch-cancelled' = 재매칭 손 취소 뒤 정지(설계 v11 R6 3.5 ①)
+    [string]$Nonce = ''                                                      # 재입장 요청 판의 기록 nonce - 폴백 ② 의 패널 → 재입장 대기 갈래(호출 E)만 씀
+  )
+
+  # '다른 던전 가기' 경로의 끝 (구현 명세 ⑤b3 1.3 · ⑤b4 1.5 · 설계 v11 R6 2.7·3.1·3.2·3.3·5.1). 대기 결과 6종을 가릅니다:
+  #  'confirmed' → ready: 안전 중지 예약 소비(이 함수가 직접 지우는 유일한 자리 - 출처 있는 확인 뒤만. 폴백 ② 복귀 루프 안 · 대기 중 규칙 15 안전 확인의 소비는 그대로) · 복귀 완료 문구 · exit 0 / rematch-cancelled: 정지 문구 · 코드 4
+  #     (구현 명세 ⑤b6) 멈출 때(안전 중지 · 마무리 실행 · 마지막 판 · 지정 시각)와 다음 판 입장 방식이 다르거나 모를 때의 보상 결정은 옛 나가기라 여기 오지
+  #     않습니다 - ready 의 예약 소비는 결정 뒤에 들어온 F9 몫이고, 여기서 시작하는 다음 판은 늘 같은 입장 방식입니다(결정 함수 머리 주석)
+  #  'inside'·'unconfirmed' → 폴백 ③: 진단 캡처 · 전송 수 갈래 문구 · 코드 4 (계상은 GUI 가 클리어 기록·완료 마커로)
+  #  'no-pair'·'reward'·'skipped' → 폴백 ②: 나가기 헬퍼 → 헬퍼가 패널 셋을 돌려주고 그 판이 재입장 요청 판(이 워커의 retry-attempt 기록 ∨ 재개)이면 재입장 대기(호출 E - 보고 끔 ·
+  #     모드 예산 · 안전 중지 예약 보존) → 재입장 완료 끝 / 시간 초과 정지, 그 밖은 복귀 루프 (ready = 안전 중지 코드 0 · rematch-cancelled = 4)
+  $otherWait = Wait-AbyssOtherSelection -Game $Game
+  $otherResult = [string]$otherWait.Result
+  if ($otherResult -eq 'confirmed') {
+    if ($Ending -eq 'rematch-cancelled') {
+      Write-RunLog "[완료] 재매칭이 취소돼 '다시 하기'를 다시 누르지 않고 어비스 선택 화면에서 멈춥니다"
+      exit 4
+    }
+    if (Test-Path -LiteralPath $safeStopFlagPath) {
+      Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
+      Write-RunLog '[완료] 안전 중지 예약 확인 - 선택 화면 복귀 완료 시점에서 회차를 마칩니다'
+      exit 0
+    }
+    Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
+    exit 0
+  }
+  if ($otherResult -eq 'inside') {
+    Write-LifeDiagnostics -Game $Game -Context "'다른 던전 가기' 대기 중 던전 안" -CaptureOnly
+    if ([int]$otherWait.Sends -ge 1) {
+      Write-RunLog "[완료] '다른 던전 가기' 뒤 던전 안이 확인됐습니다 - '다시 하기' 오클릭이 의심돼 정지합니다 (새 판은 입장 직후 키 없이 시작됐을 수 있습니다). 화면을 확인해 주세요"
+    } else {
+      Write-RunLog "[완료] '다른 던전 가기' 를 누르기 전에 던전 안이 확인돼 정지합니다 (누르지 않음 - 새 판은 입장 직후 키 없이 시작됐을 수 있습니다). 화면을 확인해 주세요"
+    }
+    exit 4
+  }
+  if ($otherResult -eq 'unconfirmed') {
+    Write-LifeDiagnostics -Game $Game -Context "'다른 던전 가기' 대기 선택 화면 미확인" -CaptureOnly
+    if ([int]$otherWait.Sends -ge 1) {
+      Write-RunLog "[완료] '다른 던전 가기' 뒤 워커가 연 것으로 확인되는 어비스 선택 화면을 보지 못해 멈춥니다 (누르지 않음). 화면을 확인하고 다시 시작해 주세요 - 어비스 선택 화면이 열려 있으면 닫지 말고 그대로 시작해 주세요 (닫으면 보상 화면으로 돌아갑니다)"
+    } else {
+      Write-RunLog "[완료] '다른 던전 가기' 를 누르려 했지만 이번 클릭을 보내지 못한 채 확인 대기 시간이 지나 멈춥니다 (누르지 않음). 화면을 확인하고 다시 시작해 주세요"
+    }
+    exit 4
+  }
+  # 폴백 ② - 'no-pair' · 'reward' · 'skipped' (설계 v11 R6 3.1 ② · 3.2 맥락 A·B · 3.3). 부모 마감 = 뒤이어 부를 복귀 루프와 같은 예산(새 한도 아님 - 설계 v11 R6 3.4) ·
+  # 복귀 루프의 안전 중지 종료 코드는 끝맺음대로. 헬퍼가 패널 셋을 돌려주고 그 판이 재입장 요청 판이면 재입장 대기(호출 E), 그 밖 결과는 모두 복귀 루프가 받습니다
+  $fallbackCause = $(if ($otherResult -eq 'no-pair') { "'다른 던전 가기' 글자를 찾지 못해" } elseif ($otherResult -eq 'reward') { '누른 뒤에도 보상 화면이 그대로라' } else { '커서 미확인으로 누르지 못해' })
+  Write-RunLog "[어비스] ${fallbackCause} 보상 화면 '나가기' 로 선택 화면에 돌아갑니다"
+  $returnExitCode = $(if ($Ending -eq 'rematch-cancelled') { 4 } else { 0 })
+  $exitClick = Invoke-AbyssExitClick -Game $Game -LogPrefix '[어비스]' -Context '나가기 클릭' -ParentDeadline ((Get-Date).AddSeconds($timeoutHud + $timeoutAbyssMenu + $timeoutAbyssSelect))
+  if ((@('matching', 'ready-panel', 'entry-waiting') -contains [string]$exitClick.Result) -and ($script:abyssRetryAttemptRecorded -or ([string]$script:handoff.Role -eq 'resume'))) {
+    $fallbackReentry = Wait-AbyssReentry -Game $Game -LimitSeconds (Get-AbyssReentryLimitSeconds) -Context "'다시 하기' 뒤 입장 대기"
+    if ([string]$fallbackReentry.Result -eq 'entered') {
+      Complete-AbyssInsideHandoff -Nonce $Nonce
+    }
+    Stop-AbyssReentryTimeout -Game $Game
+  }
+  Return-ToAbyssSelection -Game $Game -SafeStopExitCode $returnExitCode
+  if ($Ending -eq 'rematch-cancelled') {
+    Write-RunLog "[완료] 재매칭이 취소돼 '다시 하기'를 다시 누르지 않고 어비스 선택 화면에서 멈춥니다"
+    exit 4
+  }
+  Write-RunLog '[완료] 어비스 선택 화면 복귀 완료'
+  exit 0
+}
+
+function Get-AbyssReentryLimitSeconds {
+  # '다시 하기' 뒤 재입장 대기의 모드 예산 (구현 명세 ⑤b4 1.4 · 설계 v11 R5 4.2) - 원 워커 재입장 대기 · 폴백 ② 의 패널 갈래 재입장 대기 · (구현 단계 ⑤c) 재개가
+  # 이 한 함수를 씁니다. 혼자하기 = 입장 대기 한도($timeoutEntry - 매칭 없이 로딩만) / 함께하기(우연한 만남 · 구현 단위 ⑥d 의 파티장) = 매칭 대기 한도($timeoutPartyMatch).
+  # 모드는 워커가 읽은 입장 방식($dungeonMode - 커스텀은 항목 값으로 덮인 값)입니다
+  if ($dungeonMode -eq 'solo') { return $timeoutEntry }
+  return $timeoutPartyMatch
+}
+
+function Invoke-AbyssRetryClick {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$Nonce,                            # 그 판 기록의 nonce (원 워커 = 클리어 기록이 돌려준 값 · 재개 = 이어받은 항목 - 구현 단계 ⑤c)
+    [string]$Context = "'다시 하기' 클릭"       # 양보 안내 문맥 (Wait-UserYieldEnd)
+  )
+
+  # '다시 하기' 클릭 루프 (구현 명세 ⑤b4 1.2 · 설계 v11 R5 2.7 · R3 3.3). 머리 주석 다섯:
+  #  ① 회전 순서는 Wait-AbyssReentry 와 같은 골격 - 서두(메타·이 회전 판독값 비움) → ① 동결 → ② 조작 양보 → ③ 탐침 복구 뒤 → ④ 팝업 스윕 → ⑤ 판독
+  #     (짝(하단 판독문 겸함) → HUD → (HUD 일 때) 추적기 → 패널 - 패널이 클릭 앞 마지막 판독) → ⑦ 유효성 → ⑧ 분류 → ⑨ 짝 없음 결론(같은 회전의 마감보다 먼저) → ⑩ 마감 → ⑪ 클릭 → ⑫ 대기(굶김 0 · 복구 2초 · 짝 재판독 1초 · 그 밖 700ms).
+  #     ⑥(간접 양보)이 없는 이유: 이어 세는 표본이 없고, 스윕 안 커서 대피 양보는 이 회전 판독 앞이라 판독은 양보 뒤의 새 판독입니다
+  #  ② 클릭 자리는 워커에 하나(설계 v11 R3 S10): 분류 'reward3' 이고 같은 판독의 '다시 하기' 점 → (이 워커의 첫 시도만) 재입장 요청 기록(retry-attempt)
+  #     → commit 표지가 거짓이면 안전 중지 예약 → 시간 재판단 → 클릭 → 전송이면 commit 표지(첫 문장) → 재입장 클릭 기록(retry-clicked)
+  #  ③ 결과 @{ Result; LastKind } - 'sent' / 'no-pair'(짝 없음 2회) / 'skipped'(커서 미확인 3회) / 'last'(지정 시각) / 'safe-stop' / 'record-failed'(첫 기록 실패 -
+  #     클릭 0) / 'unconfirmed'(진입부터 조정 $timeoutAbyssSelect 동안 누르지 못함). 재입장 대기·끝은 부르는 쪽(Complete-AbyssRetrySelection)
+  #  ④ 마감 = 파티원 시계 하나 - 진입부터 세고 되돌리지 않습니다(양보·캡처 실패 차분만 더함). 마감 회전은 누르지 않습니다(⑨ 짝 없음 결론은 그 앞 - 둘째 결측이 마감 회전이어도 'no-pair')
+  #  ⑤ 창 좌표 throw 는 두 문구만 catch 하나에서 정확 일치로 받습니다(공용 판독 · 스윕 예비 좌표 클릭) - 그 밖은 다시 던짐
+  $clickClock = New-AbyssMemberClock -LimitSeconds $timeoutAbyssSelect
+  $cursorMisses = 0
+  $pairMisses = 0
+  $lastKind = ''
+  $sweepStreak = 0
+  $probeRecovered = $false
+  while ($true) {
+    # 서두 - 규칙 4: 직전 회전 클릭의 생략 메타와 직전 회전의 판독값을 비웁니다(복구 회전이 옛 분류·옛 점으로 누르지 않게)
+    $turnSerial = $script:captureFailSerial
+    $script:lastClickSkipReason = ''
+    $sweepStarved = $false
+    $turnRecovered = $false
+    $pairRecheck = $false
+    $screen = ''
+    $pairRead = $null
+    # ① 동결 (규칙 15) - 마감은 되돌리지 않습니다(시계가 캡처 실패 차분을 더함)
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+      $probeRecovered = -not $script:screenCaptureFailing
+      continue
+    }
+    # ② 조작 양보 (규칙 4) - 시간 상한 없음. 마감은 다음 마감 판정에서 시계가 양보 차분을 더함
+    if (Test-UserRecentlyActive) {
+      Wait-UserYieldEnd -Game $Game -Context $Context
+      continue
+    }
+    if ($probeRecovered) {
+      # ③ 탐침 복구 뒤 회전 - 스윕·판독 없이 마감만 보고 2초 뒤 다음 회전
+      $probeRecovered = $false
+      $turnRecovered = $true
+    }
+    try {
+      # ④ 팝업 스윕 (순위 1 - 판독 전 커서를 창 밖으로 뺌). 참이면 이 회전은 판독·클릭하지 않고 생략 사유로 가릅니다
+      if ((-not $turnRecovered) -and (Invoke-PurchasePopupSweep -Game $Game)) {
+        $sweepTurn = Resolve-AbyssMemberSweepTurn -CaptureFailingNow $script:screenCaptureFailing -CaptureFailedInTurn ($script:captureFailSerial -ne $turnSerial) `
+          -Performed $script:lastClickPerformed -SkipReason $script:lastClickSkipReason -Streak $sweepStreak -Limit $memberSweepStreakLimit
+        $sweepStreak = [int]$sweepTurn.Streak
+        if ($sweepTurn.Action -eq 'freeze' -or $sweepTurn.Action -eq 'yield' -or $sweepTurn.Action -eq 'counted') {
+          continue
+        }
+        $sweepStarved = ($sweepTurn.Action -eq 'starved')
+        $turnRecovered = ($sweepTurn.Action -eq 'recovered')
+      }
+      # ⑤ 판독 (순서 고정 - 짝이 클릭 점과 하단 판독문을, 패널이 클릭 앞 마지막 게이트를 줍니다. 선택 화면·S 는 읽지 않습니다)
+      if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+        $pairRead = Find-AbyssRewardButtonPair -Game $Game
+        $hudNow = Test-HomeEndEscHud -Game $Game
+        $questNow = $false
+        if ($hudNow) { $questNow = Test-InDungeonQuest -Game $Game }
+        $panelKind = Get-AbyssPanelKind -Game $Game
+      }
+    } catch {
+      # 창 좌표 throw 제한 catch - 캡처 실패(원인 gameWindowGone) 중의 두 문구(공용 판독 · 스윕 예비 좌표 클릭)만 정확 일치로 받습니다(아래 ⑦ 이 다음 회전 동결로 보냄)
+      if (-not ($script:screenCaptureFailing -and ($script:captureFailCause -eq 'gameWindowGone') -and (@('OCR용 게임 창 좌표를 읽지 못했습니다.', '게임 창 좌표를 읽지 못했습니다.') -contains $_.Exception.Message))) {
+        throw
+      }
+    }
+    if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+      # ⑦ 유효성 - 아직 실패 중이면 다음 회전 ① 동결, 판독 도중 실패했다가 이미 복구면 복구 회전(판정·클릭 없이 마감만)
+      if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) {
+        $turnRecovered = -not $script:screenCaptureFailing
+        if (-not $turnRecovered) {
+          continue
+        }
+      } else {
+        $sweepStreak = 0
+        # ⑧ 분류 - 재입장 대기와 같은 분류기(그 'reward3' = 3버튼 서명 ∧ HUD 없음 ∧ 패널·접힌 패널·권장 인원 팝업 아님). S 는 읽지 않아 거짓으로 넘깁니다
+        $screen = Resolve-AbyssHandoffStartScreen -PromptVisible $false -BottomText ([string]$pairRead.Text) -PanelKind $panelKind -HudVisible $hudNow -InDungeonQuest $questNow
+        $lastKind = $screen
+        # 짝 없음 셈(⑨)은 유효 회전의 다른 분류(점 있는 'reward3' 포함)에서만 비웁니다 - 캡처 실패·조작 양보·굶김·복구 회전은 여기 오지 않아 셈을 바꾸지 않음
+        if (-not (($screen -eq 'reward3') -and ($null -eq $pairRead.Retry))) { $pairMisses = 0 }
+        # ⑨ 결론 - 같은 회전의 마감보다 먼저('다른 던전 가기' 대기와 같은 자리 · 설계 v11 R5 2.1 ⑨): 둘째 결측은 마감 회전이어도 'no-pair', 첫 결측이 마감 회전이면 첫 줄 뒤 ⑩ 이 끝냄
+        if (($screen -eq 'reward3') -and ($null -eq $pairRead.Retry)) {
+          # 짝 없음 - 1초 뒤 한 번 더 읽습니다(다음 회전 스윕이 커서를 뺀 뒤 · 유효 회전만 셈 - 캡처 실패·조작 양보 회전은 미산입). 두 번째도 없으면 끝(사용자 결정 U-⑤-3 (나))
+          if ($pairMisses -ge 1) {
+            Write-RunLog "[어비스] 보상 화면에서 '다시 하기' 글자를 찾지 못했습니다 - '다른 던전 가기' 로 선택 화면에서 마칩니다 (판독: '$([string]$pairRead.Text)')"
+            return @{ Result = 'no-pair'; LastKind = $screen }
+          }
+          $pairMisses = 1
+          $pairRecheck = $true
+          Write-RunLog "[어비스] 보상 화면에서 '다시 하기' 글자를 찾지 못했습니다 - 1초 뒤 다시 읽습니다 (판독: '$([string]$pairRead.Text)')"
+        }
+      }
+    }
+    # ⑩ 마감 - 유효·굶김·복구·탐침 복구 뒤 회전이 봅니다 (조정 시간, 경계 -ge). 마감 회전은 누르지 않습니다
+    if (Test-AbyssMemberClockExpired -Clock $clickClock) {
+      return @{ Result = 'unconfirmed'; LastKind = $lastKind }
+    }
+    # ⑪ 클릭 - 이 회전 분류 'reward3' ∧ 같은 판독의 '다시 하기' 점 (점이 없으면 위 ⑨ 가 1초 뒤 한 번 더 읽고, 두 번째도 없으면 끝냅니다 - 부르는 쪽이 '다른 던전 가기')
+    if (($screen -eq 'reward3') -and ($null -ne $pairRead.Retry)) {
+      $script:lastClickSkipReason = ''
+      Focus-Game -Game $Game
+      if (-not $script:abyssRetryAttemptRecorded) {
+        # 이 워커의 첫 시도만 - 기록이 실패하면 누르지 않습니다(클릭 뒤 끊기면 컨트롤 패널이 이어받을 근거가 없음 - 설계 v10 B1)
+        if ((Set-AbyssJournalRetryAttempt -Nonce $Nonce) -ne 'changed') {
+          return @{ Result = 'record-failed'; LastKind = $screen }
+        }
+        $script:abyssRetryAttemptRecorded = $true
+      }
+      if (-not $script:abyssRetryCommitted) {
+        # 클릭 직전 재검사 - commit 전에만(안전 중지 > 시간). commit 뒤 재클릭은 같은 판단의 실행이라 건너뜁니다(설계 v11 R3 3.2 ②)
+        if (Test-Path -LiteralPath $safeStopFlagPath) {
+          Write-RunLog "[어비스] '다시 하기' 직전 판단: 안전 중지 예약 확인 - 누르지 않고 '나가기'로 던전 밖에 나와 마칩니다"
+          return @{ Result = 'safe-stop'; LastKind = $screen }
+        }
+        if ((Update-AbyssRetryTimeVerdict) -eq 'last') {
+          Write-RunLog "[어비스] '다시 하기' 직전 판단: 지정 시간 $($script:abyssUntil.ToString('HH:mm')) 도달 - 누르지 않고 '나가기'로 던전 밖에 나와 마칩니다"
+          return @{ Result = 'last'; LastKind = $screen }
+        }
+      }
+      Click-GamePoint -Game $Game -ReferenceX $pairRead.Retry.X -ReferenceY $pairRead.Retry.Y
+      if ($script:lastClickPerformed) {
+        $script:abyssRetryCommitted = $true
+        Write-RunLog "[어비스] '다시 하기' 클릭 - 글자 탐색 기준좌표 ($($pairRead.Retry.X),$($pairRead.Retry.Y))"
+        Set-AbyssJournalRetryClicked -Nonce $Nonce
+        return @{ Result = 'sent'; LastKind = $screen }
+      }
+      if ($script:lastClickSkipReason -eq 'user-active') {
+        # 조작 생략은 예산 미소모 - 양보 뒤 새 판독의 점으로만 누릅니다(옛 좌표 재클릭 금지 - 규칙 4). commit 전이면 다음 시도가 다시 재검사합니다
+        Wait-UserYieldEnd -Game $Game -Context $Context
+        continue
+      }
+      $cursorMisses++
+      if ($cursorMisses -ge 3) {
+        Write-RunLog "[어비스] 커서 미확인으로 '다시 하기' 를 누르지 못해 '다른 던전 가기' 로 선택 화면에서 마칩니다"
+        return @{ Result = 'skipped'; LastKind = $screen }
+      }
+    }
+    # ⑫ 대기 - 굶김 회전은 스윕이 이미 기다렸고, 복구 회전은 2초, 짝 재판독은 1초(다음 회전 스윕이 커서를 빼고 다시 읽음), 그 밖은 700ms
+    if ($sweepStarved) { continue }
+    if ($turnRecovered) {
+      Start-Sleep -Seconds 2
+      continue
+    }
+    if ($pairRecheck) {
+      Start-Sleep -Seconds 1
+      continue
+    }
+    Start-Sleep -Milliseconds 700
+  }
+}
+
+function Complete-AbyssRetrySelection {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$Nonce                             # 그 판 기록의 nonce (원 워커 = 클리어 기록 반환)
+  )
+
+  # '다시 하기' 경로의 끝 (구현 명세 ⑤b4 1.3 · 설계 v11 R5 2.7·3.1 · R1 2.2 · R6 3.1 ①·3.5 ①②). 클릭 루프 결과와 원 워커 재입장 대기(호출 B - 보고 켬 · 모드 예산)로 끝을 가릅니다:
+  #  'sent' → 재입장 대기: 'entered' → 재입장 완료 끝(11/0) / 'reclick' → 이 워커의 전송이 2 미만이면 클릭 루프 다시(commit 뒤 - 재검사 없음), 2 면 폴백 ① /
+  #     'cancelled' → '다른 던전 가기' 끝 rematch-cancelled(코드 4) / 'timeout' → 시간 초과 정지(코드 4)
+  #  'no-pair'·'skipped' → 폴백 ① '다른 던전 가기'(ready - 다음 판은 같은 항목이라 같은 입장 방식) / 'unconfirmed' → 진단 · 코드 4 /
+  #  'record-failed'·'safe-stop'·'last' → 그 값을 돌려줍니다(부르는 쪽이 지금 끝 줄 = 옛 나가기 - 구현 명세 ⑤b2 1.4 legacy-exit · 멈출 때는 '나가기' 로 필드, ⑤b6 ·
+  #     사용자 결정 2026-10-26 ①. 'safe-stop'·'last' 는 commit 전 첫 시도에서만 나옵니다)
+  $retrySends = 0
+  while ($retrySends -lt 2) {
+    $retryClick = Invoke-AbyssRetryClick -Game $Game -Nonce $Nonce
+    $retryResult = [string]$retryClick.Result
+    if ($retryResult -eq 'record-failed') { return 'record-failed' }
+    if (($retryResult -eq 'safe-stop') -or ($retryResult -eq 'last')) { return $retryResult }
+    if ($retryResult -eq 'unconfirmed') {
+      Write-LifeDiagnostics -Game $Game -Context "'다시 하기' 클릭 대기 보상 화면 미확인" -CaptureOnly
+      if ($retrySends -ge 1) {
+        Write-RunLog "[완료] '다시 하기' 를 한 번 더 누르려 했지만 이번 클릭을 보내지 못한 채 확인 대기 시간이 지나 멈춥니다 (누르지 않음 - 앞서 누른 '다시 하기' 로 새 판이 입장 직후 키 없이 시작됐을 수 있으니 화면을 확인해 주세요)"
+      } else {
+        Write-RunLog "[완료] '다시 하기' 를 누르려 했지만 이번 클릭을 보내지 못한 채 확인 대기 시간이 지나 멈춥니다 (누르지 않음). 화면을 확인하고 다시 시작해 주세요"
+      }
+      exit 4
+    }
+    if ($retryResult -ne 'sent') {
+      Complete-AbyssOtherSelection -Game $Game -Ending 'ready' -Nonce $Nonce
+    }
+    $retrySends++
+    $reentry = Wait-AbyssReentry -Game $Game -LimitSeconds (Get-AbyssReentryLimitSeconds) -Context "'다시 하기' 뒤 입장 대기" -ReportRewardReturn
+    $reentryResult = [string]$reentry.Result
+    if ($reentryResult -eq 'entered') {
+      Complete-AbyssInsideHandoff -Nonce $Nonce
+    }
+    if ($reentryResult -eq 'cancelled') {
+      Complete-AbyssOtherSelection -Game $Game -Ending 'rematch-cancelled' -Nonce $Nonce
+    }
+    if ($reentryResult -eq 'timeout') {
+      Stop-AbyssReentryTimeout -Game $Game
+    }
+    # 'reclick' - 패널 없이 3버튼이 무변화 창 동안 그대로(설계 v10 재클릭 요청). 판당 전송 2 가 상한(설계 v10 - 원 워커는 지역 카운터)
+    if ($retrySends -lt 2) {
+      Write-RunLog "[어비스] '다시 하기' 뒤 보상 화면이 그대로라 한 번 더 누릅니다"
+    }
+  }
+  Write-RunLog "[어비스] '다시 하기' 를 두 번 눌러도 보상 화면이 그대로입니다 - '다른 던전 가기' 로 선택 화면에서 마칩니다"
+  Complete-AbyssOtherSelection -Game $Game -Ending 'ready' -Nonce $Nonce
+}
+
+function Complete-AbyssInsideHandoff {
+  param([string]$Nonce)
+
+  # '다시 하기' 재입장 확인의 끝 (구현 명세 ⑤b4 1.4 · 설계 v11 R1 2.2 · R3 3.6·3.7). 재입장 완료 기록(실패해도 계속) → 지정 시각 전에 정한 판이면 안내 1줄 →
+  # 재입장 완료 줄(표지 꼬리 - 컨트롤 패널 판별) → 코드 11('continue') / 0. 완료 줄부터 종료까지 시각을 읽지 않습니다 - 판단은 commit 에서 고정(설계 v11 R1 6.4).
+  # 이 워커는 입장 직후 키를 보내지 않습니다 - 다음 워커가 인덱스 계약으로 보냅니다(설계 v10 B5)
+  Set-AbyssJournalReentered -Nonce $Nonce
+  if ($script:abyssRetryTimeVerdict -eq 'continue') {
+    Write-RunLog "[어비스] 지정 시간 $($script:abyssUntil.ToString('HH:mm')) 전에 '다시 하기'로 이어 가기로 정했습니다 - 다음 판에 들어갔고 다음 워커가 이어받습니다"
+  }
+  Write-RunLog "[완료] '다시 하기' 재입장 확인 - 직전 판을 회차로 계상, 다음 실행이 이 판을 이어받습니다 [terminal=InsideHandoff nonce=$Nonce]"
+  if ($script:abyssRetryTimeVerdict -eq 'continue') {
+    exit 11
+  }
+  exit 0
+}
+
+function Stop-AbyssReentryTimeout {
+  param([System.Diagnostics.Process]$Game)
+
+  # '다시 하기' 뒤 재입장 대기 시간 초과의 끝 (구현 명세 ⑤b4 1.4 · 설계 v11 R6 3.5 ② · v10 R4 표 'none' 행): 클릭 0(매칭 취소·나가기 없음) · 진단 캡처 · 모드별 문구 ·
+  # 코드 4(직전 판은 컨트롤 패널이 그 판의 기록으로 계상). 초 값은 그 대기의 모드 예산(Get-AbyssReentryLimitSeconds 와 같은 갈래)입니다
+  Write-LifeDiagnostics -Game $Game -Context "'다시 하기' 뒤 입장 대기 초과" -CaptureOnly
+  if ($dungeonMode -eq 'solo') {
+    Write-RunLog "[완료] '다시 하기' 뒤 ${timeoutEntry}초 안에 입장을 확인하지 못해 정지합니다 (누르지 않음 - 늦게 입장하면 입장 직후 키 없이 던전에 들어갈 수 있으니 화면을 확인해 주세요)"
+    exit 4
+  }
+  Write-RunLog "[완료] '다시 하기' 뒤 ${timeoutPartyMatch}초 안에 입장을 확인하지 못했습니다 - 매칭 취소·나가기 없이 정지합니다 (매칭이 끝나면 입장 직후 키 없이 던전에 들어갈 수 있으니 화면을 확인해 주세요)"
+  exit 4
 }
 
 function Get-KeyDisplayName {
@@ -19129,7 +19915,8 @@ try {
       # customRepeat 섹션을 아래 목록에 넣으면 items 배열 전체가 JSON으로 쏟아져 제외)
       # 완료 마커·완료 기록의 소유자 JSON(OWNER - version 3)과 진행 세대(GENERATION)도 함께 - 같은 계산에서 나온 두 값이라 어긋나면 이 줄로
       # 드러납니다(설계 v10 1.7 · 구현 명세 ① 2.10 W6)
-      Write-RunLog "[설정] 커스텀 리스트: $($script:customListText) (현재 $($script:customPositionText), 이전 항목 '$env:HONEYNOGI_CUSTOM_PREV', 다음 항목 '$env:HONEYNOGI_CUSTOM_NEXT', 재시작 $($script:customRestart), OWNER '$env:HONEYNOGI_CUSTOM_OWNER', GENERATION '$env:HONEYNOGI_CUSTOM_GENERATION')"
+      # 다음 판 이어받기 env 둘(NEXT_OWNER · NEXT_BOUNDARY('1' · 'mixed') - 어비스 보상 결정 순위 ④⑥⑧ 의 입력, 구현 명세 ⑤b5 · ⑤b6)도 받은 그대로 끝에 붙입니다
+      Write-RunLog "[설정] 커스텀 리스트: $($script:customListText) (현재 $($script:customPositionText), 이전 항목 '$env:HONEYNOGI_CUSTOM_PREV', 다음 항목 '$env:HONEYNOGI_CUSTOM_NEXT', 재시작 $($script:customRestart), OWNER '$env:HONEYNOGI_CUSTOM_OWNER', GENERATION '$env:HONEYNOGI_CUSTOM_GENERATION', NEXT_OWNER '$env:HONEYNOGI_CUSTOM_NEXT_OWNER', NEXT_BOUNDARY '$env:HONEYNOGI_CUSTOM_NEXT_BOUNDARY')"
     }
     if ($script:lifeCustomMode) {
       # 생활 커스텀은 이전/다음 항목 개념이 없습니다 (사이클마다 메뉴부터 새로 시작하므로
@@ -19353,7 +20140,11 @@ try {
     throw '파티원 흐름이 종료 코드 없이 반환됐습니다 - 내부 오류'
   }
 
-  # (뒤 단위의 어비스 지정 시각 읽기 한 줄 자리 - 아래 이어받기 블록의 if 앞 최상위, 블록 안이 아님)
+  # 어비스 '다시 하기' 시간 판단의 지정 시각 - 워커당 한 번 읽습니다(설계 v11 R3 4.3 · S4 · 구현 명세 ⑤b5). 파티원은 위 디스패치에서 갈라져 자기 읽기를 쓰고
+  # 던전·심층·사냥터는 콘텐츠 조건으로 거릅니다. 모드는 보지 않습니다 - '다시 하기' 판단을 쓰지 않는 모드(파티 찾기 · 구현 단위 ⑥d 전 파티장)는 읽기만 하고
+  # 보상 화면의 경로 술어(Test-AbyssRetryRoute)가 시간 판단을 부르지 않습니다(받기만 - 설계 v11 R3 K21·K22). 아래 이어받기 블록 앞 최상위인 이유는 재개(구현 단계 ⑤c)의
+  # 승계가 이 값을 쓰기 때문입니다
+  if ($contentCategory -eq 'abyss') { $script:abyssUntil = Get-AbyssUntilTime }
   # 이어받기 역할 확정 (구현 명세 ② 2.1 · 설계 v11 R4 4.2) - 어비스 비파티원 기동만 완료 기록을 한 번 읽어 GUI 가 넘긴 항목
   # (HONEYNOGI_HANDOFF_NONCE)의 역할을 정합니다. 파티원은 위 디스패치에서 이미 갈라졌고, 던전·심층·사냥터는 완료 기록을 쓰지 않아 기본값
   # (Role 'none') 그대로입니다. 커스텀 토큰이 깨진 기동은 읽지 않습니다 - 그 기동은 아래 형식 오류 throw 로 끝나야 하고 이어받을 소유자도 없습니다.
@@ -19605,7 +20396,7 @@ try {
     # 이어받은 own 항목의 판을 이 보상 화면에서 마무리합니다 (구현 명세 ② 2.6 · 설계 v11 R4 P16 · Q-R4-17 (가)): 본류의 클리어 확정과 같은 '마커 → 클리어 완료
     # 기록 → 나가기 헬퍼' 순으로 cleared 를 남기고, 같은 저장이 받은 항목을 applied·done 으로 닫습니다(명세 J4 - 다음 시작은 이어받을 항목 없음). Role none·next 는
     # 기록하지 않고(next 의 보상 화면 시작은 선분기가 이미 정지), 정리 전용 판(표지 항목을 받은 own 의 수동 시작)도 뺍니다 - 그 항목은 아래 복귀 루프가 닫습니다
-    if (($script:handoff.Role -eq 'own') -and -not ($script:customMode -and $script:customCleanupOnly)) { Add-AbyssJournalClearedEntry }
+    if (($script:handoff.Role -eq 'own') -and -not ($script:customMode -and $script:customCleanupOnly)) { [void](Add-AbyssJournalClearedEntry) }
     # 2026-09-18 3버튼 개편: 글자 위치 클릭 (고정 좌표 (636,655) 는 '다시 하기' 자리 - 재입장 오클릭)
     # 부모 마감 = 뒤이어 부를 복귀 루프와 같은 예산 (⑥e 설계 2.13 - 반영본 검증, 09-30 리뷰4): 헬퍼 안 복구 회전(같은 회전 복구·탐침 복구 뒤)만 이어지면
     # 'expired' 로 돌아오고, 'selection'(워커가 연 화면인지 모르는 선택 화면)과 함께 버려진 뒤 곧바로 복귀 루프가 새 예산으로 이어받습니다 (새 한도 값 아님)
@@ -19630,7 +20421,7 @@ try {
     Write-RunLog '[어비스] 나가기 버튼 감지'
     if ($script:customMode -and -not $script:customCleanupOnly) { [void](Write-CustomClearMarker) }
     # 이어받은 own 항목의 판을 이 클리어 화면에서 마무리합니다 - 위 보상 화면 시작과 같은 조건·자리('마커 → 클리어 완료 기록 → 나가기 헬퍼', 구현 명세 ② 2.6)
-    if (($script:handoff.Role -eq 'own') -and -not ($script:customMode -and $script:customCleanupOnly)) { Add-AbyssJournalClearedEntry }
+    if (($script:handoff.Role -eq 'own') -and -not ($script:customMode -and $script:customCleanupOnly)) { [void](Add-AbyssJournalClearedEntry) }
     # 2026-09-18 3버튼 개편: 글자 위치 클릭 (고정 좌표 (636,655) 는 '다시 하기' 자리 - 재입장 오클릭)
     # 부모 마감 = 뒤이어 부를 복귀 루프와 같은 예산 (⑥e 설계 2.13 - 반영본 검증, 09-30 리뷰4): 헬퍼 안 복구 회전(같은 회전 복구·탐침 복구 뒤)만 이어지면
     # 'expired' 로 돌아오고, 'selection'(워커가 연 화면인지 모르는 선택 화면)과 함께 버려진 뒤 곧바로 복귀 루프가 새 예산으로 이어받습니다 (새 한도 값 아님)
@@ -19669,8 +20460,10 @@ try {
     $startInsideDetected = $true
     Write-RunLog '[어비스] 시작: 재판독에서 던전 안으로 확인 - 시작 상태 판단을 다시 내립니다'
     if ($script:customMode -and $contentCategory -eq 'abyss') {
+      # 화면 인자는 처음 판정과 같은 $cleanupByScreen 항을 씁니다 - 마무리 실행 기동은 시작 화면만으로 정리 전용을 정하지 않습니다(정리 전용이면 exit 10 -
+      # 마무리 실행의 exit 10 금지, 설계 v11 R1 2.4 · 구현 명세 ② 2.6 · ⑤b5)
       $script:customCleanupOnly = Test-CustomCleanupOnly -CustomMode $true -Restart $script:customRestart `
-        -InsideAlready $startInsideDetected -OnResultScreen ($startExitDetected -or $startClearDetected)
+        -InsideAlready ($cleanupByScreen -and $startInsideDetected) -OnResultScreen ($cleanupByScreen -and ($startExitDetected -or $startClearDetected))
       if ($script:customRecoveryOnly -and -not ($startExitDetected -or $startClearDetected)) {
         throw '완료 항목 마무리 복구 중 어비스 내부 화면이 감지됐습니다 - 항목을 다시 실행하지 않고 안전하게 중단합니다.'
       }
@@ -20328,9 +21121,16 @@ try {
   if ($clearOutcome -eq 'left') {
     # 거점 부활 상한으로 사망 화면에서 나온 판 (2026-09-25 사용자 확정): 클리어가 아니므로 마커 없이, 회차로 세지 않고 선택 화면으로
     # 복귀 → 코드 10 → GUI 가 곧바로 다음 회차(새 파티 매칭)를 시작합니다. 커스텀은 같은 항목 재실행. 준비 실행 3회 연속은 GUI 가 오류 정지.
-    Return-ToAbyssSelection -Game $game -SafeStopExitCode 10 -LeaveEntryReason 'abandoned-death-exit'
+    # 마무리 실행(finish-only) 기동은 코드 4 로 멈춥니다 - 마무리할 판이 사라졌고 다음 기동이 없으며, 마무리 실행은 exit 10 을 내지 않습니다(설계 v11 R2 M4 ·
+    # R1 2.4 · 구현 명세 ⑤b5). 복귀 루프 안 안전 중지 출구도 같은 코드 4 이고 그 [완료] 문구는 '거점 퇴장한 판은 회차로 세지 않고 …' 입니다(명세 리뷰 2 RV-9).
+    # 열쇠 항목 닫기(-LeaveEntryReason)는 같습니다
+    Return-ToAbyssSelection -Game $game -SafeStopExitCode $(if ($script:finishOnly) { 4 } else { 10 }) -LeaveEntryReason 'abandoned-death-exit'
     # 원인 조각은 사망 블록이 둔다 ('거점 부활 상한으로' / '부활 불가 화면 대기 초과로' - 09-26). GUI Test-CheckpointLeaveReason 이 두 사유를 모두 인정
     $leaveCause = $(if ($script:abyssLeaveCause) { $script:abyssLeaveCause } else { '거점 부활 상한으로' })
+    if ($script:finishOnly) {
+      Write-RunLog "[완료] ${leaveCause} 던전을 나왔습니다 - 마무리 실행이라 다시 입장하지 않고 멈춥니다"
+      exit 4
+    }
     Write-RunLog "[완료] ${leaveCause} 던전을 나왔습니다 - 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음, 다음 회차에서 새 파티로 재입장)"
     exit 10
   }
@@ -20345,21 +21145,112 @@ try {
       -SourceCondition { Test-DungeonClearPrompt -Game $game }
     Write-RunLog '[어비스] 나가기 버튼 감지'
   }
+  # 보상 화면 마무리 (구현 명세 ⑤b5 · ⑤b6 · 설계 v10 2.1·B0 · v11 R3 3.2 ⓪① · R6 2·3 · R1 2.2). 순서 = ⓪ 초기화 → 경로 술어 → (경로 참) 보상 결정(완료 마커·클리어
+  # 기록 앞 - 클리어 기록이 결정·다음 판 owner 를 담음) → 완료 마커 → 클리어 기록 → (경로 참) 기록 확인 → 갈래: '다시 하기'(재입장 확인 끝 11/0 · 정지 · 폴백은
+  # 그 함수 안에서 끝남) / '다른 던전 가기'(선택 화면 확인 끝 0 · 정지 4) / 옛 나가기(아래 헬퍼 줄 - 경로 거짓 · 결정 exit(멈출 때 · 다음 판 입장 방식이
+  # 다르거나 모를 때) · 클리어 기록 실패 · 재입장 요청 기록 실패 · '다시 하기' 직전 재검사의 안전 중지·지정 시각)
+  # ⓪ 판단값 · commit 표지 · 이 워커의 재입장 요청 기록 표식 - 판 하나(= 워커 하나)의 보상 결정 앞에서 비웁니다(설계 v11 R1 2.1 · R3 3.2 ⓪ - 재개 워커는 구현 단계 ⑤c)
+  $script:abyssRetryTimeVerdict = ''
+  $script:abyssRetryCommitted = $false
+  $script:abyssRetryAttemptRecorded = $false
+  # '다시 하기' 경로 - 클리어·보상 문맥이고 혼자하기·우연한 만남이며 정리 전용이 아닌 판. 거짓(파티 찾기 · 구현 단위 ⑥d 전 파티장 · 정리 전용)이면 시간 판단·
+  # 보상 결정을 부르지 않고 옛 나가기입니다(받기만 - 설계 v11 R3 K21·K22 · R4 U1 · R6 3.5 ③)
+  $retryRoute = ($clearOutcome -eq 'clear' -or $clearOutcome -eq 'reward') -and
+    (Test-AbyssRetryRoute -CleanupOnly ([bool]($script:customMode -and $script:customCleanupOnly)) -Mode $dungeonMode -Matching $abyssMatching)
+  $rewardDecision = $null
+  $nextOwnerParsed = $null
+  if ($retryRoute) {
+    # 다음 판 owner(커스텀) - GUI 가 바퀴 끝 판에서 비웁니다. 해석하지 못하면 결정 순위 ⑧ 'next-owner-empty'(설계 v10 2.1(2) ⑤ · 구현 명세 ⑤b2 1.2)
+    if ($script:customMode) { $nextOwnerParsed = ConvertTo-AbyssJournalOwner -OwnerJson ([string]$env:HONEYNOGI_CUSTOM_NEXT_OWNER) }
+    # 보상 결정 ① - 시간 판단은 이 경로에서만 합니다(설계 v11 R3 3.2 ①). [bool] 인자는 bool 값으로 넘깁니다($null 은 5.1 이 변환 오류 - 규칙 3).
+    # 경계 신호는 '1'(바퀴 경계 - 순위 ⑥)과 'mixed'(랜덤 진행 · 섞인 리스트의 바퀴 끝 - 다음 판 입장 방식 미정, 순위 ④) 둘을 읽습니다(구현 명세 ⑤b6)
+    $rewardDecision = Resolve-AbyssRewardDecision -SafeStopRequested (Test-Path -LiteralPath $safeStopFlagPath) -FinishOnly ([bool]$script:finishOnly) `
+      -LastRun ([bool]$script:dgLastRun) -TimeVerdict (Update-AbyssRetryTimeVerdict) -CustomMode ([bool]$script:customMode) `
+      -NextGiven (-not [string]::IsNullOrWhiteSpace([string]$env:HONEYNOGI_CUSTOM_NEXT)) -NextItem $script:customNext -CurrentItem $script:customItem `
+      -NextBoundary ([string]$env:HONEYNOGI_CUSTOM_NEXT_BOUNDARY -eq '1') -NextOwnerGiven ($null -ne $nextOwnerParsed) `
+      -NextEntryUnknown ([string]$env:HONEYNOGI_CUSTOM_NEXT_BOUNDARY -eq 'mixed')
+  }
+  $markerOk = $true
   if ($script:customMode -and -not $script:customCleanupOnly -and ($clearOutcome -eq 'clear' -or $clearOutcome -eq 'reward')) {
     # 결과 화면 도달 = 현재 어비스 항목의 클리어 확정. 이후 나가기·선택 화면 복귀에서
     # 끊겨도 GUI가 같은 판을 다시 입장하지 않고 마무리만 복구할 수 있게 먼저 기록합니다.
     # 마커는 클리어·보상 화면을 본 문맥에서만 씁니다 - 클리어 감시는 2026-09-21 부터 'selection' 을 돌려주지 않지만
     # (불명 오버레이는 관측 지속 → 마감 시 코드 4), 증거 없는 결과에 마커가 찍히는 경로를 명시로 막습니다 (설계 합의 A2).
-    # 반환값(기록 성공 여부)은 이 단위에서 쓰지 않아 버립니다 (구현 명세 ① 2.10 W5)
-    [void](Write-CustomClearMarker)
+    # 반환값(기록 성공 여부)은 아래 기록 확인이 받습니다 - 거짓이면 '다시 하기' 금지(설계 v10 2.1(1) ① · 구현 명세 ⑤b2 1.4 RB3·RB4)
+    $markerOk = Write-CustomClearMarker
   }
   # 어비스 완료 기록(journal) - 같은 클리어 확정 지점에서 'cleared' 항목 1건을 나가기 헬퍼 앞에 남깁니다 (구현 명세 ① 2.10 W3).
   # 완료 마커를 썼는지와 무관하게 남깁니다 - 마커 쓰기가 실패한 커스텀 판도, 마커가 없는 비커스텀 판도 그 뒤 나가기·복귀 중 조건 정지(코드 4)로
-  # 끝나면 GUI 가 이 기록으로 1회 계상합니다. 정리 전용 판(손으로 들어간 판 - 계상하지 않음)만 뺍니다. 저장 실패는 [경고] 한 줄 뒤 그대로
-  # 진행하고(종료 코드·흐름 불변), 예외는 감싸지 않습니다(함수 머리 주석)
+  # 끝나면 GUI 가 이 기록으로 1회 계상합니다. 정리 전용 판(손으로 들어간 판 - 계상하지 않음)만 뺍니다. 저장 실패는 [경고] 한 줄 뒤 진행합니다 - '다시 하기'
+  # 결정이었으면 아래 기록 확인이 옛 나가기로 보냅니다(구현 명세 ⑤b2 1.4 RB2). 예외는 감싸지 않습니다(함수 머리 주석)
+  $clearedRecord = $null
   if (($clearOutcome -eq 'clear' -or $clearOutcome -eq 'reward') -and -not ($script:customMode -and $script:customCleanupOnly)) {
-    Add-AbyssJournalClearedEntry
+    # 결정한 순간의 값을 남깁니다(설계 v11 R6 1.2 - 경로 거짓은 옛 나가기 'exit'). 'retry' 면 다음 판 owner(커스텀 = 받은 NEXT_OWNER 5필드 / 비커스텀 = 이번
+    # 실행 id)도 함께 - 컨트롤 패널이 재입장한 판을 그 owner 로 이어받습니다(구현 명세 ⑤b2 1.2). 부르는 자리는 본류 한 곳 그대로입니다
+    $clearedDecision = 'exit'
+    $nextOwnerValue = $null
+    if ($retryRoute) {
+      $clearedDecision = [string]$rewardDecision.Action
+      if ($clearedDecision -eq 'retry') {
+        if ($script:customMode) { $nextOwnerValue = $nextOwnerParsed.Owner } else { $nextOwnerValue = [pscustomobject]@{ runId = [string]$script:abyssRunId } }
+      }
+    }
+    $clearedRecord = Add-AbyssJournalClearedEntry -Decision $clearedDecision -NextOwner $nextOwnerValue
   }
+  if ($retryRoute) {
+    # 기록 확인(구현 명세 ⑤b2 1.4 · ⑤b6 1.4): 결정 exit(멈출 때 · 다음 판 입장 방식이 다르거나 모를 때)는 기록과 무관하게 옛 나가기, 완료 마커를 못 쓴 판은
+    # '다시 하기' 금지 → '다른 던전 가기', 'retry' 인데 클리어 기록을 못 쓴 판은 옛 나가기
+    $rewardBranch = Resolve-AbyssRewardBranch -Action $rewardDecision.Action -MarkerOk ([bool]$markerOk) -ClearedOk ([string]$clearedRecord.Tag -eq 'changed')
+    if ($rewardBranch -eq 'retry') {
+      # '다시 하기' - 재입장 확인(11/0)·정지·'다른 던전 가기' 끝은 그 함수 안에서 끝납니다. 돌아오는 것은 재입장 요청 기록 실패('record-failed')와 클릭 직전 재검사의
+      # 안전 중지('safe-stop')·지정 시각('last' - 사유 줄은 클릭 루프가 남김)뿐 → 아래 옛 나가기(구현 명세 ⑤b6 · 사용자 결정 2026-10-26 ①)
+      $retryEnd = Complete-AbyssRetrySelection -Game $game -Nonce ([string]$clearedRecord.Nonce)
+      if ($retryEnd -eq 'record-failed') {
+        Write-RunLog "[경고] 재입장 요청 기록을 저장하지 못해 '다시 하기' 를 누르지 않고 '나가기' 로 선택 화면에 돌아갑니다"
+      }
+    } elseif ($rewardBranch -eq 'other') {
+      # '다른 던전 가기' - 결정 사유 한 줄 뒤 대기·끝(선택 화면 확인 exit 0 · 정지 4 · 폴백 ② ③). 다음 판은 늘 같은 입장 방식입니다(결정 함수 머리 주석)
+      if ($rewardDecision.Action -ne 'other') {
+        Write-RunLog "[어비스] 완료 마커를 남기지 못해 '다시 하기' 대신 '다른 던전 가기' 로 선택 화면에서 마칩니다"
+      } else {
+        $otherCause = switch ([string]$rewardDecision.Reason) {
+          'boundary' { '바퀴가 끝나' }
+          'item-change' { '다음 항목이 다른 던전·조건이라' }
+          'next-owner-empty' { '다음 판 이어받기 정보가 없어' }
+        }
+        Write-RunLog "[어비스] ${otherCause} '다른 던전 가기' 로 선택 화면에서 마칩니다"
+      }
+      Complete-AbyssOtherSelection -Game $game
+    } elseif ($rewardBranch -eq 'exit') {
+      # 옛 나가기 - 멈출 때(안전 중지 · 마무리 실행 · 마지막 판 · 지정 시각 - 구현 명세 ⑤b6 · 사용자 결정 2026-10-26 ①)와 다음 판 입장 방식이 다르거나 모를 때
+      # (다음 항목 손상 · 입장 방식 미정 · 입장 방식 바뀜 - 이어 감: 컨트롤 패널이 코드 0 뒤 다음 항목을 시작, 사용자 결정 2026-10-26 섞기 허용). 결정 사유 한 줄
+      # 뒤 아래 옛 나가기 줄로 갑니다. 끝말 '던전 밖에 나와' 는 끝 화면 둘(안전 중지 = 필드 확정 · 그 밖 = 필드에서 연 선택 화면)을 함께 덮습니다 - 던전 14-T 의
+      # 시간 줄은 필드에서 끝나 '필드에 나와' 입니다(시간 줄은 설계 v11 R3 3.7 ① 원문에서 끝 동작 자리만 바꿈). 이어 가는 판의 끝말은 '다음 항목으로 넘어갑니다'
+      if ($rewardDecision.Reason -eq 'time') {
+        Write-RunLog "[어비스] 지정 시간 $($script:abyssUntil.ToString('HH:mm')) 도달 - 이번 판을 마지막으로 '나가기'로 던전 밖에 나와 마칩니다"
+      } else {
+        $exitCause = switch ([string]$rewardDecision.Reason) {
+          'safe-stop' { '안전 중지 예약이 있어' }
+          'finish-only' { '마무리 실행이라' }
+          'last-run' { '마지막 판이라' }
+        }
+        $moveCause = switch ([string]$rewardDecision.Reason) {
+          'next-invalid' { '다음 항목 정보를 읽지 못해' }
+          'next-unknown' { '랜덤 순서라 다음 바퀴 첫 항목의 입장 방식을 알 수 없어' }
+          'entry-change' { '다음 항목의 입장 방식이 달라' }
+        }
+        if ($moveCause) {
+          Write-RunLog "[어비스] ${moveCause} '나가기'로 던전 밖에 나와 다음 항목으로 넘어갑니다"
+        } else {
+          Write-RunLog "[어비스] ${exitCause} '나가기'로 던전 밖에 나와 마칩니다"
+        }
+      }
+    } else {
+      Write-RunLog "[어비스] 완료 기록을 남기지 못해 '다시 하기' 대신 '나가기' 로 선택 화면에 돌아갑니다"
+    }
+  }
+  # 옛 나가기 경로 - 경로 거짓(파티 찾기 · 구현 단위 ⑥d 전 파티장 · 정리 전용)과 위 '다시 하기' 경로의 결정 exit(멈출 때 · 다음 판 입장 방식이 다르거나 모를 때) ·
+  # 기록 실패 두 갈래(legacy-exit · record-failed) · '다시 하기' 직전 재검사의 안전 중지·지정 시각이 지납니다(구현 명세 ⑤b6)
   # 2026-09-18 3버튼 개편('[ESC] 나가기' / '[Space] 다시 하기' / '다른 던전 가기'): 옛 고정 좌표 (636,655) 는
   # '다시 하기' 자리라 글자 위치로 클릭합니다 (미검출은 재판독 후 코드 4 - 재입장 오클릭 방지). 'matching'(재매칭 패널)이면
   # 누르지 않고 아래 복귀 루프가 기다립니다.

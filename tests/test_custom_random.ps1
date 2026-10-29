@@ -206,4 +206,110 @@ Assert-Case '비랜덤 표시: 정지 복원 - 전 행 White + Tag 해제 + 플�
 Set-CustomListRandomView -Context @{ RandomOrder = $false; RegisteredTotal = 4; Index = 0; SectionName = 'customRepeat' }
 Assert-Case '비랜덤 표시: 행 수 불일치면 생략 (플래그 미설정)' ([bool]$script:customViewShuffled) $false
 
+
+# ── 9. 다음 판 이어받기 env NX (구현 명세 ⑤b5 3.1 crandom ⑨ · ⑤b6 3.1 crandom §9 · dev:982 ⑨ · 사용자 결정 U-⑤-2 (가) · 2026-10-26 '랜덤 + 섞인 리스트 바퀴 경계 = 필드') ──
+# GUI Get-CustomNextHandoffEnv(순수)의 두 값 - NEXT_OWNER = 같은 바퀴 다음 칸(index+1)의 owner JSON / 바퀴 끝 판(1항목 리스트는 매 판)이면 빈 값 · NEXT_BOUNDARY '1' 또는 'mixed'.
+#   Owner 는 워커 원문 ConvertTo-AbyssJournalOwner 로 되읽어(어비스 보상 결정이 실제로 읽는 길) 지금 판 owner(같은 컨텍스트의 New-CustomMarkerOwnerJson)와 지문 · 순서 키 ·
+#   바퀴 · 세대가 같고 index 가 +1 · item 이 실행 순서 다음 칸 토큰인지 봅니다. 랜덤 바퀴 끝은 빈 값이어야 합니다 - 다음 바퀴의 새 순열을 미리 가정한 owner 를 만들면
+#   FAIL(dev:982 'NEXT_OWNER 에 다음 바퀴 순열 가정 → FAIL')
+# ⑤b6: 랜덤 진행(순열 있음 또는 랜덤 켬)의 바퀴 끝 판에서 등록 항목의 입장 방식(어비스 토큰의 방식 · 공백 뺀 매칭)이 둘 이상이면 NEXT_BOUNDARY 'mixed' - 다음 바퀴 첫 칸
+#   (새 순열)의 입장 방식을 아직 모르므로 워커 보상 결정이 ④ 'next-unknown' 으로 '나가기' 합니다. 순차 바퀴 끝 · 입장 방식이 한 가지인 랜덤 · 어비스가 아닌 리스트는
+#   '1' 그대로입니다(순차 바퀴 끝 NEXT 는 다음 바퀴 첫 칸이라 워커가 ⑤ 로 대조). 'mixed' · '1' 기대는 계약 열거값이고, EQ 는 GUI 원문 함수의 'mixed' 와 워커 원문 해석
+#   (ConvertFrom-AbyssCustomItemSpec)의 입장 방식 다름이 같은지 6×6 쌍으로 봅니다(사본 재구현 금지). 가드는 'mixed' 계산이 바퀴 끝 갈래 안에만 있고 순열 생성이 없는지 AST 로 봅니다
+$nxHandoffFnText = [string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Get-CustomNextHandoffEnv'))
+Invoke-Expression $nxHandoffFnText
+foreach ($definition in @(Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_run_once.ps1') -Names @('ConvertTo-AbyssJournalOwner', 'ConvertFrom-AbyssCustomItemSpec'))) { Invoke-Expression $definition }
+$nxA = [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '어려움'; dungeon = '허상의 정박지'; matching = '없음' }
+$nxB = [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '어려움'; dungeon = '광기의 동굴'; matching = '없음' }
+$nxC = [pscustomobject]@{ kind = 'abyss'; mode = 'party'; difficulty = '입문'; dungeon = '흩어진 물길'; matching = '우연한 만남' }
+# ⑤b6 픽스처: 혼자하기 매칭 빈 값(토큰은 '없음') · 우연한 만남 공백 없는 표기 · 파티 찾기 두 표기 · 파티장 (워커 해석이 받는 던전 · 난이도만)
+$nxBBlank = [pscustomobject]@{ kind = 'abyss'; mode = 'solo'; difficulty = '어려움'; dungeon = '광기의 동굴'; matching = '' }
+$nxCNs = [pscustomobject]@{ kind = 'abyss'; mode = 'party'; difficulty = '어려움'; dungeon = '광기의 동굴'; matching = '우연한만남' }
+$nxFindSp = [pscustomobject]@{ kind = 'abyss'; mode = 'party'; difficulty = '어려움'; dungeon = '광기의 동굴'; matching = '파티 찾기' }
+$nxFindNs = [pscustomobject]@{ kind = 'abyss'; mode = 'party'; difficulty = '어려움'; dungeon = '흩어진 물길'; matching = '파티찾기' }
+$nxLead = [pscustomobject]@{ kind = 'abyss'; mode = 'party'; difficulty = '어려움'; dungeon = '허상의 정박지'; matching = '파티(파티장)' }
+function New-NxContext {
+  # Start-NextCycle 이 쓰는 컨텍스트 모양(Items · ExecutionItems · Order · RandomOrder · Total · Lap · Index · Item · Generation) - 랜덤이면 실행 순서 = 원문 Get-CustomExecutionItems.
+  # RandomOrder 를 주지 않으면 순열이 있을 때만 참입니다(Get-CustomCurrentContext 는 랜덤이고 저장 순열이 유효할 때만 Order 를 채움 - 랜덤 켬 · 순열 없음은 NX10 이 직접 줌)
+  param([object[]]$Items, $Order, [int]$Lap, [int]$Index, [int]$Generation, $RandomOrder = $null)
+  $executionItems = $Items
+  if ($null -ne $Order) { $executionItems = @(Get-CustomExecutionItems -Items $Items -Order $Order) }
+  $randomFlag = $(if ($null -eq $RandomOrder) { $null -ne $Order } else { [bool]$RandomOrder })
+  return @{ Items = $Items; ExecutionItems = $executionItems; Order = $Order; RandomOrder = $randomFlag; Total = @($executionItems).Count; Lap = $Lap; Index = $Index; Item = @($executionItems)[$Index]; Generation = $Generation }
+}
+function Get-NxRow {
+  # 한 행 → '경계 [b] · owner <빈 값 | 되읽음 · 지문/순서키/바퀴/세대 같음 · index · item>' (되읽기는 워커 원문)
+  param($Context)
+  $nx = Get-CustomNextHandoffEnv -Context $Context
+  if ([string]::IsNullOrEmpty([string]$nx.Owner)) { return ('경계 [{0}] · owner 빈 값 · 되읽음 {1}' -f $nx.Boundary, [int]($null -ne (ConvertTo-AbyssJournalOwner -OwnerJson ([string]$nx.Owner)))) }
+  $parsed = ConvertTo-AbyssJournalOwner -OwnerJson ([string]$nx.Owner)
+  if ($null -eq $parsed) { return ('경계 [{0}] · owner 되읽기 실패' -f $nx.Boundary) }
+  $current = (New-CustomMarkerOwnerJson -Context $Context) | ConvertFrom-Json
+  $same = ([string]$parsed.Owner.fingerprint -ceq [string]$current.fingerprint) -and ([string]$parsed.Owner.orderKey -ceq [string]$current.orderKey) -and
+    ([int]$parsed.Owner.lap -eq [int]$current.lap) -and ([int]$parsed.Generation -eq [int]$current.generation)
+  return ('경계 [{0}] · owner 되읽음 · 지문·순서키·바퀴·세대 같음 {1} · index {2} · item {3} · 순서키 [{4}] · 세대 {5}' -f $nx.Boundary, $same, $parsed.Owner.index, $parsed.Owner.item,
+      $parsed.Owner.orderKey, $parsed.Generation)
+}
+$nxTokenA = Format-CustomItemToken -Item $nxA
+$nxTokenB = Format-CustomItemToken -Item $nxB
+Assert-Case 'NX1 순차 [A,A,B] 1바퀴 index 0(세대 3) → 경계 빈 값 · 다음 칸 index 1 · item A' (Get-NxRow (New-NxContext @($nxA, $nxA, $nxB) $null 1 0 3)) `
+  ('경계 [] · owner 되읽음 · 지문·순서키·바퀴·세대 같음 True · index 1 · item {0} · 순서키 [] · 세대 3' -f $nxTokenA)
+Assert-Case 'NX2 순차 [A,A,B] index 1 → 다음 칸 index 2 · item B' (Get-NxRow (New-NxContext @($nxA, $nxA, $nxB) $null 1 1 3)) `
+  ('경계 [] · owner 되읽음 · 지문·순서키·바퀴·세대 같음 True · index 2 · item {0} · 순서키 [] · 세대 3' -f $nxTokenB)
+Assert-Case 'NX3 순차 [A,A,B] index 2(바퀴 끝 판) → 경계 1 · owner 빈 값(다음 바퀴 owner 를 만들지 않음 - U-⑤-2 (가))' (Get-NxRow (New-NxContext @($nxA, $nxA, $nxB) $null 1 2 3)) '경계 [1] · owner 빈 값 · 되읽음 0'
+Assert-Case 'NX4 1항목 [A] (매 판 바퀴 끝) → 경계 1 · owner 빈 값' (Get-NxRow (New-NxContext @($nxA) $null 4 0 0)) '경계 [1] · owner 빈 값 · 되읽음 0'
+Assert-Case 'NX5 랜덤 [A,B,C] 순열 2,0,1 · 2바퀴 index 0(세대 1) → 다음 칸 = 실행 순서 index 1(등록 0번 A) · 순서키 그대로' (Get-NxRow (New-NxContext @($nxA, $nxB, $nxC) @(2, 0, 1) 2 0 1)) `
+  ('경계 [] · owner 되읽음 · 지문·순서키·바퀴·세대 같음 True · index 1 · item {0} · 순서키 [2,0,1] · 세대 1' -f $nxTokenA)
+Assert-Case 'NX6 랜덤 [A,B,C](혼자 · 혼자 · 우연) 순열 2,0,1 · index 2(바퀴 끝 판) → 경계 mixed(입장 방식이 섞인 랜덤 바퀴 끝 - ⑤b6) · owner 빈 값(다음 바퀴 순열 가정 0)' (Get-NxRow (New-NxContext @($nxA, $nxB, $nxC) @(2, 0, 1) 2 2 1)) '경계 [mixed] · owner 빈 값 · 되읽음 0'
+Assert-Case 'NX6s 랜덤 [혼자, 혼자](매칭 없음 · 빈 값) 순열 1,0 · 바퀴 끝 판 → 경계 1(입장 방식 한 가지) · owner 빈 값' (Get-NxRow (New-NxContext @($nxA, $nxBBlank) @(1, 0) 2 1 1)) '경계 [1] · owner 빈 값 · 되읽음 0'
+Assert-Case 'NX7 반환 = 해시 1개 · 키 Boundary,Owner' ('{0} · {1}' -f @(Get-CustomNextHandoffEnv -Context (New-NxContext @($nxA, $nxB) $null 1 0 0)).Count,
+  ((@((Get-CustomNextHandoffEnv -Context (New-NxContext @($nxA, $nxB) $null 1 0 0)).Keys) | Sort-Object) -join ',')) '1 · Boundary,Owner'
+# ⑤b6 'mixed' 경계 (구현 명세 ⑤b6 1.10 · G10): 랜덤 진행의 바퀴 끝 판 · 입장 방식이 섞인 리스트만 'mixed'
+Assert-Case 'NX8 순차 [혼자, 우연] 바퀴 끝 판 → 경계 1(순차는 섞여도 1 - NEXT 가 다음 바퀴 첫 칸 그대로라 입장 방식 대조는 워커) · owner 빈 값' (Get-NxRow (New-NxContext @($nxA, $nxC) $null 1 1 0)) '경계 [1] · owner 빈 값 · 되읽음 0'
+Assert-Case 'NX9 랜덤 [A,B,C](섞임) 순열 2,0,1 · index 1(바퀴 중간) → 경계 빈 값 · owner 있음(다음 칸 index 2 · item B)' (Get-NxRow (New-NxContext @($nxA, $nxB, $nxC) @(2, 0, 1) 2 1 1)) `
+  ('경계 [] · owner 되읽음 · 지문·순서키·바퀴·세대 같음 True · index 2 · item {0} · 순서키 [2,0,1] · 세대 1' -f $nxTokenB)
+Assert-Case 'NX10 랜덤 켬 · 순열 없음(손상) · [혼자, 우연] 바퀴 끝 판 → 경계 mixed · owner 빈 값' (Get-NxRow (New-NxContext @($nxA, $nxC) $null 1 1 0 $true)) '경계 [mixed] · owner 빈 값 · 되읽음 0'
+Assert-Case 'NX11 던전 랜덤 [1-1 어려움, 1-1 입문] 순열 1,0 · 바퀴 끝 판 → 경계 1(어비스 토큰이 아니면 한 종류)' (Get-NxRow (New-NxContext @($mapItems[0], $mapItems[1]) @(1, 0) 1 1 0)) '경계 [1] · owner 빈 값 · 되읽음 0'
+Assert-Case 'NX12 랜덤 [우연한 만남, 우연한만남](매칭 공백 표기 둘) 순열 1,0 · 바퀴 끝 판 → 경계 1(공백 무시)' (Get-NxRow (New-NxContext @($nxC, $nxCNs) @(1, 0) 1 1 0)) '경계 [1] · owner 빈 값 · 되읽음 0'
+# EQ - 원문 GUI 경계 함수를 두 항목 랜덤 바퀴 끝 문맥으로 불러 'mixed' ⇔ 워커 원문 해석(ConvertFrom-AbyssCustomItemSpec)의 입장 방식(Mode · Matching) 다름 - 다르게 나온 쌍을 이어 적습니다
+$eqItems = [ordered]@{ 'solo빈' = $nxBBlank; 'solo없음' = $nxA; '우연' = $nxC; '찾기공백' = $nxFindSp; '찾기붙임' = $nxFindNs; '파티장' = $nxLead }
+$eqBad = @()
+foreach ($eqKeyA in @($eqItems.Keys)) {
+  foreach ($eqKeyB in @($eqItems.Keys)) {
+    $eqGuiMixed = ([string](Get-CustomNextHandoffEnv -Context (New-NxContext @($eqItems[$eqKeyA], $eqItems[$eqKeyB]) @(0, 1) 1 1 0)).Boundary -ceq 'mixed')
+    $eqParsedA = ConvertFrom-AbyssCustomItemSpec -Spec (Format-CustomItemToken -Item $eqItems[$eqKeyA])
+    $eqParsedB = ConvertFrom-AbyssCustomItemSpec -Spec (Format-CustomItemToken -Item $eqItems[$eqKeyB])
+    if (($null -eq $eqParsedA) -or ($null -eq $eqParsedB)) { $eqBad += ('{0}/{1}(해석 실패)' -f $eqKeyA, $eqKeyB); continue }
+    $eqWorkerDiff = -not (([string]$eqParsedA.Mode -ceq [string]$eqParsedB.Mode) -and ([string]$eqParsedA.Matching -ceq [string]$eqParsedB.Matching))
+    if ($eqGuiMixed -ne $eqWorkerDiff) { $eqBad += ('{0}/{1}' -f $eqKeyA, $eqKeyB) }
+  }
+}
+Assert-Case "EQ GUI 경계 함수의 'mixed' = 워커 해석의 입장 방식 다름(6×6 쌍)" ($eqBad -join ',') ''
+# 가드(AST - 주석 무관): 'mixed' 계산(등록 항목 열거 · 'mixed' 글자)은 바퀴 끝 갈래(if ($nextIndex -ge [int]$Context.Total)) 안에서만 하고, 이 함수는 순열을 만들거나
+#   실행 순서를 다시 매핑하지 않습니다(다음 바퀴 순열 가정 0 - NX6 의 owner 빈 값과 같은 계약)
+$nxFnTokens = $null; $nxFnErrors = $null
+$nxFnAst = [System.Management.Automation.Language.Parser]::ParseInput($nxHandoffFnText, [ref]$nxFnTokens, [ref]$nxFnErrors)
+$nxEndIf = $nxFnAst.Find({ param($node) ($node -is [System.Management.Automation.Language.IfStatementAst]) -and ($node.Clauses[0].Item1.Extent.Text -ceq '$nextIndex -ge [int]$Context.Total') }, $true)
+$nxEndBlock = $(if ($null -ne $nxEndIf) { $nxEndIf.Clauses[0].Item2 } else { $null })
+function Test-NxInsideEndBlock {
+  # 노드가 바퀴 끝 갈래의 몸통 안에 있는지 (같은 파싱 결과의 문자 위치로 비교)
+  param($Node)
+  return (($null -ne $nxEndBlock) -and ($Node.Extent.StartOffset -ge $nxEndBlock.Extent.StartOffset) -and ($Node.Extent.EndOffset -le $nxEndBlock.Extent.EndOffset))
+}
+$nxMixedConsts = @($nxFnAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and ($node.Value -ceq 'mixed') }, $true))
+$nxItemLoops = @($nxFnAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.ForEachStatementAst]) -and ($node.Condition.Extent.Text -match '\$Context\.Items\b') }, $true))
+$nxShuffleCalls = @($nxFnAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.CommandAst]) -and (@('New-CustomShuffleOrder', 'Get-CustomExecutionItems', 'Get-Random') -contains $node.GetCommandName()) }, $true))
+Assert-Case "가드(⑤b6): Get-CustomNextHandoffEnv - 'mixed' 계산은 바퀴 끝 갈래 안에서만(갈래 1 · 'mixed' 글자 1 · 그중 갈래 안 1 · 등록 항목 열거 갈래 안 1 · 갈래 밖 0) · 순열 생성 · 매핑 호출 0" `
+  ('{0}/{1}/{2}/{3}/{4}/{5}' -f [int]($null -ne $nxEndIf), $nxMixedConsts.Count, @($nxMixedConsts | Where-Object { Test-NxInsideEndBlock -Node $_ }).Count,
+    @($nxItemLoops | Where-Object { Test-NxInsideEndBlock -Node $_ }).Count, @($nxItemLoops | Where-Object { -not (Test-NxInsideEndBlock -Node $_) }).Count, $nxShuffleCalls.Count) '1/1/1/1/0/0'
+# 가드(주석 뺀 GUI 사본): Start-NextCycle 이 OWNER 와 같은 $customContext 로 부름(호출 1 · 두 env 대입은 그 결과의 Owner · Boundary) · Clear-CustomEnv 목록에 두 env
+$nxNextCycle = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Start-NextCycle')))
+Assert-Case '가드(⑤b5): Start-NextCycle - OWNER 와 같은 $customContext 로 다음 판 env 계산 1곳 · NEXT_OWNER/NEXT_BOUNDARY 는 그 결과 그대로' `
+  ('{0}/{1}/{2}/{3}' -f [regex]::Matches($nxNextCycle, '\$env:HONEYNOGI_CUSTOM_OWNER = New-CustomMarkerOwnerJson -Context \$customContext').Count,
+    [regex]::Matches($nxNextCycle, '\$customNextHandoff = Get-CustomNextHandoffEnv -Context \$customContext').Count,
+    [regex]::Matches($nxNextCycle, '\$env:HONEYNOGI_CUSTOM_NEXT_OWNER = \$customNextHandoff\.Owner').Count,
+    [regex]::Matches($nxNextCycle, '\$env:HONEYNOGI_CUSTOM_NEXT_BOUNDARY = \$customNextHandoff\.Boundary').Count) '1/1/1/1'
+$nxClearEnv = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Clear-CustomEnv')))
+Assert-Case '가드(⑤b5): Clear-CustomEnv 목록에 NEXT_OWNER · NEXT_BOUNDARY (비커스텀 다음 회차 워커에 앞 실행 값이 남지 않게)' `
+  ('{0}/{1}' -f ($nxClearEnv -match "'HONEYNOGI_CUSTOM_NEXT_OWNER'"), ($nxClearEnv -match "'HONEYNOGI_CUSTOM_NEXT_BOUNDARY'")) 'True/True'
 exit $fails

@@ -465,11 +465,12 @@ $missingFragments = @(@('다시', '다세', '다셔', '하기', '다른', '던�
 $gagiStringCount = @(@($selectStrings + $selectExpandableStrings) | Where-Object { $_.Contains('가기') }).Count
 Check-Equal "PT3 Select-AbyssRewardButtonPair 문자열 상수: '다시'·'다세'·'다셔'·'하기'·'다른'·'던전' 각 1 이상 · '가기' 0" ('없는 조각=[{0}] · 가기 문자열={1}' -f ($missingFragments -join ','), $gagiStringCount) '없는 조각=[] · 가기 문자열=0'
 
-# PT4. 배선 0 - 화면 함수를 부르는 곳이 워커에 없고, 순수 판정은 화면 함수 안 한 곳에서만 부름 (⑤ 가 배선하면 ⑤ 명세가 이 단언을 갱신)
+# PT4. 배선 - 화면 함수를 부르는 곳 = '다른 던전 가기' 대기 1(구현 명세 ⑤b3 3.4) + '다시 하기' 클릭 루프 1(구현 명세 ⑤b4 3.4 - 명세③ C6)이고, 순수 판정은 화면 함수 안 한 곳에서만 부름
 $findCallNodes = @($workerAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.CommandAst]) -and ($node.GetCommandName() -eq 'Find-AbyssRewardButtonPair') }, $true))
+$findCallHomes = @($findCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ }) -join ','
 $selectCallNodes = @($workerAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.CommandAst]) -and ($node.GetCommandName() -eq 'Select-AbyssRewardButtonPair') }, $true))
 $selectCallHomes = @($selectCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ }) -join ','
-Check-Equal 'PT4 배선 0: 워커의 Find-AbyssRewardButtonPair 호출 0 · Select-AbyssRewardButtonPair 호출 1 (자리 = Find-AbyssRewardButtonPair 안)' ('화면 함수 호출={0} · 순수 판정 호출={1} · 자리=[{2}]' -f $findCallNodes.Count, $selectCallNodes.Count, $selectCallHomes) '화면 함수 호출=0 · 순수 판정 호출=1 · 자리=[Find-AbyssRewardButtonPair]'
+Check-Equal 'PT4 배선: 워커의 Find-AbyssRewardButtonPair 호출 2 (자리 = Wait-AbyssOtherSelection · Invoke-AbyssRetryClick) · Select-AbyssRewardButtonPair 호출 1 (자리 = Find-AbyssRewardButtonPair 안)' ('화면 함수 호출={0} · 자리=[{1}] · 순수 판정 호출={2} · 자리=[{3}]' -f $findCallNodes.Count, $findCallHomes, $selectCallNodes.Count, $selectCallHomes) '화면 함수 호출=2 · 자리=[Wait-AbyssOtherSelection,Invoke-AbyssRetryClick] · 순수 판정 호출=1 · 자리=[Find-AbyssRewardButtonPair]'
 
 # PT5. 상수 셋 - 최상위 대입 각 정확히 1 · 함수 안 대입 0 · 우변에 명령 0 · config 변수 0 (스크립트 상수 - coordsVersion·configSchemaVersion 무관), 두 대역은 겹치지 않음
 $constantReport = foreach ($constantName in @('abyssRetryPairBandX', 'abyssOtherPairBandX', 'abyssPairMaxDy')) {

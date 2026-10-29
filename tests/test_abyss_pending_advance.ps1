@@ -54,6 +54,14 @@
 #   단계 2.7~2.9 구현 검증 보강(2026-10-09 - 생존 변이 9): S3 판정 안의 예외 → 거부(SG2′ - 진행 위치 읽기 예외 주입 $script:contextThrows) · 주인 확인 불가는
 #       '클리어 이상' 만 셈(SG3″) · 적용된 cleared 는 복구 근거가 아님·post-clear-stop 은 복구(SG4′·SG4″) · 재개 횟수 기록 예외·실제 -Expect 거절 → 거부(SG5″·SG5‴) ·
 #       지문 검사·완주 판정(S1)이 S0 의 전진을 봄(SG8′) · S0 처리 중 예외 → 거부 + [오류] 줄(SG9′).
+# 지키는 것 (구현 명세 ⑤b5 - PC5. 설계 v11 R6 7.4 PC5 · 8.1 · 명세 ⑤b5 3.1 ⑰ · B-8 G3):
+#   [PC5] 마무리 실행(진행 저장 실패 보류)이 그 판을 클리어(실제 워커 모양 - 클리어 기록이 같은 저장에서 넘긴 nonce 를 닫음)하고 'unconfirmed' 코드 4 → 타이머 코드 4
+#       갈래 본문(AST 점소싱 - 실제 Invoke-Code4Accounting)에서 그 자리 계상 0 · 넘긴 nonce 는 이미 done(열어 둠 G3 이 닿지 않음) → 다음 수동 시작(실제 S0 · S3 · 첫 기동
+#       - 넘길 nonce 없음) → 복구 워커 코드 4 → 마커 경로 +1(그 판 총 1) → 다음 시작 후보 없음(내부 검토 반영 - 앞 판은 넘긴 nonce 를 닫지 않는 픽스처였음). GUI 추출
+#       목록에 Get-CustomNextHandoffEnv(실제 Start-NextCycle 이 부름 - 명세 3.4)
+#   [PC5′] (구현 명세 ⑤b5 명세 리뷰 2 RV-11 - PC5 의 클리어 전 짝) 같은 시작(진행 저장 실패 보류 · 넘긴 N1 · 앞 판 i 의 완료 마커 남음)에서 마무리 실행 워커가 그 판을
+#       클리어하기 전 코드 4(워커 원문 [완료] 사유) → 타이머 코드 4 갈래가 앞 판 마커를 이번 판의 클리어 근거로 쓰지 않음(계상 0 · 전진 0 · N1 launched - G3) → 다음 수동
+#       시작(실제 S0 · S3 · 마커 게이트 · 첫 기동)이 대기열을 1회 반영한 뒤 next:N1 로 같은 nonce/index 를 이어받음(재입장 0 - 입장 직후 키 재전송 0)
 # 방법:
 #   - GUI 함수와 저장소 묶음(머리 주석 ~ '묶음 끝' 표지 주석 사이 최상위 함수)을 이 파일 최상위에서 정의합니다(명세 ① 2.0 체크리스트 6 -
 #     클로저가 부를 수 있는 함수는 최상위 정의뿐). config·journal·마커는 케이스마다 새 임시 폴더의 실제 파일이고, 진행 전진·위치는 실제
@@ -88,6 +96,8 @@ $GUI_FUNCTION_NAMES = @(
     'Test-TimeAllowsNextCycle', 'Get-NextCycleAction', 'Start-NextCycle', 'Set-HandoffLaunchEnv', 'Resolve-HandoffEnvForContext', 'Get-FinishOnlyCustomEnv',
     'Clear-HandoffEnv', 'Clear-CustomEnv', 'Test-WorkerTimeJudgeActive', 'Get-TimeStatusSuffix', 'Test-CustomLastRun', 'Get-CustomListCompact',
     'New-CustomMarkerOwnerJson', 'Read-CustomMarkerOwner', 'Test-CustomMarkerOwnerMatchesContext',
+    # 구현 명세 ⑤b5 G1 - 실제 Start-NextCycle 커스텀 블록이 부르는 다음 판 이어받기 env 두 값(NEXT_OWNER · NEXT_BOUNDARY)
+    'Get-CustomNextHandoffEnv',
     # 단계 2.6 구현 리뷰 - 대기열 실패의 '사용 중' 안내
     'Get-AbyssPendingStopReason',
     # 단계 2.8 코드 1 - 라우팅 · 타이머 $markerExists 대입문이 부르는 마커 유효 판정 · 커스텀 오류 대응 판정 · 라우팅 안 정지 경로의 이번 기동 nonce 닫기
@@ -95,7 +105,9 @@ $GUI_FUNCTION_NAMES = @(
     'Invoke-Code1JournalRouting', 'Test-CustomMarkerValidForCurrent', 'Get-CustomErrorAction', 'Close-AbyssLaunchNonceOnStop',
     # 단계 2.9 시작 게이트 - S0·S3 와 그 공용 함수 · 이어받기 행의 타이머 코드 0·11 갈래 본문이 부르는 재입장 판별
     'Invoke-AbyssStartJournalAdvance', 'Get-AbyssStartJournalAction', 'Invoke-AbyssStartJournalAction', 'Read-AbyssStartJournal',
-    'Get-AbyssStartJournalRefusal', 'Set-CustomRecoveryReservation', 'Read-AbyssExitHandoff', 'Get-AbyssExitHandoffKind', 'Get-WorkerDoneMarkers')
+    'Get-AbyssStartJournalRefusal', 'Set-CustomRecoveryReservation', 'Read-AbyssExitHandoff', 'Get-AbyssExitHandoffKind', 'Get-WorkerDoneMarkers',
+    # 구현 명세 ⑤b5 PC5 - 타이머 코드 4 갈래 본문(점소싱)이 부르는 계상 · 끝 정지 계획 · 클리어 전 정지 술어(G3) · 표지 꼬리 제거
+    'Invoke-Code4Accounting', 'Get-Code4JournalPlan', 'Get-Code4StopPlan', 'Test-AbyssKeepLaunchOnStop', 'Remove-WorkerDoneMarkerTails')
 # 모의·감시 - 같은 이름의 GUI 실제 함수와 서명을 대조합니다
 $SPY_FUNCTION_NAMES = @('Add-GuiLog', 'Step-CustomProgress', 'Update-AbyssJournal', 'Read-AbyssJournal', 'Clear-CustomMarkerFile',
     'Get-CustomCurrentContext', 'Stop-AllRun', 'Move-WorkerLogToArchive', 'Set-CustomListRandomView', 'Reset-CustomProgress')
@@ -244,6 +256,10 @@ $code0Block = Join-StatementText -Statements $exitChainIfs[0].Clauses[0].Item2.S
 $code10Clauses = @($exitChainIfs[0].Clauses | Where-Object { $_.Item1.Extent.Text -ceq '$exitCode -eq 10' })
 if ($code10Clauses.Count -ne 1) { throw ('타이머 코드 10 갈래가 1개가 아닙니다 ({0}개)' -f $code10Clauses.Count) }
 $code10FirstBlock = Join-StatementText -Statements @(@($code10Clauses[0].Item2.Statements)[0])
+# 구현 명세 ⑤b5 PC5 - 타이머 코드 4 갈래 본문 전체(계상 Invoke-Code4Accounting → 상태줄 사유 → 끝 정지 계획 → 정지)
+$code4Clauses = @($exitChainIfs[0].Clauses | Where-Object { $_.Item1.Extent.Text -ceq '$exitCode -eq 4' })
+if ($code4Clauses.Count -ne 1) { throw ('타이머 코드 4 갈래가 1개가 아닙니다 ({0}개)' -f $code4Clauses.Count) }
+$code4Block = Join-StatementText -Statements $code4Clauses[0].Item2.Statements
 # 단계 2.9 시작 게이트 - 시작 처리(Invoke-StartAutomation)의 그 문장들 (T4-e 3 방식 - 시작 처리 전체는 돌리지 않음, 명세 3.4 하니스):
 #  ① 커스텀 게이트 블록 안: 진행 읽기 두 문장 → S0 → 진행 다시 읽기 → 지문 검사·완주 판정(S1) 두 if (랜덤 순서 준비 문장 앞까지)
 #  ② 함수 본문: S3 판정 대입 → 적용 if → 마커 게이트를 감싼 바깥 if (세 문장)
@@ -454,6 +470,14 @@ function Use-CaseFolder {
 }
 
 # ===== 단언·관측 =====
+function Get-ReasonHead {
+    # 정지 사건에 워커 원문 사유가 실렸는지 볼 때 쓰는 앞부분 - GUI 코드 4 갈래가 사유를 공백 정규화 뒤 80자로 자르므로(gui 상태줄 사유 · 자르기 규칙 자체는
+    # test_abyss_handoff_gui SS7 이 봄) 그 안쪽인 앞 40자로 대조합니다 (구현 리뷰 B P3 - 원문 사유 캡처가 정지 사건까지 갔는지)
+    param([string]$Reason)
+    $normalized = ($Reason -replace '\s+', ' ').Trim()
+    return $normalized.Substring(0, [Math]::Min(40, $normalized.Length))
+}
+
 function Assert-Case {
     param([string]$Name, $Actual, $Expect)
     if ("$Actual" -ceq "$Expect") { "OK   {0}: {1}" -f $Name, $Actual }
@@ -1317,14 +1341,30 @@ function Invoke-InsideHandoffExitRow {
 
 function Add-FinishWorkerResult {
     # 마무리 실행 워커가 그 판(i+1)을 마친 모양 - 완료 마커(owner i+1)와 cleared 항목(owner i+1)을 남깁니다(워커의 실제 기록 단위는 2.10·⑤ 몫)
-    param($OwnerNext)
+    # -CloseKeyNonce: 실제 워커처럼 같은 저장(mutation 하나)에서 그 판의 열쇠 항목(마무리 실행 기동이 Role next 로 받은 넘긴 nonce)을 launchState done + applied 로
+    #   닫습니다(워커 Add-AbyssJournalClearedEntry 의 mutator 와 같은 계약 - 구현 명세 ⑤b5 PC5 내부 검토 반영). 빈 값이면 cleared 만 덧붙입니다(앞 행들 그대로 -
+    #   코드 0 완주 처리가 넘긴 nonce 를 닫는 행들이라 결과 같음)
+    param($OwnerNext, [string]$CloseKeyNonce = '')
     [IO.File]::WriteAllText($script:customAbyssMarkerFile, (ConvertTo-CustomMarkerOwnerJson -Owner $OwnerNext))
     $clearedEntry = New-AbyssJournalEntry -Stage 'cleared'
     $clearedEntry.nonce = $NONCE_S
     $clearedEntry.section = $ABYSS_SECTION
     $clearedEntry.generation = $GENERATION
     $clearedEntry.owner = [pscustomobject]@{ fingerprint = $OwnerNext.fingerprint; orderKey = $OwnerNext.orderKey; lap = $OwnerNext.lap; index = $OwnerNext.index; item = $OwnerNext.item }
-    $appendMutator = { param($journal, $change) $journal.entries = @(@($journal.entries) + $clearedEntry); $change.Changed = $true }.GetNewClosure()
+    # 클로저 안에서는 지역 변수만 읽습니다(규칙 3 - GetNewClosure 는 지역 변수만 복사)
+    $appendMutator = {
+        param($journal, $change)
+        if ($CloseKeyNonce) {
+            foreach ($keyEntry in @($journal.entries)) {
+                if (($null -ne $keyEntry) -and ([string]$keyEntry.nonce -eq $CloseKeyNonce)) {
+                    $keyEntry.launchState = 'done'
+                    if (@($journal.applied) -notcontains $CloseKeyNonce) { $journal.applied = @(@($journal.applied) + $CloseKeyNonce) }
+                }
+            }
+        }
+        $journal.entries = @(@($journal.entries) + $clearedEntry)
+        $change.Changed = $true
+    }.GetNewClosure()
     $appendResult = & $script:realUpdateAbyssJournal -Path $script:abyssJournalPath -Mutator $appendMutator
     if ([string]$appendResult.Tag -ne 'changed') { throw ('픽스처 cleared 기록 실패: ' + [string]$appendResult.Tag) }
 }
@@ -2292,6 +2332,119 @@ function Test-CaseStartS0 {
         'launched · 1/1 · 전진 1 · 복구 안내 1 · 기동 recover 2번 · RESTART [1] · 재입장 0 → 1/2 · cleared/pending/1 · 복구 완료 줄 1'
 }
 
+function Test-CasePc5FinishUnconfirmed {
+    # PC5 (구현 명세 ⑤b5 3.1 ⑰ · 설계 v11 R6 7.4 PC5 · 8.1 · 4.3 · 4.6 ③ · 명세 B-8 G3) - 마무리 실행(진행 저장 실패 보류 step-failed) 워커가 그 판(i+1)을 클리어하고 '다른
+    #   던전 가기' 'unconfirmed' 코드 4 로 끝남. 워커 쪽은 실제 기록 모양 그대로: 마무리 실행 기동은 넘긴 N1 을 Role next 로 받고(워커 Consume-Handoff - 마무리 실행 표지는
+    #   역할 판정에 안 씀) 그 판의 클리어 기록이 완료 마커 i+1 · cleared NS 와 같은 저장에서 열쇠 항목 N1 을 done·적용으로 닫습니다(워커 Add-AbyssJournalClearedEntry -
+    #   -CloseKeyNonce). → 타이머 코드 4 갈래(실제 본문 점소싱): 그 자리 계상 0(마커 i+1 · NS 는 지금 진행 i 와 맞지 않음) · N1 은 이미 done 이라 열어 둠(G3)이 닿지 않음 ·
+    #   보류 사유 오류 정지 → 다음 수동 시작(실제 S0 · S3 · 마커 게이트 · 첫 기동): S0 대기열 반영 1/0 → 1/1 → S3 가 i+1 의 미적용 cleared(NS)로 마무리 복구 → 첫 기동
+    #   recover(넘길 nonce 없음 - Resolve none · 복구 워커는 완료 기록을 읽지 않음 - ⑳ R6-RC1) → 그 복구 워커가 출처 없는 선택 화면 코드 4(워커 원문 [완료] 사유) → 마커
+    #   경로 +1 · 전진 1/2 · NS 소비 → 다음 시작의 후보 고르기 = 없음(Status none). 그 판(i+1)의 계상 총 1(R6 4.3 '수용 결과 기록' - 사유는 워커 원문 상수라 실행 중
+    #   꼬리(R6-M15)는 이 행이 못 봄). 명세 1.7 의 판정('G3 로 열린 nonce 가 총 1 · 다음 시작 후보에 닿는지') = 닿지 않음 - 열어 둘 nonce 가 코드 4 전에 이미 닫혀 있음
+    #   (명세 B-8 (가) 그대로 · G3 의 행은 클리어 전 정지인 test_abyss_handoff_gui KP0 · KP8 · H32e - 2026-10-25 내부 검토 반영: 앞 판의 'N1 launched + cleared NS'
+    #   픽스처는 워커가 만들지 않는 모양이었음)
+    $workerAstPc5 = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'mabinogi_run_once.ps1'), [ref]$null, [ref]$null)
+    $pc5Reasons = @{}
+    foreach ($pc5Probe in @(@('Unconfirmed', "[완료] '다른 던전 가기' 뒤 워커가 연 것으로 확인되는"), @('Recovery', '[완료] 커스텀 마무리 복구 중 어비스 선택 화면이'))) {
+        $pc5Found = @($workerAstPc5.FindAll({ param($node) ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and ([string]$node.Value).StartsWith($pc5Probe[1], [StringComparison]::Ordinal) }, $true))
+        # 원문 사유 캡처는 정확히 1개여야 합니다 - 못 찾거나 겹치면 대체 문구로 넘어가지 않고 이 케이스를 FAIL 로 멈춥니다(구현 리뷰 B P3 - 대체 문구로는 아래 단언이 일반 오류 여부만 보고 통과할 수 있었음)
+        if ($pc5Found.Count -ne 1) { throw ("PC5 준비: 워커 원문 사유 '{0}' 가 정확히 1개가 아닙니다({1}개)" -f $pc5Probe[1], $pc5Found.Count) }
+        $pc5Reasons[$pc5Probe[0]] = ([string]$pc5Found[0].Value).Substring('[완료] '.Length)
+    }
+    $info = Initialize-HandoffCase 'pc5_finish_unconfirmed'
+    Invoke-InsideHandoffExitRow -StepFails
+    $holdKind = [string]$script:finishOnlyHold.Kind
+    Add-FinishWorkerResult -OwnerNext $info.OwnerNext -CloseKeyNonce $NONCE_1
+    # ① 마무리 실행 워커의 'unconfirmed' 코드 4 → 타이머 코드 4 갈래
+    Reset-Observation
+    $cyclesBefore = $script:completedCycles
+    $script:lastWorkerDoneReason = $pc5Reasons['Unconfirmed']
+    $exitCode = 4
+    . $code4Block
+    $stopAtCode4 = @($script:stops)
+    $atCode4 = '{0}/{1} · 계상 {2} · 전진 {3} · {4} · [{5}] · N1 {6} · NS {7} · 마커 {8} · 정지 {9}개 오류 {10} 보류 사유 {11} 워커 사유 {12}' -f $script:lastLaunchKind, $holdKind,
+        ($script:completedCycles - $cyclesBefore), $script:stepCalls, (Get-ProgressText), (Get-PendingText), (Get-JournalEntryText $NONCE_1), (Get-JournalEntryText $NONCE_S),
+        [IO.File]::Exists($script:customAbyssMarkerFile), $stopAtCode4.Count, $(if ($stopAtCode4.Count -eq 1) { $stopAtCode4[0].EndsWith('|True') } else { '-' }),
+        $(if ($stopAtCode4.Count -eq 1) { $stopAtCode4[0].Contains('마무리 실행 전 오류') } else { '-' }),
+        $(if ($stopAtCode4.Count -eq 1) { $stopAtCode4[0].Contains((Get-ReasonHead $pc5Reasons['Unconfirmed'])) } else { '-' })
+    Assert-Case 'PC5 ① 마무리 실행(step-failed 보류) unconfirmed 코드 4 → 기동/보류 · 그 자리 계상 0 · 전진 0 · 진행 1/0 · 대기열 A1 그대로 · N1 done(워커 클리어 기록이 닫음 - 끝 처리 손대지 않음) · NS 미적용 · 마커 남음 · 보류 사유 오류 정지 1' `
+        $atCode4 'finish-only/step-failed · 계상 0 · 전진 0 · 1/0 · [A1:N1:1/0] · N1 reentered/done/1 · NS cleared/pending/0 · 마커 True · 정지 1개 오류 True 보류 사유 True 워커 사유 True'
+    # ② 다음 수동 시작 - S0 · S3 · 마커 게이트 · 첫 기동(시작 처리 원문 그대로)
+    Initialize-StartCase -KeepFolder
+    $pc5Outcome = Invoke-ManualStart
+    $pc5LaunchNonce = $(if ($script:launches.Count -gt 0) { Get-NonceLabel ([string]$script:launches[0]['HONEYNOGI_HANDOFF_NONCE']) } else { '(기동 없음)' })
+    $atStart = '{0} · {1} · 전진 {2} · [{3}] · 복구 안내 {4} · {5} · 넘긴 nonce {6}:{7}(env {8}) · N1 {9}' -f $pc5Outcome, (Get-ProgressText), $script:stepCalls, (Get-PendingText),
+        @($script:guiLogLines | Where-Object { $_ -ceq $SG_RECOVER_NOTICE }).Count, (Get-LaunchText), $script:lastLaunchKind, (Get-NonceLabel ([string]$script:lastLaunchNonce)),
+        $pc5LaunchNonce, (Get-JournalEntryText $NONCE_1)
+    Assert-Case 'PC5 ② 다음 수동 시작 → S0 반영 1/1 · 대기열 빔 → S3 cleared(NS) 마무리 복구 → 첫 기동 recover 2번(재입장 0) · 넘긴 nonce 없음(Resolve none - N1 은 ① 전에 닫힘)' $atStart `
+        'launched · 1/1 · 전진 1 · [] · 복구 안내 1 · 기동 recover 2번 · RESTART [1] · 재입장 0 · 넘긴 nonce none:(env ) · N1 reentered/done/1'
+    # ③ 그 복구 워커의 코드 4(출처 없는 선택 화면 - 워커 원문 [완료] 사유) → 타이머 코드 4 갈래 → 마커 경로 +1
+    Reset-Observation
+    $cyclesBefore = $script:completedCycles
+    $script:lastWorkerDoneReason = $pc5Reasons['Recovery']
+    $exitCode = 4
+    . $code4Block
+    $stopAtRecovery = @($script:stops)
+    $atRecovery = '계상 {0} · 전진 {1} · {2} · 마커 정리 {3} · 마커 {4} · NS {5} · 정지 {6}개 오류 {7} 워커 사유 {8}' -f ($script:completedCycles - $cyclesBefore), $script:stepCalls, (Get-ProgressText), $script:markerClears,
+        [IO.File]::Exists($script:customAbyssMarkerFile), (Get-JournalEntryText $NONCE_S), $stopAtRecovery.Count, $(if ($stopAtRecovery.Count -eq 1) { $stopAtRecovery[0].EndsWith('|True') } else { '-' }),
+        $(if ($stopAtRecovery.Count -eq 1) { $stopAtRecovery[0].Contains((Get-ReasonHead $pc5Reasons['Recovery'])) } else { '-' })
+    Assert-Case 'PC5 ③ 복구 워커 코드 4 → 마커 경로 계상 1 · 전진 1 → 1/2 · 마커 정리 1 · NS 소비 · 사유 정상 정지 1 (그 판 i+1 계상 총 1 = ① 0 + ③ 1)' $atRecovery `
+        '계상 1 · 전진 1 · 1/2 · 마커 정리 1 · 마커 False · NS cleared/pending/1 · 정지 1개 오류 False 워커 사유 True'
+    # ④ 다음 시작의 후보 고르기(실제 Resolve - 재입장 항목의 nextOwner 대조) - N1 은 마무리 실행 워커의 클리어 기록이 ① 전에 닫아 후보 0 = Status none
+    #   (Resolve 계약: 후보 없음은 'none' · 이 호출의 쓰기 0)
+    $pc5Resolved = Resolve-HandoffEnvForContext -Context (Get-CustomCanonicalOwner -Context (Get-CustomCurrentContext -SectionName $ABYSS_SECTION))
+    Assert-Case 'PC5 ④ 다음 시작 후보(Resolve) - 상태/종류/nonce · N1 상태(마무리 실행 워커가 닫은 N1 을 다시 넘기지 않음)' `
+        ('{0}/{1}/{2} · N1 {3}' -f $pc5Resolved.Status, $pc5Resolved.Kind, (Get-NonceLabel ([string]$pc5Resolved.Nonce)), (Get-JournalEntryText $NONCE_1)) 'none/none/ · N1 reentered/done/1'
+}
+
+function Test-CasePc5PreClear {
+    # PC5′ (구현 명세 ⑤b5 명세 리뷰 2 RV-11 - PC5 의 클리어 전 짝) - PC5 와 같은 시작(재입장 실행부 진행 저장 실패 → 대기열 A1 · 마무리 실행 step-failed · 넘긴 N1)에서 마무리
+    #   실행 워커가 그 판(i+1)을 클리어하기 전 코드 4(게임 서버 연결 끊김 - 워커 원문 [완료] 사유)로 끝남. 클리어 기록 0 → N1 은 워커가 닫지 않고, 완료 마커는 앞 판 i 의 것
+    #   그대로(그 판의 워커가 '다시 하기' 앞에서 씀 - 실행부의 진행 저장 실패 갈래는 지우지 않음 · Initialize-HandoffCase 픽스처).
+    #   ① 타이머 코드 4 갈래(실제 본문 점소싱 - 실제 Invoke-Code4Accounting): 앞 판 마커를 이번 판의 클리어 근거로 쓰지 않음 → 계상 0 · 전진 0 · 마커 정리 0 · 진행 1/0 ·
+    #      대기열 A1 그대로 · N1 launched(G3 열어 둠) · 마커 그대로 · 보류 사유 오류 정지 1
+    #   ② 다음 수동 시작(실제 S0 · S3 · 마커 게이트 · 첫 기동): S0 대기열 반영 1회 1/0 → 1/1(전진 1 · 그 [경고] 1) · 대기열 빔 → S3 none(복구 안내 0) → 마커 게이트가 앞 판
+    #      마커(i)를 진행과 맞지 않아 정리(안내 1) → 첫 기동 next:N1 2번 · RESTART 빈 값 · 재입장 0 · RECOVERY 빈 값 = 같은 nonce/index 를 이어받음(입장 직후 키 재전송 0 -
+    #      워커 Role next) · N1 launched 그대로
+    #   (변이: 앞 판 마커를 다시 근거로 → ① 계상 1 · 전진 1 · N1 done · 마커 정리 → ② S0 건너뜀 · 기동 fresh(재입장 1) / 넘긴 nonce 닫기 → ② 후보 없음(fresh) / 계상·전진 주입 → ①)
+    $workerAstPc5p = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'mabinogi_run_once.ps1'), [ref]$null, [ref]$null)
+    $disconnectValues = @(@($workerAstPc5p.FindAll({ param($node) ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and
+                    ([string]$node.Value).StartsWith('[완료] 게임 서버 연결이 끊어졌습니다', [StringComparison]::Ordinal) }, $true) | ForEach-Object { [string]$_.Value }) | Select-Object -Unique)
+    # 원문 사유 캡처는 서로 다른 값 1종이어야 합니다 - 아니면 대체 문구로 넘어가지 않고 FAIL 로 멈춥니다(구현 리뷰 B P3)
+    if ($disconnectValues.Count -ne 1) { throw ("PC5′ 준비: 워커 원문 사유 '[완료] 게임 서버 연결이 끊어졌습니다…' 가 1종이 아닙니다({0}종)" -f $disconnectValues.Count) }
+    $disconnectReason = ([string]$disconnectValues[0]).Substring('[완료] '.Length)
+    $null = Initialize-HandoffCase 'pc5p_finish_preclear'
+    Invoke-InsideHandoffExitRow -StepFails
+    $holdKind = [string]$script:finishOnlyHold.Kind
+    $markerBefore = Get-FileDigest $script:customAbyssMarkerFile
+    # ① 마무리 실행 워커의 클리어 전 코드 4 → 타이머 코드 4 갈래
+    Reset-Observation
+    $cyclesBefore = $script:completedCycles
+    $script:lastWorkerDoneReason = $disconnectReason
+    $exitCode = 4
+    . $code4Block
+    $stopAtCode4 = @($script:stops)
+    $atCode4 = '{0}/{1} · 계상 {2} · 전진 {3} · 마커 정리 {4} · {5} · [{6}] · N1 {7} · 마커 그대로 {8} · 정지 {9}개 오류 {10} 보류 사유 {11} 워커 사유 {12}' -f $script:lastLaunchKind, $holdKind,
+        ($script:completedCycles - $cyclesBefore), $script:stepCalls, $script:markerClears, (Get-ProgressText), (Get-PendingText), (Get-JournalEntryText $NONCE_1),
+        ((Get-FileDigest $script:customAbyssMarkerFile) -ceq $markerBefore), $stopAtCode4.Count, $(if ($stopAtCode4.Count -eq 1) { $stopAtCode4[0].EndsWith('|True') } else { '-' }),
+        $(if ($stopAtCode4.Count -eq 1) { $stopAtCode4[0].Contains('마무리 실행 전 오류') } else { '-' }),
+        $(if ($stopAtCode4.Count -eq 1) { $stopAtCode4[0].Contains((Get-ReasonHead $disconnectReason)) } else { '-' })
+    Assert-Case 'PC5′ ① 마무리 실행(step-failed 보류)의 클리어 전 코드 4 + 앞 판 마커 → 기동/보류 · 계상 0 · 전진 0 · 마커 정리 0 · 진행 1/0 · 대기열 A1 그대로 · N1 launched(G3) · 마커 그대로 · 보류 사유 오류 정지 1' `
+        $atCode4 ('finish-only/step-failed · 계상 0 · 전진 0 · 마커 정리 0 · 1/0 · [A1:N1:1/0] · N1 reentered/launched/1 · 마커 그대로 True · 정지 1개 오류 True 보류 사유 True 워커 사유 True')
+    # ② 다음 수동 시작 - S0 · S3 · 마커 게이트 · 첫 기동(시작 처리 원문 그대로)
+    Initialize-StartCase -KeepFolder
+    $outcome = Invoke-ManualStart
+    $s0Line = $START_ADVANCE_FORMAT -f (Get-TestOwner -Lap 1 -Index 0).Position
+    $launchNonce = $(if ($script:launches.Count -gt 0) { Get-NonceLabel ([string]$script:launches[0]['HONEYNOGI_HANDOFF_NONCE']) } else { '(기동 없음)' })
+    $launchRecovery = $(if ($script:launches.Count -gt 0) { [string]$script:launches[0]['HONEYNOGI_CUSTOM_RECOVERY'] } else { '(기동 없음)' })
+    $atStart = '{0} · {1} · 전진 {2} · [{3}] · S0 전진 줄 {4} · 복구 안내 {5} · 마커 정리 안내 {6} · {7} · RECOVERY [{8}] · 넘긴 nonce {9}:{10}(env {11}) · N1 {12}' -f $outcome,
+        (Get-ProgressText), $script:stepCalls, (Get-PendingText), @($script:guiLogLines | Where-Object { $_ -ceq $s0Line }).Count, @($script:guiLogLines | Where-Object { $_ -ceq $SG_RECOVER_NOTICE }).Count,
+        @($script:guiLogLines | Where-Object { $_ -ceq $SG_MARKER_DISCARD }).Count, (Get-LaunchText), $launchRecovery, $script:lastLaunchKind, (Get-NonceLabel ([string]$script:lastLaunchNonce)),
+        $launchNonce, (Get-JournalEntryText $NONCE_1)
+    Assert-Case 'PC5′ ② 다음 수동 시작 → S0 대기열 반영 1회(1/0 → 1/1 · 그 [경고] 1) · 대기열 빔 → S3 none(복구 안내 0) → 마커 게이트 앞 판 마커 정리(안내 1) → 첫 기동 next:N1 2번(재입장 0 · RECOVERY 빈 값) · 넘긴 nonce next:N1 · N1 launched' `
+        $atStart 'launched · 1/1 · 전진 1 · [] · S0 전진 줄 1 · 복구 안내 0 · 마커 정리 안내 1 · 기동 next:N1 2번 · RESTART [] · 재입장 0 · RECOVERY [] · 넘긴 nonce next:N1(env N1) · N1 reentered/launched/1'
+}
+
 function Test-CaseStartContinuation {
     # SG11 명세 5절 A6 코드 10 행 (가) - 마무리 복구 기동(RECOVERY - 마커 없이 클리어 기록으로 띄운 복구)이 복귀 중 안전 중지로 코드 10: 타이머 코드 10 갈래 첫 문장(끝 처리 -
     #     AST 로 잘라 점소싱)은 cleared(i) 를 소비하지 않음(journal 접근 0) → 다음 수동 시작 S3 가 다시 마무리 복구(재입장 0) (변이 '마무리 복구 기동에서도 소비' 는
@@ -2470,7 +2623,7 @@ function Test-CaseStatic {
 $caseFunctions = @('Test-CaseHarness', 'Test-CaseRecord', 'Test-CaseRecordReject', 'Test-CaseRecordStoreFail', 'Test-CaseAdvanceEmpty',
     'Test-CaseAdvanceOrder', 'Test-CaseAdvanceSkip', 'Test-CaseAdvanceStepFail', 'Test-CaseAdvanceRestart', 'Test-CaseAdvanceFail',
     'Test-CaseAdvanceHeadCheck', 'Test-CasePendingTag', 'Test-CaseHandoffExecution', 'Test-CaseHandoffQueueGuide', 'Test-CaseCode1Routing', 'Test-CaseCode1LegacySafeStop',
-    'Test-CaseStartReadFailure', 'Test-CaseStartS3', 'Test-CaseStartS0', 'Test-CaseStartContinuation', 'Test-CaseStartStatic', 'Test-CaseStatic')
+    'Test-CaseStartReadFailure', 'Test-CaseStartS3', 'Test-CaseStartS0', 'Test-CaseStartContinuation', 'Test-CasePc5FinishUnconfirmed', 'Test-CasePc5PreClear', 'Test-CaseStartStatic', 'Test-CaseStatic')
 $totalWatch = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     foreach ($caseFunction in $caseFunctions) {

@@ -532,7 +532,7 @@ $lifeUntilFunctions = @($sourceAst.FindAll({ param($n) ($n -is [System.Managemen
 $lifeUntilCalls = @($sourceAst.FindAll({ param($n) ($n -is [System.Management.Automation.Language.CommandAst]) -and ($n.GetCommandName() -eq 'Test-LifeUntilReached') }, $true)).Count
 $lifeUntilVariables = @($sourceAst.FindAll({ param($n) ($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and ($n.VariablePath.UserPath -eq 'script:lifeUntilDeadline') }, $true)).Count
 Assert-Case '배선(지정시간): 생활 사이클 중 정지 없음 - 정지 함수 정의·호출·생활 지정 시각 변수 0' ('{0}/{1}/{2}' -f $lifeUntilFunctions, $lifeUntilCalls, $lifeUntilVariables) '0/0/0'
-# 읽는 쪽 고정 (워커 전체): 지정 시각(UNTIL)을 읽고 해석하는 곳은 던전·어비스 파티원·기타 셋뿐입니다. 생활의 어느 함수(새 도우미 포함)나
+# 읽는 쪽 고정 (워커 전체): 지정 시각(UNTIL)을 읽고 해석하는 곳은 던전·어비스(본류 - Get-AbyssUntilTime)·어비스 파티원·기타 넷뿐입니다. 생활의 어느 함수(새 도우미 포함)나
 # 스크립트 최상위에서 다시 읽으면 소유자가 달라집니다. 셋째 값은 주석이 아닌 토큰 가운데 이름이 든 것의 수 - [Environment] 호출·문자열로
 # 읽는 꼴도 셉니다 (생활 확장 검토 반영 - 사이클 함수 안만 보던 가드는 다른 함수에서 다시 읽는 것을 못 잡았음)
 function Get-LifeTestOwnerName {
@@ -550,9 +550,9 @@ function Get-LifeTestOwnerName {
 [Array]::Sort($untilEnvOwners, [StringComparer]::Ordinal)
 [Array]::Sort($untilParseOwners, [StringComparer]::Ordinal)
 $untilTokenCount = @($sourceTokens | Where-Object { ($_.Kind -ne [System.Management.Automation.Language.TokenKind]::Comment) -and ($_.Text -match 'HONEYNOGI_UNTIL_TIME') }).Count
-Assert-Case '배선(지정시간): UNTIL 을 읽는 곳 = 던전·어비스 파티원·기타 3곳 (env 참조 소유자 | 해석 호출 소유자 | 주석 밖 토큰 수)' `
+Assert-Case '배선(지정시간): UNTIL 을 읽는 곳 = 던전·어비스(본류)·어비스 파티원·기타 4곳 (env 참조 소유자 | 해석 호출 소유자 | 주석 밖 토큰 수)' `
   ('{0} | {1} | {2}' -f ($untilEnvOwners -join ','), ($untilParseOwners -join ','), $untilTokenCount) `
-  'Invoke-AbyssPartyMemberCycle,Invoke-NormalDungeonCycle,Invoke-NyanMerchantRun | Invoke-AbyssPartyMemberCycle,Invoke-NormalDungeonCycle,Invoke-NyanMerchantRun | 3'
+  'Get-AbyssUntilTime,Invoke-AbyssPartyMemberCycle,Invoke-NormalDungeonCycle,Invoke-NyanMerchantRun | Get-AbyssUntilTime,Invoke-AbyssPartyMemberCycle,Invoke-NormalDungeonCycle,Invoke-NyanMerchantRun | 4'
 # 메뉴 시퀀스도 사이클 한도(양보 반영)를 Get-LifeCycleDeadline 으로 직접 봅니다 - 스냅숏은 시퀀스 안의 양보를 못 받음 (2026-09-09)
 Assert-Case '배선(사이클 한도): 메뉴 시퀀스 내부 검사가 헬퍼를 직접 호출' `
   ([bool]($workerRaw -match 'function Invoke-LifeMenuSequence \{[\s\S]{0,1500}?\(Get-Date\) -gt \(Get-LifeCycleDeadline\)')) 'True'
@@ -1369,12 +1369,18 @@ Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($worke
 # 2026-10-13 구현 명세 ② 2.5 +1: 어비스 이어받기 시작 선분기 루프(Invoke-AbyssHandoffStart - 함수 매개변수 $Game)의 서두 동결 블록이 이번 회전 탐침
 #   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(명세 2.0-2 · 3.4 - 같은 루프의 B2 단계·탐침 복구 뒤 회전은 탐침을 따로 부르지 않음) → 20곳.
 #   그 탐침을 지우거나 판독만 건너뛰는 동결로 바꾸는 변이는 이 개수가 22 가 됩니다.
-# 2026-10-18 구현 명세 ④ 2.1 +1: 어비스 재입장 대기(Wait-AbyssReentry - 함수 매개변수 $Game · 아직 호출 없음)의 서두 동결 블록이 이번 회전 탐침
+# 2026-10-18 구현 명세 ④ 2.1 +1: 어비스 재입장 대기(Wait-AbyssReentry - 함수 매개변수 $Game · 첫 호출 = 선분기 B2 단계(⑤a))의 서두 동결 블록이 이번 회전 탐침
 #   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(명세 2.0-6 - 주석 포함 원문을 세어 호출 0 이어도 듦) → 21곳. 그 탐침을 지우는 변이는 이 개수가 22 가 됩니다.
 # 2026-10-18 구현 단위 ④′ +2: 던전·사냥터 시작부 팝업 정리 루프(함수 매개변수 $Game)의 게이트 회전 동결 while 이 이번 회전 탐침
 #   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다 → 23곳(그 탐침을 지우는 변이는 22). 본류(최상위 `$game`)의 같은 블록은 이 패턴에 안 잡힘 - 그 탐침을 지우는 변이는 test_stall_guards 의 탐침 검사가 잡음.
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 23곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 D·P 2 + 어비스 복귀 루프 동결 1 + 어비스 이어받기 시작 선분기 1 + 어비스 재입장 대기 1 + 사망 화면 퇴장 1 + 검증 종료 루프 1 + 냥코인 뽑기 3 + 양보 후 판정 2 + 시작부 팝업 정리(던전·사냥터) 2)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '23'   # 2026-10-18 ④′ 21 → 23 (위 주석) / 2026-10-18 ④ 2.1 20 → 21 (위 주석) / 2026-10-13 ② 2.5 19 → 20 (위 주석) / 2026-09-30 ⑥e 20 → 19 / 2026-09-26 ⑥a 파티원 클리어 S 터치 루프·파티원 시작 판정 동결 +2 / 2026-09-13 냥코인 PURCHASE_WAIT 동결 +1
+# 2026-10-23 구현 명세 ⑤b3 2.3 +1: 어비스 '다른 던전 가기' 대기(Wait-AbyssOtherSelection - 함수 매개변수 $Game · 워커 안 호출은 끝 함수 Complete-AbyssOtherSelection 안 1,
+#   본류 배선은 5b-5)의 서두 동결 블록이 이번 회전 탐침 [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(주석 포함 원문을 세어 본류 호출 0 이어도 듦) → 24곳.
+#   그 탐침을 지우는 변이는 이 개수가 23 이 됩니다. 같은 대기의 확인 창 한 줄 동결 if 는 탐침을 부르지 않습니다(안전 확인·탐침은 바깥 ① - 명세 1.7 ①).
+# 2026-10-24 구현 명세 ⑤b4 3.4 +1: 어비스 '다시 하기' 클릭 루프(Invoke-AbyssRetryClick - 함수 매개변수 $Game · 워커 안 호출은 끝 함수 Complete-AbyssRetrySelection 안 1,
+#   본류 배선은 5b-5)의 서두 동결 블록이 이번 회전 탐침 [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(주석 포함 원문을 세어 본류 호출 0 이어도 듦) → 25곳.
+#   그 탐침을 지우는 변이는 이 개수가 24 가 됩니다.
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 25곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 D·P 2 + 어비스 복귀 루프 동결 1 + 어비스 이어받기 시작 선분기 1 + 어비스 재입장 대기 1 + 어비스 다른 던전 가기 대기 1 + 어비스 다시 하기 클릭 루프 1 + 사망 화면 퇴장 1 + 검증 종료 루프 1 + 냥코인 뽑기 3 + 양보 후 판정 2 + 시작부 팝업 정리(던전·사냥터) 2)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '25'   # 2026-10-24 ⑤b4 24 → 25 (위 주석) / 2026-10-23 ⑤b3 23 → 24 (위 주석) / 2026-10-18 ④′ 21 → 23 (위 주석) / 2026-10-18 ④ 2.1 20 → 21 (위 주석) / 2026-10-13 ② 2.5 19 → 20 (위 주석) / 2026-09-30 ⑥e 20 → 19 / 2026-09-26 ⑥a 파티원 클리어 S 터치 루프·파티원 시작 판정 동결 +2 / 2026-09-13 냥코인 PURCHASE_WAIT 동결 +1
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `

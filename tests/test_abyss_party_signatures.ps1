@@ -21,6 +21,9 @@
 #      $pairExpect 와 한 키로 대조 - 3버튼 보상 7장(D2·L4+1·O00·D1·L2-pre 짝 둘 / L4 Retry 만 / G3 Other 만)과 1908 렌더 2장(창 DPI 96·144)은 라벨별 짝,
 #      그 밖 전 범주는 짝 0(오탐 0). 갈래에는 서명 단언만 둡니다 - 선택 화면 오버레이 2장·네트워크 불안정 팝업 1장은 3버튼 서명 거짓,
 #      1908 렌더 2장은 서명 참·패널 none (순수 진리표·화면 함수 계약은 tests\test_abyss_reward_pair_finder.ps1)
+#   ⑤ ⑤b4 관측 0 전이 표 대조(구현 명세 ⑤b4 B-13 · 명세 리뷰 2 P3 - 3절): tests\test_abyss_party_leader.ps1 §10 이 OCR 없이 재생하는 관측 0 전이 표를
+#      3-1 표와 따로 둔 manifest(재생 행 이름 · 묶음 · 첫 · 끝 프레임 · 정확한 줄 수)로 완전성 대조 - 누락 · 군더더기 · 차례 · 중복 · 줄 수 차이 FAIL (OCR · 보관 프레임 없이 늘 돎, 1절 뒤)
+#      3-2 보관 프레임 → 원문 판독 → 표 값으로 대조 (하단 판독문 · 두 점 · S · 패널 종류 · HUD · 추적기 · 스윕 참 · 재입장 대기 분류 - 보관 프레임 · OCR 엔진이 없을 때만 SKIP)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
@@ -106,6 +109,75 @@ foreach ($key in $bottom.Keys) {
 }
 Check-Equal "하단 서명 넷 상호 배타 (실측 판독문 $($bottom.Count)종 - 09-29 7종 포함)" ($multiHits -join ',') ''
 
+# ── 3-1. ⑤b4 관측 0 전이 표 · manifest 대조 (구현 명세 ⑤b4 3.4 끝 행 · B-13 · 명세 리뷰 2 P3 - OCR · 보관 프레임 없이 늘 돎: 2절의 SKIP 앞) ─────────
+# tests\test_abyss_party_leader.ps1 §10 의 관측 0 전이 표와 그 manifest(재생 행 이름 · 프레임 묶음 · 첫 · 끝 프레임 · 정확한 F 줄 수 - 표와 따로 둔 글자)를 ④ 소스에서 AST 로
+# 그대로 읽어(사본 없음) 표의 완전성을 봅니다 - 묶음 누락 · 군더더기 · 행 이름 → 묶음 · 묶음마다 줄 수 · 첫 · 끝 프레임 · 묶음 안 시각 차례(중복 · 역순) · 묶음 덩어리 차례(끼어든 줄) ·
+# F 줄 합. ④ 의 'RP 완전성(manifest)' 과 같은 대조를 따로 짠 코드입니다. 이 절은 건너뛰지 않습니다 - 보관 프레임 · OCR 엔진이 없을 때 건너뛰는 것은 2절과 3-2(보관 프레임 →
+# 원문 판독 → 표 값)뿐입니다
+$replayTableColumns = 'F,set,time,file,bottom,retry,other,prompt,panel,hud,quest,sweep,class'
+$leaderTestPath = Join-Path $PSScriptRoot 'test_abyss_party_leader.ps1'
+$leaderParseErrors = $null
+$leaderAst = [System.Management.Automation.Language.Parser]::ParseFile($leaderTestPath, [ref]$null, [ref]$leaderParseErrors)
+function Get-LeaderHereString {
+  # ④ 소스 최상위 대입 '$<이름> = @'…'@' 의 글자 (없으면 '')
+  param([string]$Name)
+  $hereAssign = $leaderAst.Find({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq ('$' + $Name)) }, $true)
+  if (-not $hereAssign) { return '' }
+  $hereConstant = $hereAssign.Right.Find({ param($node) $node -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true)
+  if ($hereConstant) { return [string]$hereConstant.Value }
+  return ''
+}
+$replayTableText = Get-LeaderHereString 'RETRY_REPLAY_TABLE'
+$replayManifestText = Get-LeaderHereString 'RETRY_REPLAY_MANIFEST'
+$replayTableHeader = ''
+$replayTableRows = New-Object System.Collections.Generic.List[object]
+$replayTableNames = New-Object System.Collections.Generic.List[string]
+foreach ($replayTableLine in @($replayTableText -split "`r?`n")) {
+  if ($replayTableLine -match "^[TUQ]`t") { $nameCells = $replayTableLine.Split("`t"); if ($nameCells.Count -ge 3) { $replayTableNames.Add(('{0}={1}' -f $nameCells[1], $nameCells[2])) }; continue }
+  if (-not $replayTableLine.StartsWith("F`t")) { continue }
+  $replayCells = $replayTableLine.Split("`t")
+  if ($replayCells[1] -ceq 'set') { $replayTableHeader = $replayCells -join ','; continue }
+  if ($replayCells.Count -ne 13) { $replayTableHeader = "칸 수 $($replayCells.Count): $replayTableLine"; break }
+  $replayTableRows.Add(@{ set = $replayCells[1]; time = $replayCells[2]; file = $replayCells[3]; bottom = $replayCells[4]; retry = $replayCells[5]; other = $replayCells[6]
+      prompt = $replayCells[7]; panel = $replayCells[8]; hud = $replayCells[9]; quest = $replayCells[10]; sweep = $replayCells[11]; class = $replayCells[12] })
+}
+Check-Equal '⑤b4 표 대조 준비: ④ 소스(파서 오류 0)의 관측 0 전이 표 here-string 을 읽음 · 프레임 줄 머리 = 표 열' ('{0}|{1}|{2}' -f @($leaderParseErrors).Count, [int]($replayTableRows.Count -gt 0), $replayTableHeader) ('0|1|' + $replayTableColumns)
+$replayManifest = New-Object System.Collections.Generic.List[object]
+$replayManifestBad = New-Object System.Collections.Generic.List[string]
+foreach ($manifestLine in @($replayManifestText -split "`r?`n" | Where-Object { $_ -ne '' })) {
+  $manifestCells = $manifestLine.Split("`t")
+  if (($manifestCells.Count -ne 5) -or (-not ($manifestCells[4] -match '^\d+$')) -or (-not ($manifestCells[2] -match '^\d{2}:\d{2}:\d{2}\.\d{3}$')) -or (-not ($manifestCells[3] -match '^\d{2}:\d{2}:\d{2}\.\d{3}$'))) { $replayManifestBad.Add($manifestLine); continue }
+  $replayManifest.Add(@{ name = $manifestCells[0]; set = $manifestCells[1]; first = $manifestCells[2]; last = $manifestCells[3]; rows = [int]$manifestCells[4] })
+}
+Check-Equal '⑤b4 표 manifest 대조 준비: ④ 소스의 manifest here-string 을 읽음 · 줄 꼴(칸 5 · 시각 둘 · 줄 수 정수) 어긋남 0' ('{0}|{1}' -f [int]($replayManifest.Count -gt 0), $replayManifestBad.Count) '1|0'
+$manifestSets = @($replayManifest | ForEach-Object { $_.set })
+$tableSets = @($replayTableRows | ForEach-Object { $_.set } | Select-Object -Unique)
+$setsOnlyTable = @($tableSets | Where-Object { $manifestSets -cnotcontains $_ })
+$setsOnlyManifest = @($manifestSets | Where-Object { $tableSets -cnotcontains $_ })
+Check-Equal "⑤b4 표 manifest 대조 - 묶음 누락 · 군더더기 0 (표에만 있는 묶음 / manifest 에만 있는 묶음)" ('[{0}] / [{1}]' -f ($setsOnlyTable -join ','), ($setsOnlyManifest -join ',')) '[] / []'
+Check-Equal "⑤b4 표 manifest 대조 - 행 이름 → 묶음 = 표의 T · U · Q 줄 (재생 행 $($replayManifest.Count))" ((@($replayTableNames) | Sort-Object) -join ',') ((@($replayManifest | ForEach-Object { '{0}={1}' -f $_.name, $_.set }) | Sort-Object) -join ',')
+$manifestRowMismatches = @(foreach ($manifestEntry in $replayManifest) {
+    $setRows = @($replayTableRows | Where-Object { $_.set -ceq $manifestEntry.set })
+    $haveFirst = $(if ($setRows.Count -gt 0) { $setRows[0].time } else { '-' })
+    $haveLast = $(if ($setRows.Count -gt 0) { $setRows[$setRows.Count - 1].time } else { '-' })
+    if (($setRows.Count -ne $manifestEntry.rows) -or ($haveFirst -cne $manifestEntry.first) -or ($haveLast -cne $manifestEntry.last)) {
+      '{0}:{1}줄 {2}~{3} ≠ manifest {4}줄 {5}~{6}' -f $manifestEntry.set, $setRows.Count, $haveFirst, $haveLast, $manifestEntry.rows, $manifestEntry.first, $manifestEntry.last
+    }
+  })
+Check-Equal "⑤b4 표 manifest 대조 - 묶음마다 F 줄 수 · 첫 · 끝 프레임 = manifest (행수 차이 0)" ($manifestRowMismatches -join ' · ') ''
+$replayOrderBad = New-Object System.Collections.Generic.List[string]
+foreach ($orderSet in $tableSets) {
+  $orderRows = @($replayTableRows | Where-Object { $_.set -ceq $orderSet })
+  for ($orderIndex = 1; $orderIndex -lt $orderRows.Count; $orderIndex++) {
+    if ([string]::CompareOrdinal([string]$orderRows[$orderIndex].time, [string]$orderRows[$orderIndex - 1].time) -le 0) { $replayOrderBad.Add(('{0}@{1}≤{2}' -f $orderSet, $orderRows[$orderIndex].time, $orderRows[$orderIndex - 1].time)) }
+  }
+}
+Check-Equal "⑤b4 표 manifest 대조 - 묶음 안 프레임 시각이 엄격히 늘어남 (중복 · 역순 0)" ($replayOrderBad -join ' · ') ''
+$replayBlocks = New-Object System.Collections.Generic.List[string]
+foreach ($blockRow in $replayTableRows) { if (($replayBlocks.Count -eq 0) -or ($replayBlocks[$replayBlocks.Count - 1] -cne $blockRow.set)) { $replayBlocks.Add($blockRow.set) } }
+Check-Equal "⑤b4 표 manifest 대조 - 묶음 덩어리 차례 = manifest 차례 (묶음마다 한 덩어리 - 끼어든 줄 0)" ($replayBlocks.ToArray() -join ',') ($manifestSets -join ',')
+Check-Equal "⑤b4 표 manifest 대조 - 표 F 줄 합 = manifest 줄 수 합" $replayTableRows.Count (@($replayManifest | ForEach-Object { $_.rows } | Measure-Object -Sum).Sum)
+
 # ── 2. 캡처 재생 (운영 판독 함수 그대로 - 오프라인) ─────────────────────────────
 $abyssDir = Join-Path $projectRoot '던전이미지\어비스'
 $live = '20260926_준비패널4인_준비취소_나가기_수동실측'
@@ -185,6 +257,8 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path $workerPath -Names @
     'Select-AbyssRewardButtonPair', 'Find-AbyssRewardButtonPair')) {
   Invoke-Expression $definition
 }
+# 구현 단위 ⑤b1 - '다른 던전 가기' 대기 분류(설계 v11 R6 2.6) - 운영 함수 그대로
+Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Resolve-AbyssOtherWaitScreen')))
 # ⑥e 파티원 순수 판정 (분류·보상 위 판별·재펼침 앵커·나가기 단어·퇴장 전이 표 - 설계 2.1) - 운영 함수 그대로
 foreach ($name in @('Resolve-AbyssMemberScreen', 'Test-AbyssPanelOverRewardText', 'Select-AbyssEntryWaitingAnchor', 'Select-AbyssMemberLeaveWord',
     'New-AbyssMemberLeaveTransition', 'Update-AbyssMemberLeaveTransition')) {
@@ -312,6 +386,9 @@ $pairExpect = @{
   '1008-090150' = '636,662 / 767,662'     # 1908 창 DPI 96 · 150% 모니터 (10-08 콘솔 전환 전)
   '1001-132837' = '636,660 / 765,660'     # 1908 창 DPI 144 (10-01 ⑥e 실기)
 }
+# 구현 단위 ⑤b1 (구현 명세 ⑤b1 3.4 · 설계 v11 R6 7.0 OC9): '다른 던전 가기' 대기 분류의 범주별 기대 - 보상 3버튼(7장 · 1908 렌더 2장)은 reward3
+# (선택 화면 거짓 - selection 이 reward3 보다 앞 순위여도 실제 보상 화면의 클릭이 열림), 선택 화면 오버레이는 selection(OC9), 준비·재매칭·접힌 패널은 panel
+$otherWaitExpect = @{ 'reward3' = 'reward3'; 'reward3-render' = 'reward3'; 'overlay' = 'selection'; 'ready' = 'panel'; 'matching' = 'panel'; 'entry' = 'panel' }
 $pairTextKey = '③ 짝 판독문 = 하단 판독문 (Find-AbyssRewardButtonPair - 같은 영역·배율·엔진의 한 판독, 공백 제거)'
 $pairExpectKey = '③ 짝 → 라벨별 기대 (3버튼 보상 7장·1908 렌더 2장은 표 · 그 밖 전 프레임 null / null)'
 $pairOverlayKey = '③ 선택 화면 오버레이 → 3버튼 서명 거짓 (짝 null 은 짝 키)'
@@ -475,6 +552,12 @@ foreach ($entryLine in $frames) {
       Add-Stat $pairRenderKey ((Test-AbyssRewardText -Text $bottomNow) -and $panelKind -eq 'none')
     }
   }
+  # 구현 단위 ⑤b1: '다른 던전 가기' 대기 분류 - 짝 찾기 판독문(= 하단)·패널·선택 화면·HUD·추적기를 운영 판독 그대로 넘깁니다(메뉴는 이 재생에서 늘 거짓)
+  if ($otherWaitExpect.ContainsKey($kind)) {
+    $otherSelection = $(if ($legacyKinds -contains $kind) { $selectionNow } else { Test-AbyssSelectionScreen -Game $null })
+    $otherNow = Resolve-AbyssOtherWaitScreen -BottomText $bottomNow -PanelKind $panelKind -SelectionVisible $otherSelection -HudVisible $sample.Hud -InDungeonQuest $sample.Quest
+    Add-Stat ("⑤b1 other 대기 분류: {0} → {1}" -f $kind, $otherWaitExpect[$kind]) ($otherNow -eq $otherWaitExpect[$kind])
+  }
 }
 
 # ── 2b. 전이 열 재생 (⑥e 설계 5.3 - 리뷰 의견 '캡처·배선 통합 테스트 병행 필수') ─────────────────────────────
@@ -552,7 +635,80 @@ Check-Equal '재생 범위(⑥e 새 범주): 필드 위 준비 4 · 가린 접�
 $pairCoverage = @($pairTextKey, $pairExpectKey, $pairOverlayKey, $pairNetKey, $pairRenderKey) | ForEach-Object { if ($stats.ContainsKey($_)) { $stats[$_].All } else { 0 } }
 Check-Equal "재생 범위(③ 짝): 판독문·짝 키 All = 프레임 수 $($frames.Count) · 오버레이 서명 키 2 · 네트워크 팝업 서명 키 1 · 1908 렌더 키 2" ($pairCoverage -join '/') "$($frames.Count)/$($frames.Count)/2/1/2"
 Check-Equal '재생 범위(③ 범주): 3버튼 보상 7 · 선택 화면 오버레이 2 · 네트워크 불안정 팝업 1 · 1908 렌더 3버튼 보상 2' ((@('reward3', 'overlay', 'net-popup', 'reward3-render') | ForEach-Object { [int]$kindCounts[$_] }) -join '/') '7/2/1/2'
+# 구현 단위 ⑤b1: '다른 던전 가기' 대기 분류 단언이 범주의 전 프레임을 돌았는지 (키 All = 범주 프레임 수)
+$otherCoverage = @($otherWaitExpect.Keys | Sort-Object | ForEach-Object { $otherKey = ("⑤b1 other 대기 분류: {0} → {1}" -f $_, $otherWaitExpect[$_]); '{0}={1}' -f $_, $(if ($stats.ContainsKey($otherKey)) { $stats[$otherKey].All } else { 0 }) }) -join ' · '
+Check-Equal '재생 범위(⑤b1 other 분류): 접힌 패널 10 · 재매칭 2 · 오버레이 2 · 준비 패널 23 · 3버튼 보상 7 · 1908 렌더 2' $otherCoverage 'entry=10 · matching=2 · overlay=2 · ready=23 · reward3=7 · reward3-render=2'
 Check-Equal '재생 중 나가기 헬퍼 진단 캡처(미검출 정지) 0회' $script:diagCalls 0
+
+# ── 3-2. ⑤b4 관측 0 전이 표 대조 - 보관 프레임 (구현 명세 ⑤b4 3.4 끝 행 · B-13) ─────────────────────────────
+# tests\test_abyss_party_leader.ps1 §10 의 관측 0 전이 표(프레임마다 하단 판독문 · '다시 하기' · '다른 던전 가기' 점 · S · 패널 종류 · HUD · 추적기 · 스윕 참 · 재입장 대기
+# 분류)는 그 테스트가 OCR 없이 원문 재입장 대기 · '다시 하기' 클릭 루프를 재생하는 입력입니다. 여기서는 표가 보관 프레임과 어긋나지 않는지를 '보관 프레임 → 원문 판독 →
+# 표 값' 으로 지킵니다 - 표는 3-1 이 ④ 소스의 here-string 에서 읽은 그대로이고(사본 없음), 판독은 2절과 같은 PNG 대체 캡처 + 운영 함수입니다(짝 = Find-AbyssRewardButtonPair ·
+# S 와 스태시 = Test-DungeonClearPrompt · 패널 = Get-AbyssPanelKind · HUD · 추적기(HUD 와 무관하게 한 번 - 표의 추적기 칸) · 스윕 = Invoke-PurchasePopupSweep 원문(클릭 ·
+# 포커스 · 커서 · 대기 모의, exit 는 센티널) · 분류 = Resolve-AbyssHandoffStartScreen(추적기는 HUD 참일 때만 - 재입장 대기 ⑤ 판독과 같은 꼴)). 같은 파일을 여러 시각에
+# 쓰는 줄(1908 다 올라온 무커서 프레임)은 한 번 읽어 그 줄 모두와 대조합니다. 보관 프레임이 하나라도 없으면 이 절만 SKIP (OCR 엔진이 없으면 2절이 먼저 SKIP 하고 끝남 -
+# 표 · manifest 대조는 3-1 이 늘 돎. 판독문은 진리표 자산 - 규칙 문서 '실기 검증' 5)
+if (($replayTableRows.Count -gt 0) -and ($replayTableHeader -ceq $replayTableColumns)) {
+  $replayTableFiles = [ordered]@{}
+  foreach ($replayRow in $replayTableRows) { if (-not $replayTableFiles.Contains($replayRow.file)) { $replayTableFiles[$replayRow.file] = $true } }
+  $replayMissing = @(@($replayTableFiles.Keys) | Where-Object { -not (Test-Path -LiteralPath (Join-Path $abyssDir $_)) })
+  if ($replayMissing.Count -gt 0) {
+    "SKIP 보존 캡처가 없어 ⑤b4 관측 0 전이 표 대조를 건너뜁니다: $(Join-Path $abyssDir $replayMissing[0]) (없는 파일 $($replayMissing.Count)/$($replayTableFiles.Count))"
+  } else {
+    # 스윕 · 재입장 대기 분류 운영 함수 (스윕이 부르는 팝업 닫기 넷 · 재시작 안내 판정 · 협동 미션 보드 · 네트워크 재시도 단어 - 나머지 판독 함수는 2절에서 올림)
+    foreach ($name in @('Resolve-AbyssHandoffStartScreen', 'Test-GameRestartPopup', 'Close-CoopMissionScreen', 'Close-CoopMissionBoardScreen', 'Close-WeeklyCoopResetPopup',
+        'Close-NetworkUnstablePopup', 'Test-CoopMissionBoardVisible', 'Test-CoopMissionBoardTitle', 'Select-NetworkRetryWord')) {
+      Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @($name)))
+    }
+    # 스윕의 exit(게임 재시작 안내 = 코드 4)는 센티널 throw 로 - 줄 단독 exit 수 = exit 토큰 수 · 바꾼 뒤 exit 토큰 0 (안 바뀌면 테스트 프로세스가 끝남)
+    function Get-ExitTokenCount { param([string]$Text) $exitTokens = $null; $exitErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$exitTokens, [ref]$exitErrors); return @($exitTokens | Where-Object { $_.Kind -eq [System.Management.Automation.Language.TokenKind]::Exit }).Count }
+    $sweepSource = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Invoke-PurchasePopupSweep'))
+    $sweepExitLines = ([regex]::Matches($sweepSource, '(?m)^\s*exit \d+\s*$')).Count
+    $sweepSentinel = $sweepSource -replace '(?m)^(\s*)exit (\d+)\s*$', '$1throw "__EXIT__$2"'
+    $sweepExitAfter = Get-ExitTokenCount $sweepSentinel
+    Check-Equal '⑤b4 표 대조 준비: 스윕 원문의 exit 를 센티널로 바꿈 (줄 단독 exit 수 = exit 토큰 수 · 바꾼 뒤 exit 토큰 0)' ('{0}/{1}' -f $sweepExitLines, $sweepExitAfter) ('{0}/0' -f (Get-ExitTokenCount $sweepSource))
+    if ($sweepExitAfter -eq 0) {
+      Invoke-Expression $sweepSentinel
+      function Move-CursorOutsideGame { param($Game) }
+      function Wait-UserYieldEnd { param($Game, [string]$Context) }
+      foreach ($sourceVar in @('rgPopupClose', 'rgRestartPopup')) {
+        $assign = $sourceAst.Find({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq ('$' + $sourceVar)) }, $true)
+        if (-not $assign) { "FAIL 본체에서 `$$sourceVar 정의를 찾지 못했습니다"; exit 1 }
+        Invoke-Expression $assign.Extent.Text
+      }
+      $script:contentTag = '[어비스]'
+      # 보관 프레임마다 한 번 - 원문 판독 (재입장 대기 ⑤ 와 같은 차례: S → 패널 → HUD → 추적기, 그 앞에 짝 · 뒤에 스윕)
+      $replayReads = @{}
+      foreach ($replayFile in @($replayTableFiles.Keys)) {
+        Load-Frame $replayFile
+        $pairNow = Find-AbyssRewardButtonPair -Game $null
+        $promptNow = [bool](Test-DungeonClearPrompt -Game $null)
+        $stashNow = [string]$script:lastClearPromptText
+        $panelNow = [string](Get-AbyssPanelKind -Game $null)
+        $hudNow = [bool](Test-HomeEndEscHud -Game $null)
+        $questNow = [bool](Test-InDungeonQuest -Game $null)
+        $classNow = [string](Resolve-AbyssHandoffStartScreen -PromptVisible $promptNow -BottomText $stashNow -PanelKind $panelNow -HudVisible $hudNow -InDungeonQuest ($hudNow -and $questNow))
+        $script:clicks = @(); $script:logs = @(); $script:lastClickPerformed = $false; $script:lastClickSkipReason = ''
+        $sweepNow = [string]$(try { [bool](Invoke-PurchasePopupSweep -Game $null) } catch { 'EXC:' + $_.Exception.Message })
+        $replayReads[$replayFile] = @{ bottom = [string]$pairNow.Text; stash = $stashNow; retry = (Format-PairPoint $pairNow.Retry); other = (Format-PairPoint $pairNow.Other); prompt = [string]$promptNow
+          panel = $panelNow; hud = [string]$hudNow; quest = [string]$questNow; sweep = $sweepNow; class = $classNow }
+      }
+      if ($script:sourceBitmap) { $script:sourceBitmap.Dispose() }
+      # 칸마다 대조 (스태시는 표의 하단 판독문 칸과 - 재생의 S 판독 스텁이 그 칸을 스태시로 씀)
+      $replayColumnLabels = [ordered]@{ 'bottom' = '하단 판독문(짝 판독문)'; 'stash' = 'S 판독 스태시(공백 제거) = 하단 판독문'; 'retry' = "'다시 하기' 점"; 'other' = "'다른 던전 가기' 점"
+        'prompt' = 'S(클리어 문구)'; 'panel' = '패널 종류'; 'hud' = 'HUD'; 'quest' = '추적기'; 'sweep' = '스윕 참'; 'class' = '재입장 대기 분류' }
+      foreach ($replayColumn in @($replayColumnLabels.Keys)) {
+        $tableColumn = $(if ($replayColumn -eq 'stash') { 'bottom' } else { $replayColumn })
+        $columnMismatches = @(foreach ($replayRow in $replayTableRows) {
+            $readValue = [string]$replayReads[$replayRow.file][$replayColumn]
+            if ($readValue -cne [string]$replayRow[$tableColumn]) { '{0}@{1}:[{2}]≠[{3}]' -f $replayRow.set, $replayRow.time, $readValue, $replayRow[$tableColumn] }
+          })
+        $mismatchNote = $(if ($columnMismatches.Count -gt 0) { ' / 불일치: ' + (($columnMismatches | Select-Object -First 4) -join ' · ') } else { '' })
+        Check-Equal ("⑤b4 관측 0 전이 표 대조 - {0}: 표 {1}줄(보관 프레임 {2}장) = 원문 판독{3}" -f $replayColumnLabels[$replayColumn], $replayTableRows.Count, $replayTableFiles.Count, $mismatchNote) $columnMismatches.Count 0
+      }
+    }
+  }
+}
 
 if ($fails -gt 0) { "FAIL: $fails 건"; exit 1 }
 "OK: 전부 통과"
