@@ -3924,10 +3924,12 @@ $pnlAcrMatching.Controls.Add($rbAcrPartyLead)
 # 같은 컨트롤 위에서는 Show 를 다시 부르지 않아 깜박이지 않습니다(2026-07-22 실기 반영).
 # 문구 둘 (2026-10-26 섞기 허용): 전체 고정 리스트(파티 찾기·파티(파티장))는 같아야 한다는 안내, 섞을 수 있는 리스트(혼자하기·우연한 만남)는
 # 파티 찾기·파티장만 막힌 이유. 지금 쓸 문구는 Update-AbyssInputLock 이 $script:acrLockTipText 에 고릅니다.
-# 2026-10-27 사용자 결정: 방식/매칭 칸 편집은 그 행만 바꾸고 리스트 규칙에 어긋나면 알림만 띄우므로(Invoke-AcrCellEdit) '칸에서 고르면 전체가
-# 한 번에 바뀐다'는 안내를 뺐습니다 - 리스트 전체를 다른 방식으로 바꾸는 길은 비우고 다시 추가하는 것뿐입니다.
-$script:acrLockTipTextFixed = '리스트의 방식·매칭과 같아야 합니다. 다른 방식·매칭으로 바꾸려면 리스트를 비우고 다시 추가해 주세요.'
-$script:acrLockTipTextMixable = "'파티 찾기'·'파티(파티장)'는 리스트의 모든 항목이 같은 매칭일 때만 쓸 수 있습니다. 쓰려면 리스트를 비운 뒤 다시 추가해 주세요."
+# 방식/매칭 칸 편집은 그 행만 바꿉니다(2026-10-27 - 칸 하나로 리스트 전체를 한 번에 바꾸던 일괄 변경은 없앰). 2026-10-28 사용자 결정으로 칸 편집은
+# 막지 않으므로(Invoke-AcrCellEdit - 어긋나면 로그 경고 한 줄, 최종 차단은 시작 게이트) 리스트를 다른 방식·매칭으로 바꾸는 길은 칸에서 항목마다
+# 바꾸기와 비우고 다시 추가하기 둘이고, 두 문구가 둘 다 안내합니다.
+# 두 문구는 세 줄로 나눠 띄웁니다(2026-10-31 실기 사용자 소감 - 한 줄로 너무 길게 뜸. 같은 파일의 다른 툴팁처럼 `r`n 으로 직접 나눔 · 낱말은 10-30 결정 그대로).
+$script:acrLockTipTextFixed = "리스트의 방식·매칭과 같아야 합니다.`r`n다른 방식·매칭으로 바꾸려면 리스트의 방식·매칭 칸을 항목마다 바꾸거나,`r`n리스트를 비우고 다시 추가해 주세요."
+$script:acrLockTipTextMixable = "'파티 찾기'·'파티(파티장)'는 리스트의 모든 항목이 같은 매칭일 때만 쓸 수 있습니다.`r`n쓰려면 리스트의 방식·매칭 칸을 항목마다 그 매칭으로 바꾸거나,`r`n리스트를 비운 뒤 다시 추가해 주세요."
 $script:acrLockTipText = $script:acrLockTipTextFixed
 $acrLockTipMove = {
   param($tipSender, $tipArgs)
@@ -6684,8 +6686,10 @@ function Invoke-CrCellEdit {
 function Invoke-AcrCellEdit {
   # 어비스 리스트 셀 편집 적용. 난이도/어비스 던전/방식/매칭 모두 그 행 하나만 바꿉니다 (2026-10-27 사용자 결정 - 방식·매칭 칸 하나로
   # 리스트 전체를 바꾸던 일괄 변경은 없앰). 방식·매칭을 바꾼 결과가 리스트 규칙(파티 찾기·파티(파티장) 항목이 든 리스트는 전체가 같은
-  # 방식·매칭 - Convert-AcrItemsForModeEdit)에 어긋나면 알림을 띄우고 아무것도 바꾸지 않습니다(커스텀 던전 [추가]의 '추가 불가' 알림과 같은 꼴).
-  # 함께→혼자 전환으로 지옥 난이도가 강등될 때는 사전 확인창을 띄웁니다 (원래 난이도를 잃는 변경 - 사용자 버튼 조작 즉답 팝업이라 무인 운용과 무관).
+  # 방식·매칭 - 시작 게이트와 같은 Get-AbyssMatchingIssues)에 어긋나도 막지 않고 그대로 바꾼 뒤 로그에 경고 한 줄을 남깁니다. 최종 차단은
+  # 시작 게이트입니다(2026-10-28 사용자 결정 - 커스텀 던전 칸 편집 Invoke-CrCellEdit 와 같은 방식 · 10-27 의 '알림 뒤 그대로'를 거둠).
+  # 함께→혼자 전환으로 그 행이 지옥 난이도면 확인창 없이 '매우 어려움'으로 바꾸고 행 로그에 강등 건수를 적습니다 (2026-10-30 사용자 결정 -
+  # 2026-07-25 셀 편집의 사전 확인창을 없앰. 되돌리려면 방식 칸을 함께하기로 바꾼 뒤 난이도 칸에서 지옥을 다시 고릅니다).
   param([int]$RowIndex, [int]$ColumnIndex, [string]$Value)
   $editItems = @(Get-AbyssCustomItemsFromList)
   if ($RowIndex -ge $editItems.Count) { return }
@@ -6715,27 +6719,11 @@ function Invoke-AcrCellEdit {
     return
   }
   if ($ColumnIndex -ne 2 -and $ColumnIndex -ne 5) { return }
-  # 방식(2)/매칭(5) = 그 행 하나만 (2026-10-27 - 바꾼 결과가 리스트 규칙에 어긋나면 Convert-AcrItemsForModeEdit 가 Scope 'blocked')
+  # 방식(2)/매칭(5) = 그 행 하나만 (2026-10-27). 바꾼 결과가 리스트 규칙에 어긋나도 막지 않습니다(2026-10-28) - 경고는 저장이 끝난 뒤 아래 꼬리에서
   $editTarget = $(if ($ColumnIndex -eq 2) { ConvertFrom-AcrModeOption -OptionText $Value }
     else { @{ Mode = 'party'; Matching = $Value } })
   if (-not $editTarget) { return }
   $convertResult = Convert-AcrItemsForModeEdit -Items $editItems -RowIndex $RowIndex -Mode ([string]$editTarget.Mode) -Matching ([string]$editTarget.Matching)
-  if ([string]$convertResult.Scope -eq 'blocked') {
-    # 바꿀 수 없음: 로그 + 알림만 남기고 아무것도 바꾸지 않습니다(행 표시·저장·잠금 갱신 없음 - 리스트가 그대로라 잠금도 그대로).
-    # 'GUI 팝업 금지' 규칙의 예외 ②(사용자가 직접 고른 값에 대한 즉답 - CLAUDE.md): 실행 중에는 셀 클릭·드롭다운이 running 가드로 막히고,
-    # 고른 값이 적용되기 전에 [시작]을 누른 경우(Set-UiRunning 이 커밋된 편집을 마저 적용)도 사용자가 [시작]을 누른 그 자리입니다.
-    if ([string]$convertResult.Reason -eq 'fixed-target') {
-      $blockReasonText = ("'함께하기 · {0}'은(는) 리스트의 모든 항목이 같은 매칭일 때만 쓸 수 있어 이 줄만 바꿀 수 없습니다." -f [string]$editTarget.Matching)
-      $blockHintText = '다른 항목을 모두 지운 뒤 이 칸에서 다시 고르거나, 리스트를 비운 뒤 다시 추가해 주세요.'
-    } else {
-      $blockReasonText = ("'{0}' 리스트는 모든 항목이 같은 매칭이어야 해서 이 줄만 바꿀 수 없습니다." -f [string]$convertResult.FixedMatching)
-      $blockHintText = '다른 방식·매칭으로 바꾸려면 리스트를 비우고 다시 추가해 주세요.'
-    }
-    Add-GuiLog ('[안내] 변경 차단: 어비스 항목 {0} - {1} {2}' -f ($RowIndex + 1), $blockReasonText, $blockHintText)
-    [System.Windows.Forms.MessageBox]::Show(("{0}`n`n{1}" -f $blockReasonText, $blockHintText), '커스텀 반복 - 변경 불가',
-      [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-    return
-  }
   $convertedItems = @($convertResult.Items)
   $isSame = ($convertedItems.Count -eq $editItems.Count)
   if ($isSame) {
@@ -6746,13 +6734,6 @@ function Invoke-AcrCellEdit {
     }
   }
   if ($isSame) { return }
-  if ([int]$convertResult.DowngradeCount -gt 0) {
-    $downgradeText = ("혼자하기로 바꾸면 함께하기 전용 난이도(지옥)를 쓸 수 없어`n" +
-      "지옥 난이도 항목 {0}건이 '매우 어려움'으로 바뀝니다.`n`n계속할까요?" -f [int]$convertResult.DowngradeCount)
-    $downgradeAnswer = [System.Windows.Forms.MessageBox]::Show($downgradeText, '커스텀 반복 - 난이도 변경 확인',
-      [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
-    if ($downgradeAnswer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-  }
   $prevLoading = $script:crLoading
   $script:crLoading = $true
   try {
@@ -6778,12 +6759,20 @@ function Invoke-AcrCellEdit {
   $modeLabel = $(if ([string]$editTarget.Mode -eq 'party') { "함께하기/$([string]$editTarget.Matching)" } else { '혼자하기' })
   $downgradeTag = $(if ([int]$convertResult.DowngradeCount -gt 0) { " (지옥 → 매우 어려움 강등 $([int]$convertResult.DowngradeCount)건)" } else { '' })
   Add-GuiLog ('[안내] 어비스 항목 {0} 방식 변경: {1}{2}' -f ($RowIndex + 1), $modeLabel, $downgradeTag)
+  # 리스트 규칙 경고 (2026-10-28 사용자 결정 - 막지 않고 로그 한 줄, 팝업 없음 · 최종 차단은 시작 게이트의 로그 줄 + '커스텀 반복 - 시작 불가' 팝업).
+  # 경고 판정과 [시작] 게이트 판정이 같은 술어(Get-AbyssMatchingIssues)라, 방식·매칭 칸 편집이 적용·저장된 직후에 이 경고가 없으면 그 리스트는 이 규칙으로는
+  # [시작]에서 거부되지 않습니다(같은 값 · 저장 실패로 바뀌지 않은 편집과 다른 칸 편집은 경고를 내지 않음 - 그때의 리스트는 게이트가 봄).
+  # 위반이 여럿이어도 한 줄이고(위반 항목별 줄은 [시작] 때 게이트가 남김), 번호는 리스트를 고정으로 만든 항목(게이트 C-11 줄과 같은 Get-AbyssFixedItemNumbers)입니다.
+  if (@(Get-AbyssMatchingIssues -Items $convertedItems).Count -gt 0) {
+    Add-GuiLog ("[경고] 어비스 항목 {0} 변경 뒤 지금 리스트로는 시작할 수 없습니다 - '파티 찾기'·'파티(파티장)' 항목({1}번)이 있는 리스트는 모든 항목이 같은 방식·매칭이어야 합니다 (나머지 항목도 방금 바꾼 {0}번 항목과 같은 방식·매칭으로 바꾸면 시작할 수 있습니다)." -f ($RowIndex + 1), (@(Get-AbyssFixedItemNumbers -Items $convertedItems) -join ', '))
+  }
 }
 
 # ============================================================
 #  커스텀 리스트 셀 편집 판정 (2026-07-25) - 순수 함수 (진리표 테스트 대상)
-#  셀 클릭 → 오버레이 드롭다운으로 값 변경. 어비스의 방식/매칭 열도 그 행만 바꿉니다 - 바꾼 결과가 리스트 규칙(파티 찾기·파티장
-#  항목이 든 리스트는 전체가 같은 방식·매칭)에 어긋나면 알림을 띄우고 바꾸지 않습니다 (2026-10-27 사용자 결정 - 옛 '리스트 전체 일괄 변경'은 없앰).
+#  셀 클릭 → 오버레이 드롭다운으로 값 변경. 어비스의 방식/매칭 열도 그 행만 바꿉니다 (2026-10-27 사용자 결정 - 옛 '리스트 전체 일괄 변경'은 없앰).
+#  바꾼 결과가 리스트 규칙(파티 찾기·파티장 항목이 든 리스트는 전체가 같은 방식·매칭)에 어긋나도 막지 않고 적용 쪽(Invoke-AcrCellEdit)이 로그에
+#  경고 한 줄을 남깁니다 - 최종 차단은 시작 게이트 (2026-10-28 사용자 결정 - 커스텀 던전 칸 편집과 같은 방식).
 # ============================================================
 function Get-CrCellEditPlan {
   # 던전 리스트 셀 편집 계획: 편집 가능하면 @{ Options; Current }, 아니면 $null.
@@ -6840,7 +6829,7 @@ function Set-CrItemCellValue {
 
 function Get-AcrCellEditPlan {
   # 어비스 리스트 셀 편집 계획. Scope 는 늘 'row'(난이도/어비스 던전/방식/매칭 모두 그 행 하나 - 2026-10-27 사용자 결정으로 방식/매칭의
-  # 옛 'all'(리스트 전체 일괄)을 없앰. 읽는 코드가 없는 정보 값이고, 방식/매칭이 리스트 규칙에 어긋나는지는 적용 때 Convert-AcrItemsForModeEdit 가 봄).
+  # 옛 'all'(리스트 전체 일괄)을 없앰. 읽는 코드가 없는 정보 값이고, 방식/매칭이 리스트 규칙에 어긋나는지는 적용 뒤 Invoke-AcrCellEdit 가 봄 - 경고만, 2026-10-28).
   # 혼자하기 항목의 매칭 열은 편집 불가. 방식 열은 방식+매칭을 한 번에 고르는 원자 옵션 4개 (혼자→함께 전환 시 매칭 명시 선택 보장).
   param([int]$ColumnIndex, $Item)
   $planMode = $(if ([string]$Item.mode -eq 'party') { 'party' } else { 'solo' })
@@ -6880,7 +6869,8 @@ function ConvertFrom-AcrModeOption {
 
 function Convert-AcrItemsForGlobalSetting {
   # 방식/매칭 리스트 일괄 변환 (순수). 함께→혼자 전환 시 함께하기 전용 난이도(지옥N)는
-  # '매우 어려움'으로 강등하고 강등 건수를 반환합니다 (호출부가 1건 이상이면 사전 확인창).
+  # '매우 어려움'으로 강등하고 강등 건수를 반환합니다 (건수는 Convert-AcrItemsForModeEdit 를 거쳐 Invoke-AcrCellEdit 의 행 로그
+  # 꼬리표에만 쓰임 - 확인창 없음, 2026-10-30 사용자 결정).
   # 2026-10-27 부터 칸 편집은 고친 행 하나만 넘깁니다 (Convert-AcrItemsForModeEdit - 리스트 전체 일괄 변경은 없앰).
   # 반환: 단일 해시테이블 @{ Items = [array]; DowngradeCount = N } (PS 5.1 배열 풀림 방지)
   param($Items, [string]$Mode, [string]$Matching)
@@ -6903,20 +6893,19 @@ function Convert-AcrItemsForGlobalSetting {
 }
 
 function Convert-AcrItemsForModeEdit {
-  # 방식(2)/매칭(5) 칸 편집의 결과 (순수 - 2026-10-26 섞기 허용 · 2026-10-27 사용자 결정 '바꿀 수 없으면 알림을 띄우고 바꾸지 않음'):
-  #  - 늘 그 행 하나만 바꾼 후보를 만듭니다(함께→혼자로 그 행이 지옥이면 그 행만 강등). 방식·매칭 칸 하나로 리스트 전체를 한 번에
-  #    바꾸던 일괄 변경(2026-07-25 셀 편집 설계)은 없앴습니다 - 리스트 전체를 다른 방식으로 바꾸려면 비우고 다시 추가합니다.
-  #  - 후보가 시작 게이트와 같은 규칙(Get-AbyssMatchingIssues - 파티 찾기·파티(파티장)·모르는 매칭 항목이 다른 방식·매칭과 섞임)에
-  #    어긋나면 Scope = 'blocked' 로 원래 리스트를 그대로 돌려줍니다(호출부가 알림만 띄움). Reason = 'fixed-target'(바꾼 행이 파티 찾기·
-  #    파티(파티장)처럼 리스트 전체가 같아야 하는 매칭) / 'fixed-list'(다른 항목에 그런 매칭이 있어 이 행만 다른 방식·매칭으로 바꿀 수
-  #    없음 - FixedMatching = 그 항목의 매칭 표기). 항목이 1개인 리스트는 무엇으로든 바뀝니다.
+  # 방식(2)/매칭(5) 칸 편집의 결과 (순수 - 2026-10-26 섞기 허용 · 2026-10-27 그 행만 · 2026-10-28 사용자 결정 '막지 않음'):
+  #  - 늘 그 행 하나만 바꾼 후보를 돌려줍니다(함께→혼자로 그 행이 지옥이면 그 행만 강등). 방식·매칭 칸 하나로 리스트 전체를 한 번에
+  #    바꾸던 일괄 변경(2026-07-25 셀 편집 설계)은 없앴습니다.
+  #  - 후보가 리스트 규칙(파티 찾기·파티(파티장) 항목이 든 리스트는 전체가 같은 방식·매칭)에 어긋나는지는 여기서 보지 않습니다 - 적용 쪽
+  #    Invoke-AcrCellEdit 가 저장 뒤 시작 게이트와 같은 Get-AbyssMatchingIssues 로 보고 로그에 경고 한 줄을 남깁니다(10-27 의 Scope 'blocked' ·
+  #    Reason · FixedMatching 은 없앰).
   #  - 행 번호가 범위 밖이면 바꾸지 않습니다(Scope = 'none' - 호출부가 범위를 먼저 거릅니다).
-  # 반환: 단일 해시테이블 @{ Items = [array]; DowngradeCount = N; Scope = 'row' | 'blocked' | 'none'; Reason; FixedMatching } (PS 5.1 배열 풀림 방지)
+  # 반환: 단일 해시테이블 @{ Items = [array]; DowngradeCount = N; Scope = 'row' | 'none' } (PS 5.1 배열 풀림 방지 - Scope 는 읽는 코드가 없는 정보 값)
   param($Items, [int]$RowIndex, [string]$Mode, [string]$Matching)
   $meList = @()
   foreach ($meItem in @($Items)) { if ($null -ne $meItem) { $meList += $meItem } }
   if (($RowIndex -lt 0) -or ($RowIndex -ge $meList.Count)) {
-    return @{ Items = $meList; DowngradeCount = 0; Scope = 'none'; Reason = ''; FixedMatching = '' }
+    return @{ Items = $meList; DowngradeCount = 0; Scope = 'none' }
   }
   $meOne = Convert-AcrItemsForGlobalSetting -Items @($meList[$RowIndex]) -Mode $Mode -Matching $Matching
   $meRowItem = @($meOne.Items)[0]
@@ -6924,19 +6913,7 @@ function Convert-AcrItemsForModeEdit {
   for ($meIndex = 0; $meIndex -lt $meList.Count; $meIndex++) {
     if ($meIndex -eq $RowIndex) { $meOut += $meRowItem } else { $meOut += $meList[$meIndex] }
   }
-  if (@(Get-AbyssMatchingIssues -Items $meOut).Count -eq 0) {
-    return @{ Items = $meOut; DowngradeCount = [int]$meOne.DowngradeCount; Scope = 'row'; Reason = ''; FixedMatching = '' }
-  }
-  # 막힘 - 바꾼 행이 '전체가 같아야 하는 매칭'(고정 판정은 Get-AbyssListLock 의 Fixed 와 같은 식)이면 fixed-target,
-  # 아니면(혼자하기·우연한 만남으로 바꿈) 다른 항목에 그런 매칭이 있어서이므로 fixed-list
-  if ([bool](Get-AbyssListLock -Items @($meRowItem)).Fixed) {
-    return @{ Items = $meList; DowngradeCount = 0; Scope = 'blocked'; Reason = 'fixed-target'; FixedMatching = '' }
-  }
-  $meFixedMatching = ''
-  for ($meIndex = 0; $meIndex -lt $meList.Count; $meIndex++) {
-    if (($meIndex -ne $RowIndex) -and [bool](Get-AbyssListLock -Items @($meList[$meIndex])).Fixed) { $meFixedMatching = [string]$meList[$meIndex].matching; break }
-  }
-  return @{ Items = $meList; DowngradeCount = 0; Scope = 'blocked'; Reason = 'fixed-list'; FixedMatching = $meFixedMatching }
+  return @{ Items = $meOut; DowngradeCount = [int]$meOne.DowngradeCount; Scope = 'row' }
 }
 
 function Set-CustomListRowTexts {
@@ -7818,7 +7795,7 @@ function Get-AbyssListLock {
 function Get-AbyssFixedItemNumbers {
   # 어비스 커스텀 리스트를 '전체 고정'으로 만드는 항목(Get-AbyssListLock 의 Fixed 와 같은 판정 - 함께하기인데 매칭(공백 무시)이
   # 우연한 만남이 아닌 항목)의 번호(1부터, null 을 뺀 순번 - Get-AbyssMatchingIssues 의 Index 와 같은 기준)를 돌려줍니다.
-  # 시작 게이트의 [경고] 한 줄용입니다(구현 명세 ⑤b6 C-11 · B-14 둘째 안).
+  # 시작 게이트의 [경고] 한 줄 · 팝업 머리(구현 명세 ⑤b6 C-11 · B-14 둘째 안 · ⑤b7)와 칸 편집 경고 한 줄(Invoke-AcrCellEdit - ⑤b7)이 씁니다.
   # 반환: 번호 배열(없으면 빈 배열). PS 5.1 배열 풀림 주의: 열거용이므로 return 그대로 + 호출부 @() 감싸기 규약.
   param($Items)
   $fnNumbers = @()
@@ -7834,8 +7811,8 @@ function Get-AbyssFixedItemNumbers {
 
 function Get-AbyssMatchingIssues {
   # '전체 고정' 리스트(파티 찾기·파티(파티장) 항목이 든 리스트 - Get-AbyssListLock 의 Fixed)에서 첫 항목과 방식·매칭이 다른 항목들을 찾아
-  # 돌려줍니다 (config 를 직접 편집해 섞인 리스트가 들어온 경우의 시작 게이트용 - GUI 에서는 라디오 잠금·칸 편집 규칙으로 생기지 않습니다).
-  # 칸 편집도 같은 함수로 '바꾼 결과가 어긋나는지'를 봅니다(Convert-AcrItemsForModeEdit - 어긋나면 알림만, 2026-10-27).
+  # 돌려줍니다 - 시작 게이트(거부: 로그 줄 + '커스텀 반복 - 시작 불가' 팝업)와 칸 편집 경고(Invoke-AcrCellEdit - 막지 않고 로그 한 줄,
+  # 2026-10-28 사용자 결정)가 같은 이 함수로 봅니다. 어긋난 리스트는 칸 편집(그 행만 바꿈)과 config 직접 편집으로 생깁니다([추가]는 라디오 잠금이 막음).
   # 혼자하기·함께하기 우연한 만남만 든 리스트는 섞여 있어도 위반이 아닙니다(2026-10-26 사용자 결정).
   # 반환: 위반 배열 [{Index; Mode; Matching; Reason}] (없으면 빈 배열).
   # PS 5.1 배열 풀림 주의: 열거용이므로 return $issues 그대로 + 호출부 @() 감싸기 규약.
@@ -11899,8 +11876,8 @@ function Invoke-StartAutomation {
         $crGateIssues = @(Get-CustomTransitionIssues -Items $crItems -ListRepeat $crGateRepeat -ListRepeatCount $crGateLaps)
       }
       # 어비스 방식·매칭 게이트: 파티 찾기·파티(파티장) 항목이 든 리스트는 전체가 같은 방식·매칭이어야 합니다(혼자하기·우연한 만남끼리는
-      # 섞기 허용 - 2026-10-26 사용자 결정). GUI 에서는 라디오 잠금·칸 편집 규칙으로 생기지 않지만 config 를 직접 편집하면 들어올 수 있어
-      # 시작을 거부하고 어떤 항목이 다른지 로그로 알립니다 (무인 운용 보호 - 팝업 없이 로그만).
+      # 섞기 허용 - 2026-10-26 사용자 결정). 칸 편집은 막지 않으므로(2026-10-28 - 로그 경고 한 줄) 어긋난 리스트는 GUI 칸 편집과 config 직접
+      # 편집으로 들어옵니다 - 시작을 거부하고 어떤 항목이 다른지 로그 줄과 팝업으로 알립니다 (커스텀 던전 게이트와 같은 방식 - 아래 팝업 주석).
       # 생활 미지원 스킬 게이트: [추가] 시점에서 이미 막지만 config 를 직접 편집하면 낚시가
       # 들어올 수 있습니다. 그 항목 차례에 반드시 멈추므로 시작 전에 거부합니다 (팝업 없이 로그만)
       if ($script:customConfigSection -eq 'lifeCustomRepeat') {
@@ -11924,15 +11901,26 @@ function Invoke-StartAutomation {
         $acrGateIssues = @(Get-AbyssMatchingIssues -Items $crItems)
         if ($acrGateIssues.Count -gt 0) {
           Add-GuiLog "[경고] 어비스 커스텀 반복: '파티 찾기'·'파티(파티장)' 항목이 있는 리스트는 전체가 같은 방식·매칭이어야 해서 시작할 수 없습니다 (혼자하기·우연한 만남끼리는 섞어도 됩니다)."
-          # 직접 편집한 [혼자하기, 우연한 만남, 파티 찾기] 같은 리스트는 머리 문구의 '섞어도 됩니다' 바로 아래에 우연한 만남 항목이 위반으로
-          # 찍혀 헷갈릴 수 있어, 리스트를 고정으로 만든 항목 번호와 '첫 항목 기준' 임을 한 줄로 알립니다 (구현 명세 ⑤b6 C-11 · B-14 둘째 안)
+          # [혼자하기, 우연한 만남, 파티 찾기] 같은 리스트(칸 편집 · config 직접 편집으로 생김)는 머리 문구의 '섞어도 됩니다' 바로 아래에 우연한 만남
+          # 항목이 위반으로 찍혀 헷갈릴 수 있어, 리스트를 고정으로 만든 항목 번호와 '첫 항목 기준' 임을 한 줄로 알립니다 (구현 명세 ⑤b6 C-11 · B-14 둘째 안)
           $acrGateFixedNumbers = @(Get-AbyssFixedItemNumbers -Items $crItems)
           Add-GuiLog ("[경고] 이 리스트에는 '파티 찾기'·'파티(파티장)' 항목({0}번)이 있어 모든 항목이 같은 방식·매칭이어야 합니다 (첫 항목 기준으로 다른 항목을 표시합니다)." -f ($acrGateFixedNumbers -join ', '))
           foreach ($acrGateIssue in $acrGateIssues) {
             Add-GuiLog ('[경고] {0}번({1} 매칭 ''{2}''): {3}' -f $acrGateIssue.Index, $acrGateIssue.Mode, $acrGateIssue.Matching, $acrGateIssue.Reason)
           }
-          # 칸 하나로 전체를 바꾸는 길은 없앴습니다(2026-10-27) - 위 항목을 지우면 남는 항목이 모두 첫 항목과 같아 늘 시작할 수 있습니다
-          Add-GuiLog '[안내] 위 항목을 지우거나, 리스트를 비우고 다시 추가해 주세요.'
+          # 위반 항목은 첫 항목 기준이라, 위 항목을 첫 항목과 같은 방식·매칭으로 바꾸거나(칸 편집 - 막지 않음, 2026-10-28) 지우면 남는 항목이 모두
+          # 첫 항목과 같아 늘 시작할 수 있습니다 (칸 하나로 전체를 바꾸는 길은 2026-10-27 에 없앰)
+          Add-GuiLog '[안내] 위 항목의 방식·매칭 칸을 첫 항목과 같게 바꾸거나, 위 항목을 지운 뒤 다시 시작해 주세요.'
+          # 팝업 안내 (2026-10-28 사용자 결정 '던전하고 동일하게'): 아래 커스텀 던전 게이트와 같은 시작 버튼 클릭 즉답 팝업 - 팝업 금지 규칙의
+          # 명시적 예외 (실행 중엔 시작 버튼이 숨겨져 있어 무인 운용을 막지 않음. CLAUDE.md 참고). 위반이 많으면 앞 5건까지만 담고 나머지는 로그로 봅니다.
+          # 위반 줄은 위 로그 위반 줄과 같은 꼴입니다 - 방식이 다른 위반의 이유에는 매칭이 없어, 괄호의 방식·매칭이 항목(예: 우연한 만남 · 파티 찾기)을 가릅니다.
+          $acrGateLines = @($acrGateIssues | Select-Object -First 5 | ForEach-Object { '- {0}번({1} 매칭 ''{2}''): {3}' -f $_.Index, $_.Mode, $_.Matching, $_.Reason })
+          $acrGateText = ("시작할 수 없습니다 - '파티 찾기'·'파티(파티장)' 항목({0}번)이 있는 리스트는 모든 항목이 같은 방식·매칭이어야 합니다.`n`n" -f ($acrGateFixedNumbers -join ', ')) +
+            ($acrGateLines -join "`n")
+          if ($acrGateIssues.Count -gt 5) { $acrGateText += "`n... 외 $($acrGateIssues.Count - 5)건 (로그 참고)" }
+          $acrGateText += "`n`n첫 항목 기준으로 다른 항목을 표시했습니다.`n위 항목의 방식·매칭 칸을 첫 항목과 같게 바꾸거나, 위 항목을 지운 뒤 다시 시작해 주세요."
+          [System.Windows.Forms.MessageBox]::Show($acrGateText, '커스텀 반복 - 시작 불가',
+            [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
           $script:customActive = $false
           return
         }
