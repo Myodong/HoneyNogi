@@ -1,4 +1,4 @@
-﻿# 어비스 재입장 대기 · 보상 화면 '다시 하기'/'다른 던전 가기' 회귀 - 결론 순수 판정 진리표 · 대기 루프 행동 진리표 · 정적 배선 (구현 단위 ④ · ⑤b1~⑤b6 - 2026-10)
+﻿# 어비스 재입장 대기 · 보상 화면 '다시 하기'/'다른 던전 가기' 회귀 - 결론 순수 판정 진리표 · 대기 루프 행동 진리표 · 정적 배선 (구현 단위 ④ · ⑤b1~⑤b6 · 5b-8 - 2026-10~11)
 #
 # 배경(설계 v11 R5 대기 루프 골격 · 구현 명세 ④): 어비스 재입장 대기를 워커에 넣는 단위입니다 - 스크립트 상수 $abyssReclickQuietSeconds(무변화 창 Q -
 #   config 아님) · 결론 순수 판정 Resolve-AbyssReentryVerdict · 대기 함수 Wait-AbyssReentry(결과 @{ Result; LastKind; PanelSeen } 하나). 첫 호출 = 이어받기
@@ -6,12 +6,13 @@
 #   쪽 재입장·보상 귀환 대기의 회귀를 이 파일이 모읍니다(설계 v11 R5 8절).
 # 여기서 고정하는 계약(구현 명세 ④ 1.5·1.6·1.9·1.11):
 #   회전 순서 - 서두(클릭 생략 메타 비움) → ① 동결(여러 줄 · 단독 줄 continue: 안전 확인 → 2초 → 이번 회전 탐침 → 탐침 표식) → ② 조작 양보 → ③ 탐침
-#     복구 뒤 회전(스윕·판독 없이 마감만) → try { ④ 팝업 스윕(참이면 생략 사유 분류) → ⑤ 판독(하단 → 패널 → HUD → 추적기) } catch(창 좌표 throw 만) →
-#     ⑥ 간접 양보 → ⑦ 유효성 → ⑧ 분류·던전 안 연속·패널 관측·계측 → 무변화 판정 → ⑨ 결론(같은 회전의 마감보다 먼저) → ⑩ 마감(파티원 시계 - 양보·캡처
+#     복구 뒤 회전(스윕·판독 없이 마감만) → try { ④ 팝업 스윕(참이면 생략 사유 분류) → ⑤ 판독(하단 → 패널 → HUD → 추적기 → 필드 결과 켬의 필드 모양 회전만 선택 화면 → ESC 메뉴) } catch(창 좌표 throw 만) →
+#     ⑥ 간접 양보 → ⑦ 유효성 → ⑧ 분류·던전 안 연속·패널 관측·필드 확정·계측 → 무변화 판정 → ⑨ 결론(같은 회전의 마감보다 먼저) → ⑩ 마감(파티원 시계 - 양보·캡처
 #     실패 차분) → ⑫ 대기(굶김 0 · 복구 2초 · 그 밖 700ms). ⑪(클릭)은 없습니다(구현 단위 ⑥d 자리). 조작 생략·아직 캡처 실패 중인 회전은 마감을 확정하지
 #     않습니다(규칙 4·15)
-#   결론 우선순위(위가 이김) - 던전 안 2연속 'entered' > 목표 field ∧ 필드 모양 ∧ 필드 확정 'field' > 목표 reward ∧ 3버튼 'reward' > 목표 entry ∧ 보고 ∧
-#     3버튼 ∧ 패널 관측 'cancelled' > 같은 꼴 ∧ 무변화 만료 'reclick' > ''(관측 지속). waiter 는 목표 'entry' · 필드 확정 거짓을 넘깁니다
+#   결론 우선순위(위가 이김) - 던전 안 2연속 'entered' > 목표 field ∧ 필드 모양 ∧ 필드 확정 'field' > 목표 reward ∧ 3버튼 'reward' > 목표 entry ∧ 필드 결과 ∧
+#     필드 모양 ∧ 필드 확정 'field-cancelled'(구현 단위 5b-8) > 목표 entry ∧ 보고 ∧ 3버튼 ∧ 패널 관측 'cancelled' > 같은 꼴 ∧ 무변화 만료 'reclick' > ''(관측 지속).
+#     waiter 는 목표 'entry' 를 넘기고, 필드 확정은 필드 결과 켬(-ReportFieldReturn - 원 워커 우연한 만남 '다시 하기' 대기)에서만 셉니다(설계 v11 R5 2.1·2.2 끊김 표)
 #   마감 - 본 시계(-Clock 이면 그 hashtable 그대로 · 아니면 -LimitSeconds 새 시계) · 무변화 시계(늘 만듦 · 호출부터 조정 Q) · 던전 안 유예 시계(정지로
 #     만들고 처음 미루는 회전에서 진행). -ResumeGrace 이고 본 시계가 지난 회전은 다섯 식으로 미룹니다 - 던전 안 첫 유예(연속당 한 번 · 상한 없음) · 그
 #     연속의 연장(유예 시계 안) · 3버튼 창(보고 켬 · 무변화 창 안) · 첫 유효 회전 전(무변화 창 안) · 되돌림 뒤 창(유예 시계 안 - 정지면 그 회전에 처음 진행).
@@ -39,6 +40,8 @@
 #   R5-P · SEL · WAIT 의 other 몫(⑤b3) · §10 클릭 루프 · 원 워커 B2 · 폴백 ② 호출 E · RC 행 · 정적 P5d · R3 S · 관측 0 재생(⑤b4) · §11 본류 보상 화면 꼬리 T- · 정적 P5e(⑤b5) ·
 #   §6b MX · 정적 P5b-9 · P5b-10 · §6c RB10~RB13 · 정적 P5c-5 · §10 정적 P5d-8 · §11 T-RS · T-X1 · T-MX · 정적 P5e-8~10(⑤b6 - 멈출 때와 다음 판 입장 방식이 다르거나 모를 때는
 #   '나가기' → 필드, 같은 입장 방식의 다른 던전 · 난이도는 '다른 던전 가기')
+#   구현 단위 5b-8(재매칭 패널 ESC 취소 → 필드 확정이면 곧바로 정지 - 구현 명세 5b-8 3절)이 더한 계열: §6 FC-P(필드 결과 열) · §7 FC-L · §8b 정적 FC-S ·
+#   §10 FC-X · FC-J · 정적 FC-S15 · FC-S16 · FC-S19 (GUI 결합은 test_abyss_handoff_gui.ps1 FC-G · 보존 줄은 test_log_tail_offset.ps1)
 # 보관 캡처·OCR 엔진 없이 늘 돌아 SKIP 경로가 없습니다.
 # 뒤 단위가 이 파일에 더할 자리(설계 v11 R5 8절 · 구현 명세 ④ 2.2-1):
 #   ⑤ - WA-X3~X5·X12 · WA-S(S10 포함 - S10 에 클릭 경로 문구 변형 셋 · 두 번째 판독 실패 변형(④′ 뒤 공용 스윕 행)) · 정적 R5-P1·P2·P12·P16 의 두 클릭
@@ -49,6 +52,7 @@
 #       기동의 대기 행 · P5b-4 · P5b-5 · R3 S7 의 ④ 승계 꼴(P5b-8 은 그대로 - 호출이 생긴 단계부터 그 호출 전부에 걸림)
 #   ⑥d - WA-C(C7 포함) · WA-L31·L40·L42(목표 'field'·'reward' 행) · WA-E · WA-R(E5·R5 에 클릭 경로 문구 변형 셋 · 두 번째 판독 실패 변형) · WA-X14~X18 ·
 #       정적 R5-P15·P17 · R5-P1·P2·P12·P16 의 ⑥d 두 클릭 루프 몫 · R5-P13(입장하기·준비 취소 몫) · R5-P4·P8·R5-P16·N4-P4·N4-P12 갱신 ·
+#       FC-S19(대기 스위치 수 3 · 호출 B 인자 - -ChallengeFewMembers 가 붙으면) · FC-S22(끝(retry) 명령 허용 집합 - 파티장 경로가 명령을 더하면) 갱신 ·
 #       변이 R5-M22~M24·M42~M45·M48·M50·M53(waiter 꼴)·M54~M65 와 R5-M39·M46·M47 의 ⑥d 클릭 루프 꼴 · N4-M4·M30·M31·M37 의 ⑥d 두 클릭 루프 꼴
 using namespace System.Management.Automation.Language
 
@@ -493,7 +497,8 @@ $ORIGINAL_FUNCTION_NAMES = @(
     'Wait-AbyssReentry', 'Resolve-AbyssReentryVerdict', 'Resolve-AbyssHandoffStartScreen', 'Test-AbyssFewMembersPopupText', 'Test-AbyssEntryWaitingText',
     'Test-AbyssRewardText', 'New-AbyssMemberClock', 'Update-AbyssMemberClockFreeze', 'Set-AbyssMemberClock', 'Suspend-AbyssMemberClock',
     'Resume-AbyssMemberClock', 'Test-AbyssMemberClockExpired', 'Get-FreezeAdjustedDeadline', 'Get-YieldAdjustedDeadline',
-    'Invoke-UserYieldWithDeadline', 'Register-CaptureSuccess', 'Get-CaptureFailTotalMs', 'Test-AbyssReadyPanelText', 'Test-AbyssMatchingPanelText')
+    'Invoke-UserYieldWithDeadline', 'Register-CaptureSuccess', 'Get-CaptureFailTotalMs', 'Test-AbyssReadyPanelText', 'Test-AbyssMatchingPanelText',
+    'Step-AbyssFieldSettle')   # 필드 확정 걸음 - 대기 함수의 필드 결과 켬이 부름(구현 단위 5b-8 - 그 전에는 선분기만 불러 의존 추출이 묵시로 올림)
 # 이름 바꿔 올리는 원문 (같은 이름은 아래 감시·모의가 차지). 앞 둘은 exit 센티널 치환 · 가운데 셋은 선단언 전용 · 끝은 스윕 생략 사유 분류 감시용
 #   (명세 3.2.1 은 분류를 '원문 그대로' 로 적었습니다 - 이 파일은 같은 원문을 감시 뒤에 두어 회전마다 분류 결과를 기록합니다(WA-L13 'counted' 수 · WA-L14
 #   '굶김 예산 미소모'). 감시는 받은 인자를 그대로 넘기고 결과를 그대로 돌려줘 동작이 같습니다)
@@ -512,6 +517,8 @@ $STUB_MOCK_BODIES = [ordered]@{
     'Get-AbyssPanelKind'         = 'return (Invoke-PanelStub -Game $Game)'
     'Test-HomeEndEscHud'         = 'return (Invoke-FlagStub -Game $Game -Name ''hud'' -Field ''Hud'')'
     'Test-InDungeonQuest'        = 'return (Invoke-FlagStub -Game $Game -Name ''quest'' -Field ''Quest'')'
+    'Test-AbyssSelectionScreen'  = 'return (Invoke-FlagStub -Game $Game -Name ''selection'' -Field ''Selection'')'   # 구현 단위 5b-8 2.2-4a - 필드 결과 켬의 필드 모양 회전만 부름
+    'Test-AbyssMenu'             = 'return (Invoke-FlagStub -Game $Game -Name ''menu'' -Field ''Menu'')'
     'Invoke-PurchasePopupSweep'  = 'return (Invoke-SweepStub -Game $Game)'
     'Test-CaptureRecovered'      = 'return (Invoke-ProbeStub -Game $Game)'
     'Test-UserRecentlyActive'    = 'return (Test-UserActiveStub)'
@@ -643,6 +650,8 @@ $S2_PATTERN = '^\[어비스\] 입장 계측 - 던전 안 2연속 앞 로딩\(알
 #   U  '' 퇴장 로딩 cap_210521_682 (:679 loading)
 #   R  09-18 3버튼 보상 (:182 reward3) · M 09-18 재매칭 패널 (:180 matching0918) · Rd cap_211944_558 (:171 ready211944) · E cap_212409_212 (:175 entry)
 #   P  권장 인원 팝업 G4·G5·L2 (test_abyss_handoff_start.ps1:227 · 워커 Test-AbyssFewMembersPopupText 서명 주석의 실측) · S 09-21 S4 (:181 prompt)
+#   Mn ESC 메뉴가 열린 채 공지사항 'Home' 배지가 HUD 로 읽힌 화면(워커 Test-AbyssMenu 2차 신호 주석의 2026-07-17 관측) · Sl 선택 화면 - 둘 다 판정값만
+#      (구현 단위 5b-8 2.2-4a 의 두 판독 - 행 FC-L16 · FC-L17)
 # 프롬프트·패널·추적기 값은 판정값이고 아래 선단언 ②③④ 가 실측 문자열에서 원문 판정으로 같은 값을 냄을 확인합니다. HUD 는 판정값만(tests\ 에 실측 문자열 없음)
 $SCREEN_TABLE = [ordered]@{
     'I'  = @{ Bottom = '&쇨죠돈출'; Prompt = $false; Panel = 'none'; Hud = $true; Quest = $true }
@@ -654,8 +663,10 @@ $SCREEN_TABLE = [ordered]@{
     'E'  = @{ Bottom = '아이템을누르면상세정보를수있습니다나가기입장대기중'; Prompt = $false; Panel = 'none'; Hud = $false; Quest = $false }
     'P'  = @{ Bottom = '㉬취소Space도전하기'; Prompt = $false; Panel = 'none'; Hud = $false; Quest = $false }
     'S'  = @{ Bottom = '화면을터치해주세요'; Prompt = $true; Panel = 'none'; Hud = $false; Quest = $false }
+    'Mn' = @{ Bottom = ''; Prompt = $false; Panel = 'none'; Hud = $true; Quest = $false; Menu = $true }
+    'Sl' = @{ Bottom = ''; Prompt = $false; Panel = 'none'; Hud = $true; Quest = $false; Selection = $true }
 }
-$SCREEN_KINDS = [ordered]@{ 'I' = 'inside'; 'F' = 'field'; 'U' = 'unknown'; 'R' = 'reward3'; 'M' = 'matching'; 'Rd' = 'ready'; 'E' = 'entry-waiting'; 'P' = 'popup'; 'S' = 'prompt' }
+$SCREEN_KINDS = [ordered]@{ 'I' = 'inside'; 'F' = 'field'; 'U' = 'unknown'; 'R' = 'reward3'; 'M' = 'matching'; 'Rd' = 'ready'; 'E' = 'entry-waiting'; 'P' = 'popup'; 'S' = 'prompt'; 'Mn' = 'menu'; 'Sl' = 'selection' }
 # 선단언 원료 - 패널 영역(abyssMenu 850,180,350,520 배율 4) 실측 판독문 · 추적기 영역 실측 판독문
 $PANEL_TEXT_MATCHING = '빻지/입문근든플레이어가모이면자동입장합니다.00:00'                                             # 09-18 재매칭 1/4 (test_abyss_screen_signatures.ps1:70 $panelMenu1)
 $PANEL_TEXT_READY = '박지/입문파티홍보패널100요동•X104,4385044화염술klülEl원이준비완료되면바로입장합니다.준비취소'      # 실기 -1 L1 (test_abyss_party_signatures.ps1:42 $menuLeaderL1)
@@ -1192,6 +1203,47 @@ function Get-S2Facts {
     }
     return $s2Facts
 }
+# 구현 단위 5b-8 - 재입장 대기의 새 로그 두 줄(재매칭 패널 확인 안내 · 필드 확정 줄) · 2.2-4a 두 판독 호출 수 (§7 FC-L 행 · §8 정적이 씀)
+$PANEL_NOTICE_TEXT = '[어비스] 재매칭 패널 확인 - 매칭이 끝나면 입장합니다'   # 명세 5b-8 1.6 ① 문구 (권장 인원 안내 $NOTICE_FULL_TEXT 와 같은 고정 사본 - 정적 N4-P14 · FC-S12)
+$SETTLE_LINE_PREFIX = '[어비스] 던전 밖(HUD) 확인'                            # 필드 확정 줄(명세 1.6 ② - 선분기 확정 줄과 같은 꼴)을 고르는 접두
+$SETTLE_PATTERN = '^\[어비스\] 던전 밖\(HUD\) 확인 - 필드 모양이 (?<w>[0-9.]+)초 이어졌습니다 \(첫 표본부터 (?<s>-?[0-9.]+)초, (?<n>\d+)표본\)$'
+function Get-SettleFacts {
+    # 필드 확정 줄 - 줄 수 · 정규식 일치 · w(W) · s(첫 표본부터 초) · n(표본 수) (Get-S2Facts 와 같은 꼴)
+    param($Row)
+    $settleLines = @($Row.Logs | Where-Object { $_.StartsWith($SETTLE_LINE_PREFIX, [StringComparison]::Ordinal) })
+    $settleFacts = [pscustomobject]@{ Count = $settleLines.Count; Matched = $false; W = [double]::NaN; S = [double]::NaN; N = -1; Text = '' }
+    if ($settleLines.Count -ge 1) {
+        $settleFacts.Text = [string]$settleLines[0]
+        $settleMatch = [regex]::Match($settleFacts.Text, $SETTLE_PATTERN)
+        if ($settleMatch.Success) {
+            $settleFacts.Matched = $true
+            $settleFacts.W = [double]::Parse($settleMatch.Groups['w'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $settleFacts.S = [double]::Parse($settleMatch.Groups['s'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $settleFacts.N = [int]$settleMatch.Groups['n'].Value
+        }
+    }
+    return $settleFacts
+}
+function Get-PanelNoticeCount { param($Row) return @($Row.Logs | Where-Object { $_ -ceq $PANEL_NOTICE_TEXT }).Count }
+function Get-SettleExpectedT {
+    # 확정 기대 시각 - 끊김 뒤 첫 실패 없는 F 판독(Start)부터 W(소스 캡처) 이상 지난 첫 실패 없는 F 판독 (W 정각 포함 - 원문 Step-AbyssFieldSettle 의 '-lt' 부정)
+    param($Row, [double]$Start)
+    return (Get-NthTime @(Get-RecordTimes $Row -Screen 'F' -Clean -NotBefore ($Start + [double]$memberFieldSettleSeconds)) 1)
+}
+function Test-SettleLine {
+    # 필드 확정 줄 1 · 정규식 일치 · w = W · s = 확정 시각 − Start(한 자리) · n = Start ~ 확정(포함)의 실패 없는 F 판독 수
+    param($Row, [double]$Start)
+    $settleFacts = Get-SettleFacts $Row
+    $expectSpan = [Math]::Round([double]$Row.T - $Start, 1)
+    $expectCount = @(Get-RecordTimes $Row -Screen 'F' -Clean -NotBefore $Start | Where-Object { $_ -le ([double]$Row.T + $TIME_EPSILON) }).Count
+    return (($settleFacts.Count -eq 1) -and $settleFacts.Matched -and ([Math]::Abs($settleFacts.W - [double]$memberFieldSettleSeconds) -lt $TIME_EPSILON) -and
+        ([Math]::Abs($settleFacts.S - $expectSpan) -lt 0.01) -and ($settleFacts.N -eq $expectCount))
+}
+function Get-OverlayReadCount {
+    # 2.2-4a 의 두 판독(선택 화면 'selection' · ESC 메뉴 'menu') 호출 수 - 판독 스텁이 남긴 -Game 기록(N4-L5)에서 셈
+    param($Row, [string]$Name)
+    return @($Row.GameSeen | Where-Object { ($_ -split ':')[0] -ceq $Name }).Count
+}
 function Format-RowDetail {
     # 실패 줄의 실제 값 - 결과·시각·판독 회전·사건·S2·호출 수 (판독·사건은 앞 40개)
     param($Row)
@@ -1255,13 +1307,14 @@ $signatureMismatches = @($signatureNames | Where-Object { (Get-LiveParamSignatur
 Check-True "서명 대조: 모의·감시 $($signatureNames.Count)개의 매개변수 서명 = 워커 원문" ($signatureMismatches.Count -eq 0) ($signatureMismatches -join ' · ')
 
 # ── §5 선단언 (명세 3.2.6 ①~④ · N4-P7 - 하나라도 어긋나면 FAIL) ─────────────────────────────────────────────────────────
-# ① 아홉 약어 각각 원문 분류기가 대응표의 분류를 냄
+# ① 열한 약어 각각 원문 분류기가 대응표의 분류를 냄 (Mn · Sl 은 선택 화면 · 메뉴 판정값을 함께 넘김 - 구현 단위 5b-8)
 $classifyActual = @(foreach ($screenKey in $SCREEN_TABLE.Keys) {
         $screenEntry = $SCREEN_TABLE[$screenKey]
-        '{0}={1}' -f $screenKey, (Resolve-AbyssHandoffStartScreen -PromptVisible $screenEntry.Prompt -BottomText $screenEntry.Bottom -PanelKind $screenEntry.Panel -HudVisible $screenEntry.Hud -InDungeonQuest $screenEntry.Quest)
+        '{0}={1}' -f $screenKey, (Resolve-AbyssHandoffStartScreen -PromptVisible $screenEntry.Prompt -BottomText $screenEntry.Bottom -PanelKind $screenEntry.Panel -HudVisible $screenEntry.Hud -InDungeonQuest $screenEntry.Quest `
+            -SelectionVisible ([bool]$screenEntry.Selection) -MenuVisible ([bool]$screenEntry.Menu))
     }) -join ' '
 $classifyExpected = @(foreach ($screenKey in $SCREEN_KINDS.Keys) { '{0}={1}' -f $screenKey, $SCREEN_KINDS[$screenKey] }) -join ' '
-Check-Equal '선단언 ① 아홉 약어의 원문 분류 (Resolve-AbyssHandoffStartScreen - 판정값·실측 하단 판독문)' $classifyActual $classifyExpected
+Check-Equal '선단언 ① 열한 약어의 원문 분류 (Resolve-AbyssHandoffStartScreen - 판정값·실측 하단 판독문)' $classifyActual $classifyExpected
 # ② 패널 - 원문 패널 종류 판정(서명 둘을 지남)이 실측 패널 판독문에 M 'matching' · Rd 'ready'
 $panelRegionKey = '{0},{1}' -f $rgAbyssMenu[0], $rgAbyssMenu[1]
 $script:preRegionTexts = @{ $panelRegionKey = $PANEL_TEXT_MATCHING }
@@ -1269,14 +1322,14 @@ $panelMatchingActual = Invoke-RealGetAbyssPanelKind -Game $null
 $script:preRegionTexts = @{ $panelRegionKey = $PANEL_TEXT_READY }
 $panelReadyActual = Invoke-RealGetAbyssPanelKind -Game $null
 Check-Equal '선단언 ② 패널 - 원문 Get-AbyssPanelKind: 09-18 재매칭 판독문 → M 의 판정값 · 실기 -1 L1 준비 패널 판독문 → Rd 의 판정값' "M=$panelMatchingActual Rd=$panelReadyActual" ('M={0} Rd={1}' -f $SCREEN_TABLE['M'].Panel, $SCREEN_TABLE['Rd'].Panel)
-# ③ 프롬프트 - 원문 하단 판정이 아홉 하단 판독문 중 S 만 참 (점수 영역 판독은 '')
+# ③ 프롬프트 - 원문 하단 판정이 열한 하단 판독문 중 S 만 참 (점수 영역 판독은 '')
 $promptActual = @(foreach ($screenKey in $SCREEN_TABLE.Keys) {
         $script:preBottomText = [string]$SCREEN_TABLE[$screenKey].Bottom
         $script:preRegionTexts = @{}
         '{0}={1}' -f $screenKey, [int][bool](Invoke-RealTestDungeonClearPrompt -Game $null)
     }) -join ' '
 $promptExpected = @(foreach ($screenKey in $SCREEN_TABLE.Keys) { '{0}={1}' -f $screenKey, [int][bool]$SCREEN_TABLE[$screenKey].Prompt }) -join ' '
-Check-Equal '선단언 ③ 프롬프트 - 원문 Test-DungeonClearPrompt: 아홉 하단 판독문 중 S 만 참 (대응표 판정값과 같음)' $promptActual $promptExpected
+Check-Equal '선단언 ③ 프롬프트 - 원문 Test-DungeonClearPrompt: 열한 하단 판독문 중 S 만 참 (대응표 판정값과 같음)' $promptActual $promptExpected
 # ④ 추적기 둘 - 원문 추적기 판정(내장 던전 키워드)이 던전 안 판독문 참 · 필드 판독문 거짓
 $trackerRegionKey = '{0},{1}' -f $rgQuestTracker[0], $rgQuestTracker[1]
 $script:preRegionTexts = @{ $trackerRegionKey = $TRACKER_INSIDE_TEXT }
@@ -1306,32 +1359,51 @@ $n4p7Expected = '일련번호 +1=1 · 시작 시각 규칙=1 · 갱신 규칙=1 
 '$total = [double]$script:captureFailTotalMs ; if ($script:screenCaptureFailing -and $script:captureFailingSince) { $total += ((Get-Date) - $script:captureFailingSince).TotalMilliseconds } ; return $total', $rectCaptureExpected
 Check-Equal 'N4-P7 캡처 모의의 전제 - 원문 규칙 사본 (run:3700 일련번호 · 3713~3722 시작 시각·갱신 · 3736~3745 누적·비움 · 3762~3769 누적 식 · 3571~3576 rect-failed 원인 · 3601~3604 other · 3869~3870 등록 → throw)' $n4p7Actual $n4p7Expected
 
-# ── §6 WA-P · N4-L4 - 결론 우선순위 순수 진리표 (명세 3.3 - 비교는 -ceq) ─────────────────────────────────────────────────────
+# ── §6 WA-P · N4-L4 · FC-P - 결론 우선순위 순수 진리표 (명세 3.3 · 5b-8 3.1 필드 결과 열 - 비교는 -ceq) ─────────────────────────────────────────────────────
+# 열: 이름 · 분류 · 던전 안 연속 · 패널 관측 · 목표 · 보고 · 무변화 만료 · 필드 확정 · 필드 결과(구현 단위 5b-8) · 기대. 판정 함수가 단순 함수라 모르는 매개변수를 $args 로
+#   삼키므로 열 수를 표 모양 단언으로 고정합니다(9열 행이 남으면 [bool] 묶기 예외로도 드러남)
 $VERDICT_ROWS = @(
-    @('WA-P1', 'inside', 2, $false, 'entry', $false, $false, $false, 'entered'),
-    @('WA-P2', 'inside', 1, $false, 'entry', $true, $true, $false, ''),
-    @('WA-P3', 'reward3', 0, $true, 'entry', $true, $false, $false, 'cancelled'),
-    @('WA-P4', 'reward3', 0, $false, 'entry', $true, $true, $false, 'reclick'),
-    @('WA-P5', 'reward3', 0, $false, 'entry', $true, $false, $false, ''),
-    @('WA-P6', 'reward3', 0, $true, 'entry', $false, $true, $false, ''),
-    @('WA-P7', 'reward3', 0, $true, 'entry', $true, $true, $false, 'cancelled'),
-    @('WA-P8', 'unknown', 0, $false, 'entry', $true, $true, $false, ''),
-    @('WA-P9', 'matching', 0, $true, 'entry', $true, $true, $false, ''),
-    @('WA-P10', 'field', 0, $false, 'entry', $true, $true, $true, ''),
-    @('WA-P11', 'reward3', 0, $false, 'reward', $false, $false, $false, 'reward'),
-    @('WA-P12', 'field', 0, $false, 'field', $false, $false, $true, 'field'),
-    @('WA-P13', 'inside', 2, $true, 'reward', $false, $false, $false, 'entered'),
-    @('WA-P14', 'reward3', 0, $true, 'field', $false, $false, $false, ''),
-    @('N4-L4', 'reward3', 0, $true, 'field', $true, $true, $false, ''))   # 필드 목표는 보고 켬이어도 3버튼 결론 없음 - 순위 4·5 의 목표 항
+    @('WA-P1', 'inside', 2, $false, 'entry', $false, $false, $false, $false, 'entered'),
+    @('WA-P2', 'inside', 1, $false, 'entry', $true, $true, $false, $false, ''),
+    @('WA-P3', 'reward3', 0, $true, 'entry', $true, $false, $false, $false, 'cancelled'),
+    @('WA-P4', 'reward3', 0, $false, 'entry', $true, $true, $false, $false, 'reclick'),
+    @('WA-P5', 'reward3', 0, $false, 'entry', $true, $false, $false, $false, ''),
+    @('WA-P6', 'reward3', 0, $true, 'entry', $false, $true, $false, $false, ''),
+    @('WA-P7', 'reward3', 0, $true, 'entry', $true, $true, $false, $false, 'cancelled'),
+    @('WA-P8', 'unknown', 0, $false, 'entry', $true, $true, $false, $false, ''),
+    @('WA-P9', 'matching', 0, $true, 'entry', $true, $true, $false, $false, ''),
+    @('WA-P10', 'field', 0, $false, 'entry', $true, $true, $true, $false, ''),                      # 필드 결과 끔 - 새 행과 스위치 하나만 다름(FC-P3 이 짝)
+    @('WA-P11', 'reward3', 0, $false, 'reward', $false, $false, $false, $false, 'reward'),
+    @('WA-P12', 'field', 0, $false, 'field', $false, $false, $true, $false, 'field'),
+    @('WA-P13', 'inside', 2, $true, 'reward', $false, $false, $false, $false, 'entered'),
+    @('WA-P14', 'reward3', 0, $true, 'field', $false, $false, $false, $false, ''),
+    @('N4-L4', 'reward3', 0, $true, 'field', $true, $true, $false, $false, ''),                     # 필드 목표는 보고 켬이어도 3버튼 결론 없음 - 순위 5·6 의 목표 항
+    @('FC-P1', 'field', 0, $true, 'entry', $true, $false, $true, $true, 'field-cancelled'),
+    @('FC-P2', 'field', 0, $false, 'entry', $true, $false, $true, $true, 'field-cancelled'),        # 패널 관측 무관 (사용자 결정 U-5b8-1)
+    @('FC-P3', 'field', 0, $false, 'entry', $true, $true, $true, $true, 'field-cancelled'),         # WA-P10 + 스위치
+    @('FC-P4', 'field', 0, $false, 'entry', $false, $false, $true, $true, 'field-cancelled'),       # 보고 무관 (명세 2.1 - 순수 판정은 필드 결과만 봄)
+    @('FC-P5', 'field', 0, $true, 'entry', $true, $false, $false, $true, ''),                       # 확정 아님
+    @('FC-P6', 'unknown', 0, $true, 'entry', $true, $true, $true, $true, ''),
+    @('FC-P7', 'inside', 1, $true, 'entry', $true, $true, $true, $true, ''),
+    @('FC-P8', 'reward3', 0, $false, 'entry', $true, $false, $true, $true, ''),
+    @('FC-P9', 'matching', 0, $true, 'entry', $true, $true, $true, $true, ''),
+    @('FC-P10', 'field', 0, $true, 'field', $true, $false, $true, $true, 'field'),                  # 목표 field → 순위 2 그대로 (스위치가 다른 결론을 막지 않음)
+    @('FC-P11', 'field', 0, $true, 'reward', $true, $false, $true, $true, ''),                      # 목표 reward
+    @('FC-P12', 'field', 2, $true, 'entry', $true, $false, $true, $true, 'entered'),                # 입장이 이김
+    @('FC-P13', 'reward3', 0, $true, 'entry', $true, $false, $true, $true, 'cancelled'),            # 3버튼 + 패널 + 스위치 → cancelled 그대로
+    @('FC-P14', 'reward3', 0, $false, 'entry', $true, $true, $true, $true, 'reclick'),
+    @('FC-P15', 'reward3', 0, $false, 'reward', $false, $false, $false, $true, 'reward'))
+$verdictColumnProblems = @($VERDICT_ROWS | Where-Object { @($_).Count -ne 10 } | ForEach-Object { [string]$_[0] })
+Check-True '§6 표 모양 - 모든 행 10열(이름 · 분류 · 연속 · 패널 · 목표 · 보고 · 무변화 · 확정 · 필드 결과 · 기대)' ($verdictColumnProblems.Count -eq 0) ($verdictColumnProblems -join ',')
 foreach ($verdictRow in $VERDICT_ROWS) {
     $verdictActual = ''
     try {
         $verdictActual = [string](Resolve-AbyssReentryVerdict -Kind $verdictRow[1] -InsideStreak $verdictRow[2] -PanelSeen $verdictRow[3] -Target $verdictRow[4] `
-                -ReportRewardReturn $verdictRow[5] -QuietExpired $verdictRow[6] -FieldSettled $verdictRow[7])
+                -ReportRewardReturn $verdictRow[5] -QuietExpired $verdictRow[6] -FieldSettled $verdictRow[7] -ReportFieldReturn $verdictRow[8])
     } catch {
         $verdictActual = 'THREW: ' + $_.Exception.Message
     }
-    Check-Equal ("{0} 분류 {1} · 던전 안 연속 {2} · 패널 관측 {3} · 목표 {4} · 보고 {5} · 무변화 만료 {6} · 필드 확정 {7} → '{8}'" -f $verdictRow) "[$verdictActual]" "[$($verdictRow[8])]"
+    Check-Equal ("{0} 분류 {1} · 던전 안 연속 {2} · 패널 관측 {3} · 목표 {4} · 보고 {5} · 무변화 만료 {6} · 필드 확정 {7} · 필드 결과 {8} → '{9}'" -f $verdictRow) "[$verdictActual]" "[$($verdictRow[9])]"
 }
 
 # ── §6b ⑤b1 순수부 - 보상 결정 경로(RR) · 보상 결정(RD · MX) · '다른 던전 가기' 대기 분류(OC) · 시간 함수(V·U) · 정적(P5b) (구현 명세 ⑤b1 3절 · ⑤b6 3.1 · 3.2 - 비교는 -ceq) ──
@@ -1717,7 +1789,7 @@ Check-Equal 'P5c-4 클리어 기록 호출 3곳 = own 시작 분기 둘 [void](A
 $branchFirst5b6 = @((Get-WorkerFunction 'Resolve-AbyssRewardBranch').Body.EndBlock.Statements) | Select-Object -First 1
 Check-Equal "P5c-5 기록 확인 첫 문장 = if (`$Action -eq 'exit') { return 'exit' }" (Get-NodeCode $branchFirst5b6) "if (`$Action -eq 'exit') { return 'exit' }"
 
-# ── §7 WA-L · N4-L - 대기 루프 행동 진리표 (명세 3.4 - 픽스처 공통: L = 30(행이 적은 값 우선) · Q·W·한도는 캡처값 · 시각표 'X@a' · 실패·조작 창 [a, b)) ──────────
+# ── §7 WA-L · N4-L · FC-L - 대기 루프 행동 진리표 (명세 3.4 · 5b-8 3.2 - 픽스처 공통: L = 30(행이 적은 값 우선) · Q·W·한도는 캡처값 · 시각표 'X@a' · 실패·조작 창 [a, b)) ──────────
 # WA-L1 - 준비 패널 → 로딩 → 던전 안 2연속 (S2 1 · 로딩 ≥ 1 · 필드 0 · 끊김 0 · 패널 관측 참)
 Reset-ReentryRow; Set-ScreenPlan @('Rd', 0, 'U', 3, 'I', 9)
 $row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 60 }
@@ -2451,6 +2523,285 @@ Check-True 'N4-L30 둘째 판 F@0 · M@2 · U@2.5 · I@3 → 실패 없는 I 판
     ((Format-RowDetail $row) + (' 기대 u={0}' -f $afterMUnknown))
 Check-RowCommon 'N4-L30 둘째 판' $row
 
+# ── 구현 단위 5b-8 FC-L - 필드 결과 켬(-ReportFieldReturn) 대기 루프 행 (명세 5b-8 1절 · 3.2 · 3.7a · 설계 v11 R5 2.1·2.2 끊김 표). 확정 시각은 판독 기록과 W(소스 캡처)에서 셉니다 ──
+$fieldArguments = @{ Game = $null; LimitSeconds = 60; ReportRewardReturn = $true; ReportFieldReturn = $true }   # 원 워커 우연한 만남 '다시 하기' 대기(호출 B)의 두 스위치
+$rowBeat = $BASE_WAIT_MS / 1000.0
+$rowSpan = [Math]::Ceiling([double]$memberFieldSettleSeconds / $rowBeat - $TIME_EPSILON) * $rowBeat   # W 를 박자로 올린 확정 폭 (FC-L12 의 시각표만 씀)
+
+# FC-L1 - 재매칭 패널 M@0 · 로딩 U@2.05 · 필드 모양 F@5.05 지속(10-28 1-I ② 꼴) → 첫 F 부터 W 이상인 첫 F 회전에 field-cancelled
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 2.05, 'F', 5.05)
+$row = Invoke-ReentryRow $fieldArguments
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean) 1
+$settleFacts = Get-SettleFacts $row
+Check-True "(보고·필드 결과) FC-L1 M@0 · U@2.05 · F@5.05 지속 → 첫 F 표본부터 W 이상 지난 첫 F 회전에 field-cancelled · LastKind field · PanelSeen 참 · 확정 줄 1(w = W · s · n) · 줄 = [패널 확인, 확정 줄] · S2 0" `
+    (($row.Result -ceq 'field-cancelled') -and ($row.LastKind -ceq 'field') -and ($row.PanelSeen -eq $true) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and
+    (Test-SettleLine -Row $row -Start $fieldStart) -and (@($row.S2).Count -eq 0) -and ((@($row.Logs) -join '|') -ceq ($PANEL_NOTICE_TEXT + '|' + $settleFacts.Text))) `
+    ((Format-RowDetail $row) + (' 확정 줄=[{0}]' -f $settleFacts.Text))
+Check-RowCommon 'FC-L1' $row
+
+# FC-L2 - FC-L1 의 입력 · 필드 결과 끔(보고만 - HEAD 호출 B 그대로) → L 에 timeout · LastKind field · 확정 줄 0 / FC-L18 - 같은 행에서 선택 화면 · 메뉴 판독 0(필드 결과 끔은 지금과 같음)
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 2.05, 'F', 5.05); $rowLimit = 60
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit; ReportRewardReturn = $true }
+Check-True '(보고) FC-L2 FC-L1 의 입력 · 필드 결과 끔 → L ≤ T < L + 박자에 timeout · LastKind field · PanelSeen 참 · 확정 줄 0' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'field') -and ($row.PanelSeen -eq $true) -and (Test-DeadlineWindow $row $rowLimit) -and ((Get-SettleFacts $row).Count -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L2' $row
+Check-True '(보고) FC-L18 FC-L2 의 행 - 필드 결과 끔이면 필드 모양 회전에도 선택 화면 · 메뉴 판독 0 (2.2-4a 는 필드 결과 켬만)' `
+    (((Get-OverlayReadCount $row 'selection') -eq 0) -and ((Get-OverlayReadCount $row 'menu') -eq 0) -and (@(Get-RecordTimes $row -Screen 'F').Count -ge 1)) `
+    ((Format-RowDetail $row) + (' 판독 selection={0} menu={1}' -f (Get-OverlayReadCount $row 'selection'), (Get-OverlayReadCount $row 'menu')))
+
+# FC-L3 - 패널을 한 번도 못 봄 (가) U@0 · F@3.05 / (나) 10-28 1차 판 꼴: 첫 회전 조작 [0,3) 동안 M 이 지나감(M@0 · U@2.05 · F@6.05) → 둘 다 field-cancelled · PanelSeen 거짓 · 패널 확인 0
+Reset-ReentryRow; Set-ScreenPlan @('U', 0, 'F', 3.05)
+$row = Invoke-ReentryRow $fieldArguments
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean) 1
+Check-True '(보고·필드 결과) FC-L3 (가) U@0 · F@3.05 → 첫 F 부터 W 뒤 field-cancelled · PanelSeen 거짓 · 패널 확인 0 · 확정 줄 1 (사용자 결정 U-5b8-1 - 패널 관측과 무관)' `
+    (($row.Result -ceq 'field-cancelled') -and ($row.PanelSeen -eq $false) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and ((Get-PanelNoticeCount $row) -eq 0) -and
+    (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L3 (가)' $row
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 2.05, 'F', 6.05); Add-ActiveWindow 0 3
+$row = Invoke-ReentryRow $fieldArguments
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean) 1
+Check-True '(보고·필드 결과) FC-L3 (나) 첫 회전 조작 [0,3) · M@0~2 · U@2.05 · F@6.05 → M 판독 0 · 양보 1 · 첫 F 부터 W 뒤 field-cancelled · PanelSeen 거짓 · 패널 확인 0' `
+    (($row.Result -ceq 'field-cancelled') -and ($row.PanelSeen -eq $false) -and ($row.Yields -eq 1) -and (@(Get-RecordTimes $row -Screen 'M').Count -eq 0) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and ((Get-PanelNoticeCount $row) -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L3 (나)' $row
+
+# FC-L4 - 10-28 1차 판 재생(클릭 기준 양보 [2,5)·[9,13)·[21,36) - run_20261028_h21m01s11.log 20:55:50~56:24 · M@0 · U@3.55(관측기 이멘마하 +4) · F@7.95) → 둘째 양보 끝부터 W 뒤
+#   field-cancelled · 셋째 양보 전에 끝남
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 3.55, 'F', 7.95); Add-ActiveWindow 2 5; Add-ActiveWindow 9 13; Add-ActiveWindow 21 36
+$row = Invoke-ReentryRow $fieldArguments
+$lastYieldEnd = $(if (@($row.YieldEnds).Count -ge 1) { [double]@($row.YieldEnds)[-1] } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -NotBefore $lastYieldEnd) 1
+Check-True '(보고·필드 결과) FC-L4 10-28 1차 꼴 - 양보 [2,5)·[9,13)·[21,36) · M@0 · U@3.55 · F@7.95 → 양보 2(셋째 전 끝) · 마지막 양보 끝 뒤 첫 F 부터 W 뒤 field-cancelled · 앞 F(양보 앞) ≥ 1 · 확정 줄 n = 마지막 양보 뒤 F 수 · 패널 확인 1' `
+    (($row.Result -ceq 'field-cancelled') -and ($row.Yields -eq 2) -and (@(Get-RecordTimes $row -Screen 'F' -Clean -Before $lastYieldEnd).Count -ge 1) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart) -and ((Get-PanelNoticeCount $row) -eq 1)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L4' $row
+
+# FC-L4″ - 10-28 2차 판 재생(클릭 기준 양보 [4,6)·[10,21)·[111,115) - run_20261028_h21m15s22.log 21:10:08~21:11:59 · M@0 · U@4.55(관측기 이멘마하 +5.5) · F@9.45) → 둘째 양보 끝부터 W 뒤
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 4.55, 'F', 9.45); Add-ActiveWindow 4 6; Add-ActiveWindow 10 21; Add-ActiveWindow 111 115
+$row = Invoke-ReentryRow $fieldArguments
+$lastYieldEnd = $(if (@($row.YieldEnds).Count -ge 1) { [double]@($row.YieldEnds)[-1] } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -NotBefore $lastYieldEnd) 1
+Check-True '(보고·필드 결과) FC-L4″ 10-28 2차 꼴 - 양보 [4,6)·[10,21)·[111,115) · M@0 · U@4.55 · F@9.45 → 양보 2 · 마지막 양보 끝 뒤 첫 F 부터 W 뒤 field-cancelled · 양보 앞 F ≥ 1' `
+    (($row.Result -ceq 'field-cancelled') -and ($row.Yields -eq 2) -and (@(Get-RecordTimes $row -Screen 'F' -Clean -Before $lastYieldEnd).Count -ge 1) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L4″' $row
+
+# FC-L4′ (고치기 전 재현의 대기 몫) - FC-L4 의 입력 · 필드 결과 끔 → 양보 셋 모두 · D = L + 양보 합에 timeout · LastKind field (HEAD 10-28: 300초 + 양보 22초)
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 3.55, 'F', 7.95); Add-ActiveWindow 2 5; Add-ActiveWindow 9 13; Add-ActiveWindow 21 36; $rowLimit = 60
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit; ReportRewardReturn = $true }
+Check-True '(보고) FC-L4′ FC-L4 의 입력 · 필드 결과 끔 → 양보 3 · D = L + 양보 합 · D ≤ T < D + 박자에 timeout · LastKind field · 확정 줄 0' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'field') -and ($row.Yields -eq 3) -and (Test-DeadlineWindow $row ($rowLimit + $row.YieldTotalMs / 1000.0)) -and ((Get-SettleFacts $row).Count -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L4′' $row
+
+# FC-L5 - 양보 셋이 모두 F 를 끊는 꼴(3·4·15초 - [2,5)·[9,13)·[17,32) · M@0 · U@1.05 · F@3.05) → 마지막 양보 끝 뒤 첫 F 부터 W 뒤 field-cancelled · 확정 줄 n 은 마지막 연속만(계측 $runField 아님)
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 1.05, 'F', 3.05); Add-ActiveWindow 2 5; Add-ActiveWindow 9 13; Add-ActiveWindow 17 32
+$row = Invoke-ReentryRow $fieldArguments
+$yieldEndTimes = @($row.YieldEnds)
+$lastYieldEnd = $(if ($yieldEndTimes.Count -ge 1) { [double]$yieldEndTimes[-1] } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -NotBefore $lastYieldEnd) 1
+$runsBetween = $(if ($yieldEndTimes.Count -ge 2) { @(Get-RecordTimes $row -Screen 'F' -Clean -NotBefore $yieldEndTimes[0] -Before $yieldEndTimes[1]).Count } else { -1 })
+Check-True '(보고·필드 결과) FC-L5 양보 [2,5)·[9,13)·[17,32) 가 F 연속(각 W 미만)을 끊음 → 양보 3 · 양보 사이 F ≥ 2 · 마지막 양보 끝 뒤 첫 F 부터 W 뒤 field-cancelled · 확정 줄 n = 마지막 연속 수' `
+    (($row.Result -ceq 'field-cancelled') -and ($row.Yields -eq 3) -and ($runsBetween -ge 2) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and
+    (Test-SettleLine -Row $row -Start $fieldStart)) ((Format-RowDetail $row) + (' 양보 사이 F={0}' -f $runsBetween))
+Check-RowCommon 'FC-L5' $row
+
+# FC-L6 - ⑥ 간접 양보(WA-L42 꼴 - F 지속 · @1.4 회전 스윕 'yield-false' Gap 3) → 그 회전 표본이 양보 뒤 새 시각에서 1표본 → 그 시각 + W 뒤 field-cancelled · 게이트 양보 0
+Reset-ReentryRow; Set-ScreenPlan @('F', 0); Set-SweepFrom -From 1.35 -Until 1.45 -Kind 'yield-false' -Gap 3 -Count 1
+$row = Invoke-ReentryRow $fieldArguments
+$firedTime = $(if (@($row.SweepFired).Count -ge 1) { [double]$row.SweepFired[0].T } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $firedTime) 1
+Check-True "(보고·필드 결과) FC-L6 F 지속 · @1.4 'yield-false' Gap 3 → 그 회전 판독 = 스윕 진입 + 3(양보 뒤 새 시각) · 그 시각부터 W 뒤 field-cancelled · 게이트 양보 0 · 양보 누적 > 0 · 앞 F ≥ 1 · 확정 줄 s·n 은 양보 뒤 표본부터" `
+    (($row.Result -ceq 'field-cancelled') -and ($row.Yields -eq 0) -and ($row.YieldTotalMs -gt 0) -and (@(Get-RecordTimes $row -Screen 'F' -Clean -Before $firedTime).Count -ge 1) -and
+    ($fieldStart -gt ($firedTime + $TIME_EPSILON)) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L6' $row
+
+# FC-L7 - 동결 (가) F 지속 + 캡처 실패 [3,5) → 실패 끝 뒤 첫 F 부터 W 뒤 / (나) 실패 [0,2) · L 9 → 명목 마감 L 뒤에 field-cancelled (실패 시간이 마감에서 빠짐 - 규칙 15)
+Reset-ReentryRow; Set-ScreenPlan @('F', 0); Add-FailWindow 3 5
+$row = Invoke-ReentryRow $fieldArguments
+$failEnd = $(if (@($row.FailEnds).Count -ge 1) { [double]$row.FailEnds[0] } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $failEnd) 1
+Check-True '(보고·필드 결과) FC-L7 (가) F 지속 + 실패 [3,5) → 안전 확인 ≥ 1 · 탐침 ≥ 1 · 실패 합 > 0 · 실패 앞 F ≥ 1 · 실패 끝 뒤 첫 F 부터 W 뒤 field-cancelled · 확정 줄 n 은 실패 뒤 F 만' `
+    (($row.Result -ceq 'field-cancelled') -and ($row.SafeStops -ge 1) -and ($row.Probes -ge 1) -and ($row.FailTotalMs -gt 0) -and (@(Get-RecordTimes $row -Screen 'F' -Clean -Before $failEnd).Count -ge 1) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L7 (가)' $row
+Reset-ReentryRow; Set-ScreenPlan @('F', 0); Add-FailWindow 0 2; $rowLimit = 9
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit; ReportRewardReturn = $true; ReportFieldReturn = $true }
+$failEnd = $(if (@($row.FailEnds).Count -ge 1) { [double]$row.FailEnds[0] } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $failEnd) 1
+Check-True '(보고·필드 결과) FC-L7 (나) 실패 [0,2) · L 9 → L < T < L + 실패 합에 field-cancelled (실패 끝 뒤 첫 F 부터 W 뒤)' `
+    (($row.Result -ceq 'field-cancelled') -and ($row.T -gt ($rowLimit + $TIME_EPSILON)) -and ($row.T -lt ($rowLimit + $row.FailTotalMs / 1000.0 - $TIME_EPSILON)) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart))) (Format-RowDetail $row)
+Check-RowCommon 'FC-L7 (나)' $row
+
+# FC-L8 - 스윕 참 1회전('sent' Gap 1 @2.8 → 'counted') → 스윕 뒤 첫 F 부터 W 뒤 field-cancelled
+Reset-ReentryRow; Set-ScreenPlan @('F', 0); Set-SweepFrom -From 2.75 -Until 2.85 -Kind 'sent' -Gap 1 -Count 1
+$row = Invoke-ReentryRow $fieldArguments
+$firedTime = $(if (@($row.SweepFired).Count -ge 1) { [double]$row.SweepFired[0].T } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $firedTime) 1
+Check-True "(보고·필드 결과) FC-L8 F 지속 · 'sent' Gap 1 @2.8 → 분류 counted · 스윕 앞 F ≥ 1 · 스윕 뒤 첫 F 부터 W 뒤 field-cancelled" `
+    (($row.Result -ceq 'field-cancelled') -and (@($row.SweepActions) -ccontains 'counted') -and (@(Get-RecordTimes $row -Screen 'F' -Clean -Before $firedTime).Count -ge 1) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L8' $row
+
+# FC-L9 - (가) ⑦ 같은 회전 복구가 확정될 회전(@6.3)에 남 → 그 회전 확정 0 · 복구 뒤 첫 F 부터 W 뒤 / (나) 스윕 안 복구('recover' @2.8 → 'recovered') → 복구 뒤 첫 F 부터 W 뒤
+Reset-ReentryRow; Set-ScreenPlan @('F', 0); $script:failHook = $HOOK_PROMPT_FAIL_AT_6_3
+$row = Invoke-ReentryRow $fieldArguments
+$failedTime = Get-NthTime @(Get-RecordTimes $row -Failed) 1
+$firstFieldTime = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean) 1
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $failedTime) 1
+Check-True '(보고·필드 결과) FC-L9 (가) F 지속 · @6.3 회전 하단만 실패(⑦ 복구 회전) → 그 회전 ≥ 첫 F + W(확정될 회전이었음) · 실패 회전 1 · 복구 뒤 첫 F 부터 W 뒤 field-cancelled' `
+    (($row.Result -ceq 'field-cancelled') -and (@(Get-RecordTimes $row -Failed).Count -eq 1) -and ($failedTime -ge ($firstFieldTime + [double]$memberFieldSettleSeconds - $TIME_EPSILON)) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L9 (가)' $row
+Reset-ReentryRow; Set-ScreenPlan @('F', 0); Set-SweepFrom -From 2.75 -Until 2.85 -Kind 'recover' -Gap 1 -Count 1
+$row = Invoke-ReentryRow $fieldArguments
+$firedTime = $(if (@($row.SweepFired).Count -ge 1) { [double]$row.SweepFired[0].T } else { [double]::NaN })
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $firedTime) 1
+Check-True "(보고·필드 결과) FC-L9 (나) F 지속 · 'recover' Gap 1 @2.8 → 분류 recovered · 복구 뒤 첫 F 부터 W 뒤 field-cancelled" `
+    (($row.Result -ceq 'field-cancelled') -and (@($row.SweepActions) -ccontains 'recovered') -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and
+    (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L9 (나)' $row
+
+# FC-L10 - (가) 입장 과도: F@0 · I@(W − 0.1) → 확정 0 · I 둘째에 entered · S2(f = F 수 · s = 첫 I − 첫 F) / (나) WA-L26 꼴 + 필드 결과 켬: F@0 · I@20 → W 뒤 field-cancelled
+#   (I 판독 0 - 명세 7절 위험(필드 모양이 끊김 없이 W 이어지면 새 판에 들어간 캐릭터를 두고 정지)을 행으로 고정)
+Reset-ReentryRow; Set-ScreenPlan @('F', 0, 'I', ([double]$memberFieldSettleSeconds - 0.1))
+$row = Invoke-ReentryRow $fieldArguments
+$s2 = Get-S2Facts $row
+$fieldTimes = @(Get-RecordTimes $row -Screen 'F' -Clean)
+$fieldToInsideSeconds = [Math]::Round((Get-NthTime @(Get-RecordTimes $row -Screen 'I') 1) - (Get-NthTime $fieldTimes 1), 1)
+Check-True '(보고·필드 결과) FC-L10 (가) F@0 · I@(W−0.1) → 마지막 F − 첫 F < W · I 판독 둘째에 entered · 확정 줄 0 · S2 1(f = F 수 · s = 첫 I − 첫 F)' `
+    (($row.Result -ceq 'entered') -and ((Get-NthTime $fieldTimes $fieldTimes.Count) - (Get-NthTime $fieldTimes 1) -lt [double]$memberFieldSettleSeconds) -and
+    (Test-SameTime $row.T (Get-NthTime @(Get-RecordTimes $row -Screen 'I') 2)) -and ((Get-SettleFacts $row).Count -eq 0) -and ($s2.Count -eq 1) -and $s2.Matched -and ($s2.F -eq $fieldTimes.Count) -and
+    $s2.HasPart -and ([Math]::Abs($s2.S - $fieldToInsideSeconds) -lt 0.01)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L10 (가)' $row
+Reset-ReentryRow; Set-ScreenPlan @('F', 0, 'I', 20)
+$row = Invoke-ReentryRow $fieldArguments
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean) 1
+Check-True '(보고·필드 결과) FC-L10 (나) WA-L26 입력(F@0 · I@20) + 필드 결과 켬 → 첫 F 부터 W 뒤 field-cancelled · I 판독 0 · S2 0' `
+    (($row.Result -ceq 'field-cancelled') -and (@(Get-RecordTimes $row -Screen 'I').Count -eq 0) -and (@($row.S2).Count -eq 0) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart))) (Format-RowDetail $row)
+Check-RowCommon 'FC-L10 (나)' $row
+
+# FC-L11 - (가) 보스 이펙트 꼴: 회전마다 F/I 교대(교대점은 박자 가운데) · L 30 → 확정 0 · 입장 0 · L 에 timeout / (나) F@0 · U@2.05 · F@4.05 → U 뒤 첫 F 부터 W 뒤
+$rowLimit = 30
+$alternatePlan = @()
+for ($alternateIndex = 0; ($alternateIndex * $rowBeat) -le ($rowLimit + 2 * $rowBeat); $alternateIndex++) {
+    $alternatePlan += $(if (($alternateIndex % 2) -eq 0) { 'F' } else { 'I' })
+    $alternatePlan += [Math]::Max([double]0, $alternateIndex * $rowBeat - $rowBeat / 2)   # [double] 필수 - 첫 인자가 int 면 PS 5.1 이 Max(int,int) 를 골라 0.35 → 0 으로 반올림
+}
+Reset-ReentryRow; Set-ScreenPlan $alternatePlan
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit; ReportRewardReturn = $true; ReportFieldReturn = $true }
+$lastReadKind = $(if (@($row.Reads).Count -ge 1) { [string]$SCREEN_KINDS[[string]@($row.Reads)[-1].S] } else { '' })
+Check-True '(보고·필드 결과) FC-L11 (가) F/I 회전 교대 · L 30 → L ≤ T < L + 박자에 timeout · LastKind = 마지막 판독 분류 · 확정 줄 0 · S2 0 · F ≥ 2 · I ≥ 2' `
+    (($row.Result -ceq 'timeout') -and (Test-DeadlineWindow $row $rowLimit) -and ($row.LastKind -ceq $lastReadKind) -and ((Get-SettleFacts $row).Count -eq 0) -and (@($row.S2).Count -eq 0) -and
+    (@(Get-RecordTimes $row -Screen 'F' -Clean).Count -ge 2) -and (@(Get-RecordTimes $row -Screen 'I' -Clean).Count -ge 2)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L11 (가)' $row
+Reset-ReentryRow; Set-ScreenPlan @('F', 0, 'U', 2.05, 'F', 4.05)
+$row = Invoke-ReentryRow $fieldArguments
+$unknownTimes = @(Get-RecordTimes $row -Screen 'U' -Clean)
+$lastUnknown = Get-NthTime $unknownTimes $unknownTimes.Count
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $lastUnknown) 1
+Check-True '(보고·필드 결과) FC-L11 (나) F@0 · U@2.05 · F@4.05 → U 앞 F ≥ 1 · 마지막 U 뒤 첫 F 부터 W 뒤 field-cancelled' `
+    (($row.Result -ceq 'field-cancelled') -and (@(Get-RecordTimes $row -Screen 'F' -Clean -Before $lastUnknown).Count -ge 1) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L11 (나)' $row
+
+# FC-L12 - 마감 경계(WA-L15 꼴): L 28(박자 정수배) · 확정 회전 = 마감 회전 → T = L 에 field-cancelled (⑨ 가 같은 회전 ⑩ 보다 먼저)
+$rowLimit = 28
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'F', ($rowLimit - $rowSpan - $rowBeat / 2))
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit; ReportRewardReturn = $true; ReportFieldReturn = $true }
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean) 1
+Check-True '(보고·필드 결과) FC-L12 L 28 · M@0 · F@(L − 확정 폭 − 반 박자) → 마감 경계 회전 T = L 에 field-cancelled (= 첫 F 부터 W 뒤)' `
+    (($row.Result -ceq 'field-cancelled') -and (Test-SameTime $row.T $rowLimit) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart))) (Format-RowDetail $row)
+Check-RowCommon 'FC-L12' $row
+
+# FC-L13 - 재매칭 패널 확인 1회 (보고 켬 · 패널류 ready·matching·entry-waiting 첫 회전 - 판정 무관 관측 줄)
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'Rd', 2.05, 'M', 4.05, 'R', 6.05)
+$row = Invoke-ReentryRow $fieldArguments
+Check-True '(보고·필드 결과) FC-L13 (가) M@0 · Rd@2.05 · M@4.05 · R@6.05 → 첫 R 에 cancelled · 줄 = [패널 확인] 하나' `
+    (($row.Result -ceq 'cancelled') -and (Test-SameTime $row.T (Get-NthTime @(Get-RecordTimes $row -Screen 'R') 1)) -and ((@($row.Logs) -join '|') -ceq $PANEL_NOTICE_TEXT)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L13 (가)' $row
+Reset-ReentryRow; Set-ScreenPlan @('E', 0, 'R', 3.05)
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 60; ReportRewardReturn = $true }
+Check-True '(보고) FC-L13 (나) E@0 · R@3.05 → cancelled · 패널 확인 1 (접힌 준비 패널도 패널류)' (($row.Result -ceq 'cancelled') -and ((Get-PanelNoticeCount $row) -eq 1)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L13 (나)' $row
+Reset-ReentryRow; Set-ScreenPlan @('U', 0, 'P', 1.05, 'R', 3.05)
+$row = Invoke-ReentryRow $fieldArguments
+Check-True '(보고·필드 결과) FC-L13 (다) U@0 · P@1.05 · R@3.05 → cancelled · 팝업 안내 1 · 패널 확인 0 (팝업은 패널 관측이지만 안내 대상 아님)' `
+    (($row.Result -ceq 'cancelled') -and ($row.NoticeCount -eq 1) -and ((Get-PanelNoticeCount $row) -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L13 (다)' $row
+Reset-ReentryRow; Set-ScreenPlan @('M', 0); $rowLimit = 30
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit }
+Check-True 'FC-L13 (라) 보고 끔 · M 지속 → timeout · 패널 확인 0 · 줄 0' (($row.Result -ceq 'timeout') -and ((Get-PanelNoticeCount $row) -eq 0) -and (@($row.Logs).Count -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L13 (라)' $row
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'F', 3.05)
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 60; ReportFieldReturn = $true }
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean) 1
+Check-True '(필드 결과만) FC-L13 (마) 보고 끔 · 필드 결과 켬 · M@0 · F@3.05 → 첫 F 부터 W 뒤 field-cancelled · 패널 확인 0 (안내는 보고 켬 호출 몫) · 확정 줄 1' `
+    (($row.Result -ceq 'field-cancelled') -and ((Get-PanelNoticeCount $row) -eq 0) -and ((Get-SettleFacts $row).Count -eq 1) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart))) (Format-RowDetail $row)
+Check-RowCommon 'FC-L13 (마)' $row
+Reset-ReentryRow; Set-ScreenPlan @('R', 0); Add-ActiveWindow 0 3
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 120; ReportRewardReturn = $true; PanelSeen = $true; ReportFieldReturn = $true }
+Check-True '(보고·필드 결과·-PanelSeen 참) FC-L13 (바) WA-L41 꼴 → cancelled · 패널 확인 0 (입력 PanelSeen 은 안내하지 않음 - 이 호출에서 읽은 패널류만)' `
+    (($row.Result -ceq 'cancelled') -and ((Get-PanelNoticeCount $row) -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L13 (바)' $row
+Reset-ReentryRow; Set-ScreenPlan @('Rd', 0, 'R', 3.05)
+$row = Invoke-ReentryRow $fieldArguments
+Check-True '(보고·필드 결과) FC-L13 (사) Rd@0 · R@3.05 → cancelled · 패널 확인 1 (준비 패널이 첫 패널류여도 안내 대상)' (($row.Result -ceq 'cancelled') -and ((Get-PanelNoticeCount $row) -eq 1)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L13 (사)' $row
+
+# FC-L14 - (보고·유예·필드 결과) -Clock(남은 0) · F 지속 → 첫 유효 회전 timeout (확정 전 필드 모양은 유예하지 않음 - WA-L33 (아) 와 같음)
+Reset-ReentryRow; Set-ScreenPlan @('F', 0)
+$row = Invoke-ReentryRow ($graceArguments + @{ Clock = (New-RemainingClock 0); ReportFieldReturn = $true })
+Check-True '(보고·유예·필드 결과) FC-L14 -Clock(남은 0) · F 지속 → 첫 유효 회전에 timeout · LastKind field · 확정 줄 0' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'field') -and (Test-SameTime $row.T (Get-NthTime @(Get-RecordTimes $row -Clean) 1)) -and ((Get-SettleFacts $row).Count -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L14' $row
+
+# FC-L15 - (보고·필드 결과) R 지속 → Q 에 reclick (WA-L16 과 같음 - 새 스위치가 3버튼 갈래를 바꾸지 않음)
+Reset-ReentryRow; Set-ScreenPlan @('R', 0)
+$row = Invoke-ReentryRow $fieldArguments
+Check-True '(보고·필드 결과) FC-L15 R 지속 → Q ≤ T < Q + 박자에 reclick · 줄 0' (($row.Result -ceq 'reclick') -and (Test-DeadlineWindow $row $Q) -and (@($row.Logs).Count -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L15' $row
+
+# FC-L16 - (2.2-4a · 설계 리뷰 P2) ESC 메뉴가 열린 채 'Home' 배지가 HUD 로 읽힌 화면(Mn - 앞 분류 'field' → 선택 화면 거짓 · 메뉴 참 → 'menu')은 필드 모양이 아님:
+#   (가) F@0 · Mn@3.05 지속 · L 30 → 확정 0 · L 에 timeout · LastKind menu / (나) F@0 · Mn@3.05 · F@9.05 → 메뉴가 연속을 끊고 메뉴 뒤 첫 F 부터 W 뒤 field-cancelled
+$rowLimit = 30
+Reset-ReentryRow; Set-ScreenPlan @('F', 0, 'Mn', 3.05)
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit; ReportRewardReturn = $true; ReportFieldReturn = $true }
+Check-True '(보고·필드 결과) FC-L16 (가) F@0 · Mn@3.05 지속 · L 30 → L ≤ T < L + 박자에 timeout · LastKind menu · 확정 줄 0 · 메뉴 판독 ≥ 1 (메뉴 동안 정지하지 않음)' `
+    (($row.Result -ceq 'timeout') -and (Test-DeadlineWindow $row $rowLimit) -and ($row.LastKind -ceq 'menu') -and ((Get-SettleFacts $row).Count -eq 0) -and ((Get-OverlayReadCount $row 'menu') -ge 1)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L16 (가)' $row
+Reset-ReentryRow; Set-ScreenPlan @('F', 0, 'Mn', 3.05, 'F', 9.05)
+$row = Invoke-ReentryRow $fieldArguments
+$menuTimes = @(Get-RecordTimes $row -Screen 'Mn' -Clean)
+$lastMenu = Get-NthTime $menuTimes $menuTimes.Count
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $lastMenu) 1
+Check-True '(보고·필드 결과) FC-L16 (나) F@0 · Mn@3.05 · F@9.05 → 메뉴 앞 F ≥ 1 · 메뉴 판독 회전 ≥ 1 · 마지막 메뉴 뒤 첫 F 부터 W 뒤 field-cancelled · 확정 줄 n 은 메뉴 뒤 F 만' `
+    (($row.Result -ceq 'field-cancelled') -and (@(Get-RecordTimes $row -Screen 'F' -Clean -Before $lastMenu).Count -ge 1) -and ($menuTimes.Count -ge 1) -and
+    (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and (Test-SettleLine -Row $row -Start $fieldStart)) (Format-RowDetail $row)
+Check-RowCommon 'FC-L16 (나)' $row
+
+# FC-L17 - (2.2-4a) 선택 화면(Sl - 앞 분류 'field' → 선택 화면 참 → 'selection' · 메뉴는 읽지 않음)도 연속을 끊음: F@0 · Sl@3.05 · F@9.05 → 선택 화면 뒤 첫 F 부터 W 뒤 field-cancelled ·
+#   선택 화면 판독 = F + Sl 판독 회전 · 메뉴 판독 = F 판독 회전(선택 화면 참이면 메뉴를 읽지 않음)
+Reset-ReentryRow; Set-ScreenPlan @('F', 0, 'Sl', 3.05, 'F', 9.05)
+$row = Invoke-ReentryRow $fieldArguments
+$selectionTimes = @(Get-RecordTimes $row -Screen 'Sl' -Clean)
+$lastSelection = Get-NthTime $selectionTimes $selectionTimes.Count
+$fieldStart = Get-NthTime @(Get-RecordTimes $row -Screen 'F' -Clean -After $lastSelection) 1
+$fieldReadCount = @(Get-RecordTimes $row -Screen 'F').Count
+Check-True '(보고·필드 결과) FC-L17 F@0 · Sl@3.05 · F@9.05 → 선택 화면 판독 회전 ≥ 1 · 마지막 선택 화면 뒤 첫 F 부터 W 뒤 field-cancelled · 선택 화면 판독 = F + Sl 회전 · 메뉴 판독 = F 회전' `
+    (($row.Result -ceq 'field-cancelled') -and ($selectionTimes.Count -ge 1) -and (Test-SameTime $row.T (Get-SettleExpectedT -Row $row -Start $fieldStart)) -and
+    ((Get-OverlayReadCount $row 'selection') -eq ($fieldReadCount + $selectionTimes.Count)) -and ((Get-OverlayReadCount $row 'menu') -eq $fieldReadCount)) `
+    ((Format-RowDetail $row) + (' 판독 selection={0} menu={1} F 회전={2}' -f (Get-OverlayReadCount $row 'selection'), (Get-OverlayReadCount $row 'menu'), $fieldReadCount))
+Check-RowCommon 'FC-L17' $row
+
+# FC-L19 - (2.2-4a 설계 합의 - 'unknown' 회전은 읽지 않음) 필드 결과 켬 · M@0 · U@2.05 · I@4.05 → entered · 선택 화면 · 메뉴 판독 0 (패널 · 로딩 · 던전 안 회전은 앞 분류가 'field' 아님)
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'U', 2.05, 'I', 4.05)
+$row = Invoke-ReentryRow $fieldArguments
+Check-True '(보고·필드 결과) FC-L19 M@0 · U@2.05 · I@4.05 → entered · U 판독 ≥ 1 · 선택 화면 · 메뉴 판독 0' `
+    (($row.Result -ceq 'entered') -and (@(Get-RecordTimes $row -Screen 'U' -Clean).Count -ge 1) -and ((Get-OverlayReadCount $row 'selection') -eq 0) -and ((Get-OverlayReadCount $row 'menu') -eq 0)) `
+    ((Format-RowDetail $row) + (' 판독 selection={0} menu={1}' -f (Get-OverlayReadCount $row 'selection'), (Get-OverlayReadCount $row 'menu')))
+Check-RowCommon 'FC-L19' $row
+
 # ── §8 정적 (명세 3.5 - 주석 제거 사본 · AST · 뜻 판정. R5-P14 다섯 식 · R5-P2 Resume 인자 · N4-P10 생성 두 문장 · R5-P7 우변 '0' 은 구현 형상 계약 -
 #    같은 뜻의 다른 꼴을 택하면 그 단언을 구현과 함께 갱신) ───────────────────────────────────────────────────────────────────────────
 $waiterNode = $workerFunctions['Wait-AbyssReentry']
@@ -2700,12 +3051,35 @@ $r5p7Actual = '합 {0} · ② {1} · ④ {2} · ⑥ {3} · ⑧ else {4} · ① {
 (@($catchBodies | ForEach-Object { Get-ZeroCountUnder $_.Body }) | Measure-Object -Sum).Sum
 Check-Equal "R5-P7 while 본문 안 `$insideStreak = 0 대입 4(② 게이트 · ④ 스윕 참 분기 · ⑥ 간접 양보 · ⑧ 'inside' 아닌 갈래) · ① 동결 블록 · ⑦ 복구 갈래 · catch 안 0" $r5p7Actual '합 4 · ② 1 · ④ 1 · ⑥ 1 · ⑧ else 1 · ① 0 · ⑦ 복구 0 · catch 0'
 
-# R5-P8 - 선택 화면·메뉴·상세 판독 0 · 분류 호출에 -SelectionVisible·-MenuVisible·-DetailVisible 0 (그 셋은 구현 단위 ⑥d 의 'field' 목표)
-$r5p8Commands = @(@('Test-AbyssSelectionScreen', 'Test-AbyssMenu', 'Test-AbyssKnownDetailScreen') | Where-Object { Test-HasCommand $waiterNode $_ })
-$classifyCalls = @(Get-CommandNodes -Node $waiterNode -Name 'Resolve-AbyssHandoffStartScreen')
-$classifyExtraParameters = @($classifyCalls | ForEach-Object { $_.CommandElements } | Where-Object { ($_ -is [CommandParameterAst]) -and (@('SelectionVisible', 'MenuVisible', 'DetailVisible') -contains $_.ParameterName) } | ForEach-Object { $_.ParameterName })
-Check-Equal 'R5-P8 Test-AbyssSelectionScreen · Test-AbyssMenu · Test-AbyssKnownDetailScreen 0 · 분류 호출에 -SelectionVisible·-MenuVisible·-DetailVisible 0' `
-    ('명령=[{0}] · 분류 호출 {1} · 선택 화면 셋 인자=[{2}]' -f ($r5p8Commands -join ','), $classifyCalls.Count, ($classifyExtraParameters -join ',')) '명령=[] · 분류 호출 1 · 선택 화면 셋 인자=[]'
+# R5-P8 - 선택 화면 · ESC 메뉴는 필드 결과 켬의 필드 모양 회전만 읽음(구현 단위 5b-8 2.2-4a - 설계 리뷰 P2 · 합의: 'unknown' 회전 · 상세는 읽지 않음). 판독 명령 각 1 · 상세 0 ·
+#   분류 호출 2(앞 분류는 세 신호 없이 · ⑧ 분류만 -SelectionVisible · -MenuVisible) · 두 판독을 감싼 if 조건(안쪽부터 - ⑤ 판독 if 까지, else 면 'else <첫 절 조건>')
+function Get-EnclosingIfConditions {
+    # 노드를 감싼 if 절 조건 글자(안쪽부터, Stop 노드 앞까지) - 노드가 첫 절들에 있으면 그 절 조건, else 블록에 있으면 'else <첫 절 조건>'
+    param($Node, $Stop)
+    $conditionCodes = @()
+    $childNode = $Node
+    for ($parentNode = $Node.Parent; ($null -ne $parentNode) -and (-not [object]::ReferenceEquals($parentNode, $Stop)); $parentNode = $parentNode.Parent) {
+        if ($parentNode -is [IfStatementAst]) {
+            foreach ($ifClause in $parentNode.Clauses) {
+                if ([object]::ReferenceEquals($ifClause.Item2, $childNode)) { $conditionCodes += (Get-NodeCode $ifClause.Item1) }
+            }
+            if ([object]::ReferenceEquals($parentNode.ElseClause, $childNode)) { $conditionCodes += ('else ' + (Get-NodeCode $parentNode.Clauses[0].Item1)) }
+        }
+        $childNode = $parentNode
+    }
+    return $conditionCodes
+}
+$r5p8Commands = @(@('Test-AbyssSelectionScreen', 'Test-AbyssMenu', 'Test-AbyssKnownDetailScreen') | ForEach-Object { '{0}={1}' -f $_, @(Get-CommandNodes -Node $waiterNode -Name $_).Count })
+$classifyCalls = @(Get-CommandNodes -Node $waiterNode -Name 'Resolve-AbyssHandoffStartScreen' | Sort-Object { $_.Extent.StartOffset })
+$classifyExtraParameters = @($classifyCalls | ForEach-Object { ((@($_.CommandElements | Where-Object { ($_ -is [CommandParameterAst]) -and (@('SelectionVisible', 'MenuVisible', 'DetailVisible') -contains $_.ParameterName) } | ForEach-Object { $_.ParameterName })) -join '+') })
+$r5p8Guards = @(foreach ($r5p8Name in @('Test-AbyssSelectionScreen', 'Test-AbyssMenu')) {
+        foreach ($r5p8Call in @(Get-CommandNodes -Node $waiterNode -Name $r5p8Name)) { '{0}: {1}' -f $r5p8Name, ((@(Get-EnclosingIfConditions -Node $r5p8Call -Stop $waiterNode)) -join ' < ') }
+    })
+Check-Equal 'R5-P8 선택 화면 · ESC 메뉴 판독 = 필드 결과 켬 · 필드 모양 회전만(상세 0) · 분류 호출 2(앞 분류 세 신호 없음 · ⑧ 두 신호) · 두 판독을 감싼 if 조건(안쪽부터)' `
+    ('명령=[{0}] · 분류 호출 {1} · 선택 화면 셋 인자=[{2}] · 감싼 조건=[{3}]' -f ($r5p8Commands -join ','), $classifyCalls.Count, ($classifyExtraParameters -join ' / '), ($r5p8Guards -join ' / ')) `
+    ("명령=[Test-AbyssSelectionScreen=1,Test-AbyssMenu=1,Test-AbyssKnownDetailScreen=0] · 분류 호출 2 · 선택 화면 셋 인자=[ / SelectionVisible+MenuVisible] · 감싼 조건=[" +
+        "Test-AbyssSelectionScreen: `$earlyScreen -eq 'field' < `$ReportFieldReturn < (-not `$sweepStarved) -and (-not `$turnRecovered) / " +
+        "Test-AbyssMenu: -not `$selectionNow < `$earlyScreen -eq 'field' < `$ReportFieldReturn < (-not `$sweepStarved) -and (-not `$turnRecovered)]")
 
 # R5-P12 - while 직속 if 중 첫 절 조건이 정확히 플래그이고 한 줄인 것 0 · 정확 조건 if-continue 는 ① 하나 (절 수 / 줄 머리 continue 절 수 / 정확 조건 while)
 $exactClauseCount = 0; $spinClauseCount = 0
@@ -2843,7 +3217,8 @@ $verdictCallNodes = @(Get-CommandNodes -Node $workerAst -Name 'Resolve-AbyssReen
 Check-Equal 'N4-P2 배선(⑤a · ⑤b4) - 워커의 Wait-AbyssReentry 호출 3(자리 = Invoke-AbyssHandoffStart · Complete-AbyssOtherSelection · Complete-AbyssRetrySelection) · Resolve-AbyssReentryVerdict 호출 1(자리 = Wait-AbyssReentry 안)' `
     ('대기 함수 호출 {0}=[{1}] · 순수 판정 호출 {2} · 자리=[{3}]' -f $waiterCallNodes.Count, ((@($waiterCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ','), $verdictCallNodes.Count, ((@($verdictCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ',')) '대기 함수 호출 3=[Invoke-AbyssHandoffStart,Complete-AbyssOtherSelection,Complete-AbyssRetrySelection] · 순수 판정 호출 1 · 자리=[Wait-AbyssReentry]'
 
-# N4-P3 - 순수 판정: 명령 0 · $script: 0 · exit·throw·try 0 · return 6 · 반환 문자열 = {entered, field, reward, cancelled, reclick, ''} · -Target ValidateSet = {entry, reward, field}
+# N4-P3 - 순수 판정: 명령 0 · $script: 0 · exit·throw·try 0 · return 7 · 반환 문자열 = {entered, field, reward, field-cancelled(구현 단위 5b-8), cancelled, reclick, ''} ·
+#   -Target ValidateSet = {entry, reward, field}
 $verdictCommands = @($verdictNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true)).Count
 $verdictScriptVariables = @($verdictNode.FindAll({ param($candidate) ($candidate -is [VariableExpressionAst]) -and ($candidate.VariablePath.UserPath -like 'script:*') }, $true)).Count
 $verdictExits = @($verdictNode.FindAll({ param($candidate) ($candidate -is [ExitStatementAst]) -or ($candidate -is [ThrowStatementAst]) -or ($candidate -is [TryStatementAst]) }, $true)).Count
@@ -2851,18 +3226,19 @@ $verdictReturns = @($verdictNode.FindAll({ param($candidate) $candidate -is [Ret
 $verdictReturnValues = @($verdictReturns | ForEach-Object { $returnInner = Get-InnerExpression $_.Pipeline; $(if ($returnInner -is [StringConstantExpressionAst]) { "'" + $returnInner.Value + "'" } else { '?' }) } | Sort-Object -Unique -CaseSensitive)
 $targetParameter = $(if ($null -ne $verdictNode.Body.ParamBlock) { @($verdictNode.Body.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'Target' }) | Select-Object -First 1 } else { $null })
 $validateSetValues = $(if ($null -ne $targetParameter) { @($targetParameter.Attributes | Where-Object { ($_ -is [AttributeAst]) -and ($_.TypeName.Name -eq 'ValidateSet') } | ForEach-Object { $_.PositionalArguments } | ForEach-Object { [string]$_.Value } | Sort-Object -CaseSensitive) } else { @() })
-Check-Equal "N4-P3 순수 판정 - 명령 0 · `$script: 0 · exit·throw·try 0 · return 6 · 반환 문자열 집합 · -Target ValidateSet = {entry, reward, field}" `
+Check-Equal "N4-P3 순수 판정 - 명령 0 · `$script: 0 · exit·throw·try 0 · return 7 · 반환 문자열 집합 · -Target ValidateSet = {entry, reward, field}" `
     ('명령 {0} · script {1} · exit/throw/try {2} · return {3} · 반환=[{4}] · ValidateSet=[{5}]' -f $verdictCommands, $verdictScriptVariables, $verdictExits, $verdictReturns.Count, ($verdictReturnValues -join ','), ($validateSetValues -join ',')) `
-    ('명령 0 · script 0 · exit/throw/try 0 · return 6 · 반환=[{0}] · ValidateSet=[{1}]' -f ((@("''", "'cancelled'", "'entered'", "'field'", "'reclick'", "'reward'") | Sort-Object -Unique -CaseSensitive) -join ','), ((@('entry', 'field', 'reward') | Sort-Object -CaseSensitive) -join ','))
+    ('명령 0 · script 0 · exit/throw/try 0 · return 7 · 반환=[{0}] · ValidateSet=[{1}]' -f ((@("''", "'cancelled'", "'entered'", "'field'", "'field-cancelled'", "'reclick'", "'reward'") | Sort-Object -Unique -CaseSensitive) -join ','), ((@('entry', 'field', 'reward') | Sort-Object -CaseSensitive) -join ','))
 
-# N4-P4 - waiter 매개변수 이름 차례 = Game·LimitSeconds·Clock·Context·ReportRewardReturn·PanelSeen·ResumeGrace · $Clock 타입 없음 · [ref] 0 (⑥d 가 Target·ChallengeFewMembers 를 더할 때 갱신)
+# N4-P4 - waiter 매개변수 이름 차례 = Game·LimitSeconds·Clock·Context·ReportRewardReturn·ReportFieldReturn(구현 단위 5b-8)·PanelSeen·ResumeGrace · $Clock 타입 없음 · [ref] 0
+#   (⑥d 가 Target·ChallengeFewMembers 를 더할 때 갱신)
 $waiterParameters = $(if ($null -ne $waiterNode.Body.ParamBlock) { @($waiterNode.Body.ParamBlock.Parameters) } else { @() })
 $waiterParameterNames = @($waiterParameters | ForEach-Object { [string]$_.Name.VariablePath.UserPath }) -join ','
 $clockParameter = @($waiterParameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'Clock' }) | Select-Object -First 1
 $clockTypeConstraints = $(if ($null -ne $clockParameter) { @($clockParameter.Attributes | Where-Object { $_ -is [TypeConstraintAst] }).Count } else { -1 })
 $refConstraints = @($waiterParameters | ForEach-Object { $_.Attributes } | Where-Object { ($_ -is [TypeConstraintAst]) -and ($_.TypeName.Name -eq 'ref') }).Count
-Check-Equal 'N4-P4 waiter 매개변수 = Game·LimitSeconds·Clock·Context·ReportRewardReturn·PanelSeen·ResumeGrace · $Clock 타입 없음 · [ref] 0' `
-    ('이름=[{0}] · Clock 타입 {1} · ref {2}' -f $waiterParameterNames, $clockTypeConstraints, $refConstraints) '이름=[Game,LimitSeconds,Clock,Context,ReportRewardReturn,PanelSeen,ResumeGrace] · Clock 타입 0 · ref 0'
+Check-Equal 'N4-P4 waiter 매개변수 = Game·LimitSeconds·Clock·Context·ReportRewardReturn·ReportFieldReturn·PanelSeen·ResumeGrace · $Clock 타입 없음 · [ref] 0' `
+    ('이름=[{0}] · Clock 타입 {1} · ref {2}' -f $waiterParameterNames, $clockTypeConstraints, $refConstraints) '이름=[Game,LimitSeconds,Clock,Context,ReportRewardReturn,ReportFieldReturn,PanelSeen,ResumeGrace] · Clock 타입 0 · ref 0'
 
 # N4-P5 - waiter 안 $script: 대입 = 정확히 1 - 대상 $script:lastClickSkipReason · 우변 빈 문자열 상수(따옴표 꼴·괄호 무관). 대입은 대상의 맨 앞 변수가
 #   $script: 범위인 대입문(멤버·인덱스 대상 포함)과 증감(++ · --)을 함께 셉니다 - 워커 전역 상태를 바꾸는 꼴이면 문법이 달라도 같은 대입입니다
@@ -2885,11 +3261,11 @@ $scriptAssignmentOk = ($scriptAssignments.Count -eq 1) -and ($scriptAssignments[
 ((Get-InnerExpression $scriptAssignments[0].Right) -is [StringConstantExpressionAst]) -and ([string](Get-InnerExpression $scriptAssignments[0].Right).Value -ceq '')
 Check-True "N4-P5 waiter 안 `$script: 대입 = 정확히 1 (`$script:lastClickSkipReason ← 빈 문자열 상수)" $scriptAssignmentOk ((@($scriptAssignments | ForEach-Object { Get-NodeCode $_ })) -join ' | ')
 
-# N4-P6 - waiter 명령 이름 집합 = 정확히 21 (허용 집합의 원본 - 구현이 도움 함수를 더하면 이 행과 명세 3.2.1 표 아래 첫 줄을 함께) · 순수 판정 0
+# N4-P6 - waiter 명령 이름 집합 = 정확히 24 (구현 단위 5b-8 이 Step-AbyssFieldSettle · Test-AbyssSelectionScreen · Test-AbyssMenu 를 더함 - 허용 집합의 원본 - 구현이 도움 함수를 더하면 이 행과 명세 3.2.1 표 아래 첫 줄을 함께) · 순수 판정 0
 $WAITER_COMMANDS_EXPECTED = @('ForEach-Object', 'Get-AbyssPanelKind', 'Get-Date', 'Invoke-PurchasePopupSweep', 'New-AbyssMemberClock', 'Resolve-AbyssHandoffStartScreen',
     'Resolve-AbyssMemberSweepTurn', 'Resolve-AbyssReentryVerdict', 'Resume-AbyssMemberClock', 'Select-Object', 'Start-Sleep', 'Test-AbyssMemberClockExpired',
     'Test-CaptureRecovered', 'Test-DungeonClearPrompt', 'Test-HomeEndEscHud', 'Test-InDungeonQuest', 'Test-SafeStopDuringCaptureFail', 'Test-UserRecentlyActive',
-    'Wait-UserYieldEnd', 'Where-Object', 'Write-RunLog')
+    'Wait-UserYieldEnd', 'Where-Object', 'Write-RunLog', 'Step-AbyssFieldSettle', 'Test-AbyssSelectionScreen', 'Test-AbyssMenu')
 $waiterCommandSet = @($waiterNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 $expectedCommandSet = @($WAITER_COMMANDS_EXPECTED | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 Check-Equal "N4-P6 waiter 명령 이름 집합 = 정확히 $($WAITER_COMMANDS_EXPECTED.Count)개(허용 집합) · 순수 판정 명령 0" `
@@ -3089,15 +3465,239 @@ $n4p13Problems = @(Get-N4P13Problems)
 Check-True "N4-P13 스윕 참 분기 사실(뜻) - continue 조건 {freeze, yield, counted} · 굶김·복구 대입 · 분기 안 마감 판정 0 · 연속 0 하나 · 분류 인자 = 선분기 · 되돌림 if('yield' ∧ 살아 있는 연속 · 본문 둘) · 차례 분류 < 되돌림 < 연속 0 < continue · 연속 수 대입 .Streak 1 + ⑦ else 상수 0 1 · 루프 앞 0 1" `
     ($n4p13Problems.Count -eq 0) ($n4p13Problems -join ' · ')
 
-# N4-P14 - waiter 안 Write-RunLog = 정확히 2 · 둘 다 인자 하나 - S2 확장 문자열(S2 고정 접두) 1 · 권장 인원 팝업 관측 안내 상수 1 · 그 밖 0
+# N4-P14 - waiter 안 Write-RunLog = 정확히 4 · 모두 인자 하나 - S2 확장 문자열(S2 고정 접두) 1 · 권장 인원 팝업 관측 안내 상수 1 · 재매칭 패널 확인 안내 상수 1 ·
+#   필드 확정 확장 문자열(필드 확정 접두) 1 · 그 밖 0 (뒤 둘은 구현 단위 5b-8)
 $logKinds = @($waiterLogNodes | ForEach-Object {
         $logElements = @($_.CommandElements)
         if ($logElements.Count -ne 2) { "인자 $($logElements.Count - 1)개" }
         elseif (($logElements[1] -is [ExpandableStringExpressionAst]) -and ($S2_PREFIX.Length -gt 0) -and ([string]$logElements[1].Value).StartsWith($S2_PREFIX)) { 'S2' }
         elseif (($logElements[1] -is [StringConstantExpressionAst]) -and ([string]$logElements[1].Value -ceq $NOTICE_FULL_TEXT)) { '안내' }
+        elseif (($logElements[1] -is [StringConstantExpressionAst]) -and ([string]$logElements[1].Value -ceq $PANEL_NOTICE_TEXT)) { '패널' }
+        elseif (($logElements[1] -is [ExpandableStringExpressionAst]) -and ([string]$logElements[1].Value).StartsWith($SETTLE_LINE_PREFIX, [StringComparison]::Ordinal)) { '필드 확정' }
         else { '그 밖' }
     } | Sort-Object)
-Check-Equal "N4-P14 waiter 안 Write-RunLog = 정확히 2 · 인자 하나씩 - S2 확장 문자열 1 · '$NOTICE_FULL_TEXT' 1 · 그 밖 0 (결과 줄은 호출부 문구)" ('Write-RunLog {0} = [{1}]' -f $waiterLogNodes.Count, ($logKinds -join ',')) 'Write-RunLog 2 = [S2,안내]'
+Check-Equal "N4-P14 waiter 안 Write-RunLog = 정확히 4 · 인자 하나씩 - S2 확장 문자열 1 · '$NOTICE_FULL_TEXT' 1 · '$PANEL_NOTICE_TEXT' 1 · 필드 확정 줄 1 · 그 밖 0 (결과 줄은 호출부 문구)" `
+    ('Write-RunLog {0} = [{1}]' -f $waiterLogNodes.Count, ($logKinds -join ',')) ('Write-RunLog 4 = [{0}]' -f ((@('S2', '안내', '패널', '필드 확정') | Sort-Object) -join ','))
+
+# ── §8b 구현 단위 5b-8 정적 FC-S (명세 5b-8 3.3 · 3.7a - 주석 뺀 사본 · AST). 행이 못 잡는 등가 변이와 배선 꼴을 고정합니다 - 같은 뜻의 다른 꼴을 택하면 구현과 함께 갱신.
+#    끝(retry) 갈래 · exit · 재생 사본은 §10 정적(FC-S15 · FC-S16 · FC-S19) ──
+function Get-AndLeafCodes {
+    # -and 로 이은 조건의 잎 글자 (괄호를 벗김 - 순서 무관 비교용, 열거용)
+    param($Node)
+    $innerNode = Get-InnerExpression $Node
+    if (($innerNode -is [BinaryExpressionAst]) -and ($innerNode.Operator -eq [TokenKind]::And)) { return @(@(Get-AndLeafCodes $innerNode.Left) + @(Get-AndLeafCodes $innerNode.Right)) }
+    return @(Get-NodeCode $innerNode)
+}
+function Get-ParameterArgumentCode {
+    # 명령 호출에서 그 매개변수의 값 글자 (콜론 꼴 · 띄어 쓴 꼴 - 없으면 '(없음)', 값 없는 스위치면 '(스위치)')
+    param($Command, [string]$Name)
+    $commandElements = @($Command.CommandElements)
+    for ($elementIndex = 1; $elementIndex -lt $commandElements.Count; $elementIndex++) {
+        $element = $commandElements[$elementIndex]
+        if (($element -is [CommandParameterAst]) -and ($element.ParameterName -eq $Name)) {
+            if ($null -ne $element.Argument) { return (Get-NodeCode $element.Argument) }
+            if (($elementIndex + 1 -lt $commandElements.Count) -and (-not ($commandElements[$elementIndex + 1] -is [CommandParameterAst]))) { return (Get-NodeCode $commandElements[$elementIndex + 1]) }
+            return '(스위치)'
+        }
+    }
+    return '(없음)'
+}
+function Get-StatementHead {
+    # 문장 머리 - if 면 'if <첫 절 조건>', 대입이면 대상 변수 이름, 그 밖은 문장 글자
+    param($Statement)
+    if ($Statement -is [IfStatementAst]) { return ('if ' + (Get-NodeCode $Statement.Clauses[0].Item1)) }
+    if ($Statement -is [AssignmentStatementAst]) {
+        $assignedNode = Get-InnerExpression $Statement.Left
+        if ($assignedNode -is [VariableExpressionAst]) { return [string]$assignedNode.VariablePath.UserPath }
+    }
+    return (Get-NodeCode $Statement)
+}
+$fcWaiterWhile = $waiterNode.Find({ param($candidate) $candidate -is [WhileStatementAst] }, $true)
+$fcWhileCodes = @($fcWaiterWhile.Body.Statements | ForEach-Object { Get-NodeCode $_ })
+
+# FC-S1 (2.1) - 순수 판정 새 행: 'field-cancelled' 행 하나 · 절 1 · else 0 · 조건 -and 잎 넷 일대일(순서 무관 - 목표 entry · 필드 결과 · 분류 field · 필드 확정. 패널 관측 · 보고 ·
+#   무변화 · 던전 안 연속을 보지 않음 - 사용자 결정 U-5b8-1) · 본문 직속 if 차례(return 글자)
+$fcVerdictIfs = @($verdictNode.Body.EndBlock.Statements | Where-Object { $_ -is [IfStatementAst] })
+$fcVerdictOrder = (@($fcVerdictIfs | ForEach-Object {
+            $fcFirstStatement = @($_.Clauses[0].Item2.Statements)[0]
+            $fcReturnInner = $(if ($fcFirstStatement -is [ReturnStatementAst]) { Get-InnerExpression $fcFirstStatement.Pipeline } else { $null })
+            $(if ($fcReturnInner -is [StringConstantExpressionAst]) { [string]$fcReturnInner.Value } else { '?' })
+        })) -join ' < '
+$fcNewRows = @($fcVerdictIfs | Where-Object { (Get-NodeCode $_.Clauses[0].Item2) -ceq "{ return 'field-cancelled' }" })
+$fcNewRowText = '(행 {0})' -f $fcNewRows.Count
+if ($fcNewRows.Count -eq 1) {
+    $fcNewRowText = '절 {0} · else {1} · 잎=[{2}]' -f $fcNewRows[0].Clauses.Count, [int]($null -ne $fcNewRows[0].ElseClause), ((@(Get-AndLeafCodes $fcNewRows[0].Clauses[0].Item1 | Sort-Object -CaseSensitive)) -join ' & ')
+}
+$fcNewRowLeaves = (@(@('$Target -eq ''entry''', '$ReportFieldReturn', '$Kind -eq ''field''', '$FieldSettled') | Sort-Object -CaseSensitive)) -join ' & '
+Check-Equal "FC-S1 순수 판정 새 행 - 'field-cancelled' 행 하나 · 절 1 · else 0 · 잎 넷(목표 entry · 필드 결과 · 분류 field · 필드 확정) · 본문 직속 if 차례" `
+    ('{0} · 차례=[{1}]' -f $fcNewRowText, $fcVerdictOrder) ('절 1 · else 0 · 잎=[{0}] · 차례=[entered < field < reward < field-cancelled < cancelled < reclick]' -f $fcNewRowLeaves)
+
+# FC-S2 · FC-S3 (2.1 · 2.2-1) - ReportFieldReturn 매개변수: 순수 판정 [bool](띄어 쓴 값도 묶임) · 대기 [switch](호출 B 는 콜론 꼴) · 기본값 없음 · 자리 = ReportRewardReturn 바로 뒤
+$fcParamShape = (@(foreach ($fcOwner in @($verdictNode, $waiterNode)) {
+            $fcParams = @($fcOwner.Body.ParamBlock.Parameters)
+            $fcNames = [string[]]@($fcParams | ForEach-Object { [string]$_.Name.VariablePath.UserPath })
+            $fcAt = [Array]::IndexOf($fcNames, 'ReportFieldReturn')
+            $(if ($fcAt -lt 1) { '{0}:자리 {1}' -f $fcOwner.Name, $fcAt } else { '{0}:{1}/기본값 {2}/앞 {3}' -f $fcOwner.Name, $fcParams[$fcAt].StaticType.Name, [int]($null -ne $fcParams[$fcAt].DefaultValue), $fcNames[$fcAt - 1] })
+        })) -join ' · '
+Check-Equal 'FC-S2 · FC-S3 ReportFieldReturn 매개변수 - 순수 판정 [bool] · 대기 [switch] · 기본값 없음 · 자리 = ReportRewardReturn 바로 뒤' $fcParamShape `
+    'Resolve-AbyssReentryVerdict:Boolean/기본값 0/앞 ReportRewardReturn · Wait-AbyssReentry:SwitchParameter/기본값 0/앞 ReportRewardReturn'
+
+# FC-S4 (2.2-3 · 4 · 4a · 6 · 8) - 새 상태 변수의 대입 수 · 함수 직속 초기화(while 앞 - 이어받기 · 표본 시각 · 확정 결과는 회전마다라 직속 0) · 초기값
+#   while 앞만 셉니다 - StrictMode 가 없어 초기화를 while 뒤로 옮겨도 미정의 = $null 로 동작이 같아 행이 못 잡음(변이 M82 - 구현 리뷰 2/2 의 3/5)
+$FC_STATE_NAMES = @('panelNoticed', 'settleState', 'settleNext', 'settleAlive', 'fieldAt', 'selectionNow', 'menuNow', 'earlyScreen', 'fieldSettled', 'settlePrevious', 'settleSpan', 'settleCount')
+$fcAssignNames = @($waiterNode.FindAll({ param($candidate) $candidate -is [AssignmentStatementAst] }, $true) | ForEach-Object { $fcLeft = Get-InnerExpression $_.Left; $(if ($fcLeft -is [VariableExpressionAst]) { [string]$fcLeft.VariablePath.UserPath } else { '' }) })
+$fcAssignText = (@(foreach ($fcName in $FC_STATE_NAMES) { '{0}={1}' -f $fcName, @($fcAssignNames | Where-Object { $_ -ceq $fcName }).Count })) -join ' '
+$fcInitStatements = @($waiterNode.Body.EndBlock.Statements | Where-Object { ($_ -is [AssignmentStatementAst]) -and (Test-BeforeWhile $_) })
+$fcInitNames = @($fcInitStatements | ForEach-Object { Get-StatementHead $_ })
+$fcInitText = (@(foreach ($fcName in @('panelNoticed', 'settleState', 'settleNext', 'settleAlive', 'fieldAt', 'fieldSettled')) { '{0}={1}' -f $fcName, @($fcInitNames | Where-Object { $_ -ceq $fcName }).Count })) -join ' '
+$fcInitCodes = @($fcInitStatements | ForEach-Object { Get-NodeCode $_ })
+$fcInitValues = (@(@('$panelNoticed = $false', '$settleState = $null', '$settleNext = $false') | ForEach-Object { [int]($fcInitCodes -ccontains $_) })) -join ''
+Check-Equal 'FC-S4 새 상태 변수 대입 수 · 함수 직속 while 앞 초기화(패널 안내 표식 · 확정 상태 · 이어받기 표식만) · 초기값' ('대입=[{0}] · 함수 직속 while 앞=[{1}] · 초기값 {2}' -f $fcAssignText, $fcInitText, $fcInitValues) `
+    '대입=[panelNoticed=2 settleState=2 settleNext=3 settleAlive=2 fieldAt=2 selectionNow=2 menuNow=2 earlyScreen=1 fieldSettled=2 settlePrevious=1 settleSpan=1 settleCount=1] · 함수 직속 while 앞=[panelNoticed=1 settleState=1 settleNext=1 settleAlive=0 fieldAt=0 fieldSettled=0] · 초기값 111'
+
+# FC-S5 (2.2-4 · R5 2.2) - 서두 이어받기: 메타 비움 바로 뒤 두 문장 = 선분기 while 의 같은 두 문장(소스 캡처) · 정확히 1 · ① 동결 if 앞(동결 회전이 continue 로 건너뛰면 연속이 안 끊김)
+$fcSkipAt = [Array]::IndexOf([string[]]$fcWhileCodes, '$script:lastClickSkipReason = ''''')
+$fcFreezeAt = -1
+for ($fcIndex = 0; $fcIndex -lt $fcWhileCodes.Count; $fcIndex++) { if ($fcWhileCodes[$fcIndex].StartsWith('if ($script:screenCaptureFailing) {', [StringComparison]::Ordinal)) { $fcFreezeAt = $fcIndex; break } }
+$fcCarryText = $(if (($fcSkipAt -ge 0) -and ($fcSkipAt + 2 -lt $fcWhileCodes.Count)) { '{0} | {1}' -f $fcWhileCodes[$fcSkipAt + 1], $fcWhileCodes[$fcSkipAt + 2] } else { '(메타 비움 줄 없음)' })
+$fcSelectorCodes = @($selectorWhile.Body.Statements | ForEach-Object { Get-NodeCode $_ })
+$fcSelectorSkipAt = [Array]::IndexOf([string[]]$fcSelectorCodes, '$script:lastClickSkipReason = ''''')
+$fcSelectorCarry = $(if (($fcSelectorSkipAt -ge 0) -and ($fcSelectorSkipAt + 2 -lt $fcSelectorCodes.Count)) { '{0} | {1}' -f $fcSelectorCodes[$fcSelectorSkipAt + 1], $fcSelectorCodes[$fcSelectorSkipAt + 2] } else { '(선분기 메타 비움 줄 없음)' })
+$fcCarryCount = @($fcWhileCodes | Where-Object { $_ -ceq '$settleAlive = $settleNext' }).Count
+Check-Equal "FC-S5 서두 이어받기 - 메타 비움 바로 뒤 두 문장 = 선분기의 두 문장(소스 캡처) · while 직속 '`$settleAlive = `$settleNext' 1 · ① 동결 if 앞" `
+    ('{0} · 개수 {1} · 동결 if 앞 {2}' -f $fcCarryText, $fcCarryCount, (($fcSkipAt -ge 0) -and ($fcFreezeAt -gt ($fcSkipAt + 2)))) ('{0} · 개수 1 · 동결 if 앞 True' -f $fcSelectorCarry)
+
+# FC-S6 (2.2-4 · 5) - $fieldAt 대입 정확히 2: 서두($turnStart = Get-Date 바로 뒤 $fieldAt = $turnStart) · ⑥ 간접 양보(Get-Date - 가상 시계 모의를 지나는 꼴)
+$fcFieldAtCodes = @($waiterNode.FindAll({ param($candidate) ($candidate -is [AssignmentStatementAst]) -and (Test-IsVariable $candidate.Left 'fieldAt') }, $true) | ForEach-Object { Get-NodeCode $_ })
+$fcTurnStartAt = [Array]::IndexOf([string[]]$fcWhileCodes, '$turnStart = Get-Date')
+$fcFieldAtAfterTurn = $(if (($fcTurnStartAt -ge 0) -and ($fcTurnStartAt + 1 -lt $fcWhileCodes.Count)) { $fcWhileCodes[$fcTurnStartAt + 1] } else { '(없음)' })
+Check-Equal "FC-S6 `$fieldAt 대입 정확히 2 - 서두(`$turnStart = Get-Date 바로 뒤) · ⑥ 간접 양보(Get-Date)" ('{0} · 서두 다음 문장 [{1}]' -f ($fcFieldAtCodes -join ' | '), $fcFieldAtAfterTurn) `
+    '$fieldAt = $turnStart | $fieldAt = Get-Date · 서두 다음 문장 [$fieldAt = $turnStart]'
+
+# FC-S7 (2.2-5 · R5 2.1 ⑥) - ⑥ 간접 양보 갈래 하나 · 본문 = 되돌림 if · 던전 안 연속 끊음 · 필드 연속 끊음 · 필드 표본 시각 = 양보 뒤 (선분기는 필드 연속을 끊지 않음 - ⑱′ WA-F7)
+$fcIndirectIfs = @($waiterNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and ((Get-NodeCode $candidate.Clauses[0].Item1) -ceq '[double]$script:userYieldTotalMs -ne $turnYieldMs') }, $true))
+$fcIndirectBody = $(if ($fcIndirectIfs.Count -eq 1) { (@($fcIndirectIfs[0].Clauses[0].Item2.Statements | ForEach-Object { Get-NodeCode $_ })) -join ' ; ' } else { '(⑥ if {0}개)' -f $fcIndirectIfs.Count })
+Check-Equal 'FC-S7 ⑥ 간접 양보 본문 - 되돌림 if · 던전 안 연속 끊음 · 필드 연속 끊음 · 필드 표본 시각 = 양보 뒤 새 시각' $fcIndirectBody `
+    'if ($insideStreak -gt 0) { $insideGraceRun = 0; $insideGraceReverted = $true } ; $insideStreak = 0 ; $settleAlive = $false ; $fieldAt = Get-Date'
+
+# FC-S8 (2.2-6) - Step-AbyssFieldSettle 호출 하나 = 선분기 호출에서 -TurnStart 만 $fieldAt(소스 캡처) · 감싼 조건(필드 if · ⑦ 유효 else · ⑥~⑨ if) · 평가 차례 ⑧ 분류 < Step < ⑨ 결론
+$fcStepCalls = @(Get-CommandNodes -Node $waiterNode -Name 'Step-AbyssFieldSettle')
+$fcSelectorStep = @(Get-CommandNodes -Node $selectorNode -Name 'Step-AbyssFieldSettle')
+$fcStepExpected = $(if ($fcSelectorStep.Count -eq 1) { (Get-NodeCode $fcSelectorStep[0]).Replace('-TurnStart $turnStart', '-TurnStart $fieldAt') } else { '(선분기 Step {0})' -f $fcSelectorStep.Count })
+$fcVerdictCalls = @(Get-CommandNodes -Node $waiterNode -Name 'Resolve-AbyssReentryVerdict')
+$fcStepText = '(Step {0})' -f $fcStepCalls.Count
+if ($fcStepCalls.Count -eq 1) {
+    $fcStepText = '{0} · 감싼 조건=[{1}] · ⑧ 분류 < Step < ⑨ 결론 {2}' -f (Get-NodeCode $fcStepCalls[0]), ((@(Get-EnclosingIfConditions -Node $fcStepCalls[0] -Stop $waiterNode)) -join ' < '),
+    (($classifyCalls.Count -eq 2) -and ($fcVerdictCalls.Count -eq 1) -and ($classifyCalls[1].Extent.StartOffset -lt $fcStepCalls[0].Extent.StartOffset) -and ($fcStepCalls[0].Extent.StartOffset -lt $fcVerdictCalls[0].Extent.StartOffset))
+}
+Check-Equal 'FC-S8 Step 호출 하나 = 선분기 호출에서 -TurnStart 만 $fieldAt · 감싼 조건(필드 결과 켬 ∧ 필드 모양 · ⑦ 유효 else · ⑥~⑨ if) · ⑧ 분류 < Step < ⑨ 결론' $fcStepText `
+    ("{0} · 감싼 조건=[`$ReportFieldReturn -and (`$screen -eq 'field') < else `$script:screenCaptureFailing -or `$script:captureFailSerial -ne `$turnSerial < (-not `$sweepStarved) -and (-not `$turnRecovered)] · ⑧ 분류 < Step < ⑨ 결론 True" -f $fcStepExpected)
+
+# FC-S9 (2.2-7) - ⑨ 결론 호출 인자(매개변수마다 - 줄 이음 무관) · $fieldSettled 대입 둘(유효 회전마다 거짓 · 필드 if 안 확정)
+$fcVerdictArgs = $(if ($fcVerdictCalls.Count -eq 1) { (@(@('Kind', 'InsideStreak', 'PanelSeen', 'Target', 'ReportRewardReturn', 'ReportFieldReturn', 'QuietExpired', 'FieldSettled') | ForEach-Object { '{0}={1}' -f $_, (Get-ParameterArgumentCode $fcVerdictCalls[0] $_) })) -join ' ' } else { '(⑨ 호출 {0})' -f $fcVerdictCalls.Count })
+$fcFieldSettledCodes = (@($waiterNode.FindAll({ param($candidate) ($candidate -is [AssignmentStatementAst]) -and (Test-IsVariable $candidate.Left 'fieldSettled') }, $true) | ForEach-Object { Get-NodeCode $_ })) -join ' | '
+Check-Equal 'FC-S9 ⑨ 결론 호출 인자 - 필드 결과 = ([bool]$ReportFieldReturn) · 필드 확정 = $fieldSettled · 목표 entry · $fieldSettled 대입 둘' ('{0} · 대입=[{1}]' -f $fcVerdictArgs, $fcFieldSettledCodes) `
+    ("Kind=`$screen InsideStreak=`$insideStreak PanelSeen=`$panelObserved Target='entry' ReportRewardReturn=([bool]`$ReportRewardReturn) ReportFieldReturn=([bool]`$ReportFieldReturn) QuietExpired=`$quietExpired FieldSettled=`$fieldSettled · 대입=[`$fieldSettled = `$false | `$fieldSettled = [bool]`$settleState.Confirmed]")
+
+# FC-S10 (2.2-6) - 필드 if 하나: 바로 앞 문장 = '$fieldSettled = $false' · 본문 차례 = 앞 상태(끊김이면 $null) → Step → 확정 결과 → 미확정이면 이어받기 표식 · 절 1 · else 0
+$fcFieldIfs = @($waiterNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and ((Get-NodeCode $candidate.Clauses[0].Item1) -ceq '$ReportFieldReturn -and ($screen -eq ''field'')') }, $true))
+$fcFieldIfText = '(필드 if {0})' -f $fcFieldIfs.Count
+if ($fcFieldIfs.Count -eq 1) {
+    $fcSiblings = @($fcFieldIfs[0].Parent.Statements)
+    $fcFieldIfIndex = [Array]::IndexOf($fcSiblings, $fcFieldIfs[0])
+    $fcFieldIfText = '앞 문장 [{0}] · 본문 [{1}] · 절 {2} · else {3}' -f $(if ($fcFieldIfIndex -ge 1) { Get-NodeCode $fcSiblings[$fcFieldIfIndex - 1] } else { '' }),
+    ((@($fcFieldIfs[0].Clauses[0].Item2.Statements | ForEach-Object { Get-NodeCode $_ })) -join ' ; '), $fcFieldIfs[0].Clauses.Count, [int]($null -ne $fcFieldIfs[0].ElseClause)
+}
+Check-Equal 'FC-S10 필드 if - 앞 문장 = 확정 결과 거짓 · 본문 차례(앞 상태 → Step → 확정 결과 → 미확정이면 이어받기 표식) · 절 1 · else 0' $fcFieldIfText `
+    ('앞 문장 [$fieldSettled = $false] · 본문 [$settlePrevious = $(if ($settleAlive) {{ $settleState }} else {{ $null }}) ; $settleState = {0} ; $fieldSettled = [bool]$settleState.Confirmed ; if (-not $fieldSettled) {{ $settleNext = $true }}] · 절 1 · else 0' -f $fcStepExpected)
+
+# FC-S11 (2.2-8) - 필드 확정 줄 하나: 고정 조각 · 채움(W 변수 · settleSpan · settleCount - 숫자 박기 0) · 감싼 조건(결과 'field-cancelled') · settleSpan 우변(확정 회전 표본 시각 기준)
+$fcSettleLogs = @($waiterLogNodes | Where-Object { (@($_.CommandElements).Count -eq 2) -and ($_.CommandElements[1] -is [ExpandableStringExpressionAst]) -and ([string]$_.CommandElements[1].Value).StartsWith($SETTLE_LINE_PREFIX, [StringComparison]::Ordinal) })
+$fcSettleText = '(확정 줄 {0})' -f $fcSettleLogs.Count
+if ($fcSettleLogs.Count -eq 1) {
+    $fcSettleParts = Get-S2Parts $fcSettleLogs[0].CommandElements[1]
+    $fcSpanCodes = (@($waiterNode.FindAll({ param($candidate) ($candidate -is [AssignmentStatementAst]) -and (Test-IsVariable $candidate.Left 'settleSpan') }, $true) | ForEach-Object { Get-NodeCode $_.Right })) -join ' | '
+    $fcSettleText = '조각=[{0}] · 채움=[{1}] · 감싼 조건=[{2}] · settleSpan=[{3}]' -f ($fcSettleParts.Fragments -join '|'), ($fcSettleParts.Fills -join ','),
+    ((@(Get-EnclosingIfConditions -Node $fcSettleLogs[0] -Stop $waiterNode)) -join ' < '), $fcSpanCodes
+}
+Check-Equal "FC-S11 필드 확정 줄 - 고정 조각 · 채움 셋(숫자 박기 0) · 감싼 조건(결과 'field-cancelled' · ⑦ 유효 else · ⑥~⑨ if) · settleSpan 우변" $fcSettleText `
+    ("조각=[[어비스] 던전 밖(HUD) 확인 - 필드 모양이 |초 이어졌습니다 (첫 표본부터 |초, |표본)] · 채움=[memberfieldsettleseconds,settlespan,settlecount] · 감싼 조건=[`$result -eq 'field-cancelled' < " +
+        "else `$script:screenCaptureFailing -or `$script:captureFailSerial -ne `$turnSerial < (-not `$sweepStarved) -and (-not `$turnRecovered)] · settleSpan=[[Math]::Round((`$fieldAt - [datetime]`$settleState.Since).TotalSeconds, 1)]")
+
+# FC-S12 (2.2-6 · 1.6 ①) - 재매칭 패널 확인 안내 하나: 감싼 if 잎 셋(보고 켬 · 1회 표식 · 패널류 셋 - 팝업 제외) · 본문 = 표식 → 안내 · 앞 둘 = 패널 관측 if · 권장 인원 안내 if · 뒤 = 확정 결과 거짓
+$fcPanelLogs = @($waiterLogNodes | Where-Object { (@($_.CommandElements).Count -eq 2) -and ($_.CommandElements[1] -is [StringConstantExpressionAst]) -and ([string]$_.CommandElements[1].Value -ceq $PANEL_NOTICE_TEXT) })
+$fcPanelText = '(패널 안내 {0})' -f $fcPanelLogs.Count
+if ($fcPanelLogs.Count -eq 1) {
+    $fcPanelIf = $fcPanelLogs[0].Parent
+    while (($null -ne $fcPanelIf) -and (-not ($fcPanelIf -is [IfStatementAst]))) { $fcPanelIf = $fcPanelIf.Parent }
+    $fcPanelSiblings = @($fcPanelIf.Parent.Statements)
+    $fcPanelAt = [Array]::IndexOf($fcPanelSiblings, $fcPanelIf)
+    $fcPanelText = '잎=[{0}] · 본문=[{1}] · 앞 둘=[{2} / {3}] · 뒤=[{4}]' -f ((@(Get-AndLeafCodes $fcPanelIf.Clauses[0].Item1 | Sort-Object -CaseSensitive)) -join ' & '),
+    ((@($fcPanelIf.Clauses[0].Item2.Statements | ForEach-Object { Get-NodeCode $_ })) -join ' ; '), (Get-StatementHead $fcPanelSiblings[$fcPanelAt - 2]), (Get-StatementHead $fcPanelSiblings[$fcPanelAt - 1]),
+    (Get-StatementHead $fcPanelSiblings[$fcPanelAt + 1])
+}
+$fcPanelLeaves = (@(@('$ReportRewardReturn', '-not $panelNoticed', "@('ready', 'matching', 'entry-waiting') -contains `$screen") | Sort-Object -CaseSensitive)) -join ' & '
+Check-Equal 'FC-S12 재매칭 패널 확인 안내 - 잎 셋(보고 켬 · 1회 표식 · 패널류 셋) · 본문 = 표식 → 안내 · 앞 둘 = 패널 관측 if · 권장 인원 안내 if · 뒤 = 확정 결과 거짓' $fcPanelText `
+    ("잎=[{0}] · 본문=[`$panelNoticed = `$true ; Write-RunLog '{1}'] · 앞 둘=[if @('popup', 'ready', 'matching', 'entry-waiting') -contains `$screen / if `$ReportRewardReturn -and (`$screen -eq 'popup') -and (-not `$popupNoticed)] · 뒤=[fieldSettled]" -f $fcPanelLeaves, $PANEL_NOTICE_TEXT)
+
+# FC-S13 (2.3-1 · 0.4) - 재입장 대기 호출의 필드 결과 스위치: 끝(retry) 호출 B 1 · 콜론 꼴(띄어 쓰면 스위치가 늘 켜지고 괄호 값이 위치 인자 $Clock 으로 묶임 - PS 5.1 실측) · 인자 =
+#   모드 예산 식(Get-AbyssReentryLimitSeconds 첫 if 조건)의 -eq → -ne(소스 캡처) · 끝(other) 호출 E · 선분기 B2 는 0
+$fcSwitchShape = (@(foreach ($fcCaller in @('Complete-AbyssRetrySelection', 'Complete-AbyssOtherSelection', 'Invoke-AbyssHandoffStart')) {
+            $fcCalls = @(Get-CommandNodes -Node (Get-WorkerFunction $fcCaller) -Name 'Wait-AbyssReentry')
+            $fcSwitchParams = @($fcCalls | ForEach-Object { $_.CommandElements } | Where-Object { ($_ -is [CommandParameterAst]) -and ($_.ParameterName -eq 'ReportFieldReturn') })
+            '{0}:{1}/{2}[{3}]' -f $fcCaller, $fcCalls.Count, $fcSwitchParams.Count, ((@($fcSwitchParams | ForEach-Object { $(if ($null -ne $_.Argument) { Get-NodeCode (Get-InnerExpression $_.Argument) } else { '(콜론 인자 없음)' }) })) -join ',')
+        })) -join ' · '
+$fcModeIfs = @((Get-WorkerFunction 'Get-AbyssReentryLimitSeconds').FindAll({ param($candidate) $candidate -is [IfStatementAst] }, $true))
+$fcModeCondition = $(if ($fcModeIfs.Count -ge 1) { Get-NodeCode $fcModeIfs[0].Clauses[0].Item1 } else { '(모드 if 없음)' })
+Check-Equal 'FC-S13 재입장 대기 호출의 필드 결과 스위치 - 끝(retry) 호출 B 1 · 콜론 꼴 · 인자 = 모드 예산 식의 -ne · 끝(other) 호출 E 0 · 선분기 B2 0' $fcSwitchShape `
+    ('Complete-AbyssRetrySelection:1/1[{0}] · Complete-AbyssOtherSelection:1/0[] · Invoke-AbyssHandoffStart:1/0[]' -f $fcModeCondition.Replace(' -eq ', ' -ne '))
+
+# FC-S14 - 이름 있는 인자 ⊆ 피호출 param (전체 이름 - 대기 · 순수 판정 · Step 이 모두 단순 함수라 모르는 이름이 오류 없이 $args 로 사라짐 - PS 5.1 실측)
+$fcCallees = @('Wait-AbyssReentry', 'Resolve-AbyssReentryVerdict', 'Step-AbyssFieldSettle')
+$fcUnknownNames = @(foreach ($fcCallee in $fcCallees) {
+        $fcDeclared = @((Get-WorkerFunction $fcCallee).Body.ParamBlock.Parameters | ForEach-Object { [string]$_.Name.VariablePath.UserPath })
+        foreach ($fcCall in @(Get-CommandNodes -Node $workerAst -Name $fcCallee)) {
+            foreach ($fcParam in @($fcCall.CommandElements | Where-Object { $_ -is [CommandParameterAst] })) {
+                if (-not ($fcDeclared -contains $fcParam.ParameterName)) { '{0}@{1}: -{2}' -f $fcCallee, (Get-EnclosingFunctionName $fcCall), $fcParam.ParameterName }
+            }
+        }
+    })
+$fcCallCount = (@(foreach ($fcCallee in $fcCallees) { '{0} {1}' -f $fcCallee, @(Get-CommandNodes -Node $workerAst -Name $fcCallee).Count })) -join ' · '
+Check-True ('FC-S14 이름 있는 인자 ⊆ 피호출 param(전체 이름) - 호출 {0}' -f $fcCallCount) ($fcUnknownNames.Count -eq 0) ($fcUnknownNames -join ' · ')
+
+# FC-S17 - 'field-cancelled' 철자 정확히 3곳(판정 return · 대기 확정 줄 if · 끝(retry) 갈래) · 'field' 와 'cancel' 이 함께 든 다른 문자열 0 (한 곳만 틀리면 끝 갈래에 안 걸리고 재클릭 꼬리를 탐)
+$fcSpellNodes = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -ceq 'field-cancelled') }, $true))
+$fcSpellOwners = (@($fcSpellNodes | ForEach-Object { Get-EnclosingFunctionName $_ } | Sort-Object -CaseSensitive)) -join ','
+$fcLookalike = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -cne 'field-cancelled') -and ([string]$candidate.Value).Contains('field') -and ([string]$candidate.Value).Contains('cancel') }, $true) | ForEach-Object { [string]$_.Value })
+Check-Equal "FC-S17 'field-cancelled' 철자 3곳 · 닮은 글자 0" ('{0} [{1}] · 닮은 글자 [{2}]' -f $fcSpellNodes.Count, $fcSpellOwners, ($fcLookalike -join ',')) `
+    ('3 [{0}] · 닮은 글자 []' -f ((@('Complete-AbyssRetrySelection', 'Resolve-AbyssReentryVerdict', 'Wait-AbyssReentry') | Sort-Object -CaseSensitive) -join ','))
+
+# FC-S18 - 계측 변수(run* · entry*)가 대기 함수의 if · while 조건 · Step · ⑨ 인자에 0 (로그 전용 - 필드 확정은 Step 상태만. 계측 $runField 는 끊김에서 안 비워짐)
+$fcGuardNodes = @($waiterNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -or ($candidate -is [WhileStatementAst]) }, $true) | ForEach-Object {
+        if ($_ -is [IfStatementAst]) { foreach ($fcClause in $_.Clauses) { $fcClause.Item1 } } else { $_.Condition }
+    })
+$fcGuardNodes += @($fcStepCalls) + @($fcVerdictCalls)
+$fcRunVariables = @($fcGuardNodes | ForEach-Object { $_.FindAll({ param($candidate) $candidate -is [VariableExpressionAst] }, $true) } | ForEach-Object { [string]$_.VariablePath.UserPath } |
+    Where-Object { ($_ -like 'run*') -or ($_ -like 'entry*') } | Sort-Object -Unique)
+Check-Equal 'FC-S18 계측 변수(run* · entry*) - 대기 함수의 if · while 조건 · Step · ⑨ 인자에 0' ('[{0}]' -f ($fcRunVariables -join ',')) '[]'
+
+# FC-S20 - Step-AbyssFieldSettle 호출 자리 = 선분기 1 · 재입장 대기 1 정확히
+$fcStepOwners = (@(Get-CommandNodes -Node $workerAst -Name 'Step-AbyssFieldSettle' | ForEach-Object { Get-EnclosingFunctionName $_ } | Sort-Object -CaseSensitive)) -join ','
+Check-Equal 'FC-S20 Step-AbyssFieldSettle 호출 자리 = 선분기 1 · 재입장 대기 1' $fcStepOwners ((@('Invoke-AbyssHandoffStart', 'Wait-AbyssReentry') | Sort-Object -CaseSensitive) -join ',')
+
+# FC-S21 (2.2-4a) - ⑤ 판독 if(try 안 · ⑥ 앞) 차례: 하단 · 패널 · HUD · 추적기 · 두 판독 초기화 · 필드 결과 if(앞 분류 = 세 신호 없는 분류 · 'field' 일 때 선택 화면 → 거짓이면 메뉴)
+$fcWaiterTry = @($fcWaiterWhile.Body.Statements | Where-Object { $_ -is [TryStatementAst] })
+$fcReadIf = @($(if ($fcWaiterTry.Count -eq 1) { @($fcWaiterTry[0].Body.Statements | Where-Object { ($_ -is [IfStatementAst]) -and ((Get-NodeCode $_.Clauses[0].Item1) -ceq '(-not $sweepStarved) -and (-not $turnRecovered)') }) }))
+$fcReadShape = '(try {0} · ⑤ 판독 if {1})' -f $fcWaiterTry.Count, $fcReadIf.Count
+if ($fcReadIf.Count -eq 1) {
+    $fcReadStatements = @($fcReadIf[0].Clauses[0].Item2.Statements)
+    $fcSwitchIf = @($fcReadStatements | Where-Object { ($_ -is [IfStatementAst]) -and ((Get-NodeCode $_.Clauses[0].Item1) -ceq '$ReportFieldReturn') })
+    $fcSwitchBody = $(if ($fcSwitchIf.Count -eq 1) { (@($fcSwitchIf[0].Clauses[0].Item2.Statements | ForEach-Object { Get-NodeCode $_ })) -join ' ; ' } else { '(필드 결과 if {0})' -f $fcSwitchIf.Count })
+    $fcReadShape = '차례=[{0}] · 필드 결과 if=[{1}]' -f ((@($fcReadStatements | ForEach-Object { Get-StatementHead $_ })) -join ','), $fcSwitchBody
+}
+Check-Equal "FC-S21 ⑤ 판독 if(try 안) 차례 · 필드 결과 if(앞 분류 · 'field' 일 때 선택 화면 → 메뉴 · 상세 없음)" $fcReadShape `
+    ("차례=[promptNow,bottomText,panelKind,hudNow,questNow,selectionNow,menuNow,if `$ReportFieldReturn] · 필드 결과 if=[`$earlyScreen = Resolve-AbyssHandoffStartScreen -PromptVisible `$promptNow -BottomText `$bottomText " +
+        "-PanelKind `$panelKind -HudVisible `$hudNow -InDungeonQuest `$questNow ; if (`$earlyScreen -eq 'field') { `$selectionNow = Test-AbyssSelectionScreen -Game `$Game if (-not `$selectionNow) { `$menuNow = Test-AbyssMenu -Game `$Game } }]")
 
 # ── §9 ⑤b3 '다른 던전 가기' 대기 · 끝 함수 - 행(대기 66 · 끝 33) · 정적(R6-P · R5-P · SEL · WAIT 의 other 몫 22) (구현 명세 ⑤b3 2.2 · 3.1 · 3.2 - 비교는 -ceq) ──
 # 대상(구현 명세 ⑤b3 1.2 · 1.3): Wait-AbyssOtherSelection(대기 - 결과 @{ Result; Sends; LastKind }) · Complete-AbyssOtherSelection(끝 - ReadySelection · 정지 끝 B ·
@@ -4215,7 +4815,7 @@ $RETRY_RECHECK_WAIT_MS = Get-RetryRecheckWaitMs (Get-WorkerFunction 'Wait-AbyssO
 if ($null -eq $RETRY_RECHECK_WAIT_MS) { "FAIL 준비: '다른 던전 가기' 대기 ⑫ 의 짝 재판독 대기를 캡처하지 못했습니다 (if (`$pairRecheck) 하나 · Start-Sleep 상수 하나 - 명세 3.2 'RC1a 간격 기대의 출처')"; exit 1 }
 
 # 하니스 판독 비용(초) - 시제품 연기 시험(⑤b4 mod5 하니스)의 모의 비용과 같은 값입니다. 행의 시각표 · RC1a 의 회전 비용 기대 · 경계 행의 마감 판정 시각이 이 표 하나를 씁니다
-$RETRY_COST = @{ sweep = 0.1; prompt = 0.05; panel = 0.08; hud = 0.04; quest = 0.02; selection = 0.06; pair = 0.04; focus = 0.5; click = 0.45 }
+$RETRY_COST = @{ sweep = 0.1; prompt = 0.05; panel = 0.08; hud = 0.04; quest = 0.02; selection = 0.06; menu = 0.06; pair = 0.04; focus = 0.5; click = 0.45 }   # menu = 구현 단위 5b-8 2.2-4a(선택 화면과 같은 하니스 값)
 # 클릭 루프 첫 시도의 재판단 시각(진입부터) = 스윕 → 짝 → HUD(거짓이면 추적기 0) → 패널 → 포커스 (기록 · 재검사 · 재판단은 비용 0) - K 행의 지정 시각을 이 값에서 잽니다
 $RETRY_FIRST_JUDGE = $RETRY_COST.sweep + $RETRY_COST.pair + $RETRY_COST.hud + $RETRY_COST.panel + $RETRY_COST.focus
 # RC1a 의 회전 비용 = 짝 판독 → HUD · 패널 → [⑫ 재판독 대기] → 다음 회전 스윕 → 짝 판독 (짝 판독 시각은 판독 시작 · 양보 검사와 줄은 비용 0)
@@ -4257,6 +4857,14 @@ $RETRY_IH_BODY = "[완료] '다시 하기' 재입장 확인 - 직전 판을 회�
 $RETRY_IH_LINE = $RETRY_IH_BODY + (' [terminal=InsideHandoff nonce={0}]' -f $RETRY_NONCE)
 $RETRY_NONE_SOLO = "[완료] '다시 하기' 뒤 ${timeoutEntry}초 안에 입장을 확인하지 못해 정지합니다 (누르지 않음 - 늦게 입장하면 입장 직후 키 없이 던전에 들어갈 수 있으니 화면을 확인해 주세요)"
 $RETRY_NONE_PARTY = "[완료] '다시 하기' 뒤 ${timeoutPartyMatch}초 안에 입장을 확인하지 못했습니다 - 매칭 취소·나가기 없이 정지합니다 (매칭이 끝나면 입장 직후 키 없이 던전에 들어갈 수 있으니 화면을 확인해 주세요)"
+# 구현 단위 5b-8 - 재매칭 ESC 취소 정지 줄(끝(retry) 원문) · 재입장 대기의 재매칭 패널 확인 안내(원문)를 소스에서 캡처합니다(규칙 9). 정확히 하나가 아니면 준비를 멈추지 않고
+#   '(소스에 없음 N)' 으로 두고 정적 FC-S15 가 FAIL 로 알립니다 - 고치기 전 워커에서 이 절을 돌리면 FC-X 행이 지금 동작을 실패 줄에 남깁니다(고치기 전 재현)
+$retryFieldDoneNodes = @((Get-WorkerFunction 'Complete-AbyssRetrySelection').FindAll({ param($candidate) (($candidate -is [StringConstantExpressionAst]) -or ($candidate -is [ExpandableStringExpressionAst])) -and
+            ([string]$candidate.Value).StartsWith('[완료] 재매칭이 취소돼 필드로', [StringComparison]::Ordinal) }, $true))
+$RETRY_DONE_FIELD_CANCELLED = $(if ($retryFieldDoneNodes.Count -eq 1) { [string]$retryFieldDoneNodes[0].Value } else { '(소스에 없음 {0})' -f $retryFieldDoneNodes.Count })
+$retryPanelNoticeNodes = @((Get-WorkerFunction 'Wait-AbyssReentry').FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and
+            ([string]$candidate.Value).StartsWith('[어비스] 재매칭 패널 확인', [StringComparison]::Ordinal) }, $true))
+$RETRY_LINE_PANEL_NOTICE = $(if ($retryPanelNoticeNodes.Count -eq 1) { [string]$retryPanelNoticeNodes[0].Value } else { '(소스에 없음 {0})' -f $retryPanelNoticeNodes.Count })
 # 단계 쓰기 원문이 저장 실패에 남기는 [경고] 줄(설계 R2 3.6 낱말 - 'expect-failed' = 기록 실패 · 'locked' = 파일 사용 중. 글자는 test_abyss_journal_store.ps1 의
 #   $REENTERED_FAIL_FORMAT · $RETRY_CLICKED_FAIL_FORMAT 과 같음) - W13(reentered 'expect-failed' 주입) · RC12(retry-clicked 'locked' 주입)
 $RETRY_REENTERED_FAIL_LINE = '[경고] 재입장 완료 기록을 저장하지 못했습니다 (기록 실패) - 재입장 완료 줄을 남기고 이어 갑니다'
@@ -4310,12 +4918,14 @@ Invoke-Expression $retryNoneDefinition
 
 # 화면 약어 → 판독값 (명세 2.2). 하단 판독문은 §4 $SCREEN_TABLE 의 실측 문자열 그대로(R · M · I · U)이거나 그 문자열에서 조각 하나를 뺀 변형입니다
 #   (Rr = R 의 '다세하기' 뺌 - 3버튼 서명 참 · '다시 하기' 점 없음 · '다른 던전 가기' 점 있음). S = 선택 화면(보상 위 오버레이 - 하단 '' · §9 의 S 와 같음).
-#   Retry · Other = 그 판독의 두 점 있음(점은 §9 의 3버튼 점 - 09-18 보관 프레임). 클릭 루프 · 재입장 대기 · '다른 던전 가기' 대기가 한 표를 읽습니다
+#   Retry · Other = 그 판독의 두 점 있음(점은 §9 의 3버튼 점 - 09-18 보관 프레임). 클릭 루프 · 재입장 대기 · '다른 던전 가기' 대기가 한 표를 읽습니다.
+#   F = 필드 모양(HUD 만 - §4 F cap_210525_840 · 구현 단위 5b-8 FC-X 행)
 $RETRY_SCREENS = [ordered]@{
     'R'  = @{ Bottom = $SCREEN_TABLE['R'].Bottom; Retry = $true; Other = $true; Prompt = $false; Panel = 'none'; Hud = $false; Quest = $false; Selection = $false }
     'Rr' = @{ Bottom = $SCREEN_TABLE['R'].Bottom.Replace('다세하기', ''); Retry = $false; Other = $true; Prompt = $false; Panel = 'none'; Hud = $false; Quest = $false; Selection = $false }
     'M'  = @{ Bottom = $SCREEN_TABLE['M'].Bottom; Retry = $false; Other = $false; Prompt = $false; Panel = 'matching'; Hud = $false; Quest = $false; Selection = $false }
     'I'  = @{ Bottom = $SCREEN_TABLE['I'].Bottom; Retry = $false; Other = $false; Prompt = $false; Panel = 'none'; Hud = $true; Quest = $true; Selection = $false }
+    'F'  = @{ Bottom = $SCREEN_TABLE['F'].Bottom; Retry = $false; Other = $false; Prompt = $false; Panel = 'none'; Hud = $true; Quest = $false; Selection = $false }
     'U'  = @{ Bottom = $SCREEN_TABLE['U'].Bottom; Retry = $false; Other = $false; Prompt = $false; Panel = 'none'; Hud = $false; Quest = $false; Selection = $false }
     'S'  = @{ Bottom = ''; Retry = $false; Other = $false; Prompt = $false; Panel = 'none'; Hud = $false; Quest = $false; Selection = $true }
 }
@@ -4323,7 +4933,7 @@ $RETRY_RETRY_POINT = @{ X = $OTHER_WAIT_RETRY_POINT[0]; Y = $OTHER_WAIT_RETRY_PO
 $RETRY_OTHER_POINT = @{ X = [int]$OTHER_WAIT_DEFAULT_POINTS[0][1]; Y = [int]$OTHER_WAIT_DEFAULT_POINTS[0][2] }
 # 대응표 확인(준비 - 행이 가정하는 분류를 원문 분류 함수가 냄): 클릭 루프 · 재입장 대기 = Resolve-AbyssHandoffStartScreen(클릭 루프는 S 거짓 · 하단 = 짝 판독문) ·
 #   '다른 던전 가기' 대기 = Resolve-AbyssOtherWaitScreen
-$RETRY_SCREEN_KINDS = [ordered]@{ 'R' = 'reward3/reward3'; 'Rr' = 'reward3/reward3'; 'M' = 'matching/panel'; 'I' = 'inside/inside'; 'U' = 'unknown/unknown'; 'S' = 'unknown/selection' }
+$RETRY_SCREEN_KINDS = [ordered]@{ 'R' = 'reward3/reward3'; 'Rr' = 'reward3/reward3'; 'M' = 'matching/panel'; 'I' = 'inside/inside'; 'F' = 'field/field'; 'U' = 'unknown/unknown'; 'S' = 'unknown/selection' }
 $retryKindsActual = @(foreach ($retryScreenKey in $RETRY_SCREENS.Keys) {
         $retryScreenEntry = $RETRY_SCREENS[$retryScreenKey]
         '{0}={1}/{2}' -f $retryScreenKey, (Resolve-AbyssHandoffStartScreen -PromptVisible $false -BottomText $retryScreenEntry.Bottom -PanelKind $retryScreenEntry.Panel -HudVisible $retryScreenEntry.Hud -InDungeonQuest $retryScreenEntry.Quest),
@@ -4593,7 +5203,7 @@ function Get-RetryJournalProblems {
 function Invoke-RetryReentryCall {
     # Wait-AbyssReentry 감시 - 호출 기록(시각 · 한도 · 보고 · 문맥) · 행 결과 스텁(차례대로 - Advance 초만큼 시계 · SetF9 이면 예약) 또는 원문(이름 바꿔 올린 대기)
     param($Bound)
-    $reentryRecord = [pscustomobject]@{ T = (Get-VirtualElapsed); Limit = [int]$Bound['LimitSeconds']; Report = [bool]$Bound['ReportRewardReturn']; Context = [string]$Bound['Context']; Result = ''; End = $null }
+    $reentryRecord = [pscustomobject]@{ T = (Get-VirtualElapsed); Limit = [int]$Bound['LimitSeconds']; Report = [bool]$Bound['ReportRewardReturn']; ReportField = [bool]$Bound['ReportFieldReturn']; Context = [string]$Bound['Context']; Result = ''; End = $null }
     $script:retryReentryCalls.Add($reentryRecord)
     if ($null -ne $script:retryReentryStubs) {
         if ($script:retryReentryStubs.Count -lt 1) { throw 'TEST: 재입장 대기 결과 스텁이 모자랍니다' }
@@ -4703,6 +5313,7 @@ $RETRY_STUB_BODIES = [ordered]@{
     'Test-HomeEndEscHud'           = 'return (Invoke-RetryFlagStub -Name ''hud'' -Field ''Hud'')'
     'Test-InDungeonQuest'          = 'return (Invoke-RetryFlagStub -Name ''quest'' -Field ''Quest'')'
     'Test-AbyssSelectionScreen'    = 'return (Invoke-RetryFlagStub -Name ''selection'' -Field ''Selection'')'
+    'Test-AbyssMenu'               = 'return (Invoke-RetryFlagStub -Name ''menu'' -Field ''Menu'')'   # 구현 단위 5b-8 2.2-4a (필드 결과 켬의 필드 모양 회전만)
     'Get-AbyssPanelKind'           = 'return (Invoke-RetryPanelStub)'
     'Invoke-PurchasePopupSweep'    = 'return (Invoke-RetrySweepWrap -Game $Game)'
     'Click-GamePoint'              = 'Invoke-RetryClickStub -ReferenceX $ReferenceX -ReferenceY $ReferenceY'
@@ -4781,6 +5392,9 @@ function Reset-RetryRow {
     $script:safeStopFlagMock = [bool]$Spec.F9
     # ⓪ (행 입력 - 5b-5 의 실제 자리가 다시 돌림)
     $script:dungeonMode = $(if ($Spec.Mode) { [string]$Spec.Mode } else { 'solo' })
+    # 다시 하기 경로의 운용 전제 - 함께하기 판은 매칭이 늘 '우연한 만남'(Test-AbyssRetryRoute). 이 절이 도는 함수는 이 값을 읽지 않지만, 그 전제로 가드한 코드도 행이
+    #   실행하게 세웁니다(구현 리뷰 2/2 의 4/5 독립 검토 - 세우지 않던 판은 우연한 만남 가드 + 리터럴 없는 조건의 break · 추가 '[완료]' 줄 · 결과 재대입이 ④ 를 통과, 변이 M86~M88)
+    $script:abyssMatching = $(if ($script:dungeonMode -eq 'party') { '우연한 만남' } else { '' })
     $script:abyssRetryTimeVerdict = [string]$Spec.Verdict0
     $script:abyssRetryCommitted = $false
     $script:abyssRetryAttemptRecorded = [bool]$Spec.Recorded0
@@ -4871,17 +5485,23 @@ function Invoke-RetryRow {
         LastLines = @($rowLogs | Where-Object { $_.StartsWith("[어비스] '다시 하기' 직전 판단: 지정 시간 ", [StringComparison]::Ordinal) }).Count
         ContinueLines = @($rowLogs | Where-Object { $_.StartsWith('[어비스] 지정 시간 ', [StringComparison]::Ordinal) -and $_.Contains("전에 '다시 하기'로 이어 가기로 정했습니다") }).Count
         IhLines = @($rowLogs | Where-Object { $_.Contains('[terminal=InsideHandoff') }).Count
+        PanelLines = @($rowLogs | Where-Object { $_ -ceq $RETRY_LINE_PANEL_NOTICE }).Count                       # 구현 단위 5b-8 - 재매칭 패널 확인 안내
+        SettleLines = @($rowLogs | Where-Object { $_ -cmatch $SETTLE_PATTERN }).Count                             # 필드 확정 줄
+        DoneLines = @($rowLogs | Where-Object { $_.StartsWith('[완료]', [StringComparison]::Ordinal) }).Count      # '[완료]' 줄 총수(구현 리뷰 2/2 의 4/5 - 정지 끝은 정지 줄 하나)
+        Inputs = (Get-OtherEventCalls) + [int]$script:recordMockCalls['Click-ScreenPoint'] + [int]$script:recordMockCalls['Invoke-ClickUntil']   # 키 · 이벤트 정리 · 화면 좌표 클릭 · 클릭 반복(게임 좌표 클릭은 Clicks)
+        WaiterHud = @($script:retryReads | Where-Object { $_.InWaiter -and ($_.Name -eq 'hud') } | ForEach-Object { [pscustomobject]@{ T = [double]$_.T; Frame = [string]$_.Frame } })
     }
 }
 function Format-RetryRow {
     param($Row)
     $clickText = (@($Row.Clicks | ForEach-Object { '{0}({1},{2})@{3}' -f $_.Kind, $_.X, $_.Y, (Format-Seconds $_.T) }) -join ' ')
-    $reentryText = (@($Row.Reentry | ForEach-Object { '{0}/{1}{2}@{3}' -f $_.Result, $_.Limit, $(if ($_.Report) { '(보고)' } else { '' }), (Format-Seconds $_.T) }) -join ' ')
+    $reentryText = (@($Row.Reentry | ForEach-Object { '{0}/{1}{2}{3}@{4}' -f $_.Result, $_.Limit, $(if ($_.Report) { '(보고)' } else { '' }), $(if ($_.ReportField) { '(필드)' } else { '' }), (Format-Seconds $_.T) }) -join ' ')
     $eventText = (@($Row.Events | Select-Object -First 24 | ForEach-Object { '{0}{1}' -f $_.Kind, $(if ($_.InClick) { '' } else { '°' }) }) -join ',')
-    return ('exit={0} 오류=[{1}] 반환=[{2}] 클릭 루프=[{3}|{4}|{5}] T={6} 클릭=[{7}] retry 시도={8} 기록 a/c/r={9}/{10}/{11} 재입장 대기=[{12}] other 대기={13} Dg={14} 재판단={15} 진단={16} 헬퍼={17} 복귀=[{18}] 소비={19} 예약 끝={20} 양보={21} 탐침={22} 안전={23} 짝 판독=[{24}] 첫 줄={25} 짝 없음 줄={26} 사건=[{27}] 마지막=[{28}] 완료 기록=[{29}]' -f
+    return ('exit={0} 오류=[{1}] 반환=[{2}] 클릭 루프=[{3}|{4}|{5}] T={6} 클릭=[{7}] retry 시도={8} 기록 a/c/r={9}/{10}/{11} 재입장 대기=[{12}] other 대기={13} Dg={14} 재판단={15} 진단={16} 헬퍼={17} 복귀=[{18}] 소비={19} 예약 끝={20} 양보={21} 탐침={22} 안전={23} 짝 판독=[{24}] 첫 줄={25} 짝 없음 줄={26} 사건=[{27}] 마지막=[{28}] 완료 기록=[{29}] [완료] 줄={30} 입력={31} 패널 줄={32} 확정 줄={33}' -f
         $Row.Exit, $Row.Error, $Row.Return, $Row.Click, $Row.ClickLast, $Row.Shape, (Format-Seconds $Row.T), $clickText, $Row.RetryTries, $Row.Attempts, $Row.Clickeds, $Row.Reentereds,
         $reentryText, $Row.OtherWaits, $Row.DgCalls, $Row.UpdateCalls, $Row.Diags, $Row.Helper, $Row.Return2, $Row.Removed, $Row.FlagEnd, $Row.Yields, $Row.Probes, $Row.Safe,
-        ((@($Row.PairTimes | Select-Object -First 14 | ForEach-Object { Format-Seconds $_ })) -join ' '), $Row.MissFirst, $Row.MissEnd, $eventText, $Row.Last, $Row.JournalText)
+        ((@($Row.PairTimes | Select-Object -First 14 | ForEach-Object { Format-Seconds $_ })) -join ' '), $Row.MissFirst, $Row.MissEnd, $eventText, $Row.Last, $Row.JournalText,
+        $Row.DoneLines, $Row.Inputs, $Row.PanelLines, $Row.SettleLines)   # 뒤 넷 - 구현 단위 5b-8 행 결과(구현 리뷰 2/2 의 4/5 독립 검토 - 실패 줄에서 원인이 보이게)
 }
 function Get-RetryClickText { param($Row) return ((@($Row.Clicks | ForEach-Object { '{0}({1},{2})' -f $_.Kind, $_.X, $_.Y })) -join ',') }
 function Get-RetryFirstClick { param($Row, [string]$Kind = 'retry') $kindClicks = @($Row.Clicks | Where-Object { $_.Kind -eq $Kind }); if ($kindClicks.Count -lt 1) { return [double]-1 }; return [double]$kindClicks[0].T }
@@ -4899,6 +5519,26 @@ function Test-RetryDeadlineTurnPair {
     $beforeLast = [double]$clickPairTimes[$clickPairTimes.Count - 2] + $RETRY_TURN_CHECK_OFFSET
     $lastCheck = [double]$clickPairTimes[$clickPairTimes.Count - 1] + $RETRY_TURN_CHECK_OFFSET
     return (($beforeLast -lt ($RETRY_L - $TIME_EPSILON)) -and ($lastCheck -ge ($RETRY_L - $TIME_EPSILON)))
+}
+# 구현 단위 5b-8 FC-X 행 도움 - 첫 retry 전송 시각(행 전제 - 첫 시도 재판단 + 클릭 비용 · 행이 Get-RetryFirstClick 으로 확인) · 10-28 1-I ② 1차 판(20:55:48 '다시 하기' -
+#   run_20261028_h21m01s11.log:44-52)의 조작 양보 셋(+2~+5 · +9~+13 · +21~+36초)을 전송 기준 조작 창으로
+$RETRY_FIELD_CLICK_AT = $RETRY_FIRST_JUDGE + $RETRY_COST.click
+$RETRY_FIELD_INCIDENT_ACTIVE = @(@(($RETRY_FIELD_CLICK_AT + 2), ($RETRY_FIELD_CLICK_AT + 5)), @(($RETRY_FIELD_CLICK_AT + 9), ($RETRY_FIELD_CLICK_AT + 13)), @(($RETRY_FIELD_CLICK_AT + 21), ($RETRY_FIELD_CLICK_AT + 36)))
+function Test-RetryFieldSettleLine {
+    # 필드 확정 줄 대조: 줄 하나 · 꼴 · W = 소스 캡처 · 표본 수 = 대기 함수 F 화면 HUD 판독 중 After 뒤 것 · 첫 표본부터 초 = 그 연속 첫 · 끝 HUD 판독 시각 차(회전 안 HUD 앞 판독 비용이
+    #   같아 회전 시작 차와 같음 - 한 자리 반올림 0.05 안) · 끝 표본에서 처음 W 이상(끝 앞 표본은 W 미만)
+    param($Row, [double]$After = -1)
+    $settleLines = @($Row.Logs | Where-Object { $_ -cmatch $SETTLE_PATTERN })
+    if ($settleLines.Count -ne 1) { return $false }
+    $settleMatch = [regex]::Match([string]$settleLines[0], $SETTLE_PATTERN)
+    $fieldHudTimes = @($Row.WaiterHud | Where-Object { ($_.Frame -ceq 'F') -and ($_.T -ge ($After - $TIME_EPSILON)) } | ForEach-Object { [double]$_.T })
+    if ($fieldHudTimes.Count -lt 2) { return $false }
+    $spanLast = $fieldHudTimes[$fieldHudTimes.Count - 1] - $fieldHudTimes[0]
+    $spanBefore = $fieldHudTimes[$fieldHudTimes.Count - 2] - $fieldHudTimes[0]
+    $settleWidth = [double]::Parse($settleMatch.Groups['w'].Value, [Globalization.CultureInfo]::InvariantCulture)
+    $settleSpanText = [double]::Parse($settleMatch.Groups['s'].Value, [Globalization.CultureInfo]::InvariantCulture)
+    return (([Math]::Abs($settleWidth - [double]$memberFieldSettleSeconds) -lt $TIME_EPSILON) -and ([int]$settleMatch.Groups['n'].Value -eq $fieldHudTimes.Count) -and
+        ([Math]::Abs($settleSpanText - $spanLast) -le (0.05 + $TIME_EPSILON)) -and ($spanLast -ge ($memberFieldSettleSeconds - $TIME_EPSILON)) -and ($spanBefore -lt ($memberFieldSettleSeconds - $TIME_EPSILON)))
 }
 function Get-RetryEventOrder {
     # 클릭 루프 안 첫 시도의 사건 차례 (focus · attempt · safecheck · update · click 의 첫 등장 차례)
@@ -5136,14 +5776,14 @@ $RETRY_ROWS = [ordered]@{
         Spec = @{ Timeline = @(,@(0, 'R')); F9 = $true; Until = 1000; Verdict0 = 'continue' }
         Expect = { param($Row) ($Row.Exit -ceq '') -and ($Row.Error -ceq '') -and ($Row.Return -ceq 'safe-stop') -and ($Row.Last -ceq $RETRY_LINE_SAFE) -and ($Row.SafeLines -eq 1) -and ($Row.Removed -eq 0) -and $Row.FlagEnd -and
             ($Row.OtherWaits -eq 0) -and ($Row.LastLines -eq 0) -and ($Row.ContinueLines -eq 0) -and ($Row.UpdateCalls -eq 0) -and ($Row.RetrySends -eq 0) } }
-    'RC5a'   = @{ Desc = "모드 예산 - 호출 B · 혼자하기 → -LimitSeconds = `$timeoutEntry(소스 캡처)"; Spec = @{ Timeline = @(,@(0, 'R')); ReentryStubs = @(, $RETRY_STUB_ENTERED) }
-        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutEntry) -and @($Row.Reentry)[0].Report } }
-    'RC5b'   = @{ Desc = "모드 예산 - 호출 B · 우연한 만남 → -LimitSeconds = `$timeoutPartyMatch(소스 캡처)"; Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); ReentryStubs = @(, $RETRY_STUB_ENTERED) }
-        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutPartyMatch) -and @($Row.Reentry)[0].Report } }
+    'RC5a'   = @{ Desc = "모드 예산 - 호출 B · 혼자하기 → -LimitSeconds = `$timeoutEntry(소스 캡처) · 필드 결과 끔(5b-8)"; Spec = @{ Timeline = @(,@(0, 'R')); ReentryStubs = @(, $RETRY_STUB_ENTERED) }
+        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutEntry) -and @($Row.Reentry)[0].Report -and (-not @($Row.Reentry)[0].ReportField) } }
+    'RC5b'   = @{ Desc = "모드 예산 - 호출 B · 우연한 만남 → -LimitSeconds = `$timeoutPartyMatch(소스 캡처) · 필드 결과 켬(5b-8)"; Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); ReentryStubs = @(, $RETRY_STUB_ENTERED) }
+        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutPartyMatch) -and @($Row.Reentry)[0].Report -and @($Row.Reentry)[0].ReportField } }
     'RC5c'   = @{ Desc = "모드 예산 - 호출 E · 혼자하기 → `$timeoutEntry · 보고 끔"; Spec = @{ Entry = 'other'; Recorded0 = $true; OtherStub = $RETRY_OTHER_NOPAIR; HelperResult = 'matching'; ReentryStubs = @(, $RETRY_STUB_ENTERED) }
-        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutEntry) -and (-not @($Row.Reentry)[0].Report) } }
+        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutEntry) -and (-not @($Row.Reentry)[0].Report) -and (-not @($Row.Reentry)[0].ReportField) } }
     'RC5d'   = @{ Desc = "모드 예산 - 호출 E · 우연한 만남 → `$timeoutPartyMatch · 보고 끔"; Spec = @{ Mode = 'party'; Entry = 'other'; Recorded0 = $true; OtherStub = $RETRY_OTHER_NOPAIR; HelperResult = 'matching'; ReentryStubs = @(, $RETRY_STUB_ENTERED) }
-        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutPartyMatch) -and (-not @($Row.Reentry)[0].Report) } }
+        Expect = { param($Row) (@($Row.Reentry).Count -eq 1) -and (@($Row.Reentry)[0].Limit -eq $timeoutPartyMatch) -and (-not @($Row.Reentry)[0].Report) -and (-not @($Row.Reentry)[0].ReportField) } }
     'RC6'    = @{ Desc = '첫 시도 사건 차례 = 포커스 < 기록 < 안전 중지 확인 < 재판단 < 클릭 (R3 S6 · R5 2.3 ④)'; Spec = @{ Timeline = @(,@(0, 'R')); Until = 60; Verdict0 = 'continue'; ReentryStubs = @(, $RETRY_STUB_ENTERED) }
         Expect = { param($Row) (Get-RetryEventOrder $Row) -ceq 'focus<attempt<safecheck<update<click' } }
     'RC7'    = @{ Desc = "원문 대기 · 'reclick' 둘째 호출의 짝 판독 2 · 3 번째 = Rr → 그 호출 안 결측 두 번(첫 줄 1 · 짝 없음 줄 1) → 'no-pair' → 폴백 ① · 코드 0 · 그 호출의 기록 · 재판단 0"
@@ -5160,6 +5800,48 @@ $RETRY_ROWS = [ordered]@{
         Spec = @{ Timeline = @(,@(0, 'R')); CursorMisses = 3; OtherStub = $RETRY_OTHER_NOPAIR; HelperResult = 'matching'; ReentryStubs = @(, $RETRY_STUB_ENTERED) }
         Expect = { param($Row) ($Row.Exit -ceq '__EXIT__0') -and ($Row.Last -ceq $RETRY_IH_LINE) -and ($Row.CursorLines -eq 1) -and ($Row.RetrySends -eq 0) -and ($Row.Helper -eq 1) -and
             (@($Row.Reentry).Count -eq 1) -and (-not @($Row.Reentry)[0].Report) -and ($Row.Reentereds -eq 1) -and (Test-RetryNonce $Row) } }
+    # 구현 단위 5b-8 FC-X - 재매칭 패널 ESC 취소 → 필드 확정 'field-cancelled' (명세 5b-8 1 · 2.3 · 3.4). 원문 대기 행의 W 는 소스 캡처, 필드 확정 줄의 표본 수 · 초는 판독 기록에서 셈
+    #   'field-cancelled' 끝 행(X1 · X2 · X3 · X5 · X7)은 '[완료]' 줄 1 · 입력(키 · 이벤트 정리 · 화면 좌표 클릭 · 클릭 반복) 0 도 봅니다 - 1절 4항 끝(구현 리뷰 2/2 의 4/5 · 변이 M83 · M85)
+    'FC-X1'  = @{ Desc = "(K15b 꼴) commit 뒤 호출 B 'field-cancelled' → 입력 0(클릭 · 키 · 이벤트 정리) · 정지 줄(소스 캡처 - '[완료]' 줄은 그 하나) · 코드 4 · 시간 줄 ③ 0 · 11 0 · '다른 던전 가기' 대기 0 · 진단 · 헬퍼 · 복귀 0 · 예약 소비 0 · 필드 결과 켬(우연한 만남)"
+        Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); Until = 1000; Verdict0 = 'continue'; ReentryStubs = @(, @{ Result = 'field-cancelled'; LastKind = 'field'; PanelSeen = $true }) }
+        Expect = { param($Row) ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_DONE_FIELD_CANCELLED) -and ($Row.DoneLines -eq 1) -and ($Row.Inputs -eq 0) -and ($Row.ContinueLines -eq 0) -and ($Row.IhLines -eq 0) -and ($Row.OtherWaits -eq 0) -and
+            ($Row.OtherSends -eq 0) -and ($Row.RetrySends -eq 1) -and ($Row.Reclicks -eq 0) -and ($Row.Diags -eq 0) -and ($Row.Helper -eq 0) -and ($Row.Return2 -ceq '') -and ($Row.Removed -eq 0) -and
+            (@($Row.Reentry).Count -eq 1) -and @($Row.Reentry)[0].Report -and @($Row.Reentry)[0].ReportField } }
+    'FC-X2'  = @{ Desc = "(U-5b8-1 · 1-I ② 꼴) 원문 대기 · 우연한 만남 · 재매칭 패널(M) → 로딩(U) → 필드 모양(F) 지속 → 필드 확정(W 소스 캡처 - 첫 F 표본부터 W 를 처음 넘긴 회전) 'field-cancelled' → 입력 0 · 정지 줄 · 코드 4 · retry 전송 총 1 · other 0 · 진단 0 · 패널 확인 줄 1 · 필드 확정 줄 1(마지막 앞 줄)"
+        Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); RetrySend = @{ 1 = @(@(0.5, 'M'), @(4.5, 'U'), @(9.5, 'F')) } }
+        Expect = { param($Row) $reentryCall = @($Row.Reentry)[0]; $logList = @($Row.Logs)
+            ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_DONE_FIELD_CANCELLED) -and ($Row.DoneLines -eq 1) -and ($Row.Inputs -eq 0) -and ($Row.RetrySends -eq 1) -and ($Row.OtherSends -eq 0) -and ($Row.OtherWaits -eq 0) -and ($Row.Reclicks -eq 0) -and
+            ($Row.Diags -eq 0) -and ($Row.Helper -eq 0) -and ($Row.Return2 -ceq '') -and ($Row.Removed -eq 0) -and ($Row.IhLines -eq 0) -and ($Row.ContinueLines -eq 0) -and (@($Row.Reentry).Count -eq 1) -and
+            ($reentryCall.Result -ceq 'field-cancelled') -and $reentryCall.Report -and $reentryCall.ReportField -and ($reentryCall.Limit -eq $timeoutPartyMatch) -and ($Row.PanelLines -eq 1) -and ($Row.SettleLines -eq 1) -and
+            ($logList.Count -ge 2) -and ([string]$logList[$logList.Count - 2] -cmatch $SETTLE_PATTERN) -and (Test-RetryFieldSettleLine $Row) } }
+    'FC-X3'  = @{ Desc = "FC-X2 들머리 + 전송 뒤 예약(F9 - WA-X3′ 꼴) → 끝 같음('field-cancelled' 정지 줄 · 코드 4) · 예약 그대로(정지 끝은 소비하지 않음 - GUI 가 코드 4 정지에서 지움) · 안전 중지 확인 줄 0"
+        Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); RetrySend = @{ 1 = @(@(0.5, 'M'), @(4.5, 'U'), @(9.5, 'F')) }; F9OnRetrySend = 1 }
+        Expect = { param($Row) ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_DONE_FIELD_CANCELLED) -and ($Row.DoneLines -eq 1) -and ($Row.Inputs -eq 0) -and ($Row.RetrySends -eq 1) -and ($Row.OtherSends -eq 0) -and ($Row.Removed -eq 0) -and $Row.FlagEnd -and
+            ($Row.Diags -eq 0) -and (@($Row.Logs | Where-Object { $_.StartsWith('[완료] 안전 중지 예약 확인', [StringComparison]::Ordinal) }).Count -eq 0) -and (@($Row.Reentry)[0].Result -ceq 'field-cancelled') } }
+    'FC-X4'  = @{ Desc = "(U-5b8-1 혼자하기 제외) 원문 대기 · 혼자하기 · 전송 뒤 로딩(U) → 필드 모양(F) 지속 → 필드 결과 끔 → 모드 예산(`$timeoutEntry 소스 캡처) 뒤 'timeout' · 'none' 행 혼자하기 문구 · 진단 1 · 필드 확정 줄 0 · 패널 확인 줄 0"
+        Spec = @{ Timeline = @(,@(0, 'R')); RetrySend = @{ 1 = @(@(1, 'U'), @(4, 'F')) } }
+        Expect = { param($Row) $reentryCall = @($Row.Reentry)[0]; $waitSeconds = [double]$reentryCall.End - [double]$reentryCall.T
+            ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_NONE_SOLO) -and ($Row.Diags -eq 1) -and ($Row.RetrySends -eq 1) -and ($Row.OtherSends -eq 0) -and (@($Row.Reentry).Count -eq 1) -and
+            ($reentryCall.Result -ceq 'timeout') -and $reentryCall.Report -and (-not $reentryCall.ReportField) -and ($reentryCall.Limit -eq $timeoutEntry) -and
+            ($waitSeconds -ge ($timeoutEntry - $TIME_EPSILON)) -and ($waitSeconds -lt ($timeoutEntry + 2)) -and ($Row.SettleLines -eq 0) -and ($Row.PanelLines -eq 0) } }
+    'FC-X5'  = @{ Desc = "(U-5b8-1 '패널 관측과 무관' · 근거 0.3 ① 패널을 못 본 ESC) 원문 대기 · 우연한 만남 · 전송 뒤 패널 표본 없이 로딩(U) → 필드 모양(F) 지속 → 'field-cancelled' · 같은 끝 · 패널 확인 줄 0 · 필드 확정 줄 1"
+        Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); RetrySend = @{ 1 = @(@(0.5, 'U'), @(2.5, 'F')) } }
+        Expect = { param($Row) $reentryCall = @($Row.Reentry)[0]
+            ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_DONE_FIELD_CANCELLED) -and ($Row.DoneLines -eq 1) -and ($Row.Inputs -eq 0) -and ($reentryCall.Result -ceq 'field-cancelled') -and ($Row.PanelLines -eq 0) -and ($Row.SettleLines -eq 1) -and
+            ($Row.RetrySends -eq 1) -and ($Row.OtherSends -eq 0) -and ($Row.Diags -eq 0) -and (Test-RetryFieldSettleLine $Row) } }
+    'FC-X6'  = @{ Desc = "(명세 0.4 보고 끔 호출 그대로) 폴백 ② 호출 E · 우연한 만남 · 원문 대기 · 재매칭 패널(M) → 필드 모양(F) 지속 → 필드 결과 끔이라 확정이 결론 아님 → 모드 예산(`$timeoutPartyMatch) 뒤 'timeout' · 'none' 행 우연한 만남 문구 · 진단 1 · 패널 확인 줄 0(보고 끔) · 필드 확정 줄 0"
+        Spec = @{ Mode = 'party'; Entry = 'other'; Recorded0 = $true; OtherStub = $RETRY_OTHER_NOPAIR; HelperResult = 'matching'; Timeline = @(@(0, 'M'), @(5, 'F')) }
+        Expect = { param($Row) $reentryCall = @($Row.Reentry)[0]
+            ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_NONE_PARTY) -and ($Row.Diags -eq 1) -and (@($Row.Reentry).Count -eq 1) -and (-not $reentryCall.Report) -and (-not $reentryCall.ReportField) -and
+            ($reentryCall.Result -ceq 'timeout') -and (([double]$reentryCall.End - [double]$reentryCall.T) -ge ($timeoutPartyMatch - $TIME_EPSILON)) -and ($Row.PanelLines -eq 0) -and ($Row.SettleLines -eq 0) } }
+    'FC-X7'  = @{ Desc = "(1-I ② 1차 재현 - 사고 케이스 · run_20261028_h21m01s11.log:44-54) 패널 +0.3 · 로딩 +3 · 필드 모양 +8 + 그 판의 조작 양보 셋(+2~+5 · +9~+13 · +21~+36) → ② 양보가 필드 연속을 끊고 양보 끝부터 다시 W → 'field-cancelled' (양보 시간은 W 에 들지 않음 - 규칙 4). 고치기 전 워커는 300 + 양보 합 뒤 'none' 행(실기 323초 꼴)"
+        Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); RetrySend = @{ 1 = @(@(0.3, 'M'), @(3, 'U'), @(8, 'F')) }; Active = $RETRY_FIELD_INCIDENT_ACTIVE }
+        Expect = { param($Row) $reentryCall = @($Row.Reentry)[0]; $endAt = [double]$reentryCall.End
+            $activeEnds = @($RETRY_FIELD_INCIDENT_ACTIVE | Where-Object { [double]$_[0] -lt $endAt } | ForEach-Object { [double]$_[1] })
+            $lastActiveEnd = $(if ($activeEnds.Count -gt 0) { [double]($activeEnds | Measure-Object -Maximum).Maximum } else { [double]-1 })
+            ([Math]::Abs((Get-RetryFirstClick $Row) - $RETRY_FIELD_CLICK_AT) -lt $TIME_EPSILON) -and ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_DONE_FIELD_CANCELLED) -and ($Row.DoneLines -eq 1) -and ($Row.Inputs -eq 0) -and
+            ($reentryCall.Result -ceq 'field-cancelled') -and ($Row.Yields -eq $activeEnds.Count) -and (($endAt - $lastActiveEnd) -ge $memberFieldSettleSeconds) -and ($Row.PanelLines -eq 1) -and
+            (Test-RetryFieldSettleLine $Row -After $lastActiveEnd) } }
 }
 "INFO ⑤b4: L ${RETRY_L}초 · 모드 예산 혼자하기 ${timeoutEntry}초 / 우연한 만남 ${timeoutPartyMatch}초 · 짝 재판독 대기(other 대기 ⑫ 캡처) ${RETRY_RECHECK_WAIT_MS}ms · 첫 시도 재판단 $(Format-Seconds $RETRY_FIRST_JUDGE)초 · 행 $($RETRY_ROWS.Count) · 경계 행 Rr 시작 RC1g $(Format-Seconds $RETRY_RC1G_AT)초 / RC1h $(Format-Seconds $RETRY_RC1H_AT)초 (마감 회전 $retryDeadlineTurn)"
 $retryRowResults = @{}
@@ -5202,6 +5884,14 @@ $RETRY_JOURNAL_EXPECT = [ordered]@{
     'RC8'       = 'retry-attempt:changed retry-clicked:changed reentered:changed | reentered/1/1 | seq 8'
     'RC12'      = 'retry-attempt:changed retry-clicked:locked* reentered:changed | reentered/1/0 | seq 7'
     'RV-NONCE1' = 'retry-attempt:changed reentered:changed | reentered/1/0 | seq 7'
+    # 구현 단위 5b-8 FC-J1~J7 - 'field-cancelled' 끝은 클릭 뒤 기록 그대로(reentered · 추가 retry-clicked · 새 단계값 0) · 호출 E 행(FC-X6)은 씨앗 그대로 · 쓰기 0
+    'FC-X1'     = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
+    'FC-X2'     = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
+    'FC-X3'     = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
+    'FC-X4'     = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
+    'FC-X5'     = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
+    'FC-X6'     = '(호출 0) | retry-attempt/1/0 | seq 5'
+    'FC-X7'     = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
 }
 foreach ($journalRowName in $RETRY_JOURNAL_EXPECT.Keys) {
     Check-Equal ('J-{0} 완료 기록(실제 파일) - 저장 경계 호출(단계:태그 · * 주입) | 이 판 항목 단계/attempts/retryClicks | seq' -f $journalRowName) $retryRowResults[$journalRowName].JournalText $RETRY_JOURNAL_EXPECT[$journalRowName]
@@ -5623,6 +6313,68 @@ if ($null -ne $retryFinishWhile) {
 }
 Check-Equal "P5d-8 끝(retry) 클릭 루프 결과 분기 차례 = record-failed 반환 < safe-stop·last 반환 < unconfirmed < 폴백 ① (-ne 'sent')" $retryFinishOrder `
     "record-failed[return 'record-failed'] < safe-stop·last[return `$retryResult] < unconfirmed < 폴백 ①"
+
+# FC-S15 (구현 단위 5b-8 2.3-2 · U-5b8-2) - 끝(retry) while 직속 재입장 결과 if 차례 · 본문(명령 이름 · exit) - 'field-cancelled' 갈래 = Write-RunLog ; exit 4 (입력 · 진단 · 기록 · 예약 · 다른
+#   끝 0 - FC-X 가 행동으로도 봄) · 정지 줄 = 사용자 결정 글자(고정 사본 - 행은 소스 캡처를 따라가므로 글자 변이는 이 단언만 잡음) · 끝(retry) 안 1 · 워커 전체 1 · 사유 80자 안(GUI 코드 4
+#   상태줄은 사유를 80자에서 자름) · 표지 꼬리 0
+$FC_FIELD_CANCEL_DONE = "[완료] 재매칭이 취소돼 필드로 나왔습니다 - '다시 하기'를 다시 누르지 않고 멈춥니다"   # 사용자 결정 U-5b8-2 (2026-11-01)
+$fcResultOrder = '(while 없음)'
+if ($null -ne $retryFinishWhile) {
+    $fcResultOrder = (@($retryFinishWhile.Body.Statements | Where-Object { ($_ -is [IfStatementAst]) -and ((Get-NodeCode $_.Clauses[0].Item1) -cmatch '^\$reentryResult -eq ''[a-z-]+''$') } | ForEach-Object {
+                $fcResultName = [regex]::Match((Get-NodeCode $_.Clauses[0].Item1), '''([a-z-]+)''').Groups[1].Value
+                $fcResultBody = (@($_.Clauses[0].Item2.Statements | ForEach-Object { $fcBodyCommand = Get-StatementCommand $_; $(if ($_ -is [ExitStatementAst]) { Get-NodeCode $_ } elseif ($null -ne $fcBodyCommand) { $fcBodyCommand.GetCommandName() } else { '(명령 아님)' }) })) -join ' ; '
+                '{0}[{1}]' -f $fcResultName, $fcResultBody
+            })) -join ' < '
+}
+$fcDoneWorkerCount = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -ceq $FC_FIELD_CANCEL_DONE) }, $true)).Count
+Check-Equal 'FC-S15 끝(retry) 재입장 결과 갈래 차례 · 본문 · 정지 줄 = U-5b8-2 글자(끝(retry) 안 1 · 워커 전체 1) · 사유 80자 안 · 표지 꼬리 0' `
+    ('{0} · 정지 줄 {1}/{2} · 글자 일치 {3} · 80자 안 {4} · 꼬리 {5}' -f $fcResultOrder, $retryFieldDoneNodes.Count, $fcDoneWorkerCount, ($RETRY_DONE_FIELD_CANCELLED -ceq $FC_FIELD_CANCEL_DONE),
+        (($RETRY_DONE_FIELD_CANCELLED.Length - '[완료] '.Length) -le 80), [int]$RETRY_DONE_FIELD_CANCELLED.Contains('[terminal=')) `
+    'entered[Complete-AbyssInsideHandoff] < cancelled[Complete-AbyssOtherSelection] < field-cancelled[Write-RunLog ; exit 4] < timeout[Stop-AbyssReentryTimeout] · 정지 줄 1/1 · 글자 일치 True · 80자 안 True · 꼬리 0'
+
+# FC-S16 (2.4) - 끝(retry) exit = 정확히 2 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' 갈래 · 'field-cancelled' 갈래 (§10 센티널 준비 게이트(줄 단독)의 사실을 이름 있는 단언으로)
+$fcRetryExits = @($retryFinishNode.FindAll({ param($candidate) $candidate -is [ExitStatementAst] }, $true))
+$fcRetryExitText = (@($fcRetryExits | ForEach-Object { '{0}@{1}' -f (Get-LineCode $_), (@(Get-EnclosingIfConditions -Node $_ -Stop $retryFinishNode) | Select-Object -First 1) })) -join ' / '
+Check-Equal "FC-S16 끝(retry) exit 2 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' · 'field-cancelled' 갈래" $fcRetryExitText "exit 4@`$retryResult -eq 'unconfirmed' / exit 4@`$reentryResult -eq 'field-cancelled'"
+
+# FC-S22 (1절 4항 끝 · 구현 리뷰 2/2 의 4/5) - 끝(retry) 명령 이름 집합 = 정확히 8 (허용 집합 - N4-P6 꼴). FC-S15 는 정확 조건 갈래만 보고 FC-X 행은 비커스텀이라
+#   'field-cancelled' 갈래 밖에 다른 꼴 조건(StartsWith · -like)이나 커스텀 가드로 더한 키 · 마커 · 기록 · 예약 명령이 빠져나갔음(변이 M83 · M84). 끝(retry)에 명령을 더하면 이 행과 명세 3.3 을 함께
+$RETRY_FINISH_COMMANDS_EXPECTED = @('Complete-AbyssInsideHandoff', 'Complete-AbyssOtherSelection', 'Get-AbyssReentryLimitSeconds', 'Invoke-AbyssRetryClick', 'Stop-AbyssReentryTimeout',
+    'Wait-AbyssReentry', 'Write-LifeDiagnostics', 'Write-RunLog')
+$fcRetryCommandSet = @($retryFinishNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
+$fcRetryCommandUnnamed = @($retryFinishNode.FindAll({ param($candidate) ($candidate -is [CommandAst]) -and (-not $candidate.GetCommandName()) }, $true)).Count
+Check-Equal "FC-S22 끝(retry) 명령 이름 집합 = 정확히 $($RETRY_FINISH_COMMANDS_EXPECTED.Count)개(허용 집합) · 이름 없는 호출(& `$식) 0" `
+    ('[{0}] · 이름 없음 {1}' -f ($fcRetryCommandSet -join ','), $fcRetryCommandUnnamed) ('[{0}] · 이름 없음 0' -f ((@($RETRY_FINISH_COMMANDS_EXPECTED | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)) -join ','))
+
+# FC-S19 (3.4 재생 들머리) - 이 파일 재생 실행(Invoke-RetryReplayRun)의 재입장 대기 호출 인자(Game 제외) = 워커 끝(retry) 호출 B 의 인자 (재생이 새 판정을 우회하지 않게 - 이 파일을 파싱)
+function Get-CallArgumentTexts {
+    # 명령 호출의 매개변수 이름=값 글자 (그 노드가 든 원문 기준 · 공백 정규화 · Game 제외 · 정렬). 스위치(피호출 원문의 [switch] 매개변수)는 콜론 값만 값으로 받고 그 밖의
+    #   매개변수는 다음 요소를 값으로 받습니다. 남은 위치 인자는 '(위치)=글자' 로 셉니다 - PS 5.1 은 위치 인자를 선언 차례의 빈 매개변수(여기선 $Clock)에 묶고, 공백 꼴
+    #   스위치 값도 위치 인자입니다(명세 3.3 묶기 실측 · 구현 리뷰 2/2 의 4/5 - 변이 T1 · T2)
+    param($Command, [string[]]$SwitchNames = @())
+    $argumentTexts = New-Object System.Collections.Generic.List[string]
+    $commandElements = @($Command.CommandElements)
+    for ($elementIndex = 1; $elementIndex -lt $commandElements.Count; $elementIndex++) {
+        $element = $commandElements[$elementIndex]
+        if (-not ($element -is [CommandParameterAst])) { $argumentTexts.Add(('(위치)={0}' -f (($element.Extent.Text -replace '\s+', ' ').Trim()))); continue }
+        $valueText = '(스위치)'
+        if ($null -ne $element.Argument) { $valueText = $element.Argument.Extent.Text }
+        elseif (($SwitchNames -notcontains $element.ParameterName) -and ($elementIndex + 1 -lt $commandElements.Count) -and (-not ($commandElements[$elementIndex + 1] -is [CommandParameterAst]))) {
+            $valueText = $commandElements[$elementIndex + 1].Extent.Text
+            $elementIndex++
+        }
+        if ($element.ParameterName -ne 'Game') { $argumentTexts.Add(('{0}={1}' -f $element.ParameterName, (($valueText -replace '\s+', ' ').Trim()))) }
+    }
+    return ((@($argumentTexts) | Sort-Object -CaseSensitive) -join ' ')
+}
+$fcReentrySwitches = @($workerFunctions['Wait-AbyssReentry'].Body.ParamBlock.Parameters | Where-Object { $_.StaticType -eq [switch] } | ForEach-Object { [string]$_.Name.VariablePath.UserPath })
+$fcSelfAst = [Parser]::ParseFile($PSCommandPath, [ref]$null, [ref]$null)
+$fcReplayFunctions = @($fcSelfAst.FindAll({ param($candidate) ($candidate -is [FunctionDefinitionAst]) -and ($candidate.Name -eq 'Invoke-RetryReplayRun') }, $true))
+$fcReplayCalls = @($(if ($fcReplayFunctions.Count -eq 1) { @($fcReplayFunctions[0].FindAll({ param($candidate) ($candidate -is [CommandAst]) -and ($candidate.GetCommandName() -eq 'Wait-AbyssReentry') }, $true)) }))
+$fcCallBNodes = @(Get-CommandNodes -Node $retryFinishNode -Name 'Wait-AbyssReentry')
+Check-Equal 'FC-S19 재생 실행의 재입장 대기 호출 인자(Game 제외 · 위치 인자 포함) = 워커 끝(retry) 호출 B 인자 - 재생 함수 1 · 호출 각 1 · 대기 스위치 3' `
+    ('재생 함수 {0} · 호출 {1} · 스위치 {2} · {3}' -f $fcReplayFunctions.Count, $fcReplayCalls.Count, $fcReentrySwitches.Count, $(if ($fcReplayCalls.Count -eq 1) { Get-CallArgumentTexts $fcReplayCalls[0] -SwitchNames $fcReentrySwitches } else { '' })) `
+    ('재생 함수 1 · 호출 1 · 스위치 3 · {0}' -f $(if ($fcCallBNodes.Count -eq 1) { Get-CallArgumentTexts $fcCallBNodes[0] -SwitchNames $fcReentrySwitches } else { '(호출 B {0})' -f $fcCallBNodes.Count }))
 # ── §10 관측 0 재생 (명세 3.5 · B-13 - 범위 ⑤-57 재생 틀의 회귀 몫 · OCR 0 · 늘 돎) ──
 # 전이 표 = 관측 0(2026-10-24 · 1272 창) 프레임을 워커 원문 판독 함수로 읽은 값(짝 판독문 = 하단 판독문 · 두 점 · S · 패널 종류 · HUD · 추적기 · 스윕 참)과 그 프레임의 원문 분류
 #   (재입장 대기 꼴 - 표를 지을 때의 값으로 고정: 재생 행의 결정 표본 대조용)입니다. 1908 · 창 DPI 144 결측 두 판(⑥e frames2 - 버튼이 올라오는 중 '다시' 누락)의 첫 프레임과
@@ -6068,15 +6820,19 @@ function Invoke-RetryReplaySweep {
     $script:lastClickSkipReason = ''
     return $true
 }
-# 재입장 대기 표본 감시 - 원문 분류기를 이름 바꿔 올리고 같은 이름은 대기 안 분류(⑧)마다 (그 회전 하단 판독 프레임 · 원문 분류 · 표의 고정 분류)를 기록하는 감시가 차지합니다
+# 재입장 대기 표본 감시 - 원문 결론 판정을 이름 바꿔 올리고 같은 이름은 대기 안 결론(⑨ - 유효 회전마다 한 번, -Kind = 그 회전 ⑧ 분류)마다 (그 회전 하단 판독 프레임 · 원문 분류 ·
+#   표의 고정 분류)를 기록하는 감시가 차지합니다. 분류기가 아니라 결론을 봅니다 - 필드 결과 켬의 앞 분류(세 신호 없이 부름)가 표본으로 두 번 세어지지 않고 ⑧ 분류 호출의
+#   인자 꼴과 무관(구현 리뷰 2/2 의 4/5 - 분류기 감시를 -MenuVisible 로 거르던 판은 HEAD 워커에서 RP1~RP7 이 결과는 맞는데 '표본 0' 으로 FAIL. ⑧ 인자 누락은 M75 를 FC-L16 · L17 · R5-P8 이 잡음)
+#   원문 분류기의 이름 바꾼 사본은 그대로 올립니다 - 아래 'RP 전제'(표 고정 분류 = 원문 분류)가 부름
 try {
     Invoke-Expression (([string]$workerFunctions['Resolve-AbyssHandoffStartScreen'].Extent.Text) -replace '^function Resolve-AbyssHandoffStartScreen\b', 'function Invoke-RealResolveAbyssHandoffStartScreen')
-    Invoke-Expression (New-MockDefinition -Name 'Resolve-AbyssHandoffStartScreen' -Body '$screenKind = Invoke-RealResolveAbyssHandoffStartScreen @PSBoundParameters; if ($script:retryInWaiter -gt 0) { $script:retryWaiterSamples.Add([pscustomobject]@{ T = (Get-VirtualElapsed); Frame = $script:retryWaiterFrame; Live = [string]$screenKind; Frozen = $script:retryWaiterFrameClass; LastFrozen = [string]$script:retryReads[$script:retryReads.Count - 1].Class }) }; return $screenKind')
+    Invoke-Expression (([string]$workerFunctions['Resolve-AbyssReentryVerdict'].Extent.Text) -replace '^function Resolve-AbyssReentryVerdict\b', 'function Invoke-RealResolveAbyssReentryVerdict')
+    Invoke-Expression (New-MockDefinition -Name 'Resolve-AbyssReentryVerdict' -Body 'if ($script:retryInWaiter -gt 0) { $script:retryWaiterSamples.Add([pscustomobject]@{ T = (Get-VirtualElapsed); Frame = $script:retryWaiterFrame; Live = [string]$Kind; Frozen = $script:retryWaiterFrameClass; LastFrozen = [string]$script:retryReads[$script:retryReads.Count - 1].Class }) }; return (Invoke-RealResolveAbyssReentryVerdict @PSBoundParameters)')
 } catch {
-    "FAIL 준비: ⑤b4 재생 분류 감시 정의 실패 ($($_.Exception.Message))"
+    "FAIL 준비: ⑤b4 재생 결론 감시 정의 실패 ($($_.Exception.Message))"
     exit 1
 }
-if ((Get-LiveParamSignature 'Resolve-AbyssHandoffStartScreen') -cne (Get-ParamSignature 'Resolve-AbyssHandoffStartScreen')) { "FAIL 준비: 분류 감시 서명이 워커 원문과 다릅니다"; exit 1 }
+if ((Get-LiveParamSignature 'Resolve-AbyssReentryVerdict') -cne (Get-ParamSignature 'Resolve-AbyssReentryVerdict')) { "FAIL 준비: 결론 감시 서명이 워커 원문과 다릅니다"; exit 1 }
 function Invoke-RetryReplayRun {
     # 재생 한 번 - 묶음 · 시작 시각 · 모드 · 비용 모형(중앙값 × 배수 + 캡처 ms) · 들머리(waiter = 원문 재입장 대기 호출 B 꼴 · click = 클릭 루프). 결과 'EOD' = 자료 끝
     param([string]$Set, [datetime]$StartAt, [string]$Mode, [double]$Factor, [double]$CaptureMs, [string]$Entry)
@@ -6091,7 +6847,7 @@ function Invoke-RetryReplayRun {
     $script:retryReplaySweeps = 0
     $replayResult = ''
     try {
-        if ($Entry -eq 'waiter') { $replayOut = Wait-AbyssReentry -Game $null -LimitSeconds (Get-AbyssReentryLimitSeconds) -Context "'다시 하기' 뒤 입장 대기" -ReportRewardReturn }
+        if ($Entry -eq 'waiter') { $replayOut = Wait-AbyssReentry -Game $null -LimitSeconds (Get-AbyssReentryLimitSeconds) -Context "'다시 하기' 뒤 입장 대기" -ReportRewardReturn -ReportFieldReturn:($dungeonMode -ne 'solo') }
         else { $replayOut = Invoke-AbyssRetryClick -Game $null -Nonce $RETRY_NONCE }
         $replayResult = [string]$replayOut.Result
     } catch {

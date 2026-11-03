@@ -155,6 +155,8 @@
 #   [새 행] SS1c(커스텀 'other' 대기 중 예약 → 확인이 소비 → 안전 중지) · CX1(커스텀 마지막 바퀴 끝 → 옛 나가기 → 지정 바퀴 완료) · MX-G1 · MX-G2(섞인 목록의 입장 방식 바뀜 →
 #        'entry-change' 이어 감 줄 → 옛 나가기 exit 0 → Step · 다음 기동 none · 다음 항목 env) · MX-G3(랜덤 진행 · 섞인 목록 바퀴 끝 → 실제 Start-NextCycle 의 NEXT_BOUNDARY 'mixed' →
 #        'next-unknown' → Step 바퀴 넘김 · 새 순열) · MX-G4(입장 방식 바뀜 판 + 결정 뒤 예약 → 출구 ② → 안전 중지) · FN1(정적 - 마무리 실행 안내 끝말).
+#   [구현 단위 5b-8] 재입장 대기 손 모의에 -ReportFieldReturn(워커 서명 - 결합 0) · 받은 스위치 기록 · FC-G1~G3(재매칭 패널 ESC 취소 → 필드 확정 'field-cancelled' 끝 코드 4 의 GUI 틱 -
+#        비커스텀 기록 계상 · 커스텀 마커 계상 · 전송 뒤 예약).
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing   # 갈래의 상태줄 색([System.Drawing.Color]::SteelBlue 등)
 $fails = 0
@@ -788,7 +790,8 @@ function Stop-WorkerTailExit {
 # (큐)대로 돌려주고 비면 TEST-UNREACHABLE(행이 정하지 않은 호출 = 그 행이 그 갈래에 닿지 않아야 함). 대기 · 클릭 루프 자체의 판독 · 클릭 · 마감은
 # test_abyss_party_leader §9 · §10 이 원문으로 봅니다
 $script:otherWaitPlan = New-Object System.Collections.ArrayList     # '다른 던전 가기' 대기 결과 @{ Result; Sends }
-$script:reentryPlan = New-Object System.Collections.ArrayList       # 재입장 대기 결과 'entered' / 'cancelled' / 'timeout' / 'reclick'
+$script:reentryPlan = New-Object System.Collections.ArrayList       # 재입장 대기 결과 'entered' / 'cancelled' / 'timeout' / 'reclick' / 'field-cancelled'(구현 단위 5b-8)
+$script:reentryFieldFlags = New-Object System.Collections.ArrayList # 재입장 대기가 받은 -ReportFieldReturn 값(호출마다 - 끝(retry) 호출 B 배선을 GUI 결합 행이 봄. List[object] 감싸기 예외 대신 ArrayList)
 $script:retryClickPlan = New-Object System.Collections.ArrayList    # 클릭 루프 결과 'sent' / 'skipped' / 'safe-stop' / 'no-pair' / 'last' / 'unconfirmed'
 $script:safeStopOnRetryClick = $false                               # 클릭 루프가 결과를 돌려주기 직전에(전송이면 commit 뒤) 안전 중지 예약을 만듦(보상 결정 뒤 F9 - ⑤b6 SS3 · SS11)
 $script:safeStopOnOtherWait = $false                                # '다른 던전 가기' 대기가 결과를 돌려주기 직전에 안전 중지 예약을 만듦(보상 결정 뒤 F9 - ⑤b6 SS1c)
@@ -823,10 +826,12 @@ function Wait-AbyssReentry {
         $Clock = $null,
         [string]$Context = '재입장 대기',
         [switch]$ReportRewardReturn,
+        [switch]$ReportFieldReturn,
         [bool]$PanelSeen = $false,
         [switch]$ResumeGrace
     )
     $script:reentryCalls++
+    [void]$script:reentryFieldFlags.Add([string][bool]$ReportFieldReturn)
     return @{ Result = [string](Get-WorkerPlanNext -Plan $script:reentryPlan -Name 'Wait-AbyssReentry'); LastKind = ''; PanelSeen = $true }
 }
 function Invoke-AbyssRetryClick {
@@ -3785,6 +3790,7 @@ function Invoke-WorkerClearedRecord {
     $script:crashBeforeDoneLine = [bool]$Plan.CrashBeforeDone
     $script:otherWaitCalls = 0
     $script:reentryCalls = 0
+    $script:reentryFieldFlags.Clear()
     $script:retryClickCalls = 0
     $script:diagCalls = 0
     $noncesBefore = @()
@@ -3834,6 +3840,7 @@ function Invoke-WorkerClearedRecord {
         TailExit    = $tailExit
         OtherWaits  = $script:otherWaitCalls
         Reentries   = $script:reentryCalls
+        ReentryField = (@($script:reentryFieldFlags) -join ',')
         RetryClicks = $script:retryClickCalls
         Diags       = $script:diagCalls
         FlagAfter   = [IO.File]::Exists($safeStopFlagPath)
@@ -4562,6 +4569,42 @@ function Test-CaseRewardTailCoupling {
         ('{0} || 계상 1 · 전진 1 · 기록 cleared/pending/1 · 정지 [stop|안전 중지|False] · 기동 0 · 사유 [{1}]' -f
             (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($moveFormat -f $moveMap['entry-change']) -Done $RETURN_SAFE_STOP_DONE),
             $RETURN_SAFE_STOP_DONE)
+    # ── 구현 단위 5b-8 - 재매칭 패널 ESC 취소 → 필드 확정 'field-cancelled' 끝(코드 4 · 입력 0 · 기록 무변경)의 GUI 틱 (FC-G1~FC-G3). 캡처는 이 묶음 바로 앞(고치기 전 워커에서는 이 묶음만 빠짐) ──
+    $fieldCancelledDone = Get-WorkerDoneReason -Fragment '재매칭이 취소돼 필드로' -InFunction 'Complete-AbyssRetrySelection'
+    # FC-G1 (FB10 꼴) 우연한 만남 '다시 하기' 전송 1 → 재입장 대기 'field-cancelled'(호출 B 가 필드 결과 켬을 넘김) → 입력 0 · 정지 줄 · 코드 4 → (GUI 틱) retry-clicked 기록으로 +1 · 그 기록 소비 ·
+    #     조건 정지(사유 원문 그대로 - 80자 안 U-5b8-2) · 다음 기동 0 → 다음 수동 시작 none
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'party' -Matching '우연한 만남' -Plan @{ RetryClick = @('sent'); Reentry = @('field-cancelled') }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    $nextStart = Invoke-NextStartAfterTick -RunId ([guid]::NewGuid().ToString('D'))
+    Assert-Case "FC-G1 (GUI 틱) 재매칭 ESC 취소 → 필드 확정 끝 코드 4(입력 0 · 진단 0 · 필드 결과 켬) → +1 · 기록 소비 · 조건 정지(사유 그대로) · 다음 기동 0 → 다음 시작 none" `
+        ('{0} · 필드 [{1}] || 계상 {2} · 기록 {3} · 정지 [{4}] · 기동 {5} · 사유 [{6}] → {7}/{8}' -f (Get-RewardWorkerText $worker), $worker.ReentryField, $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce),
+            ((Get-StopEvents $tick.Row) -join ' / '), $tick.Row.Launches, $tick.Reason, $nextStart.Kind, $nextStart.HandoffNonce) `
+        ('{0} · 필드 [True] || 계상 1 · 기록 retry-clicked/pending/1 · 정지 [stop|조건 정지: {1}|False] · 기동 0 · 사유 [{1}] → none/' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'retry-clicked/retry/run' -Waits 'o0/r1/c1' -Done $fieldCancelledDone), $fieldCancelledDone)
+    # FC-G2 (PC2 꼴 · 커스텀) 같은 항목 두 칸(우연한 만남 - 결정 'retry') · 완료 마커 실제 씀 → 'field-cancelled' 코드 4 → (GUI 틱) 마커 경로 +1 · Step(같은 바퀴 다음 칸) · 마커 정리 1 ·
+    #     기록 소비 · 정상 정지 · 다음 기동 0
+    $fcRetryItems = @($ABYSS_ITEMS_MIX[1], $ABYSS_ITEMS_MIX[1], $ABYSS_ITEMS_MIX[2])
+    $null = Start-RewardRow -Setup @{ Custom = $true; DiskContext = (New-AbyssContext -Index 0 -Generation $H_GENERATION -Items $fcRetryItems) }
+    $worker = Invoke-WorkerClearedRecord -Custom $true -Run 'whole' -RetryRoute -Plan @{ RetryClick = @('sent'); Reentry = @('field-cancelled') }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "FC-G2 (GUI 틱) 커스텀 'retry'(같은 항목 두 칸) · 유효 완료 마커 · 'field-cancelled' 코드 4 → 마커 경로 +1 · 전진 1 · 마커 정리 1 · 기록 소비 · 정상 정지 · 다음 기동 0" `
+        ('{0} · 필드 [{1}] || 계상 {2} · 전진 {3} · 마커 정리 {4} · 기록 {5} · 정지 [{6}] · 기동 {7}' -f (Get-RewardWorkerText $worker), $worker.ReentryField, $tick.Row.Completed, $tick.Row.Steps,
+            $tick.Row.MarkerClears, (Get-EntryText $tick.Row.Journal $workerNonce), (Get-StopFlags $tick.Row), $tick.Row.Launches) `
+        ('{0} · 필드 [True] || 계상 1 · 전진 1 · 마커 정리 1 · 기록 retry-clicked/pending/1 · 정지 [False] · 기동 0' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'retry-clicked/retry/1/1' -Waits 'o0/r1/c1' -Done $fieldCancelledDone))
+    # FC-G3 (SS11 꼴) '다시 하기' 전송(commit) 뒤 예약(F9 - 클릭 루프 모의가 commit 뒤에 만듦) → 'field-cancelled' 끝(코드 4 · 워커는 예약을 소비하지 않음 - 예약 1) → (GUI 틱)
+    #     재입장 클릭 기록으로 +1 · 조건 정지(코드 4 는 예약을 보지 않음). 정지 뒤 예약 0 = 이 행의 GUI 정지 1 + S3 의 정지 함수 예약 파일 삭제(정적 - 이 파일의 정지는 모의, SS11 과 같은 짜임)
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'party' -Matching '우연한 만남' -Plan @{ RetryClick = @('sent'); SafeStopOnClick = $true; Reentry = @('field-cancelled') }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "FC-G3 (GUI 틱) '다시 하기' 전송 뒤 예약 → 'field-cancelled' → 예약 그대로 · 코드 4 → 재입장 클릭 기록으로 +1 · 조건 정지" `
+        ('{0} || 계상 {1} · 기록 {2} · 정지 [{3}] · 사유 [{4}]' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), ((Get-StopEvents $tick.Row) -join ' / '), $tick.Reason) `
+        ('{0} || 계상 1 · 기록 retry-clicked/pending/1 · 정지 [stop|조건 정지: {1}|False] · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '4' -Entry 'retry-clicked/retry/run' -Waits 'o0/r1/c1' -Flag 1 -Done $fieldCancelledDone), $fieldCancelledDone)
 }
 
 # ===== S 정적 (단계 2.7 - 주석 뺀 GUI 사본) =====

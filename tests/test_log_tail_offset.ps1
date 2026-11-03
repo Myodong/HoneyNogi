@@ -846,7 +846,8 @@ if ($clearedSuccessTexts.Count -eq 1 -and $clearedWarningTexts.Count -eq 1 -and 
 #     ([어비스] 태그 · '(퇴장 절차)' 없음 · 다른 머리 낱말 · 문장 중간 인용)을 더 봅니다. H8 의 표본은 재입장 대기의 입장 계측 줄입니다 - 구현 단위 ⑤a 부터 선분기
 #     B2 단계의 줄도 그 함수가 써서 옛 H8(선분기)·H8w(재입장 대기) 두 표본을 하나로 합쳤습니다
 #  ③ 보존 줄(명세 ② 2.7 '보이는 그대로 둘 줄' · 3.4): [경고] 닫기 실패(R2·own) · cleared 저장 실패 · 필드 확정 결과 줄 · 키 '이미 보낸 키' 줄 · [안내] 복구 기동 ·
-#     B2 단계 시작 줄 · 이벤트 정리 안내 줄 · 권장 인원 팝업 관측 안내(재입장 대기 - 구현 명세 ④) · [경고] 재입장 클릭·완료 기록 실패(구현 명세 ⑤b2)
+#     B2 단계 시작 줄 · 이벤트 정리 안내 줄 · 권장 인원 팝업 관측 안내(재입장 대기 - 구현 명세 ④) · [경고] 재입장 클릭·완료 기록 실패(구현 명세 ⑤b2) ·
+#     재매칭 패널 확인 안내 · 필드 확정 결과 줄(재입장 대기) · 재매칭 ESC 취소 정지 줄(구현 단위 5b-8)
 #  ④ 판별은 원문(명세 ② 2.7 · J11): 타이머 통상 tail 의 수집 식(기본·복구 로그)과 공통 최종 수집(Invoke-ExitLogFinalCollect)이 남기는 [완료] 사유에는 꼬리가
 #     남고 창 줄에서만 빠집니다. 코드 4 상태줄($code4Reason)의 꼬리 0 은 tests\test_abyss_handoff_gui.ps1 가 실제 타이머 틱으로 봅니다
 function Get-WorkerOwnerFunctionName {
@@ -1192,6 +1193,11 @@ $keepSpecs = @(
   @{ Label = '[경고] 재입장 완료 기록 실패(구현 명세 ⑤b2)'; Function = 'Set-AbyssJournalReentered'; Prefix = '[경고] 재입장 완료 기록을 저장하지 못했습니다'; Want = 1
      Fills = @(@{ failureKind = '파일 사용 중' }, @{ failureKind = '파일 손상' }, @{ failureKind = '기록 실패' }) }
   @{ Label = '권장 인원 팝업 관측 안내(재입장 대기)'; Function = 'Wait-AbyssReentry'; Prefix = '[안내] 권장 인원 팝업 관측'; Want = 1; Fills = @(@{}) }
+  # 구현 단위 5b-8 - 재입장 대기의 재매칭 패널 확인 안내 · 필드 확정 결과 줄(선분기 S3 와 같은 꼴 - 표본 수는 지역 변수) · 끝(retry)의 재매칭 ESC 취소 정지 줄
+  @{ Label = '재매칭 패널 확인 안내(재입장 대기 - 구현 단위 5b-8)'; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 재매칭 패널 확인'; Want = 1; Fills = @(@{}) }
+  @{ Label = "필드 확정 결과 줄(재입장 대기 'field-cancelled' - 구현 단위 5b-8)"; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 던전 밖(HUD) 확인 - '; Want = 1
+     Fills = @(@{ memberFieldSettleSeconds = $hideSettleSeconds; settleSpan = '6.3'; settleCount = '9' }) }
+  @{ Label = '재매칭 ESC 취소 정지 줄(구현 단위 5b-8)'; Function = 'Complete-AbyssRetrySelection'; Prefix = '[완료] 재매칭이 취소돼 필드로'; Want = 1; Fills = @(@{}) }
 )
 foreach ($keepSpec in $keepSpecs) {
   $keepNodes = @(Get-WorkerLogArgumentNodes -FunctionName $keepSpec.Function -Prefix ([string]$keepSpec.Prefix) -Fragment ([string]$keepSpec.Fragment))
