@@ -684,11 +684,18 @@ Assert-Case 'v11: 구 하단 경계(333) 유지 (1272 커버 불변)' $lootRevea
 Assert-Case '옵션 알약: 워커 하드코딩 (600,85,320,60)' `
   ($workerSource -match '\$rgDgOptDifficulty = @\(600, 85, 320, 60\)') $true
 # 어비스 ESC 자기앵커 (2026-08-13 21:25 실사고): 고정점 (1083,89)가 네이티브 1908에서 버튼
-# 밖(실측 (1102,74)) - 17회 무반응. 읽힌 'ESC' 글자 위치 클릭 + 고정점 폴백(1272 유지).
-Assert-Case '어비스 ESC: 글자 탐색 클릭 배선 (rgHomeEndEsc + ESC)' `
-  ($workerSource -match "Find-GameTextPoint[^\r\n]*\`$rgHomeEndEsc\[0\][\s\S]{0,220}?-SearchText 'ESC' -ExactText 'ESC'") $true
-Assert-Case '어비스 ESC: 미발견 시 고정점 폴백 유지' `
-  ($workerSource -match "if \(\`$escPoint\) \{[\s\S]{0,120}?Click-ScreenPoint[\s\S]{0,200}?Click-GamePoint[^\r\n]*ptEscButton") $true
+# 밖(실측 (1102,74)) - 17회 무반응. 읽힌 'ESC' 글자 위치를 클릭합니다.
+# 2026-11-04 (구현 명세 ESC탐색 3.3 - 10-28 실기 1-D′a): 글자 탐색이 헬퍼로 옮겨가고 '미발견 시 고정점 폴백' 은 새 계약이 됐습니다 - 두 판독이 모두 못 찾은 첫 회전은 누르지 않고 커서를 치운 뒤
+# 다시 읽고(continue), 다음 실패에 창 크기로 고른 고정점을 누릅니다. 둘 다 주석 뺀 사본으로 봅니다 (행동은 test_abyss_return_loop RLE 사례)
+$escFinderBody = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Find-AbyssEscButtonPoint')))
+$escLoopBody = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection')))
+Assert-Case '어비스 ESC: 글자 탐색 클릭 배선 (탐색 헬퍼 본문의 rgHomeEndEsc + ESC, 복귀 루프가 그 헬퍼를 부름)' `
+  (($escFinderBody -match "Find-GameTextPoint[^\r\n]*\`$rgHomeEndEsc\[0\][\s\S]{0,220}?-SearchText 'ESC' -ExactText 'ESC'") -and
+   ($escLoopBody -match "\`$escRead = Find-AbyssEscButtonPoint -Game \`$Game")) $true
+Assert-Case '어비스 ESC: 찾으면 글자 클릭, 미발견 첫 실패는 대피 뒤 누르지 않고 다시 읽고, 다음 실패에 창 크기 고정점' `
+  ($escLoopBody -match "if \(\`$escPoint\) \{[\s\S]{0,200}?Click-ScreenPoint -X \`$escPoint\.X -Y \`$escPoint\.Y\s*\} else \{\s*\`$escMissCount\+\+\s*if \(\`$escMissCount % 2 -eq 1\) \{[\s\S]{0,600}?Move-CursorOutsideGame -Game \`$Game[\s\S]{0,300}?continue\s*\}\s*\`$escFallback = Get-AbyssEscFallbackPoint -Game \`$Game -LargeTurn \`$escLargeTurn[\s\S]{0,200}?Click-GamePoint -Game \`$Game -ReferenceX \`$escFallback\.X -ReferenceY \`$escFallback\.Y") $true
+Assert-Case '어비스 ESC: 복귀 루프가 고정점 변수를 직접 쓰지 않음 (창 크기로 고른 점만 - 옛 고정점 직접 클릭 0)' `
+  ($escLoopBody -match 'ptEscButton') $false
 # v8 (2026-08-13 실사고): 네이티브 1908 창(모니터 100% + 물리 1908 리사이즈, 제목줄 31px)은
 # 선택 화면 알약 행이 y163 - 구영역(30,165,200,50)을 1px 차로 이탈해 3연속 정지.
 # 위로 20 확장. 두 실측 기하(1272 네이티브 y187 / 1908 네이티브 y163)를 모두 덮고,

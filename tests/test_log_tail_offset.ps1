@@ -353,6 +353,37 @@ foreach ($coordCase in $coordRenderCases) {
     (Convert-WorkerLogLineForGui ('12:00:00 ' + $coordRendered) $false) ('12:00:00 ' + $coordCase.Shown)
 }
 
+# 어비스 복귀 'ESC 클릭' 줄의 꼬리 (2026-11-04 구현 명세 ESC탐색 1절 로그 · 3.3): 접두 '[어비스] ESC 클릭' 은 그대로이고 꼬리는 ' (글자 탐색 …)' 로 시작해 GUI 의 진단 꼬리 규칙이 화면에서 지웁니다
+# ('기준좌표' 낱말을 쓰지 않아 위 전수 6곳과 무관). 꼬리 글자가 $escClickTail 대입 둘과 FoundBy 문자열 둘에 나뉘어 있어 표본 줄을 손으로 적으면 소스가 바뀌어도 안 움직입니다 - 워커 AST 에서
+# Write-RunLog 인자 · 대입 둘의 우변 · FoundBy 문자열 둘을 캡처해, 표본 값으로 펼친 원문(필터 전)과 화면 표시(필터 뒤)를 정확 일치로 단언합니다. 꼬리를 다른 말로 시작하게 바꾸면 화면에 좌표가 남습니다
+$escFinderAst = $workerAst.Find({ param($node) ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($node.Name -eq 'Find-AbyssEscButtonPoint') }, $true)
+$escLoopAst = $workerAst.Find({ param($node) ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($node.Name -eq 'Return-ToAbyssSelection') }, $true)
+$escFoundByNames = @(@($escFinderAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $true)) |
+    ForEach-Object { $_.KeyValuePairs } | Where-Object { $_.Item1.Extent.Text -eq 'FoundBy' } |
+    ForEach-Object { $_.Item2.Find({ param($node) $node -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true).Value } | Where-Object { $_ })
+Check-Equal "워커: 탐색 헬퍼의 FoundBy 문자열 = '글자 탐색' · '글자 탐색 이진화' 둘 (빈 값은 캡처 실패 반환)" ($escFoundByNames -join ' | ') '글자 탐색 | 글자 탐색 이진화'
+$escTailTemplates = @(@($escLoopAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq '$escClickTail') }, $true)) |
+    ForEach-Object { $_.Right.Find({ param($node) $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst] }, $true).Value })
+Check-Equal '워커: $escClickTail 대입 = 복귀 루프 2곳 (글자 찾음 · 고정점)' $escTailTemplates.Count 2
+$escLogNodes = @($escLoopAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and $node.Value.Contains('$escClickTail') }, $true))
+$escLogIsFirstArg = ($escLogNodes.Count -eq 1 -and $escLogNodes[0].Parent -is [System.Management.Automation.Language.CommandAst] -and $escLogNodes[0].Parent.GetCommandName() -eq 'Write-RunLog' -and
+                     [object]::ReferenceEquals($escLogNodes[0].Parent.CommandElements[1], $escLogNodes[0]))
+Check-Equal '워커: 꼬리를 찍는 줄 = Write-RunLog 첫 인자 1곳' $escLogIsFirstArg $true
+$escRenderCases = @(
+  @{ Template = 0; FoundBy = $escFoundByNames[0]; Point = @{ X = 1653; Y = 111 }; Raw = '[어비스] ESC 클릭 (글자 탐색 화면좌표 1653,111)' }
+  @{ Template = 0; FoundBy = $escFoundByNames[1]; Point = @{ X = 1653; Y = 112 }; Raw = '[어비스] ESC 클릭 (글자 탐색 이진화 화면좌표 1653,112)' }
+  @{ Template = 1; FoundBy = ''; Point = @{ X = 1083; Y = 89 }; Raw = '[어비스] ESC 클릭 (글자 탐색 실패 고정점 1083,89)' }
+  @{ Template = 1; FoundBy = ''; Point = @{ X = 1102; Y = 78 }; Raw = '[어비스] ESC 클릭 (글자 탐색 실패 고정점 1102,78)' }
+)
+foreach ($escCase in $escRenderCases) {
+  $escRead = @{ FoundBy = $escCase.FoundBy }; $escPoint = $escCase.Point; $escFallback = $escCase.Point
+  $escClickTail = $ExecutionContext.InvokeCommand.ExpandString($escTailTemplates[$escCase.Template])
+  $escRendered = $ExecutionContext.InvokeCommand.ExpandString($escLogNodes[0].Value)
+  Check-Equal ('워커 템플릿 펼침: {0}' -f $escCase.Raw) $escRendered $escCase.Raw
+  Check-Equal ('GUI: ESC 클릭 꼬리 제거 (소스 템플릿): {0}' -f $escCase.Raw) `
+    (Convert-WorkerLogLineForGui ('12:00:00 ' + $escRendered) $false) '12:00:00 [어비스] ESC 클릭'
+}
+
 # ── 좌표·개발자 메모 정리 2차 (2026-10-02 사용자 확정) - 파일 원본은 그대로, 화면에서만 정리 ──
 # ① 닫기(X) 후보 좌표 ② '(호출부가 오류 처리…)' ③ 커서 대피 실패의 좌표·반복 안내(+ 클릭 보류·목록 스크롤 좌표)
 # ④ 게임 창 정보의 위치 ⑤ 게임 창 정렬 → 크기 조정/위치 조정. 전부 실사용·실기 로그 원문이고, 앞 11줄은 바뀌는 줄,

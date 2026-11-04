@@ -27,6 +27,9 @@
 #   ⑪ ESC 메뉴 '어비스' 아이콘 폴백 (2026-10-07 설계 v2 10.3 - RLI0~RLI10): 글자 탐색이 유효 캡처에서 실패하고 그 회전의 메뉴 판정이 2차 신호('게임 종료')
 #      만으로 참일 때만 아이콘을 찾아 같은 클릭 블록으로 누름. 글자·아이콘 판독의 캡처 실패 회전(가드 두 줄)은 미발견·클릭 없이 끝내고, 토큰(출처) 없는
 #      메뉴·던전 안 메뉴에서는 부르지 않음. 클릭 무반응·오클릭·지속 필드 오독(수용 위험 R10)의 결말은 특성으로 고정
+#   ⑫ ESC 클릭 자리 탐색 (2026-11-04 구현 명세 ESC탐색 1절 · 3.2 - RLE0~RLE10): 일반 판독이 유효하게 못 찾으면 같은 회전에 이진화/한국어 판독을 한 번 더 하고, 둘 다 유효하게 못 찾으면
+#      번갈아 누르지 않고 커서를 치운 뒤 다시 읽거나(E5) 실제 창 너비로 고른 고정점을 누름(E6 - 큰 창은 새 점 · 옛 점 번갈아). 캡처 실패 회전은 세지도 누르지도 않고, 끝내 안 열리면
+#      지금처럼 복귀 마감 코드 1
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
@@ -46,7 +49,8 @@ function Check-True {
 
 # ── 운영 코드 추출 (사본 재구현 금지) ─────────────────────────────────────────
 # 마감 산술(Get-FreezeAdjustedDeadline = 양보 차분 + 캡처 실패 누적 차분 - ⑥e 설계 2.13)과 선택 화면 출처 판정(Test-AbyssSelectionProvenance - 2.14)은 운영 함수 그대로
-foreach ($name in @('Get-YieldAdjustedDeadline', 'Invoke-UserYieldWithDeadline', 'Get-FreezeAdjustedDeadline', 'Test-AbyssSelectionProvenance')) {
+# ESC 글자 탐색 · 고정점 고르기(구현 명세 ESC탐색 3.2)도 운영 함수 그대로입니다 - 창 너비를 읽는 Get-AbyssEscFallbackPoint 만 아래 모의가 맡습니다
+foreach ($name in @('Get-YieldAdjustedDeadline', 'Invoke-UserYieldWithDeadline', 'Get-FreezeAdjustedDeadline', 'Test-AbyssSelectionProvenance', 'Find-AbyssEscButtonPoint', 'Select-AbyssEscFallbackPoint')) {
   Invoke-Expression ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @($name)))
 }
 $loopDef = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection'))
@@ -59,7 +63,7 @@ Invoke-Expression $loopDef
 $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($workerPath, [ref]$null, [ref]$null)
 $config = $null
 function Get-ConfigValue { param([object]$Root, [string[]]$Path, $Default) return $Default }
-foreach ($sourceVar in @('memberFieldSettleSeconds', 'allDungeonKeywords', 'rgAbyssCards', 'rgAbyssSelect')) {
+foreach ($sourceVar in @('memberFieldSettleSeconds', 'allDungeonKeywords', 'rgAbyssCards', 'rgAbyssSelect', 'ptEscButton', 'ptEscButtonLarge', 'escLargeWindowMinWidth')) {
   $assign = $sourceAst.Find({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq ('$' + $sourceVar)) }, $true)
   if (-not $assign) { "FAIL 본체에서 `$$sourceVar 정의를 찾지 못했습니다"; exit 1 }
   Invoke-Expression $assign.Extent.Text
@@ -69,7 +73,7 @@ Check-True '캡처: 필드 확정 폭 W 는 소스 값 (입장 과도 4.2초 < W
 # ── 운영 상수 (값은 계약과 무관 - 마감 60초·영역 좌표만 형식을 맞춤) ──
 $timeoutHud = 30; $timeoutAbyssMenu = 15; $timeoutAbyssSelect = 15
 $safeStopFlagPath = 'HoneyNogi_safe_stop_test.flag'
-$rgAbyssMenu = @(850, 180, 350, 520); $rgHomeEndEsc = @(1000, 40, 260, 90); $ptEscButton = @(1083, 89); $ocrEnglishEngine = 'en'
+$rgAbyssMenu = @(850, 180, 350, 520); $rgHomeEndEsc = @(1000, 40, 260, 90); $ocrEnglishEngine = 'en'
 $ptNoticeClose = @(1090, 137); $rgStellaTitle = @(0, 0, 10, 10); $ocrKoreanEngine = 'ko'; $ptStellaCard = @(0, 0); $rgStellaPickBtn = @(0, 0, 10, 10)
 $rgClearExit = @(430, 570, 420, 125)
 $refocusEverySeconds = 0
@@ -92,7 +96,10 @@ function Advance { param([double]$Ms)
 function Get-Date { return $script:vclock }
 function Start-Sleep { param([int]$Milliseconds, [int]$Seconds) Advance ($Milliseconds + $Seconds * 1000) }
 function Write-RunLog { param([string]$Message) [void]$script:logs.Add(('{0:N1} {1}' -f (Elapsed), $Message)) }
-function Write-LifeDiagnostics { param($Game, $Context, [switch]$CaptureOnly) $script:diagCalls++; $script:diagContext = $Context }
+function Write-LifeDiagnostics { param($Game, $Context, [switch]$CaptureOnly)
+  $script:diagCalls++; $script:diagContext = $Context
+  [void]$script:diagLog.Add(('{0}|{1}' -f $Context, [bool]$CaptureOnly)); [void]$script:events.Add('진단')   # -CaptureOnly 까지 남깁니다 (ESC 미발견 진단은 캡처만 - 명세 3.2)
+}
 function Focus-Game { param($Game) }
 function Invoke-AutoRefocus { param($Game) return $false }
 function Test-Path { param($LiteralPath, $Path) return [bool]$script:safeStopFlag }
@@ -271,13 +278,42 @@ function Get-GameRegionOcrText { param($Game, $ReferenceX, $ReferenceY, $RegionW
   if ($script:rl4Mode) { $r = Pop-Rl4 'ocr'; if ($r.Fail) { return '' }; return [string]$r.Value }
   [void](Read-Mock 'Get-GameRegionOcrText' $true); return ''
 }
-function Find-GameTextPoint { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $SearchText, $ExactText, $Scale, $Engine)
-  $ok = Read-Mock ('Find-GameTextPoint:' + $SearchText) $true
+# ESC 글자 탐색 모의 (구현 명세 ESC탐색 3.2): 일반 · 이진화는 판독 이름이 따로이고(Find-GameTextPoint:ESC · :ESC#bin - 실패 주입 failOnceAt 의 열쇠) 결과도 따로 지정합니다.
+# 유효한 판독마다 escNormalSeq · escBinSeq 앞에서 'found' / 'miss' 를 하나씩, 다 쓰면 escNormalDefault · escBinDefault. 판독 모드와 엔진은 캡처 실패 판독까지 순서대로 escReads 에 남습니다.
+# 두 판독의 점이 달라 어느 판독의 점을 눌렀는지 사건 · 로그로 갈립니다 (일반 점은 1908 실측 글자 중심의 기준 좌표)
+$escTextPoint = @{ X = 1102; Y = 74 }; $escBinPoint = @{ X = 1103; Y = 76 }
+function Find-GameTextPoint { param($Game, $ReferenceX, $ReferenceY, $RegionWidth, $RegionHeight, $SearchText, $ExactText, $Scale, $Engine, [switch]$BinaryWhiteText)
+  if ($SearchText -eq 'ESC') { [void]$script:escReads.Add(('{0}:{1}' -f $(if ($BinaryWhiteText) { '이진화' } else { '일반' }), $Engine)) }
+  $ok = Read-Mock ('Find-GameTextPoint:' + $SearchText + $(if ($BinaryWhiteText) { '#bin' } else { '' })) $true
   if (-not $ok) { return $null }
-  if ($SearchText -eq 'ESC') { return @{ X = 1102; Y = 74 } }
+  if ($SearchText -eq 'ESC') {
+    if ($BinaryWhiteText) {
+      if ((Next-Seq 'escBin' $script:escBinDefault) -eq 'found') { return $escBinPoint }
+      return $null
+    }
+    if ((Next-Seq 'escNormal' $script:escNormalDefault) -eq 'found') { return $escTextPoint }
+    return $null
+  }
   # 메뉴 '어비스' 글자 (설계 v2 10.3 ①): textAbyssMode 'miss' = 유효 캡처에서 못 찾음(렌더 이상으로 글자가 깨진 메뉴). 캡처 실패는 기존 failOnceAt 장치
   if ($SearchText -eq '어비스') { if ($script:textAbyssMode -eq 'miss') { return $null }; return @{ X = 971; Y = 531 } }
   return $null
+}
+# 커서 모의 (구현 명세 ESC탐색 3.2): 사례 값 cursorOverGame 에서 시작해 대피하면 창 밖, 클릭이 나가면 게임 위입니다 (운영 Click-ScreenPoint 는 커서를 되돌리지 않음).
+# 대피 안의 양보는 운영 계약대로 가상 시계 · 양보 누적만 올리고(parkYieldMs - 한 번 쓰면 0, 게이트를 지나지 않음), 그 양보 뒤 화면을 screenAfterPark 로 바꿉니다
+function Test-CursorOverGame { param($Game) return [bool]$script:cursorOverGame }
+function Move-CursorOutsideGame { param($Game)
+  $script:parkCalls++; [void]$script:parkTimes.Add((Elapsed)); [void]$script:events.Add('대피')
+  if ($script:parkYieldMs -gt 0) {
+    $parkYield = $script:parkYieldMs; $script:parkYieldMs = 0
+    Advance $parkYield
+    $script:userYieldTotalMs = [double]$script:userYieldTotalMs + $parkYield
+  }
+  if ($script:screenAfterPark) { $script:screen = $script:screenAfterPark; $script:screenAfterPark = '' }
+  $script:cursorOverGame = $false
+}
+# 창 너비 모의 (구현 명세 ESC탐색 3.2): 운영 함수는 클릭 직전에 GetWindowRect 로 읽습니다 - 여기서는 고정점 회전마다 widthSeq 앞에서 하나씩, 다 쓰면 windowWidth. 고르기는 추출한 운영 함수
+function Get-AbyssEscFallbackPoint { param($Game, [int]$LargeTurn)
+  return (Select-AbyssEscFallbackPoint -WindowWidth ([int](Next-Seq 'width' $script:windowWidth)) -LargeTurn $LargeTurn)
 }
 # 메뉴 '어비스' 아이콘 탐색 모의 (설계 v2 10.3 ② - 운영 Find-AbyssMenuIconPoint 계약): 캡처 실패 중이면 캡처 없이 capture-failed / 캡처 1회(판독 모의 -
 # 실패 규칙에 걸리면 capture-failed) / 메뉴 화면('menu'·'menuInside')이고 iconMode 'found' 면 found + 라벨 상당점 (971,531)(Send-Mock 이 X=971 을 어비스
@@ -317,31 +353,49 @@ function Find-AbyssExitButtonPoint { param($Game)
 }
 
 # ── 모의: 클릭·키 ─────────────────────────────────────────────────────────────
+function Invoke-EscButtonTransition {
+  # ESC 버튼이 눌린 화면 전이: 필드 → 메뉴 / 던전 안(필드 오독 포함) → 던전 안 메뉴 / 메뉴 → 닫힘
+  switch ($script:screen) {
+    'field'        { $script:screen = 'menu' }
+    'fieldMisread' { $script:screen = 'menuInside' }
+    'inside'       { $script:screen = 'menuInside' }
+    'menu'         { $script:screen = 'field' }
+    'menuInside'   { $script:screen = 'inside' }
+  }
+}
 function Send-Mock { param([int]$X, [int]$Y)
   $r = Next-Seq 'send' 'sent'
   $script:lastClickPerformed = ($r -eq 'sent'); $script:lastClickSkipReason = $(if ($r -eq 'sent') { '' } else { $r })
-  if ($r -ne 'sent') { return }
+  # ESC 판별은 좌표 쌍입니다 (구현 명세 ESC탐색 3.2): 큰 창 고정점의 X 가 글자 점의 X 와 같아 X 하나로는 글자 클릭과 고정점 클릭이 갈리지 않습니다
+  $isEscText = (($X -eq $escTextPoint.X -and $Y -eq $escTextPoint.Y) -or ($X -eq $escBinPoint.X -and $Y -eq $escBinPoint.Y))
+  $isEscFixed = (($X -eq $ptEscButtonLarge[0] -and $Y -eq $ptEscButtonLarge[1]) -or ($X -eq $ptEscButton[0] -and $Y -eq $ptEscButton[1]))
+  if ($r -ne 'sent') {
+    if ($isEscFixed) { [void]$script:events.Add("고정점 생략($r) $X,$Y") }
+    return
+  }
+  $script:cursorOverGame = $true
   [void]$script:clickTimes.Add((Elapsed))
-  if ($X -eq 1102) {
-    # ESC 버튼: 필드 → 메뉴 / 던전 안(필드 오독 포함) → 던전 안 메뉴 / 메뉴 → 닫힘. escIgnoreUntil 전의 ESC 는 전송되지만 게임이 무시(화면 불변)
-    $script:escClicksSent++; [void]$script:escTimes.Add((Elapsed))
+  if ($isEscText) {
+    # ESC 글자 클릭. escIgnoreUntil 전의 ESC 는 전송되지만 게임이 무시(화면 불변)
+    $script:escClicksSent++; [void]$script:escTimes.Add((Elapsed)); [void]$script:events.Add("글자 $X,$Y")
     if ($script:onFirstEsc -and $script:escClicksSent -eq 1) { & $script:onFirstEsc }
     if ($null -ne $script:escIgnoreUntil -and (Elapsed) -lt $script:escIgnoreUntil) { return }
     if ($script:escLeadsTo) { $script:screen = $script:escLeadsTo; $script:escLeadsTo = ''; return }
-    switch ($script:screen) {
-      'field'        { $script:screen = 'menu' }
-      'fieldMisread' { $script:screen = 'menuInside' }
-      'inside'       { $script:screen = 'menuInside' }
-      'menu'         { $script:screen = 'field' }
-      'menuInside'   { $script:screen = 'inside' }
-    }
+    Invoke-EscButtonTransition
   } elseif ($X -eq 971) {
     # 메뉴 '어비스' → 필드 메뉴면 abyssLeadsTo(기본 선택 화면, 'detail'·'unknown' 가능). 던전 안 메뉴였다면 오버레이 = 원 사고 (09-20 23:25)
     $script:abyssClicksSent++; [void]$script:abyssTimes.Add((Elapsed)); $script:panelReadsAtAbyss = $script:panelReads
     if ($script:screen -eq 'menuInside') { $script:abyssClickedFromInside++; $script:screen = 'selection' }
     else { $script:screen = $script:abyssLeadsTo }
     if ($script:onAbyssClick) { & $script:onAbyssClick }
-  } else { $script:otherClicksSent++ }
+  } else {
+    # 고정점도 '그 밖의 클릭' 으로 세어 AllInput 합과 X 후보 0 단언들이 옛날처럼 이 클릭을 봅니다 - 게임 반응은 fallbackOpensMenu(기본 무시: 단추 밖 또는 눌러도 안 열리는 자리), 사건 목록에는 따로 남깁니다
+    $script:otherClicksSent++
+    if ($isEscFixed) {
+      [void]$script:fixedClicks.Add("$X,$Y"); [void]$script:fixedTimes.Add((Elapsed)); [void]$script:events.Add("고정점 $X,$Y")
+      if ($script:fallbackOpensMenu) { Invoke-EscButtonTransition }
+    }
+  }
 }
 function Click-ScreenPoint { param([int]$X, [int]$Y) Send-Mock -X $X -Y $Y }
 function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY) Send-Mock -X ([int]$ReferenceX) -Y ([int]$ReferenceY) }
@@ -404,6 +458,14 @@ function Reset-Case {
   $script:textAbyssMode = 'found'; $script:iconMode = 'found'; $script:menuSignalMode = 'exit-label'
   $script:lastAbyssMenuSignal = ''; $script:lastQuestTrackerText = ''
   $script:iconCalls = 0; $script:iconTimes = New-Object 'System.Collections.Generic.List[double]'; $script:iconScreens = New-Object 'System.Collections.Generic.List[string]'
+  # ESC 클릭 자리 탐색 (구현 명세 ESC탐색 3.2): 기본은 일반 판독이 찾는 평상시 - 기존 사례가 그대로 지납니다. events = 대피 · 진단 · 글자 · 고정점 사건 순서열
+  $script:escNormalSeq = @(); $script:escNormalIdx = 0; $script:escNormalDefault = 'found'
+  $script:escBinSeq = @(); $script:escBinIdx = 0; $script:escBinDefault = 'miss'
+  $script:escReads = New-Object 'System.Collections.Generic.List[string]'; $script:events = New-Object 'System.Collections.Generic.List[string]'
+  $script:fixedClicks = New-Object 'System.Collections.Generic.List[string]'; $script:fixedTimes = New-Object 'System.Collections.Generic.List[double]'; $script:fallbackOpensMenu = $false
+  $script:windowWidth = 1272; $script:widthSeq = @(); $script:widthIdx = 0
+  $script:cursorOverGame = $true; $script:parkCalls = 0; $script:parkTimes = New-Object 'System.Collections.Generic.List[double]'; $script:parkYieldMs = 0; $script:screenAfterPark = ''
+  $script:diagLog = New-Object 'System.Collections.Generic.List[string]'
 }
 function Run-Loop { param([int]$SafeStopExitCode = 0)
   try { Return-ToAbyssSelection -Game $null -SafeStopExitCode $SafeStopExitCode } catch { $script:threw = $_.Exception.Message }
@@ -940,6 +1002,130 @@ $script:textAbyssMode = 'miss'; $script:menuSignalMode = 'abyss-text'
 Run-Loop
 $rli10Untailed = @($script:logs | Where-Object { $_ -match '글자를 찾지 못했습니다' -and $_ -notmatch ' - 재시도 \(\d+\) \(판독: 아이콘 탐색 안 함 - [^\r\n]+\)$' }).Count
 Check-Equal "RLI10 1차 신호 메뉴 + 글자 실패 지속: 아이콘 호출 0, 어비스 0, 미발견 ≥ 1 이고 전부 '아이콘 탐색 안 함' 꼬리, 마감 throw, 코드 없음" ("$($script:iconCalls)/$($script:abyssClicksSent)/$([int]((MissLogs) -ge 1))/$rli10Untailed/$(ThrewTimeout)/$($script:exitCode)") '0/0/1/0/1/'
+
+# ── 12. RLE 복귀 루프의 ESC 클릭 자리 탐색 (2026-11-04 구현 명세 ESC탐색 1절 · 3.2 - 사용자 결정 U-E-1~U-E-7) ─────────────────────────
+# 10-28 실기 1-D′a: 판독 영역의 다른 플레이어 이름표 하나로 일반 판독이 '' 인데 HUD 판정은 이진화로 통과해, 필드는 확인되고 클릭 자리만 못 찾아 1908 에서 단추 밖 고정점을 눌렀습니다
+# (ESC 다섯 번에 메뉴 0 → 복귀 대기 초과 코드 1). 기대 좌표는 소스 캡처($ptEscButton · $ptEscButtonLarge)와 모의 글자 점이고, 실패 계수는 지역 변수라 다음 E5 줄의 '(N회, …)' 로 봅니다.
+# 모의(Reset-Case 기본값): 일반 found · 이진화 miss · 고정점 클릭은 게임이 무시 · 창 너비 1272 · 커서 게임 위. 시각은 하니스 가상 시계(판독 0초)라 실제보다 짧아 - 60초에 고정점이 네 번 들어갑니다
+# (실제는 두 번 안팎 - 명세 1절) - 코드 · 횟수 · 순서만 단언합니다
+$escSmallXY = "$($ptEscButton[0]),$($ptEscButton[1])"
+$escLargeXY = "$($ptEscButtonLarge[0]),$($ptEscButtonLarge[1])"
+$escTextXY = "$($escTextPoint.X),$($escTextPoint.Y)"
+$escBinXY = "$($escBinPoint.X),$($escBinPoint.Y)"
+function EscClickTails { return @($script:logs | ForEach-Object { if ($_ -match '\[어비스\] ESC 클릭 \((.+)\)$') { $Matches[1] } }) }
+function E5Tails { return @($script:logs | ForEach-Object { if ($_ -match '\[어비스\] ESC 글자를 못 읽어 누르지 않고 다시 읽습니다 \((.+)\)$') { $Matches[1] } }) }
+function FirstE5Tails { param([int]$Count) return (@(E5Tails | Select-Object -First $Count) -join ' | ') }
+function FirstEvents { param([int]$Count) return (@($script:events | Select-Object -First $Count) -join ', ') }
+function FirstFixedClicks { param([int]$Count) return (@($script:fixedClicks | Select-Object -First $Count) -join ' → ') }
+function FirstFixedLogs { param([int]$Count) return (@(EscClickTails | Where-Object { $_ -like '글자 탐색 실패 고정점 *' } | Select-Object -First $Count | ForEach-Object { $_ -replace '^글자 탐색 실패 고정점 ', '' }) -join ' → ') }
+function FirstEscReads { param([int]$Count) return (@($script:escReads | Select-Object -First $Count) -join ',') }
+
+# RLE0 (E1) 일반 성공: 둘째 판독 · 대피 없이 그 점을 누르고, 줄에 분기와 좌표가 남습니다
+Reset-Case -Screen 'field'
+Run-Loop
+Check-Equal 'RLE0 일반 성공: 판독은 일반/영어 1번(둘째 판독 0), 대피 0, ESC 1, 고정점 0, 어비스 1, 복귀 확인 1, 코드·throw 없음' ("$(FirstEscReads 9)/$($script:parkCalls)/$($script:escClicksSent)/$($script:fixedClicks.Count)/$($script:abyssClicksSent)/$(Done)/$($script:exitCode)/$($script:threw)") '일반:en/0/1/0/1/1//'
+Check-Equal "RLE0 클릭 줄 = '[어비스] ESC 클릭 (글자 탐색 화면좌표 $escTextXY)' 1줄" (@(EscClickTails) -join ' | ') "글자 탐색 화면좌표 $escTextXY"
+# RLE1 (E2) 일반 유효 실패 + 이진화 성공: 같은 회전에 이진화/한국어(판독 표 37장 - 한국어만 읽은 그림 9 · 영어만 읽은 그림 0)가 찾은 점을 눌러 출처 있는 완료
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:escBinDefault = 'found'
+Run-Loop
+Check-Equal 'RLE1 일반 실패 + 이진화 성공: 판독 순서 일반/영어 → 이진화/한국어, 대피 0, ESC 1, 고정점 0, 복귀 확인 1, 코드·throw 없음' ("$(FirstEscReads 9)/$($script:parkCalls)/$($script:escClicksSent)/$($script:fixedClicks.Count)/$(Done)/$($script:exitCode)/$($script:threw)") '일반:en,이진화:ko/0/1/0/1//'
+Check-Equal "RLE1 클릭 줄 = '[어비스] ESC 클릭 (글자 탐색 이진화 화면좌표 $escBinXY)' 1줄 - 사건도 이진화 점" ("$(@(EscClickTails) -join ' | ')/$(FirstEvents 9)") "글자 탐색 이진화 화면좌표 $escBinXY/글자 $escBinXY"
+# RLE2 (E3) 일반 판독의 캡처 실패 1회 뒤 둘 다 실패: 그 회전은 둘째 판독 0 · 클릭 0 · 계수 불변 → 동결 → 복구 뒤 첫 E5 가 (1회) (규칙 15 - 캡처 실패 표본을 '못 찾음' 으로 세지 않음)
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:failOnceAt = @{ 'Find-GameTextPoint:ESC' = 1 }
+Run-Loop
+Check-Equal 'RLE2 일반 캡처 실패: 그 회전 둘째 판독 0 (다음 판독이 다시 일반)' (FirstEscReads 3) '일반:en,일반:en,이진화:ko'
+Check-True "RLE2 그 회전 클릭 0 · 동결 1회 뒤 첫 E5 줄 '(1회, 커서 게임 위)', 첫 사건 대피" ($script:safeStopCalls -eq 1 -and $script:parkTimes.Count -ge 1 -and $script:parkTimes[0] -gt $script:safeStopTimes[0] -and (ClicksIn 0 $script:parkTimes[0]) -eq 0 -and (FirstE5Tails 1) -eq '1회, 커서 게임 위' -and (FirstEvents 1) -eq '대피') "(동결 $($script:safeStopTimes -join ','), 대피 $($script:parkTimes -join ','), E5 '$(FirstE5Tails 1)', 사건 '$(FirstEvents 1)')"
+# RLE3 (E4) 일반 유효 실패 + 둘째 판독 캡처 실패 1회 뒤 둘 다 실패: 그 회전 클릭 0 · 계수 불변 → 복구 뒤 첫 E5 가 (1회)
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:failOnceAt = @{ 'Find-GameTextPoint:ESC#bin' = 1 }
+Run-Loop
+Check-Equal 'RLE3 둘째 판독 캡처 실패: 그 회전을 끝내고 다음 회전에 두 판독을 다시 함' (FirstEscReads 4) '일반:en,이진화:ko,일반:en,이진화:ko'
+Check-True "RLE3 그 회전 클릭 0 · 동결 1회 뒤 첫 E5 줄 '(1회, 커서 게임 위)', 첫 사건 대피" ($script:safeStopCalls -eq 1 -and $script:parkTimes.Count -ge 1 -and $script:parkTimes[0] -gt $script:safeStopTimes[0] -and (ClicksIn 0 $script:parkTimes[0]) -eq 0 -and (FirstE5Tails 1) -eq '1회, 커서 게임 위' -and (FirstEvents 1) -eq '대피') "(동결 $($script:safeStopTimes -join ','), 대피 $($script:parkTimes -join ','), E5 '$(FirstE5Tails 1)', 사건 '$(FirstEvents 1)')"
+# RLE4 (E5 · E6) 둘 다 실패 지속 · 작은 창 · 커서 게임 위: 대피와 고정점을 번갈아 하고, 3회째 실패의 대피 뒤에 진단 캡처 1장, 메뉴가 끝내 안 열려 복귀 마감 코드 1 (U-E-2 ~ U-E-4)
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'
+Run-Loop
+Check-Equal "RLE4 둘 다 실패 지속: 사건 순서열 '대피, 고정점 $escSmallXY, 대피, 진단, 고정점 $escSmallXY'" (FirstEvents 5) "대피, 고정점 $escSmallXY, 대피, 진단, 고정점 $escSmallXY"
+$rle4Moves = @($script:events | Where-Object { $_ -ne '진단' })
+$rle4Off = @(for ($i = 0; $i -lt $rle4Moves.Count; $i++) { if ($rle4Moves[$i] -ne $(if ($i % 2 -eq 0) { '대피' } else { "고정점 $escSmallXY" })) { $rle4Moves[$i] } })
+Check-True 'RLE4 끝까지 대피 · 고정점이 번갈아 나오고 고정점 2번 이상, 대피 → 다음 고정점 간격 ≥ W (다음 회전이 필드 확정을 다시 셈)' ($rle4Off.Count -eq 0 -and $script:fixedClicks.Count -ge 2 -and ($script:fixedTimes[0] - $script:parkTimes[0]) -ge $memberFieldSettleSeconds) "(어긋남 $($rle4Off.Count), 사건 $($script:events -join ' / '), 고정점 $($script:fixedTimes -join ','), 대피 $($script:parkTimes -join ','))"
+Check-Equal "RLE4 E5 줄 '(1회, 커서 게임 위)' → '(3회, 커서 게임 위)'" (FirstE5Tails 2) '1회, 커서 게임 위 | 3회, 커서 게임 위'
+Check-Equal "RLE4 클릭 줄은 고정점 수만큼 전부 '(글자 탐색 실패 고정점 $escSmallXY)'" ("$(@(EscClickTails | Select-Object -Unique) -join ' | ')/$(@(EscClickTails).Count)") "글자 탐색 실패 고정점 $escSmallXY/$($script:fixedClicks.Count)"
+Check-Equal 'RLE4 진단 1회 = 문맥 어비스 ESC 글자 미발견 · -CaptureOnly' ($script:diagLog -join ' | ') '어비스 ESC 글자 미발견|True'
+Check-True 'RLE4 마감 코드 1 경로: throw, 코드 없음, (가상 − 누적 실패 − 양보) = 60 ± 1초, 복귀 확인 0' ((ThrewTimeout) -eq 1 -and $null -eq $script:exitCode -and [math]::Abs((Adj) - 60) -le 1.01 -and (Done) -eq 0) "(adj $(Adj), throw '$($script:threw)')"
+Check-True 'RLE4 고정점 클릭은 AllInput 합에 듦 (입력 = 고정점뿐), 글자 ESC 0, 어비스 0' ((AllInput) -eq $script:fixedClicks.Count -and $script:escClicksSent -eq 0 -and $script:abyssClicksSent -eq 0) "(AllInput $(AllInput), 고정점 $($script:fixedClicks.Count), ESC $($script:escClicksSent))"
+# RLE4b 같은 조건 · 커서 게임 밖: 줄만 달라지고 대피는 그대로 합니다 (커서 자리는 로그로 가르기 위한 사실 기록 - 대피 여부를 정하지 않음)
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:cursorOverGame = $false
+Run-Loop
+Check-Equal "RLE4b 커서 게임 밖: 첫 E5 줄 '(1회, 커서 게임 밖)', 고정점 전 대피 호출 1, 대피 수 = E5 줄 수" ("$(FirstE5Tails 1)/$(FirstEvents 2)/$([int]($script:parkCalls -eq @(E5Tails).Count))") "1회, 커서 게임 밖/대피, 고정점 $escSmallXY/1"
+# RLE5 같은 조건 · 큰 창: 새 점과 옛 점을 번갈아 누릅니다 (U-E-7 - 1908 너비에는 1272 화면을 늘린 배치가 있어 그때는 옛 점이 글자 위) - 클릭 사건과 로그 원문 좌표가 같은 순서
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:windowWidth = 1908
+Run-Loop
+Check-Equal "RLE5 큰 창: 클릭 사건 = 로그 원문 좌표 = $escLargeXY → $escSmallXY → $escLargeXY" "$(FirstFixedClicks 3) / $(FirstFixedLogs 3)" "$escLargeXY → $escSmallXY → $escLargeXY / $escLargeXY → $escSmallXY → $escLargeXY"
+# RLE5b 회전 사이 창이 1908 → 1276 → 1908 으로 변함 (RDP 축소 · 복원): 그 순간의 실제 너비로 고르고, 작은 창 고정점은 큰 창 순번을 쓰지 않습니다
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:widthSeq = @(1908, 1276, 1908)
+Run-Loop
+Check-Equal "RLE5b 창 1908 → 1276 → 1908: $escLargeXY → $escSmallXY(작은 창 · 순번 불변) → $escSmallXY(큰 창 순번 1)" (FirstFixedClicks 3) "$escLargeXY → $escSmallXY → $escSmallXY"
+# RLE5c 큰 창 고정점 뒤 글자 클릭이 끼고(게임 무시) 다시 실패: 글자 발견은 대피 계수만 되돌리고 큰 창 순번은 건드리지 않습니다
+Reset-Case -Screen 'field'
+$script:escNormalSeq = @('miss', 'miss', 'found'); $script:escNormalDefault = 'miss'; $script:windowWidth = 1908; $script:escIgnoreUntil = 20000
+Run-Loop
+Check-Equal "RLE5c 글자 클릭이 끼어도: 사건 '대피, 고정점 $escLargeXY, 글자 $escTextXY, 대피, 고정점 $escSmallXY'" (FirstEvents 5) "대피, 고정점 $escLargeXY, 글자 $escTextXY, 대피, 고정점 $escSmallXY"
+# RLE6 1회 실패 뒤 다음 회전 일반 성공 (이름표가 지나감): 고정점 없이 글자를 눌러 완료, 3회에 닿지 않아 진단 0
+Reset-Case -Screen 'field'
+$script:escNormalSeq = @('miss')
+Run-Loop
+Check-Equal 'RLE6 1회 실패 뒤 일반 성공: E5 1줄, 대피 1, 고정점 0, ESC 1, 진단 0, 복귀 확인 1, 코드·throw 없음' ("$(@(E5Tails).Count)/$($script:parkCalls)/$($script:fixedClicks.Count)/$($script:escClicksSent)/$($script:diagCalls)/$(Done)/$($script:exitCode)/$($script:threw)") '1/1/0/1/0/1//'
+# RLE6b 실패(E5) → 글자 찾음 · 전송 · 게임 무시 → 실패: 글자 발견이 계수를 0 으로 되돌려 둘째 E5 도 (1회) · 고정점 0
+Reset-Case -Screen 'field'
+$script:escNormalSeq = @('miss', 'found', 'miss')
+$script:onFirstEsc = { $script:escIgnoreUntil = (Elapsed) + 1 }   # 첫 글자 클릭만 게임이 무시 (09-15 타 PC 1272 ESC 세 번째 성공의 추정 모양)
+Run-Loop
+Check-Equal "RLE6b 글자 발견이 계수를 되돌림: E5 줄 '(1회, …)' 둘, 고정점 0, ESC 2, 복귀 확인 1" ("$(FirstE5Tails 9)/$($script:fixedClicks.Count)/$($script:escClicksSent)/$(Done)") '1회, 커서 게임 위 | 1회, 커서 게임 위/0/2/1'
+# RLE7 고정점 클릭이 메뉴를 엶 (글자는 끝내 안 읽히지만 단추는 눌림): 전송 확인된 고정점이 토큰을 발급해 메뉴 → 어비스 → 선택 화면 완료
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:fallbackOpensMenu = $true
+Run-Loop
+Check-Equal 'RLE7 고정점이 메뉴를 엶: 고정점 1번 뒤 어비스 1, 복귀 확인 1, 메뉴 닫기 0, 진단 0, 코드·throw 없음' ("$(FirstFixedClicks 9)/$($script:abyssClicksSent)/$(Done)/$($script:keyVerified)/$($script:diagCalls)/$($script:exitCode)/$($script:threw)") "$escSmallXY/1/1/0/0//"
+# RLE8 큰 창 고정점 클릭 user-active 생략 (규칙 4): 보내지 않은 클릭은 고정점 차례 · 큰 창 순번을 쓰지 않습니다 - 양보 뒤 다음 실패가 E5 없이 같은 점이고, 그 뒤로는 평소 순서
+Reset-Case -Screen 'field' -SendSeq @('user-active')
+$script:escNormalDefault = 'miss'; $script:windowWidth = 1908
+Run-Loop
+$rle8SkipLogs = Count-Log 'ESC 클릭 건너뜀 \(사용자 조작\)'
+Check-Equal "RLE8 user-active 생략: 사건 '대피, 고정점 생략(user-active) $escLargeXY, 고정점 $escLargeXY, 대피, 진단, 고정점 $escSmallXY'" (FirstEvents 6) "대피, 고정점 생략(user-active) $escLargeXY, 고정점 $escLargeXY, 대피, 진단, 고정점 $escSmallXY"
+Check-Equal 'RLE8 양보 1, 건너뜀 줄 1, 생략과 재시도 사이 E5 줄 없음 (1회 다음이 3회)' ("$($script:yieldWaits)/$rle8SkipLogs/$(FirstE5Tails 2)") '1/1/1회, 커서 게임 위 | 3회, 커서 게임 위'
+#      토큰 폐기: 옛 토큰 보유 → E5 → 고정점 생략 + 0ms 양보(누적 차분 0 - 2c 와 같은 경계) 중 던전 안 메뉴 → 생략 자리의 명시 폐기가 막아 어비스를 누르지 않고 닫습니다
+Reset-Case -Screen 'field' -SendSeq @('sent', 'user-active')
+$script:escNormalSeq = @('found', 'miss', 'miss'); $script:escNormalDefault = 'miss'; $script:windowWidth = 1908; $script:escIgnoreUntil = 20000
+$script:yieldSeconds = 0; $script:screenAfterYield = 'menuInside'
+Run-Loop
+$rle8TokenRecheck = Count-Log '메뉴 출처를 다시 확인'
+Check-Equal 'RLE8 토큰 폐기 - 고정점 생략 뒤 0초 양보 중 던전 안 메뉴: 어비스 0, 던전 안 클릭 0, 메뉴 닫기 1, 코드 4, 출처 재확인 로그 0(명시 폐기), 누적 양보 0' ("$($script:abyssClicksSent)/$($script:abyssClickedFromInside)/$($script:keyVerified)/$($script:exitCode)/$rle8TokenRecheck/$([int]$script:userYieldTotalMs)") '0/0/1/4/0/0'
+# RLE8b 큰 창 고정점 클릭 cursor-not-ready 생략: 자동화 자신의 실패라 그대로 소모합니다 (둘을 뭉쳐 되돌리면 커서가 계속 안 잡힐 때 예산이 안 줄어듦 - 규칙 4) - 양보 없음, 다음 실패는 E5, 그다음 고정점은 옛 점
+Reset-Case -Screen 'field' -SendSeq @('cursor-not-ready')
+$script:escNormalDefault = 'miss'; $script:windowWidth = 1908
+Run-Loop
+$rle8bSkipLogs = Count-Log 'ESC 클릭 건너뜀 \(커서 미확인\)'
+Check-Equal "RLE8b cursor-not-ready 생략: 사건 '대피, 고정점 생략(cursor-not-ready) $escLargeXY, 대피, 진단, 고정점 $escSmallXY'" (FirstEvents 5) "대피, 고정점 생략(cursor-not-ready) $escLargeXY, 대피, 진단, 고정점 $escSmallXY"
+# 둘째 E5 의 커서 자리는 계약이 아닙니다 - cursor-not-ready 는 클릭을 보내지 않았다는 뜻뿐이고, 커서가 어디 남았는지는 모의가 만든 값입니다 (구현 명세 ESC탐색 3.2 '(3회, …)')
+Check-Equal "RLE8b 양보 0, 건너뜀 줄 1, 다음 실패가 E5 '(3회, …)'" ("$($script:yieldWaits)/$rle8bSkipLogs/$((FirstE5Tails 2) -replace '3회, 커서 게임 (위|밖)$', '3회, 커서 …')") '0/1/1회, 커서 게임 위 | 3회, 커서 …'
+# RLE9 클릭 메타를 참으로 둔 뒤 첫 E5, 다음 회전 화면이 메뉴: E5 는 클릭이 없으므로 메타를 읽기 전에 끝나야 합니다 - 앞 클릭의 참을 읽으면 보내지 않은 ESC 로 토큰이 나가 '어비스' 를 누릅니다 (규칙 4)
+Reset-Case -Screen 'field'
+$script:escNormalDefault = 'miss'; $script:lastClickPerformed = $true; $script:screenAfterPark = 'menu'
+Run-Loop
+Check-Equal 'RLE9 첫 E5 뒤 메뉴 (앞 클릭 메타 참): 어비스 0, 메뉴 닫기 1 (토큰 미발급)' ("$($script:abyssClicksSent)/$($script:keyVerified)") '0/1'
+# RLE10 옛 토큰 보유 → E5 → 대피 안 양보 중 던전 안 메뉴: 메뉴 분기의 기준값 대조가 폐기합니다 (대피 안 양보는 게이트를 지나지 않음 - 명세 2.3)
+Reset-Case -Screen 'field'
+$script:escNormalSeq = @('found'); $script:escNormalDefault = 'miss'; $script:escIgnoreUntil = 20000
+$script:parkYieldMs = 3000; $script:screenAfterPark = 'menuInside'
+Run-Loop
+$rle10Recheck = Count-Log '메뉴 출처를 다시 확인'
+Check-Equal "RLE10 대피 안 양보 중 던전 안 메뉴: 어비스 0, 던전 안 클릭 0, 메뉴 닫기 1, '메뉴 출처를 다시 확인' 줄 1, 코드 4" ("$($script:abyssClicksSent)/$($script:abyssClickedFromInside)/$($script:keyVerified)/$rle10Recheck/$($script:exitCode)") '0/0/1/1/4'
 
 if ($fails -gt 0) { "FAIL: $fails 건"; exit 1 }
 "OK: 전부 통과"

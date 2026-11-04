@@ -124,7 +124,9 @@ Check-Equal '배선: 복귀 루프 - 재매칭·준비·접힌 준비 패널이�
 Check-Equal '배선(⑥a): 복귀 루프 - 패널 분기 안에서 이 패널 표본이 유효할 때만(플래그·일련번호) 마감 판정, 준비·접힌 패널이면 진단 + 코드 4, 재매칭이면 break → 기존 throw' ([bool]($ret -match 'if \(\$panelKindNow -ne ''none'' -or \$entryWaitingNow\) \{\s*if \(\(-not \$script:screenCaptureFailing\) -and \(\$script:captureFailSerial -eq \$turnSerial\) -and\s*\(Get-Date\) -ge \(Get-FreezeAdjustedDeadline[^\r\n]*\)\) \{\s*if \(\$panelKindNow -eq ''ready'' -or \$entryWaitingNow\) \{[\s\S]{0,700}exit 4\s*\}\s*break\s*\}')) 'True'
 Check-Equal '배선: 복귀 루프 - 던전 안(HUD+추적기) 2연속·20초면 ESC 금지 + 진단 + 코드 4' ([bool]($ret -match 'if \(\$questNow\) \{[\s\S]{0,700}\$insideStreak -ge 2 -and[\s\S]{0,120}TotalSeconds -ge 20[\s\S]{0,300}Write-LifeDiagnostics[\s\S]{0,500}exit 4')) 'True'
 Check-Equal '배선: 복귀 루프 - 필드를 직접 확인(fieldProven)한 뒤에만 메뉴 어비스 클릭, 아니면 전면 확인 ESC 로 닫고 재확인(전송 성공만 계수, 3회 상한 코드 4)' ([bool]($ret -match 'if \(-not \$fieldProven\) \{[\s\S]{0,300}\$menuCloseTries -ge 3[\s\S]{0,500}exit 4[\s\S]{0,700}if \(Press-KeyVerified -Game \$Game -VirtualKey 0x1B[^\r\n]*\) \{\s*\$menuCloseTries\+\+')) 'True'
-Check-Equal '배선: 복귀 루프 - fieldProven 은 필드 확인 뒤 ESC 클릭이 실제 전송됐을 때만 발급' ([bool]($ret -match 'Write-RunLog ''\[어비스\] ESC 클릭''\s*\$fieldProven = \$true')) 'True'
+# 2026-11-04 구현 명세 ESC탐색 3.3: 클릭 줄에 탐색 분기 · 좌표 꼬리($escClickTail - 화면 표시 숨김은 test_log_tail_offset)가 붙어 작은따옴표 리터럴이 큰따옴표 문자열이 됐습니다 -
+#   클릭 줄 바로 다음 문장이 토큰 발급이라는 뜻은 같습니다
+Check-Equal '배선: 복귀 루프 - fieldProven 은 필드 확인 뒤 ESC 클릭이 실제 전송됐을 때만 발급' ([bool]($ret -match 'Write-RunLog "\[어비스\] ESC 클릭 \(\$escClickTail\)"\s*\$fieldProven = \$true')) 'True'
 # 2026-09-30 ⑥e 설계 2.14: 양보 앞 폐기 줄 끝에 선택 화면 출처 폐기('; $selectionExpected = $false')가 같은 줄로 붙어 두 번째 조항의 줄 끝을 [^\r\n]* 로
 #   넓힙니다 - 토큰·연속 수 폐기가 양보 호출 바로 앞 줄에 있어야 한다는 뜻은 그대로이고, 출처 폐기는 아래 ③ 의 '양보 호출 수 = 출처 폐기 줄 수' 가 봅니다
 # 2026-10-07 ESC 메뉴 '어비스' 아이콘 폴백 (설계 v2 10.4): 클릭 로그의 탐색 출처가 고정 글자 '글자 탐색' 에서 변수 $abyssMenuFoundBy 로 바뀌어
@@ -261,8 +263,9 @@ Check-Equal '배선(⑥e 2.13 ①): 복귀 루프 동결 블록 < 양보 게이�
 # 2026-10-13 구현 명세 ② 2.3 (3.4 · 설계 R2 3.3 ②): 완료 블록의 첫 문장은 코드 10 출구의 열쇠 닫기 정확히 1문장이고(호출부가 사유를 넘겼을 때만 -
 #   'left'·정리 전용, 화면 'selection-proven'), 그 바로 뒤가 예전 첫 문장(안전 중지 확인)입니다 - 이 블록의 두 출구(안전 중지 exit · 완료 return)를 함께
 #   덮습니다. 닫기 줄은 '선택 화면 복귀 확인' 글자를 쓰지 않아(닫기 함수 안 문구) 그 1곳 단언은 그대로입니다. 닫기 동작은 test_after_entry_at_most_once
-Check-Equal '배선(⑥e 2.14 ③ · ② 2.3): 회전 서두 - turnNow 바로 뒤 필드 연속 이어받기 한 줄, 그 뒤 완료 블록(열쇠 닫기 1문장 → 안전 중지 소비 → exit / 완료 로그 → return)이 동결 블록 앞, 완료 문자열·이어받기 줄 각 1곳' (
-  ([bool]($retLoop -match '\$turnNow = Get-Date\s*\$fieldSettleAlive = \$fieldSettleNext; \$fieldSettleNext = \$false\s*if \(\$selectionConfirmed\) \{\s*if \(\$LeaveEntryReason\) \{\s*Close-AbyssKeyEntryOnLeave -Reason \$LeaveEntryReason -Screen ''selection-proven''\s*\}\s*if \(Test-Path -LiteralPath \$safeStopFlagPath\) \{[\s\S]{0,600}?exit \$SafeStopExitCode\s*\}\s*Write-RunLog ''\[어비스\] 선택 화면 복귀 확인''\s*return\s*\}')) -and
+# 2026-11-04 구현 명세 ESC탐색 1절: turnNow 와 이어받기 줄 사이에 직전 회전의 생략 메타를 비우는 한 줄이 섰습니다(규칙 4 - 이 루프에만 없던 것) - 이어받기 줄이 회전 서두라는 뜻은 같습니다
+Check-Equal '배선(⑥e 2.14 ③ · ② 2.3): 회전 서두 - turnNow 뒤 생략 메타 비움 한 줄 · 필드 연속 이어받기 한 줄, 그 뒤 완료 블록(열쇠 닫기 1문장 → 안전 중지 소비 → exit / 완료 로그 → return)이 동결 블록 앞, 완료 문자열·이어받기 줄 각 1곳' (
+  ([bool]($retLoop -match '\$turnNow = Get-Date\s*\$script:lastClickSkipReason = ''''\s*\$fieldSettleAlive = \$fieldSettleNext; \$fieldSettleNext = \$false\s*if \(\$selectionConfirmed\) \{\s*if \(\$LeaveEntryReason\) \{\s*Close-AbyssKeyEntryOnLeave -Reason \$LeaveEntryReason -Screen ''selection-proven''\s*\}\s*if \(Test-Path -LiteralPath \$safeStopFlagPath\) \{[\s\S]{0,600}?exit \$SafeStopExitCode\s*\}\s*Write-RunLog ''\[어비스\] 선택 화면 복귀 확인''\s*return\s*\}')) -and
   ($retLoop.IndexOf('if ($selectionConfirmed) {') -lt $retFreeze.Index) -and
   ([regex]::Matches($ret, '선택 화면 복귀 확인').Count -eq 1) -and ([regex]::Matches($ret, '\$fieldSettleAlive = \$fieldSettleNext; \$fieldSettleNext = \$false').Count -eq 1)) 'True'
 $retSel = [regex]::Match($retLoop, '(?s)if \(Test-AbyssSelectionScreen -Game \$Game\) \{(.*?)\r?\n    \}')
@@ -295,9 +298,10 @@ Check-Equal '배선(⑥e 2.14 ③): 단계 전환 출처 폐기 - 패널 분기�
 $retHud = $retLoop.Substring([Math]::Max(0, $retLoop.IndexOf('if (Test-HomeEndEscHud -Game $Game) {')))
 $settle = [regex]::Match($retHud, '\$insideStreak = 0; \$insideSince = \$null[\s\S]*?if \(\$fieldSettleCount -lt 2 -or \(\$turnNow - \$fieldSettleSince\)\.TotalSeconds -lt \$memberFieldSettleSeconds\) \{\s*\$fieldSettleNext = \$true\s*Start-Sleep -Milliseconds 700\s*continue\s*\}')
 $settleEnd = $settle.Index + $settle.Length
+# 2026-11-04 구현 명세 ESC탐색 3.3: ESC 글자 탐색이 Find-AbyssEscButtonPoint 로 옮겨가 ESC 쪽 기준을 그 호출 위치로 바꿨습니다 (옛 기준 -SearchText 'ESC' 는 이 함수에서 사라져 위치가 -1)
 Check-Equal '배선(⑥e 2.14 ⑤): 필드 확정 - HUD 분기에서 필드 모양 2표본 이상·첫 표본부터 W 이상일 때만 진행(아니면 이어받기 표식 + 700ms + continue), 안전 중지 소비·공지 X·ESC 는 모두 그 뒤, 이어받기 표식 대입 1곳' (
   $settle.Success -and ($settleEnd -lt $retHud.IndexOf('Test-Path -LiteralPath $safeStopFlagPath')) -and ($settleEnd -lt $retHud.IndexOf('Test-NoticeBoardPopup')) -and
-  ($settleEnd -lt $retHud.IndexOf("-SearchText 'ESC'")) -and ([regex]::Matches($ret, '\$fieldSettleNext = \$true').Count -eq 1)) 'True'
+  ($settleEnd -lt $retHud.IndexOf('Find-AbyssEscButtonPoint -Game $Game')) -and ([regex]::Matches($ret, '\$fieldSettleNext = \$true').Count -eq 1)) 'True'
 Check-Equal '배선(⑥e 2.14 ⑤): 오클릭 판정 - 세 판독 직전 일련번호(misclickSerial) 1곳, 조건 블록 첫 줄이 실패 회전 끝냄(오클릭 로그·진단·ESC 앞 - 실패한 음성으로 ESC 금지)' (
   ([regex]::Matches($ret, '\$misclickSerial = \$script:captureFailSerial').Count -eq 1) -and
   ([bool]($ret -match '\$misclickSerial = \$script:captureFailSerial\s*if \(-not \$script:screenCaptureFailing -and -not \(Test-AbyssSelectionScreen -Game \$Game\) -and\s*-not \(Test-AbyssMenu -Game \$Game\) -and -not \(Test-HomeEndEscHud -Game \$Game\)\) \{\s*if \(\$script:screenCaptureFailing -or \$script:captureFailSerial -ne \$misclickSerial\) \{ Start-Sleep -Milliseconds 700; continue \}\s*Write-RunLog ''\[어비스\] 어비스가 아닌 화면이 열렸습니다')) -and

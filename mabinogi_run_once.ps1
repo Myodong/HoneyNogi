@@ -599,6 +599,10 @@ $ptEnter       = @(Get-ConfigValue $config @('clickPoints', 'enter') @(981, 654)
 $ptClearCenter = @(Get-ConfigValue $config @('clickPoints', 'clearScreenCenter') @(636, 358))
 $ptExitButton  = @(Get-ConfigValue $config @('clickPoints', 'exitButton') @(636, 655))   # 2026-09-18 보상 화면 3버튼 개편 뒤 클릭에는 미사용(그 자리가 '다시 하기') - 글자 탐색 Invoke-AbyssExitClick. 키는 config 호환용 유지
 $ptEscButton   = @(Get-ConfigValue $config @('clickPoints', 'escButton') @(1083, 89))
+# 큰 창(1908 계열)의 ESC 고정점 (2026-11-04 실측): 1272 실측점 $ptEscButton 은 네이티브 1908 · 1914 네 배치에서 라벨 밖이라 따로 둡니다. 창 DPI 96 라벨(y100~123)과
+# 144 라벨(y113~135)이 겹치는 띠 안의 한 점입니다. 스크립트 상수라 coordsVersion · configSchemaVersion 과 무관합니다 (config 좌표를 바꾸면 커스텀 진행 기록이 초기화됨)
+$ptEscButtonLarge = @(1102, 78)
+$escLargeWindowMinWidth = 1590   # 권장 크기 1272 · 1908 의 가운데 - 실제 창 너비가 이 값 이상이면 큰 창
 $ptAbyssMenu   = @(Get-ConfigValue $config @('clickPoints', 'abyssMenu') @(971, 387))   # 2026-07-16 UI 개편: 아이콘 그리드 메뉴의 '어비스' 타일 (OCR 실측)
 
 $rgClearExit   = @(Get-ConfigValue $config @('ocrRegions', 'clearAndExitText') @(430, 570, 420, 125))
@@ -6304,6 +6308,46 @@ function Test-HomeEndEscHud {
     -RegionWidth $rgHomeEndEsc[2] -RegionHeight $rgHomeEndEsc[3] -Scale 5 -Engine $ocrEnglishEngine -BinaryWhiteText
   $normalized = ($binaryText -replace '\s', '').ToLowerInvariant()
   return ($normalized.Contains('hom') -or $normalized.Contains('esc') -or $normalized.Contains('end'))
+}
+
+function Find-AbyssEscButtonPoint {
+  param([System.Diagnostics.Process]$Game)
+
+  # 복귀 루프의 ESC 글자 탐색 (판독만 - 클릭 · 키 · 양보 · 전면화 · 커서 대피 없음). 2026-10-28 실기 1-D′a: 판독 영역의 다른 플레이어 이름표 하나로 일반 판독이 통째로
+  # '' 가 됐는데 Test-HomeEndEscHud 는 이진화로 통과해, 필드는 확인되고 클릭 자리만 못 찾았습니다. 그래서 일반 판독이 유효하게 못 찾았을 때만 이진화로 한 번 더 읽습니다.
+  # 일반 판독의 캡처가 실패했으면 '못 찾음' 이 아니므로 둘째 판독을 하지 않습니다 - 호출부 가드가 그 회전을 끊습니다 (규칙 15).
+  # 이진화는 한국어 엔진입니다: 재현 그림 37장에서 이진화/영어만 읽은 그림 0 · 이진화/한국어만 읽은 그림 9 (1270 필드 포함). 순서는 일반 먼저 - 이진화는 놓치는 그림이 있습니다.
+  $serialBefore = $script:captureFailSerial
+  $point = Find-GameTextPoint -Game $Game -ReferenceX $rgHomeEndEsc[0] -ReferenceY $rgHomeEndEsc[1] `
+    -RegionWidth $rgHomeEndEsc[2] -RegionHeight $rgHomeEndEsc[3] -SearchText 'ESC' -ExactText 'ESC' `
+    -Scale 5 -Engine $ocrEnglishEngine
+  if ($point) { return @{ Point = $point; FoundBy = '글자 탐색' } }
+  if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $serialBefore) { return @{ Point = $null; FoundBy = '' } }
+  $point = Find-GameTextPoint -Game $Game -ReferenceX $rgHomeEndEsc[0] -ReferenceY $rgHomeEndEsc[1] `
+    -RegionWidth $rgHomeEndEsc[2] -RegionHeight $rgHomeEndEsc[3] -SearchText 'ESC' -ExactText 'ESC' `
+    -Scale 5 -Engine $ocrKoreanEngine -BinaryWhiteText
+  return @{ Point = $point; FoundBy = '글자 탐색 이진화' }
+}
+
+function Select-AbyssEscFallbackPoint {
+  param([int]$WindowWidth, [int]$LargeTurn)
+
+  # ESC 고정점 고르기 (순수 함수 - 진리표 대상). 1272 실측점은 작은 창(1270 · 1272 · 1315)에서 라벨 안이고 네이티브 1908 · 1914 에서 라벨 밖입니다.
+  # 큰 창은 새 점과 옛 점을 번갈아 누릅니다: 1908 너비에는 1272 화면을 1.5배 늘린 배치(제목줄 47px - 08-12~09-11 그림)가 있어 그때는 옛 점이 글자 위이고 새 점이 라벨 밖입니다.
+  # 세 배치에 공통으로 드는 점은 없습니다 (겹치는 띠 높이 1.5px)
+  if ($WindowWidth -lt $escLargeWindowMinWidth) { return @{ X = $ptEscButton[0]; Y = $ptEscButton[1]; Large = $false } }
+  $point = if (($LargeTurn % 2) -eq 0) { $ptEscButtonLarge } else { $ptEscButton }
+  return @{ X = $point[0]; Y = $point[1]; Large = $true }
+}
+
+function Get-AbyssEscFallbackPoint {
+  param([System.Diagnostics.Process]$Game, [int]$LargeTurn)
+
+  # 클릭 직전의 실제 창 너비로 고릅니다 - 저장된 설정이 아닙니다 ('권장 창 모드' 는 1회 적용 버튼이고, RDP 끊김으로 1908 창이 1276x719 로 줄어드는 사례가 있음).
+  # 창 좌표를 못 읽으면 너비를 짐작하지 않고 Get-ScaledScreenPoint 와 같은 사유로 던집니다
+  $rect = New-Object HoneyNogiInput+RECT
+  if (-not [HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$rect)) { throw '게임 창 좌표를 읽지 못했습니다.' }
+  return (Select-AbyssEscFallbackPoint -WindowWidth ($rect.Right - $rect.Left) -LargeTurn $LargeTurn)
 }
 
 function Test-MenuExitLabel {
@@ -14766,6 +14810,8 @@ function Return-ToAbyssSelection {
   $xAttempts = 0          # 닫기(X) 후보 순환 인덱스
   $stellaHandled = 0      # 복귀 중 스텔라 픽 처리 횟수 (무한 클릭 방지 상한용)
   $abyssMenuMissCount = 0 # 메뉴에서 '어비스' 글자를 못 찾은 횟수 (진단 캡처 1회용)
+  $escMissCount = 0       # 일반 · 이진화 판독이 모두 'ESC' 를 못 찾은 회전 수 - 찾으면 0. 홀수 회전은 커서를 치우고 다시 읽고, 짝수 회전은 고정점을 누릅니다
+  $escLargeTurn = 0       # 큰 창 고정점 순번 (짝수 새 점 · 홀수 옛 점). 글자 발견 · 작은 창 고정점이 건드리지 않아 RDP 축소 · 복원이나 글자 클릭이 끼어도 번갈아 누름이 이어집니다
   $seenYieldMs = [double]$script:userYieldTotalMs   # 양보 마감 연장 기준값 (허브와 같은 계약)
   # 캡처 실패 누적 기준값 (⑥e 설계 2.13): 만료 판정은 모두 Get-FreezeAdjustedDeadline(양보 + 캡처 실패 누적 차분)으로 봅니다 - 같은 회전 안의
   # 실패 → 뒤 판독 복구의 실패 시간도 마감에서 빼고(규칙 15), 동결 블록은 마감을 되돌리지 않습니다 (되돌리면 실패 회전이 사이에 한 번씩 낄 때 영영 만료 안 됨)
@@ -14805,6 +14851,7 @@ function Return-ToAbyssSelection {
   while ($true) {
     $turnSerial = $script:captureFailSerial   # 회전 단위 캡처 실패 판정용 (구현 리뷰 P2)
     $turnNow = Get-Date
+    $script:lastClickSkipReason = ''   # 직전 회전의 생략 메타가 남아 오발동하지 않게 (규칙 4)
     $fieldSettleAlive = $fieldSettleNext; $fieldSettleNext = $false   # 직전 회전이 필드 확정 대기로 끝났을 때만 필드 모양 연속이 이어짐 (그 밖의 회전은 모두 끊음 - 2.14)
     if ($selectionConfirmed) {
       # 완료 (⑥e 설계 2.14 - 09-30 리뷰5 P1-1): 워커 자신의 '어비스' 클릭 뒤 출처가 살아 있는 판독이 선택 화면을 확인했습니다. 이 루프의 완료 문구·
@@ -15158,29 +15205,43 @@ function Return-ToAbyssSelection {
       Focus-Game -Game $Game
       # ESC 버튼 자기앵커 (2026-08-13 21:25 실사고): 고정점 (1083,89)가 네이티브 1908에서
       # 버튼 밖(실측 'ESC' 단어 중심 (1102,74) - 우상단 앵커라 위-오른쪽으로 이동) → 17회
-      # 클릭 무반응으로 시간 초과. HUD 글자는 같은 진단에서 매번 정확히 읽혔으므로 읽힌
-      # 'ESC' 글자 위치를 클릭하고, 못 찾을 때만 기존 고정점(1272 실측 동작) 폴백.
-      # 폴백을 유지하는 이유(토글과 다름): 빗나가도 오입장류 사고가 아니고 루프가 매 회전
-      # 화면을 재판정하는 안전 구조 (교차 리뷰 승인).
-      $escPoint = Find-GameTextPoint -Game $Game -ReferenceX $rgHomeEndEsc[0] -ReferenceY $rgHomeEndEsc[1] `
-        -RegionWidth $rgHomeEndEsc[2] -RegionHeight $rgHomeEndEsc[3] -SearchText 'ESC' -ExactText 'ESC' `
-        -Scale 5 -Engine $ocrEnglishEngine
+      # 클릭 무반응으로 시간 초과. 읽힌 'ESC' 글자 위치를 클릭합니다.
+      # 2026-11-04 (10-28 실기 1-D′a - 이름표로 일반 판독이 깨져 1908 에서 단추 밖 고정점을 눌러 메뉴를 못 엶): 두 판독(Find-AbyssEscButtonPoint)이 모두 못 찾으면 먼저 누르지 않고
+      # 커서를 치운 뒤 다시 읽습니다 - 글자 클릭이 무시되면 커서가 글자 위에 남아 판독을 가립니다 (09-09 '입문' 실사고와 같은 기전). 그래도 못 찾으면 창 크기에 맞는 고정점을 누릅니다.
+      # 고정점을 남기는 이유: 복잡한 배경 등으로 판독이 다 놓쳐도 메뉴를 열 길이고, 루프가 매 회전 화면을 재판정하는 안전 구조입니다
+      $escRead = Find-AbyssEscButtonPoint -Game $Game
+      $escPoint = $escRead.Point
       # 필드 표본 뒤의 판독(공지 팝업·ESC 글자 탐색)에서 캡처 실패가 있었으면 이 회전은 ESC 를 보내지 않습니다 - 뒤 판독 성공이
       # 플래그를 풀어도 그 사이 화면이 바뀌었을 수 있고(재입장 등), 실패 뒤 일련번호로 토큰을 발급하면 다음 메뉴의 대조가 실패를
       # 못 봅니다('토큰 세탁' - 구현 리뷰 4차 P1). 규칙 15: 실패 회전은 조작하지 않고 재판독.
       if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { Start-Sleep -Milliseconds 700; continue }
       if ($escPoint) {
+        $escMissCount = 0
+        $escClickTail = "$($escRead.FoundBy) 화면좌표 $([int]$escPoint.X),$([int]$escPoint.Y)"
         Click-ScreenPoint -X $escPoint.X -Y $escPoint.Y
       } else {
-        Click-GamePoint -Game $Game -ReferenceX $ptEscButton[0] -ReferenceY $ptEscButton[1]
+        $escMissCount++
+        if ($escMissCount % 2 -eq 1) {
+          # 클릭이 없는 회전입니다 - 아래 클릭 메타를 읽기 전에 continue 합니다 (앞 클릭의 참이 남아 거짓 토큰이 되는 것을 막음 - 규칙 4). 다음 회전은 W 를 다시 셉니다
+          $escCursorWhere = if (Test-CursorOverGame -Game $Game) { '게임 위' } else { '게임 밖' }
+          Write-RunLog "[어비스] ESC 글자를 못 읽어 누르지 않고 다시 읽습니다 (${escMissCount}회, 커서 $escCursorWhere)"
+          Move-CursorOutsideGame -Game $Game   # 판독 직전이 아니라 두 판독 실패 갈래 - 다음 판독은 W 뒤입니다
+          if ($escMissCount -eq 3) { Write-LifeDiagnostics -Game $Game -Context '어비스 ESC 글자 미발견' -CaptureOnly }
+          continue
+        }
+        $escFallback = Get-AbyssEscFallbackPoint -Game $Game -LargeTurn $escLargeTurn
+        $escClickTail = "글자 탐색 실패 고정점 $($escFallback.X),$($escFallback.Y)"
+        Click-GamePoint -Game $Game -ReferenceX $escFallback.X -ReferenceY $escFallback.Y
+        if ($escFallback.Large -and $script:lastClickSkipReason -ne 'user-active') { $escLargeTurn++ }   # 'user-active' 생략만 큰 창 순번을 쓰지 않습니다 - 'cursor-not-ready' 는 소모합니다 (규칙 4)
       }
       if ($script:lastClickPerformed) {
-        Write-RunLog '[어비스] ESC 클릭'
+        Write-RunLog "[어비스] ESC 클릭 ($escClickTail)"
         $fieldProven = $true   # 필드(HUD + 추적기 던전명 없음)를 확인하고 워커가 직접 연 메뉴에만 유효한 일회성 토큰 (구현 리뷰 P1)
         $fieldProvenYieldMs = [double]$script:userYieldTotalMs; $fieldProvenSerial = $script:captureFailSerial; $fieldProvenTrackerText = [string]$script:lastQuestTrackerText   # 발급 시점 기준값 - 메뉴 분기에서 대조 (구현 리뷰 2차 P1)
       } else {
         Write-RunLog "[어비스] ESC 클릭 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 회전에서 재시도"
         if ($script:lastClickSkipReason -eq 'user-active') {
+          if ($escMissCount -gt 0) { $escMissCount-- }   # 보내지 못한 고정점은 차례를 쓰지 않습니다 - 다음 실패가 다시 고정점입니다 (규칙 4: cursor-not-ready 는 그대로 소모)
           $fieldProven = $false; $insideStreak = 0; $insideSince = $null; $selectionExpected = $false   # 조작 생략·양보 = 토큰·연속 수·선택 화면 출처 폐기 (누적 양보 차분이 0 인 경계에서도 fail-closed - 구현 리뷰 3차 P1 / 2.14)
           Invoke-UserYieldWithDeadline -Game $Game -Context '어비스 선택 화면 복귀' -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs)
         }
