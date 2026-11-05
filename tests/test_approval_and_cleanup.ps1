@@ -233,6 +233,122 @@ Assert-Case '계약: 빌드가 현재 버전 제외 매니페스트 내장(자�
   ($buildSource -match '-lt \(\[version\]\$appVersion\)') $true
 Assert-Case '계약: 빌드 후 자기 해시 upsert' ($buildSource -match 'RELEASE HASH') $true
 
+# ---- 8. [시작] 누른 뒤 표시 (Set-StartButtonPending · Complete-ApprovalCheck 실함수) ----
+# 조회 동안 글자 · 색이 바뀌고, 조회가 끝나면 시작하든 못 하든 되돌아와야 합니다. 되돌림이 빠지면 버튼이 '시작 중…' 에 멈춥니다
+foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') `
+    -Names @('Set-StartButtonPending', 'Complete-ApprovalCheck', 'Start-ApprovalCheck')) {
+  Invoke-Expression $definition
+}
+$startButtonText = '시작(F9)'
+$script:themeHoney = 'honey'
+$script:themeBorder = 'border'
+$script:deviceCode = ''
+$script:approvalDeniedSeen = $false
+$approvalGraceDays = 7
+$lblStatus = [pscustomobject]@{ Text = '' }
+$btnStart = [pscustomobject]@{ Text = $startButtonText; BackColor = 'honey' }
+function Get-ConfigApprovalCache { return @{ At = $null; Code = '' } }
+function Set-ApprovalCache { }
+function Clear-ApprovalCache { }
+function Add-GuiLog { param([string]$Text) }
+function Update-ApprovalUi { }
+function Test-ApprovalAllowsStart { return $script:mockAllowed }
+function Invoke-StartAutomation { $script:startCalls++; $script:textAtStart = $btnStart.Text }
+
+Set-StartButtonPending -Pending $true
+Assert-Case '시작 표시: 누르면 글자가 바뀜' $btnStart.Text '시작 중…'
+Assert-Case '시작 표시: 누르면 색이 바뀜' $btnStart.BackColor 'border'
+foreach ($startCase in @(
+    @{ N = '승인되면 시작'; Allowed = $true; Starts = 1 }
+    @{ N = '승인 안 되면 시작 안 함'; Allowed = $false; Starts = 0 }
+  )) {
+  Set-StartButtonPending -Pending $true
+  $script:approvalPendingStart = $true
+  $script:mockAllowed = $startCase.Allowed
+  $script:startCalls = 0
+  $script:textAtStart = ''
+  Complete-ApprovalCheck -ResponseText ''
+  Assert-Case "시작 표시 $($startCase.N): 시작 횟수" $script:startCalls $startCase.Starts
+  Assert-Case "시작 표시 $($startCase.N): 글자 되돌림" $btnStart.Text $startButtonText
+  Assert-Case "시작 표시 $($startCase.N): 색 되돌림" $btnStart.BackColor 'honey'
+  Assert-Case "시작 표시 $($startCase.N): 예약 해제" $script:approvalPendingStart $false
+}
+# 시작 불가로 Invoke-StartAutomation 이 그냥 돌아와도 버튼이 평소 모양이어야 하므로, 되돌림은 그 호출 앞입니다
+$script:mockAllowed = $true
+$script:approvalPendingStart = $true
+Set-StartButtonPending -Pending $true
+Complete-ApprovalCheck -ResponseText ''
+Assert-Case '시작 표시: 시작 함수가 불릴 때 이미 되돌려져 있음' $script:textAtStart $startButtonText
+# 시작을 예약하지 않은 조회(패널이 뜰 때 · 승인 다시 확인)는 버튼을 건드리지 않습니다
+$script:approvalPendingStart = $false
+$btnStart.Text = '건드리면 안 됨'
+Complete-ApprovalCheck -ResponseText ''
+Assert-Case '시작 표시: 예약 없는 조회는 버튼 불변' $btnStart.Text '건드리면 안 됨'
+Assert-Case '계약: 클릭 핸들러는 버튼을 끄고 표시를 켠 뒤 조회를 시작' `
+  ($guiSource -match '\$btnStart\.Enabled = \$false\s+Set-StartButtonPending -Pending \$true\s+\$lblStatus\.Text = [^\r\n]+\s+Start-ApprovalCheck -ForStart') $true
+
+
+# 조회가 끝나는 길마다 표시가 되돌아오는지 실제 코드로 봅니다 (Start-ApprovalCheck 실함수 · 승인 타이머 Tick 본문은 소스에서 잘라 점소싱).
+# 합류는 예약이 single-flight 반환보다 앞이어야 하고, 기동 실패 · 시간 초과 · 정상 완료는 전부 Complete-ApprovalCheck 로 모여야 합니다 - 하나라도 빠지면 버튼이 '시작 중…' 에 남습니다
+$approvalTickCall = @([System.Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'mabinogi_gui.ps1'), [ref]$null, [ref]$null).FindAll({
+      param($node)
+      $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and $node.Member.Value -eq 'Add_Tick' -and $node.Expression.Extent.Text -eq '$script:approvalTimer'
+    }, $true))
+Assert-Case '시작 표시 경로: 소스에서 승인 타이머 Tick 을 찾음' $approvalTickCall.Count 1
+$approvalTickBlock = $approvalTickCall[0].Arguments[0].ScriptBlock.GetScriptBlock()
+function New-FetchMock {
+  # 조회 객체 모의: 끝난 조회는 빈 응답을 돌려주고, 정지 요청은 아무것도 하지 않습니다
+  $fetchMock = [pscustomobject]@{ Name = 'fetch' }
+  $fetchMock | Add-Member -MemberType ScriptMethod -Name EndInvoke -Value { param($asyncResult) return @('') }
+  $fetchMock | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+  $fetchMock | Add-Member -MemberType ScriptMethod -Name BeginStop -Value { param($callback, $state) }
+  return $fetchMock
+}
+$approvalFetchTimeoutSeconds = 25
+$approvalTimerMock = [pscustomobject]@{ Name = 'timer' }
+$approvalTimerMock | Add-Member -MemberType ScriptMethod -Name Start -Value { }
+$approvalTimerMock | Add-Member -MemberType ScriptMethod -Name Stop -Value { }
+$script:approvalTimer = $approvalTimerMock
+$script:mockAllowed = $true
+
+# 진행 중 조회에 합류: 새로 만들지 않고 돌아오지만 예약은 걸려 있어야 하고, 조회 중 틱은 표시를 건드리지 않으며, 조회가 끝나면 되돌아옵니다
+$joinFetch = New-FetchMock
+$script:approvalPs = $joinFetch
+$script:approvalAsync = [pscustomobject]@{ IsCompleted = $false }
+$script:approvalStartedAt = Get-Date
+$script:approvalPendingStart = $false
+$script:startCalls = 0
+Set-StartButtonPending -Pending $true
+Start-ApprovalCheck -ForStart
+Assert-Case '시작 표시 합류: 예약이 걸리고 진행 중 조회를 그대로 씀' "$($script:approvalPendingStart)/$([object]::ReferenceEquals($script:approvalPs, $joinFetch))" 'True/True'
+. $approvalTickBlock
+Assert-Case '시작 표시 합류: 조회 중 틱은 표시를 유지' "$($btnStart.Text)/$($script:startCalls)" '시작 중…/0'
+$script:approvalAsync.IsCompleted = $true
+. $approvalTickBlock
+Assert-Case '시작 표시 합류 → 정상 완료: 글자 · 색 되돌림, 시작 1회, 조회 비움' "$($btnStart.Text)/$($btnStart.BackColor)/$($script:startCalls)/$($null -eq $script:approvalPs)" "$startButtonText/honey/1/True"
+
+# 25초 시간 초과: 끝나지 않은 조회를 버리고 실패 판정으로 모입니다
+$script:approvalPs = New-FetchMock
+$script:approvalAsync = [pscustomobject]@{ IsCompleted = $false }
+$script:approvalStartedAt = (Get-Date).AddSeconds(-($approvalFetchTimeoutSeconds + 1))
+$script:approvalPendingStart = $true
+$script:startCalls = 0
+Set-StartButtonPending -Pending $true
+. $approvalTickBlock
+Assert-Case '시작 표시 시간 초과: 글자 · 색 되돌림, 시작 1회, 예약 해제, 조회 비움' "$($btnStart.Text)/$($btnStart.BackColor)/$($script:startCalls)/$($script:approvalPendingStart)/$($null -eq $script:approvalPs)" "$startButtonText/honey/1/False/True"
+
+# 기동 실패: Start() 가 없는 타이머로 try 안에서 예외를 내 실제 catch 를 탑니다 (빈 주소라 네트워크로 나가지 않습니다)
+$whitelistUrl = ''
+$script:approvalTimer = [pscustomobject]@{ Name = 'no-start' }
+$script:approvalPs = $null
+$script:approvalAsync = $null
+$script:approvalPendingStart = $false
+$script:startCalls = 0
+Set-StartButtonPending -Pending $true
+Start-ApprovalCheck -ForStart
+Assert-Case '시작 표시 기동 실패: 글자 · 색 되돌림, 시작 1회, 예약 해제, 조회 비움' "$($btnStart.Text)/$($btnStart.BackColor)/$($script:startCalls)/$($script:approvalPendingStart)/$($null -eq $script:approvalPs)" "$startButtonText/honey/1/False/True"
+$script:approvalTimer = $approvalTimerMock
+
 if ($fails -gt 0) { Write-Output "FAIL 합계: $fails"; exit 1 }
 Write-Output '전체 통과'
 exit 0

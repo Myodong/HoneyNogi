@@ -2410,6 +2410,7 @@ $script:approvalAsync = $null
 # 도달하지 못해 **시작 버튼과 F9 가 영구 잠깁니다** (2026-08-10 8차 점검).
 $script:approvalStartedAt = $null
 $approvalFetchTimeoutSeconds = 25    # 내부 -TimeoutSec 10 + 리다이렉트/DNS 여유
+$startButtonText = '시작(F9)'         # [시작] 버튼의 평소 글자 - 승인 조회 동안 Set-StartButtonPending 이 잠깐 바꿉니다
 
 function Start-ApprovalCheck {
   # 명단 비동기 조회 시작. 진행 중이면 새로 만들지 않고 합류합니다 (single-flight -
@@ -2475,12 +2476,22 @@ function Complete-ApprovalCheck {
   if ($script:approvalPendingStart) {
     $script:approvalPendingStart = $false
     $lblStatus.Text = '대기 중'
+    Set-StartButtonPending -Pending $false
     if (Test-ApprovalAllowsStart) {
       Invoke-StartAutomation
     } else {
       Add-GuiLog '[안내] 사용 승인이 확인되지 않아 시작하지 않았습니다'
     }
   }
+}
+
+function Set-StartButtonPending {
+  # [시작]을 누른 뒤 승인 조회가 끝날 때까지 글자와 색으로 눌렸음을 보여 줍니다 (2026-11-04 사용자 요청 - 조회가 최대 25초 걸리는데
+  # 버튼이 꺼지기만 해서 눌렸는지 알 수 없었음). 되돌리는 자리는 Complete-ApprovalCheck 하나입니다 - 조회가 끝나면 시작하든 못 하든 그 자리를
+  # 지나고, Invoke-StartAutomation 의 시작 불가 갈래는 전부 그 뒤라 따로 되돌리지 않아도 됩니다. 색은 팔레트 값이라 호출 때 읽습니다
+  param([bool]$Pending)
+  $btnStart.Text = $(if ($Pending) { '시작 중…' } else { $startButtonText })
+  $btnStart.BackColor = $(if ($Pending) { $script:themeBorder } else { $script:themeHoney })
 }
 
 function Update-ApprovalUi {
@@ -2696,7 +2707,7 @@ $rbCustomRepeat.Add_CheckedChanged({
 
 # --- 제어 버튼 (한 줄) ---
 $btnStart = New-Object System.Windows.Forms.Button
-$btnStart.Text = '시작(F9)'
+$btnStart.Text = $startButtonText
 $btnStart.Location = New-Object System.Drawing.Point(15, 144)   # 대분류 줄 신설로 +40 (v2.0.0)
 $btnStart.Size = New-Object System.Drawing.Size(150, 38)
 $btnStart.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
@@ -12190,6 +12201,7 @@ $btnStart.Add_Click({
       return
     }
     $btnStart.Enabled = $false
+    Set-StartButtonPending -Pending $true
     $lblStatus.Text = '사용 승인 확인 중…'
     Start-ApprovalCheck -ForStart
   })
