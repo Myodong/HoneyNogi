@@ -379,15 +379,16 @@ Assert-Case "배선: '다음 층으로' 양보 사실을 '다시 하기' 게이�
 Assert-Case "배선: 40초 루프의 '계속하기'·공지 닫기 로그는 실제 클릭일 때만" `
   (([regex]::Matches($workerCode, "'계속하기' 클릭을 건너뜀").Count -eq 2) -and
    ($workerCode.Contains('공지 게시판 X 닫기 클릭을 건너뜀'))) 'True'
-# 어비스 복귀 루프의 클릭 생략 → 즉시 마감 연장 (메뉴·ESC·공지 X 3곳 + 스텔라 2·X 후보 1 = elseif)
+# 어비스 복귀 루프의 클릭 생략 → 즉시 마감 연장 (메뉴·ESC·공지 X 두 블록 4곳 + 스텔라 2·X 후보 1 = elseif)
 # 2026-09-18: '나가기' 분기는 Invoke-AbyssExitClick 헬퍼로 이동 - 헬퍼의 Wait-UserYieldEnd 가 $script:userYieldTotalMs 에
 # 누적하고 이 루프의 while 조건(Get-YieldAdjustedDeadline)이 반영하므로 직접 호출 1곳이 줄어 9→8
-Assert-Case '배선: 어비스 복귀 루프 클릭 생략 시 즉시 마감 연장 6곳' `
-  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count) 8   # 서두 게이트 1 + 복구 ESC 게이트 1 + 클릭 생략 6
+# 2026-11-04: 공지가 HUD 까지 가린 화면을 5) 분기에서 닫는 소비 블록(사용자 결정 U-R-8)이 생략 뒤 양보 1곳을 더해 8→9
+Assert-Case '배선: 어비스 복귀 루프 클릭 생략 시 즉시 마감 연장 7곳' `
+  ([regex]::Matches($workerCode, "Invoke-UserYieldWithDeadline -Game \`$Game -Context '어비스 선택 화면 복귀'").Count) 9   # 서두 게이트 1 + 복구 ESC 게이트 1 + 클릭 생략 7
 # 2026-09-30 ⑥e 설계 2.13 (뒤집음): 복귀 루프의 만료 판정은 모두 Get-FreezeAdjustedDeadline(양보 + 캡처 실패 누적 차분)이라 헬퍼 안 캡처 실패
 #   시간은 누적 차분이 다음 판정 때 더합니다 - 헬퍼의 FrozenMs 를 따로 더하면 같은 실패 시간이 두 번 더해집니다(⑥a 필드 복귀 루프의 선례).
 #   대신 호출 직전의 조정 마감을 부모 마감(-ParentDeadline $exitParentDeadline)으로 넘기고, 헬퍼 안 복구 회전만 이어져 그 마감에 닿은
-#   'expired' 는 바로 다음 줄에서 break(→ 기존 throw)로 받습니다 (09-30 리뷰4 P1-2 - 2초 뒤 continue 면 정지가 늦어짐)
+#   'expired' 는 바로 다음 줄에서 break(→ 안전 중지가 없으면 throw, 있으면 while 뒤 마감 출구)로 받습니다 (09-30 리뷰4 P1-2 - 2초 뒤 continue 면 정지가 늦어짐)
 $abyssReturnForExit = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection')))
 Assert-Case "배선: 어비스 복귀 루프 '나가기' 분기는 헬퍼 FrozenMs 를 마감에 더하지 않음 (캡처 실패 누적 차분과 이중 가산 금지)" `
   ([regex]::Matches($abyssReturnForExit, 'FrozenMs').Count) 0

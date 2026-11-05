@@ -241,6 +241,13 @@ Check-Equal 'GUI: 미발견 줄의 아이콘 판독 꼬리 제거 - 재시도 �
 Check-Equal "GUI: 미발견 줄의 '아이콘 탐색 안 함' 꼬리 제거 (1차 신호 회전 - 재시도 횟수 괄호는 보존)" `
   (Convert-WorkerLogLineForGui "15:00:00 [어비스] 메뉴에서 '어비스' 글자를 찾지 못했습니다 - 재시도 (3) (판독: 아이콘 탐색 안 함 - 메뉴 판정에서 '어비스' 글자 조각이 읽힌 회전)" $false) `
   "15:00:00 [어비스] 메뉴에서 '어비스' 글자를 찾지 못했습니다 - 재시도 (3)"
+# 공지 게시판 '(HUD 가려짐)' (복귀 연장 U-R-8): 어느 블록에서 닫았는지 가리는 표지라 파일에만 남깁니다. 줄 끝이 아니면 지우지 않습니다
+Check-Equal "GUI: 공지 '(HUD 가려짐)' 꼬리 제거" `
+  (Convert-WorkerLogLineForGui '15:00:00 [어비스] 공지 게시판 팝업 감지 - X로 닫기 (HUD 가려짐)' $false) `
+  '15:00:00 [어비스] 공지 게시판 팝업 감지 - X로 닫기'
+Check-Equal "GUI: '(HUD 가려짐)' 이 줄 끝이 아니면 그대로" `
+  (Convert-WorkerLogLineForGui '15:00:00 [어비스] 공지 (HUD 가려짐) 뒤에 글자' $false) `
+  '15:00:00 [어비스] 공지 (HUD 가려짐) 뒤에 글자'
 Check-Equal 'GUI: 순서 추정(Y=) 꼬리 제거' `
   (Convert-WorkerLogLineForGui "12:00:13 [생활] '거미줄 뭉치' 행을 목록 순서로 추정했습니다 (Y=680 - 이름 판독 실패 보완)" $false) `
   "12:00:13 [생활] '거미줄 뭉치' 행을 목록 순서로 추정했습니다"
@@ -1229,6 +1236,8 @@ $keepSpecs = @(
   @{ Label = "필드 확정 결과 줄(재입장 대기 'field-cancelled' - 구현 단위 5b-8)"; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 던전 밖(HUD) 확인 - '; Want = 1
      Fills = @(@{ memberFieldSettleSeconds = $hideSettleSeconds; settleSpan = '6.3'; settleCount = '9' }) }
   @{ Label = '재매칭 ESC 취소 정지 줄(구현 단위 5b-8)'; Function = 'Complete-AbyssRetrySelection'; Prefix = '[완료] 재매칭이 취소돼 필드로'; Want = 1; Fills = @(@{}) }
+  # 구현 단위 복귀 연장 1.5 - 마감 뒤 안전 중지 세 갈래: 코드 0 은 상태줄에 사유가 안 나와 화면을 확인하라는 안내가 창의 이 줄뿐입니다 - 꼬리 규칙에 깎이면 안 됩니다
+  @{ Label = '마감 뒤 안전 중지 줄(구현 단위 복귀 연장)'; Function = 'Return-ToAbyssSelection'; Prefix = '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못'; Want = 3; Fills = @(@{}) }
 )
 foreach ($keepSpec in $keepSpecs) {
   $keepNodes = @(Get-WorkerLogArgumentNodes -FunctionName $keepSpec.Function -Prefix ([string]$keepSpec.Prefix) -Fragment ([string]$keepSpec.Fragment))
@@ -1245,6 +1254,16 @@ foreach ($keepSpec in $keepSpecs) {
       Check-Equal ('GUI 보존 줄({0}): 창 줄 그대로 - {1}' -f $keepSpec.Label, $keepLine) (Convert-WorkerLogLineForGui ('12:00:00 ' + $keepLine) $true) ('12:00:00 ' + $keepLine)
     }
   }
+}
+
+# 복귀 마감 연장 줄 (구현 단위 복귀 연장 1.5): 연장 값은 분석용 꼬리라 파일에만 남고 창에서는 지워집니다 - 워커 원문을 표본 값으로 채워 봅니다 (꼬리 글자가 ' (판독: ' 로 시작하지 않게 바뀌면 창에 숫자가 드러남)
+$extendNodes = @(Get-WorkerLogArgumentNodes -FunctionName 'Update-AbyssReturnDeadlineOnSend' -Prefix '[안내] 복귀 중 아는 창을 눌러 복귀 대기 시간을 늘립니다 (판독: ')
+Check-Equal '워커 연장 줄(구현 단위 복귀 연장): Update-AbyssReturnDeadlineOnSend 의 Write-RunLog 첫 인자 1곳' $extendNodes.Count 1
+if ($extendNodes.Count -eq 1) {
+  $extendLine = Expand-WorkerStringSample -Node $extendNodes[0] -SubValue '34'
+  Check-Equal 'GUI 연장 줄(구현 단위 복귀 연장): 판독 꼬리가 창에서 지워짐 · 파일 원문에는 연장 값' `
+    ('{0} · {1}' -f (Convert-WorkerLogLineForGui ('12:00:00 ' + $extendLine) $false), $extendLine.EndsWith('(판독: 연장 34초, 남은 연장 34초)')) `
+    '12:00:00 [안내] 복귀 중 아는 창을 눌러 복귀 대기 시간을 늘립니다 · True'
 }
 
 # ④ 판별은 원문 - [완료] 줄인 꼬리 표본(H5 는 [어비스] 줄이라 사유 수집 대상이 아님)으로 두 수집 경로를 돌립니다

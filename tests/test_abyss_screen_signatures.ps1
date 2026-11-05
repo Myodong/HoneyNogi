@@ -28,6 +28,8 @@
 #      그대로 1곳. 닫기 동작·호출부 개수는 test_after_entry_at_most_once
 #   ⑨ own 시작 분기의 완료 기록 (2026-10-13 구현 명세 ② 2.6 · P16): 보상·클리어 화면 시작 분기도 마커 줄 뒤·나가기 헬퍼 앞에서 own 만 기록 - 완료 기록
 #      호출 개수 4(정의 + 본류 + 시작 분기 2). 시작 분기 조건은 test_abyss_handoff_start, 행동은 test_after_entry_at_most_once
+#   ⑩ 복귀 마감 연장 · 마감 뒤 안전 중지 (2026-11-04 구현 명세 복귀연장 3.4): 연장 호출 여섯 곳이 유효 전송 조건 안에서만 같은 마감 · 연장 예산을 넘기고, 5) 분기는 헬퍼 호출 앞에서 메타를 비우고 -Outcome 을 넘기며,
+#      while 뒤는 Test-Path → Remove-Item → [완료] 줄 → 두 스위치 진단 → exit, 그 뒤 throw 입니다 (모양이 아니라 연결을 봅니다 - 행동은 test_abyss_return_loop RLX)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'source_test_helpers.ps1')
 $root = Split-Path -Parent $PSScriptRoot
@@ -121,7 +123,7 @@ Check-Equal '배선(2.10 W3 · ② 2.6 · ⑤b5): 마커 블록 → $clearedReco
 $ret = Body 'Return-ToAbyssSelection'
 Check-Equal '배선: 복귀 루프 - 재매칭·준비·접힌 준비 패널이면 대기 (선택 화면 판정보다 앞)' (($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -gt 0) -and ($ret.IndexOf('Get-AbyssPanelKind -Game $Game') -lt $ret.IndexOf('if (Test-AbyssSelectionScreen -Game $Game) {')) -and ([bool]($ret -match '\$entryWaitingNow = \(\$panelKindNow -eq ''none''\) -and \(-not \$script:screenCaptureFailing\) -and \(Test-AbyssEntryWaiting -Game \$Game\)'))) 'True'
 # ⑥e 설계 2.13: 만료 판정 산술이 Get-YieldAdjustedDeadline → Get-FreezeAdjustedDeadline(양보 + 캡처 실패 누적 차분 - 같은 회전 실패 → 복구의 실패 시간도 뺌)
-Check-Equal '배선(⑥a): 복귀 루프 - 패널 분기 안에서 이 패널 표본이 유효할 때만(플래그·일련번호) 마감 판정, 준비·접힌 패널이면 진단 + 코드 4, 재매칭이면 break → 기존 throw' ([bool]($ret -match 'if \(\$panelKindNow -ne ''none'' -or \$entryWaitingNow\) \{\s*if \(\(-not \$script:screenCaptureFailing\) -and \(\$script:captureFailSerial -eq \$turnSerial\) -and\s*\(Get-Date\) -ge \(Get-FreezeAdjustedDeadline[^\r\n]*\)\) \{\s*if \(\$panelKindNow -eq ''ready'' -or \$entryWaitingNow\) \{[\s\S]{0,700}exit 4\s*\}\s*break\s*\}')) 'True'
+Check-Equal '배선(⑥a): 복귀 루프 - 패널 분기 안에서 이 패널 표본이 유효할 때만(플래그·일련번호) 마감 판정, 준비·접힌 패널이면 진단 + 코드 4, 재매칭이면 break → 안전 중지가 없으면 throw' ([bool]($ret -match 'if \(\$panelKindNow -ne ''none'' -or \$entryWaitingNow\) \{\s*if \(\(-not \$script:screenCaptureFailing\) -and \(\$script:captureFailSerial -eq \$turnSerial\) -and\s*\(Get-Date\) -ge \(Get-FreezeAdjustedDeadline[^\r\n]*\)\) \{\s*if \(\$panelKindNow -eq ''ready'' -or \$entryWaitingNow\) \{[\s\S]{0,700}exit 4\s*\}\s*break\s*\}')) 'True'
 Check-Equal '배선: 복귀 루프 - 던전 안(HUD+추적기) 2연속·20초면 ESC 금지 + 진단 + 코드 4' ([bool]($ret -match 'if \(\$questNow\) \{[\s\S]{0,700}\$insideStreak -ge 2 -and[\s\S]{0,120}TotalSeconds -ge 20[\s\S]{0,300}Write-LifeDiagnostics[\s\S]{0,500}exit 4')) 'True'
 Check-Equal '배선: 복귀 루프 - 필드를 직접 확인(fieldProven)한 뒤에만 메뉴 어비스 클릭, 아니면 전면 확인 ESC 로 닫고 재확인(전송 성공만 계수, 3회 상한 코드 4)' ([bool]($ret -match 'if \(-not \$fieldProven\) \{[\s\S]{0,300}\$menuCloseTries -ge 3[\s\S]{0,500}exit 4[\s\S]{0,700}if \(Press-KeyVerified -Game \$Game -VirtualKey 0x1B[^\r\n]*\) \{\s*\$menuCloseTries\+\+')) 'True'
 # 2026-11-04 구현 명세 ESC탐색 3.3: 클릭 줄에 탐색 분기 · 좌표 꼬리($escClickTail - 화면 표시 숨김은 test_log_tail_offset)가 붙어 작은따옴표 리터럴이 큰따옴표 문자열이 됐습니다 -
@@ -229,7 +231,9 @@ $retMenu = $ret.Substring($ret.IndexOf('if (Test-AbyssMenu -Game $Game) {'))
 Check-Equal '배선(2차·3차 P1): 복귀 루프 - 메뉴 분기 진입 시 일련번호·양보 누적 어느 쪽이든 변했으면 토큰 폐기(재판독 아님), fieldProven 검사보다 앞' (([bool]($retMenu -match 'if \(\$fieldProven -and \(\(\$script:captureFailSerial -ne \$fieldProvenSerial\) -or \(\[double\]\$script:userYieldTotalMs -ne \$fieldProvenYieldMs\)\)\) \{\s*\$fieldProven = \$false')) -and ($retMenu.IndexOf('$fieldProvenYieldMs))) {') -lt $retMenu.IndexOf('if (-not $fieldProven) {'))) 'True'
 $retYieldCalls = [regex]::Matches($ret, 'Invoke-UserYieldWithDeadline -Game \$Game').Count
 $retYieldGuarded = [regex]::Matches($ret, '\$fieldProven = \$false[^\r\n]*\r?\n\s*Invoke-UserYieldWithDeadline -Game \$Game').Count
-Check-Equal "배선(3차 P1): 복귀 루프 - 모든 양보 호출(${retYieldCalls}곳, 8곳 이상) 직전에 토큰 폐기 (누적 양보 차분이 0 인 경계 대비)" ("$retYieldGuarded/$([int]($retYieldCalls -ge 8))") "$retYieldCalls/1"
+# 2026-11-04 '알 수 없는 화면' 쪽 공지 (사용자 결정 U-R-8): 그 소비 블록의 양보 1곳만 폐기 줄 없이 부릅니다 - 같은 회전의 5) 분기 머리가 이미 폐기했고 그 뒤로 발급이 없습니다 (전제는 아래 3c ②-2 가 봅니다)
+$retYieldHeadCleared = [regex]::Matches($ret, 'if \(\$script:lastClickSkipReason -eq ''user-active''\) \{ Invoke-UserYieldWithDeadline -Game \$Game').Count
+Check-Equal "배선(3차 P1): 복귀 루프 - 양보 호출(${retYieldCalls}곳, 9곳 이상) 가운데 5) 분기 머리 폐기를 받는 공지 소비 블록 1곳을 뺀 모두의 직전에 토큰 폐기 (누적 양보 차분이 0 인 경계 대비)" ("$retYieldGuarded/$retYieldHeadCleared/$([int]($retYieldCalls -ge 9))") "$($retYieldCalls - 1)/1/1"
 $startBlock = $src.Substring($src.IndexOf('$startMatchingDetected = '), $src.IndexOf('뒤 입장 완료 감지 - 이 판의 클리어 대기부터') - $src.IndexOf('$startMatchingDetected = '))
 # ⑥e: 옛 파티원 필드 복귀 루프 쪽 단언은 D 로 - D 의 간접 양보 리셋(⑤)이 유효성 블록(⑥ - 실패 표본 폐기)보다 앞
 Check-Equal '배선(3차 P2 · ⑥e): 시작 재매칭·파티원 D - 간접 양보 리셋이 실패 표본 폐기보다 앞 (같은 회전에 겹쳐도 옛 연속 수가 남지 않음)' ((($startBlock.IndexOf('-ne $turnYieldMs) { $startInsideStreak = 0 }') -gt 0) -and ($startBlock.IndexOf('-ne $turnYieldMs) { $startInsideStreak = 0 }') -lt $startBlock.IndexOf('-ne $turnSerial) { continue }'))) -and (($member.IndexOf('-ne $turnYieldMs) { $insideStreak = 0; $fieldStreak = 0 }') -gt 0) -and ($member.IndexOf('-ne $turnYieldMs) { $insideStreak = 0; $fieldStreak = 0 }') -lt $memberValidityAt))) 'True'
@@ -282,7 +286,7 @@ Check-Equal '배선(⑥e 2.14 ③): 확인 루프 - 그 시도의 판독 직전 
   ($ret.IndexOf('if ($selectionConfirmed) { continue }') -gt 0) -and ($ret.IndexOf('if ($selectionConfirmed) { continue }') -lt $ret.IndexOf('-not (Test-AbyssSelectionScreen')) -and
   ([regex]::Matches($ret, '\$selectionConfirmed = ').Count -eq 3)) 'True'
 $retYieldProvenance = [regex]::Matches($ret, '\$fieldProven = \$false[^\r\n]*\$selectionExpected = \$false[^\r\n]*\r?\n\s*Invoke-UserYieldWithDeadline -Game \$Game').Count
-Check-Equal "배선(⑥e 2.14 ③): 모든 양보 호출(${retYieldCalls}곳) 앞 폐기 줄이 선택 화면 출처 폐기를 같은 줄에 담음 (누적 양보 차분이 0 인 경계에서도 fail-closed)" $retYieldProvenance $retYieldCalls
+Check-Equal "배선(⑥e 2.14 ③): 양보 호출(${retYieldCalls}곳) 가운데 5) 분기 머리 폐기를 받는 공지 소비 블록 1곳을 뺀 모두의 앞 폐기 줄이 선택 화면 출처 폐기를 같은 줄에 담음 (누적 양보 차분이 0 인 경계에서도 fail-closed)" $retYieldProvenance ($retYieldCalls - 1)
 $escPrefix = $ret.Substring(0, [Math]::Max(0, $ret.IndexOf('Press-KeyOnce -VirtualKey 0x1B')))
 $escPrev3 = ((($escPrefix -split "`n") | Select-Object -Last 4 | Select-Object -First 3) -join "`n")
 Check-Equal '배선(⑥e 2.14 ③): 단계 전환 출처 폐기 - 패널 분기·메뉴 분기 첫 줄·HUD 분기 첫 줄·보상 분기·복구 분기, 오클릭 복구 ESC 바로 앞 3줄에는 없음(09-15 어비스 → 상세 → ESC → 선택 화면 경로 보존)' (
@@ -294,7 +298,7 @@ Check-Equal '배선(⑥e 2.14 ③): 단계 전환 출처 폐기 - 패널 분기�
   ($escPrefix.Length -gt 0) -and (-not $escPrev3.Contains('$selectionExpected = $false'))) 'True'
 # ⑤ 필드 확정(W)·실패 판독 가드 (⑥e 설계 2.14 - 반영본 검증, 09-30 리뷰5): 같은 두 판독(HUD·추적기)이 던전 안에서 필드 모양을 내는 일이 관측이라
 #   (입장 직후 추적기 제목 반짝임 2.1~4.2초 · 보스 이펙트의 '정박' 누락 2연속) 1표본으로 ESC 를 보내면 던전 안 메뉴 → 워커 '어비스' → 출처 있는 완료가 됩니다.
-#   필드 모양 유효 표본이 끊김 없이 2개 이상이고 첫 표본부터 W($memberFieldSettleSeconds) 이상일 때만 안전 중지 소비·공지 X·ESC 를 합니다
+#   필드 모양 유효 표본이 끊김 없이 2개 이상이고 첫 표본부터 W($memberFieldSettleSeconds) 이상일 때만 안전 중지 소비·HUD 분기의 공지 X·ESC 를 합니다
 $retHud = $retLoop.Substring([Math]::Max(0, $retLoop.IndexOf('if (Test-HomeEndEscHud -Game $Game) {')))
 $settle = [regex]::Match($retHud, '\$insideStreak = 0; \$insideSince = \$null[\s\S]*?if \(\$fieldSettleCount -lt 2 -or \(\$turnNow - \$fieldSettleSince\)\.TotalSeconds -lt \$memberFieldSettleSeconds\) \{\s*\$fieldSettleNext = \$true\s*Start-Sleep -Milliseconds 700\s*continue\s*\}')
 $settleEnd = $settle.Index + $settle.Length
@@ -401,6 +405,162 @@ Check-Equal '배선(⑥e 2.12): 시작 패널 대기 판독 쪽 복구 회전 �
   ($swReset -gt 0) -and ($swReset -lt $swRecovered) -and ($swRecovered -lt $swDrop) -and
   ([bool]($startWait -match 'if \(\(-not \$script:screenCaptureFailing\) -and \$script:captureFailSerial -ne \$turnSerial\) \{\s*if \(\(Get-Date\) -ge \(Get-FreezeAdjustedDeadline -Deadline \(\[ref\]\$startMatchDeadline\)[^\r\n]*\)\) \{\s*Write-LifeDiagnostics[^\r\n]*\s*Write-RunLog[^\r\n]*\s*exit 4\s*\}\s*Start-Sleep -Seconds 2\s*\}'))) 'True'
 Check-Equal '배선(⑥e 2.12): 시작 패널 대기의 조정 마감 판정 4곳 (표식 회전·스윕 참·판독 도중 복구·일반)' ([regex]::Matches($startWait, 'Get-FreezeAdjustedDeadline -Deadline \(\[ref\]\$startMatchDeadline\)').Count) 4
+
+# ── 3c. 복귀 마감 연장 · 마감 뒤 안전 중지 (2026-11-04 구현 명세 복귀연장 3.4 - 사용자 결정 U-R-1~7): 주석 뺀 사본의 AST 로 어느 조건 안에 있는지 · 무엇을 넘기는지 봅니다 ──
+# 글자 모양을 맞추는 단언이 아닙니다 - 연장이 전송 조건 밖으로 나오거나 다른 변수를 넘기면 행동 행보다 먼저 여기서 드러납니다
+$retFn = [System.Management.Automation.Language.Parser]::ParseInput($ret, [ref]$null, [ref]$null).Find({ param($node) ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($node.Name -eq 'Return-ToAbyssSelection') }, $true)
+$retEnd = @($retFn.Body.EndBlock.Statements)
+$retWhiles = @($retEnd | Where-Object { ($_ -is [System.Management.Automation.Language.WhileStatementAst]) -and ($_.Condition.Extent.Text -eq '$true') })
+function Get-EnclosingConditions { param($Node)
+  # 노드를 품은 if 의 참 갈래 조건 글자를 안쪽부터 돌려줍니다 (else 갈래는 조건이 없어 세지 않습니다 - 연장이 생략 갈래로 옮겨 가면 목록이 달라집니다)
+  $found = @()
+  for ($child = $Node; $null -ne $child.Parent; $child = $child.Parent) {
+    if ($child.Parent -is [System.Management.Automation.Language.IfStatementAst]) {
+      foreach ($clause in $child.Parent.Clauses) { if ([object]::ReferenceEquals($clause.Item2, $child)) { $found += [string]$clause.Item1.Extent.Text } }
+    }
+  }
+  return $found
+}
+function Get-CommandNodes { param($Root, [string]$Name) return @($Root.FindAll({ param($node) ($node -is [System.Management.Automation.Language.CommandAst]) -and ([string]$node.GetCommandName() -eq $Name) }, $true)) }
+Check-Equal '셋업(복귀연장 3.4): 복귀 루프 본문의 최상위 while ($true) 1곳' $retWhiles.Count 1
+$retWhile = $retWhiles[0]
+# ① 연장 호출: 여섯 곳 모두 같은 마감 · 기준값 · 연장 예산 · 남길 시간을 넘기고, 전송을 확인한 조건 안에만 있습니다. X 후보 · ESC · 메뉴 · 동결 자리는 아래 여섯 조건 목록에 없어 함께 막힙니다
+$extCalls = @(Get-CommandNodes -Root $retFn -Name 'Update-AbyssReturnDeadlineOnSend')
+$extArgs = '-Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs) -ExtendLeftMs ([ref]$returnExtendLeftMs) -KeepMs $returnKeepMs'
+$extArgsSame = @($extCalls | Where-Object { ($_.Extent.Text -replace '^Update-AbyssReturnDeadlineOnSend\s+', '') -ceq $extArgs }).Count
+Check-Equal '배선(복귀연장 3.4 ①): 연장 호출 6곳이 모두 같은 마감 · 기준값 · 연장 예산 · 남길 시간을 넘김' "$($extCalls.Count)/$extArgsSame" '6/6'
+$extWhere = @($extCalls | ForEach-Object { (@(Get-EnclosingConditions -Node $_) -join ' ⊂ ') })
+$extSent = '$script:lastClickPerformed'
+$extBranch = '-not $script:screenCaptureFailing'
+$extWant = @(
+  ('$noticeCloseTries -lt $noticeCloseTryLimit ⊂ ' + $extSent + ' ⊂ Test-NoticeBoardPopup -Game $Game ⊂ Test-HomeEndEscHud -Game $Game'),
+  ("(`$script:lastClickPerformed -and `$eventOutcome -ne 'confirm-word') -or (`$eventOutcome -eq 'sent') ⊂ Invoke-EventSkipOrConfirm -Game `$Game -LogPrefix '복귀 중 ' -Outcome ([ref]`$eventOutcome) ⊂ " + $extBranch),
+  ($extSent + " ⊂ `$stellaTitleNow.Contains('스텔라') ⊂ `$stellaHandled -lt 5 ⊂ " + $extBranch),
+  ($extSent + ' ⊂ $stellaBtnNow ⊂ $stellaHandled -lt 5 ⊂ ' + $extBranch),
+  ($extSent + " ⊂ Close-GhostRegisterPrompt -Game `$Game -LogPrefix '[안내] 복귀 중 ' ⊂ " + $extBranch),
+  ($extSent + ' ⊂ $noticeCovered -and $noticeCloseTries -lt $noticeCloseTryLimit ⊂ ' + $extBranch))
+Check-Equal '배선(복귀연장 3.4 ①): 연장 호출은 공지 X 두 블록 · 이벤트 헬퍼 · 스텔라 1 · 2단계 · 고스트의 유효 전송 조건 안에서만 (공지 호출은 HUD 분기의 공지 if 안과 5) 분기의 소비 if 안이고 ESC 쪽에는 없음)' ($extWhere -join ' || ') ($extWant -join ' || ')
+# 연장은 전송을 확인한 바로 그 자리입니다: 연장을 품은 블록 안에는 대기가 없고, 입력 → 전송 확인 if → 기존 2초 대기가 문장으로 붙어 있습니다 (공지 두 곳 · 스텔라 두 곳 - 나머지 둘은 입력과 대기가 헬퍼 안입니다).
+# 행동 행의 허용오차로는 2초 순서 오류가 갈리지 않습니다 (구현 리뷰 2/2)
+$extBlocksWithWait = @($extCalls | Where-Object { @(Get-CommandNodes -Root $_.Parent.Parent -Name 'Start-Sleep').Count -gt 0 }).Count
+$extInputThenWait = @($extCalls | Where-Object {
+    $sendIf = $_.Parent.Parent.Parent
+    # HUD 분기 공지는 연장을 횟수 if 로 한 겹 더 감쌉니다 (U-R-10) - 그 바깥이 전송 확인 if 입니다
+    if (($sendIf -is [System.Management.Automation.Language.IfStatementAst]) -and ($sendIf.Clauses[0].Item1.Extent.Text -ceq '$noticeCloseTries -lt $noticeCloseTryLimit')) { $sendIf = $sendIf.Parent.Parent }
+    if (($sendIf -isnot [System.Management.Automation.Language.IfStatementAst]) -or ($sendIf.Clauses[0].Item1.Extent.Text -cne $extSent)) { return $false }
+    $siblings = @($sendIf.Parent.Statements)
+    $sendIfAt = -1
+    for ($i = 0; $i -lt $siblings.Count; $i++) { if ([object]::ReferenceEquals($siblings[$i], $sendIf)) { $sendIfAt = $i } }
+    return (($sendIfAt -ge 1) -and ($sendIfAt + 1 -lt $siblings.Count) -and ($siblings[$sendIfAt - 1].Extent.Text -cmatch '^Click-(GamePoint|ScreenPoint|NoticeBoardClose) ') -and ($siblings[$sendIfAt + 1].Extent.Text -ceq 'Start-Sleep -Seconds 2'))
+  }).Count
+Check-Equal '배선(복귀연장 3.4 ①): 연장을 품은 블록 안 대기 0곳, 입력 → 전송 확인 if → 2초 대기가 붙은 자리 4곳 (공지 두 곳 · 스텔라 두 곳)' "$extBlocksWithWait/$extInputThenWait" '0/4'
+Check-Equal '배선(복귀연장 3.4 ①): 스텔라 전송 갈래의 첫 문장은 카운터 그대로 (자체 상한 5회 - test_yield_batch)' (@($extCalls | Where-Object { @(Get-EnclosingConditions -Node $_)[0] -eq $extSent -and $_.Parent.Parent.Statements[0].Extent.Text -eq '$stellaHandled++' }).Count) 2
+# 연장 예산: 함수 머리에서 한 번 정하고 전송 때 함수 안에서만 줄어듭니다 - 회전마다 되돌리면 상한이 사라집니다 (U-R-3). 기본 예산 · 남길 시간 · 연장 예산 셋 다 식과 자리를 봅니다
+$retWhileAt = -1
+for ($i = 0; $i -lt $retEnd.Count; $i++) { if ([object]::ReferenceEquals($retEnd[$i], $retWhile)) { $retWhileAt = $i } }
+function Get-ReturnHeadAssign { param([string]$Name)
+  # 복귀 함수 안 그 변수의 대입이 1곳이고 while 앞 최상위 문장이면 오른쪽 식 글자를, 아니면 어긋난 모양을 돌려줍니다
+  $assigns = @($retFn.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq $Name) }, $true))
+  if ($assigns.Count -ne 1) { return "대입 $($assigns.Count)곳" }
+  for ($i = 0; $i -lt $retWhileAt; $i++) { if ([object]::ReferenceEquals($retEnd[$i], $assigns[0])) { return [string]$assigns[0].Right.Extent.Text } }
+  return 'while 앞 최상위 문장 아님'
+}
+Check-Equal '배선(복귀연장 3.4 ①): 기본 예산 · 남길 시간 · 연장 예산 대입은 복귀 루프 안에서 각 1곳 · while 앞 함수 머리 문장 · 식은 계약 그대로' ((@('$returnBaseSeconds', '$returnKeepMs', '$returnExtendLeftMs') | ForEach-Object { Get-ReturnHeadAssign -Name $_ }) -join ' || ') '$timeoutHud + $timeoutAbyssMenu + $timeoutAbyssSelect || [double]$returnBaseSeconds * 1000 || [double]($abyssReturnTotalLimitSeconds - $returnBaseSeconds) * 1000'
+# ② 5) 분기: 헬퍼 호출 앞에서 메타를 비웁니다 - 이벤트 헬퍼의 Space · 캡처 실패 미룸은 메타를 쓰지 않아 앞 회전의 참이 남습니다. 비움은 보상 분기 뒤 · 헬퍼를 품은 if 앞의 회전 본문 문장입니다
+$whileStatements = @($retWhile.Body.Statements)
+$eventIfIndex = -1; $exitBranchIndex = -1; $metaClearIndex = -1
+for ($i = 0; $i -lt $whileStatements.Count; $i++) {
+  $statement = $whileStatements[$i]
+  if (($statement -is [System.Management.Automation.Language.IfStatementAst]) -and (@(Get-CommandNodes -Root $statement -Name 'Invoke-EventSkipOrConfirm').Count -gt 0)) { $eventIfIndex = $i }
+  if (($statement -is [System.Management.Automation.Language.IfStatementAst]) -and ($statement.Clauses[0].Item1.Extent.Text -eq 'Test-ExitButton -Game $Game')) { $exitBranchIndex = $i }
+  if ($statement.Extent.Text -ceq '$script:lastClickPerformed = $false') { $metaClearIndex = $i }
+}
+$eventCall = @(Get-CommandNodes -Root $retFn -Name 'Invoke-EventSkipOrConfirm')
+$metaClearAll = @($retFn.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq '$script:lastClickPerformed') }, $true)).Count
+# 사이 문장은 범위 연산자로 고르지 않습니다 - 두 문장이 붙어 있으면 ($i + 1)..($i) 가 거꾸로 돌아 두 문장을 집어 '사이에 문장이 있다' 고 틀리게 나옵니다 (변이 검증에서 드러남)
+$metaBetween = @($whileStatements | Select-Object -Skip ($metaClearIndex + 1) -First ([Math]::Max(0, $eventIfIndex - $metaClearIndex - 1)) | Where-Object { $_.Extent.Text -notmatch '^\$eventOutcome = ' }).Count
+Check-Equal '배선(복귀연장 3.4 ②): 메타 비움은 회전 본문 문장 1곳 · 보상 분기 뒤 · 헬퍼를 품은 if 바로 앞(사이에는 Outcome 비움뿐), 헬퍼 호출 1곳이 -Outcome ([ref]$eventOutcome) 를 넘김' (
+  ($metaClearAll -eq 1) -and ($exitBranchIndex -ge 0) -and ($exitBranchIndex -lt $metaClearIndex) -and ($metaClearIndex -lt $eventIfIndex) -and ($metaBetween -eq 0) -and ($eventCall.Count -eq 1) -and
+  ($eventCall[0].Extent.Text -ceq "Invoke-EventSkipOrConfirm -Game `$Game -LogPrefix '복귀 중 ' -Outcome ([ref]`$eventOutcome)")) 'True'
+# ②-2 '알 수 없는 화면' 쪽 공지 (2026-11-04 사용자 결정 U-R-8): 판독 · 기존 가드 · 소비가 이 순서로 붙어 있어야 판독 실패의 거짓이 X 후보로 새지 않고, 같은 회전 앞 판독이 실패한 회전에 누르지 않습니다 (규칙 15).
+#      앞 경로가 모두 먼저 돌도록 판독은 고스트 if 바로 다음 문장이고, 소비 if 는 알 수 없음 시계 바로 앞입니다 (행동은 test_abyss_return_loop RLX1l~r). 문장 목록을 보므로 사이에 다른 문장이 끼어도 드러납니다
+function Get-StatementIndex { param([string[]]$Texts, [string]$Prefix)
+  for ($i = 0; $i -lt $Texts.Count; $i++) { if ($Texts[$i].StartsWith($Prefix, [StringComparison]::Ordinal)) { return $i } }
+  return -1
+}
+$branch5Statements = @($whileStatements[$eventIfIndex].Clauses[0].Item2.Statements)
+$branch5Texts = @($branch5Statements | ForEach-Object { [string]$_.Extent.Text })
+$noticeGhostIndex = Get-StatementIndex -Texts $branch5Texts -Prefix 'if (Close-GhostRegisterPrompt -Game $Game'
+$noticeReadIndex = Get-StatementIndex -Texts $branch5Texts -Prefix '$noticeCovered = Test-NoticeBoardPopup -Game $Game'
+$noticeGuardIndex = Get-StatementIndex -Texts $branch5Texts -Prefix $retFinishLine
+$noticeUseIndex = Get-StatementIndex -Texts $branch5Texts -Prefix 'if ($noticeCovered -and $noticeCloseTries -lt $noticeCloseTryLimit) {'
+$noticeHandIndex = Get-StatementIndex -Texts $branch5Texts -Prefix 'if ($noticeCovered -and -not $noticeHandedToX) {'
+$noticeClockIndex = Get-StatementIndex -Texts $branch5Texts -Prefix 'if ($null -eq $unknownSince)'
+Check-Equal '배선(공지 U-R-8 · U-R-10): 5) 분기 문장 = 고스트 if → 판독 대입 → 캡처 실패 가드 → 소비 if → 넘김 if → 알 수 없음 시계 (각각 바로 다음 문장 - 판독과 소비 사이에 가드), 탭 줄 판독은 HUD 분기 1 + 5) 분기 1' (
+  "$([int]($noticeGhostIndex -ge 0))/$($noticeReadIndex - $noticeGhostIndex)/$($noticeGuardIndex - $noticeReadIndex)/$($noticeUseIndex - $noticeGuardIndex)/$($noticeHandIndex - $noticeUseIndex)/$($noticeClockIndex - $noticeHandIndex)/$(@(Get-CommandNodes -Root $retFn -Name 'Test-NoticeBoardPopup').Count)") '1/1/1/1/1/1/2'
+$noticeHandBody = @($(if ($noticeHandIndex -ge 0) { $branch5Statements[$noticeHandIndex].Clauses[0].Item2.Statements } else { @() }) | ForEach-Object { [string]$_.Extent.Text })
+Check-Equal '배선(공지 U-R-10): 넘김 if 본문 2문장 = 표시 세움 → 넘김 줄' ($noticeHandBody -join ' / ') '$noticeHandedToX = $true / Write-RunLog "[어비스] 공지 게시판이 X 를 $noticeCloseTryLimit 번 시도해도 남아 있어 X 후보로 넘깁니다"'
+$noticeUseIf = $(if ($noticeUseIndex -ge 0) { $branch5Statements[$noticeUseIndex] } else { $whileStatements[$eventIfIndex] })
+$noticeUseBody = @($noticeUseIf.Clauses[0].Item2.Statements | ForEach-Object { [string]$_.Extent.Text })
+$noticeUseHead = @($noticeUseBody | Select-Object -First 3) -join ' / '
+$noticeUseTail = @($noticeUseBody | Select-Object -Last 2) -join ' / '
+Check-Equal '배선(공지 U-R-8): 소비 if 본문 6문장 = 시계 지움(전송 여부와 무관) → Focus-Game → X 클릭 → 전송 if → 2초 → continue, X 클릭은 HUD 블록과 같은 줄 (전체 2곳)' (
+  "$noticeUseHead/$($noticeUseBody.Count)/$($noticeUseTail)/$([regex]::Matches($ret, 'Click-NoticeBoardClose -Game \$Game').Count)") (
+  '$unknownSince = $null / Focus-Game -Game $Game / Click-NoticeBoardClose -Game $Game/6/Start-Sleep -Seconds 2 / continue/2')
+$noticeUseYieldWhere = @(@(Get-CommandNodes -Root $noticeUseIf -Name 'Invoke-UserYieldWithDeadline') | ForEach-Object { @(Get-EnclosingConditions -Node $_) -join ' ⊂ ' })
+Check-Equal "배선(공지 U-R-8): 소비 if 의 양보는 'user-active' 생략 안 1곳 ('cursor-not-ready' 는 시간을 소모 - 규칙 4)" ($noticeUseYieldWhere -join ' || ') ("`$script:lastClickSkipReason -eq 'user-active' ⊂ `$noticeCovered -and `$noticeCloseTries -lt `$noticeCloseTryLimit ⊂ " + $extBranch)
+$noticeSkipLine = 'Write-RunLog "[어비스] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq ''user-active'') { ''사용자 조작'' } else { ''커서 미확인'' })) - 다음 회전에서 재시도"'
+Check-Equal "배선(공지 U-R-8): 건너뜀 줄은 HUD 블록과 글자 그대로 같고 전송 줄은 꼬리 '(HUD 가려짐)' 으로 HUD 블록 줄과 갈림" (
+  "$([regex]::Matches($ret, [regex]::Escape($noticeSkipLine)).Count)/$([regex]::Matches($ret, [regex]::Escape("Write-RunLog '[어비스] 공지 게시판 팝업 감지 - X로 닫기'")).Count)/$([regex]::Matches($ret, [regex]::Escape("Write-RunLog '[어비스] 공지 게시판 팝업 감지 - X로 닫기 (HUD 가려짐)'")).Count)") '2/1/1'
+# 소비 if 의 양보만 폐기 줄 없이 부릅니다 (위 '모든 양보 호출' 두 단언의 예외 1곳) - 같은 회전의 5) 분기 머리가 이미 폐기했고 5) 분기 안에 발급이 없다는 그 전제입니다
+$branch5Head = @($branch5Texts | Select-Object -First 4) -join '; '
+Check-Equal '배선(공지 U-R-8): 소비 if 의 양보가 폐기 줄 없이 되는 전제 - 5) 분기 머리 네 문장이 토큰 · 연속 수 · 선택 화면 출처 폐기이고 5) 분기 안에 토큰 · 출처 발급 0' (
+  "$branch5Head/$([regex]::Matches($whileStatements[$eventIfIndex].Extent.Text, '\$fieldProven = \$true|\$selectionExpected = \$true').Count)") '$fieldProven = $false; $insideStreak = 0; $insideSince = $null; $selectionExpected = $false/0'
+# ③ while 뒤: 안전 중지가 걸려 있으면 Remove-Item → [완료] 세 갈래 → 두 스위치 진단 → exit, 없으면 throw. 만료 break 다섯 곳이 모두 이 한 자리로 옵니다 (안쪽 foreach 의 break 는 세지 않음)
+$whileIndex = [array]::IndexOf($retEnd, $retWhile)
+$afterWhile = @($retEnd | Select-Object -Skip ($whileIndex + 1))
+$m1If = $afterWhile[0]
+$m1Body = @($m1If.Clauses[0].Item2.Statements)
+$m1Branches = $m1Body[1]
+$m1Lines = @($m1Branches.FindAll({ param($node) ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and ([string]$node.Value).StartsWith('[완료] ') }, $true) | ForEach-Object { [string]$_.Value })
+$m1Conditions = @($m1Branches.Clauses | ForEach-Object { [string]$_.Item1.Extent.Text })
+Check-Equal '배선(복귀연장 3.4 ③): while 뒤 문장 = 안전 중지 if(else 없음) + throw 뿐, throw 문구 그대로' (
+  ($afterWhile.Count -eq 2) -and ($m1If -is [System.Management.Automation.Language.IfStatementAst]) -and ($m1If.Clauses.Count -eq 1) -and ($null -eq $m1If.ElseClause) -and
+  ($m1If.Clauses[0].Item1.Extent.Text -ceq 'Test-Path -LiteralPath $safeStopFlagPath') -and ($afterWhile[1] -is [System.Management.Automation.Language.ThrowStatementAst]) -and
+  ($afterWhile[1].Extent.Text -ceq "throw '어비스 선택 화면 복귀 대기 시간이 초과됐습니다.'")) 'True'
+Check-Equal '배선(복귀연장 3.4 ③): 안전 중지 if 본문 순서 = Remove-Item → [완료] 세 갈래(코드 10 · 거점 퇴장 · 그 밖) → 두 스위치 진단 → exit $SafeStopExitCode 혼자 한 줄' (
+  ($m1Body.Count -eq 4) -and ($m1Body[0].Extent.Text -ceq 'Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue') -and
+  ($m1Branches -is [System.Management.Automation.Language.IfStatementAst]) -and (($m1Conditions -join ' / ') -ceq "`$SafeStopExitCode -eq 10 / `$LeaveEntryReason -eq 'abandoned-death-exit'") -and ($null -ne $m1Branches.ElseClause) -and ($m1Lines.Count -eq 3) -and
+  ($m1Body[2].Extent.Text -ceq "Write-LifeDiagnostics -Game `$Game -Context '어비스 복귀 마감 안전 중지' -CaptureOnly -WithLogCopy") -and
+  ($m1Body[3].Extent.Text -ceq 'exit $SafeStopExitCode')) 'True'
+Check-Equal '배선(복귀연장 3.4 ③): 그 if 안의 열쇠 닫기 0 (던전 밖 확정 출구 전용 - 만료는 화면을 모름), 복귀 루프 전체 닫기 2곳 그대로' "$(@(Get-CommandNodes -Root $m1If -Name 'Close-AbyssKeyEntryOnLeave').Count)/$(@(Get-CommandNodes -Root $retFn -Name 'Close-AbyssKeyEntryOnLeave').Count)" '0/2'
+$retBreaks = @($retWhile.FindAll({ param($node) $node -is [System.Management.Automation.Language.BreakStatementAst] }, $true) | Where-Object {
+    $breakLoop = $_.Parent
+    while (($null -ne $breakLoop) -and -not ($breakLoop -is [System.Management.Automation.Language.LoopStatementAst])) { $breakLoop = $breakLoop.Parent }
+    [object]::ReferenceEquals($breakLoop, $retWhile) })
+Check-Equal '배선(복귀연장 3.4 ③): 최상위 while 의 만료 break 5곳 (표식 회전 · 패널 · 복구 회전 · 일반 · 헬퍼 expired)' $retBreaks.Count 5
+# 세 [완료] 줄의 금지 구절 (명세 1.5): 다른 단언의 조각이 이 줄에 걸리면 조각 1개 전제가 깨집니다 - 문자열 인자라 -f 식 전수 검사에서 빠지지 않습니다
+$m1Forbidden = @($m1Lines | Where-Object { $_.Contains('선택 화면 복귀 확인') -or $_.Contains('던전 밖(HUD) 확인 시점에서 회차를 마칩니다') -or $_.Contains('거점 부활 상한으로 던전을 나왔') }).Count
+Check-Equal '배선(복귀연장 1.5): 세 [완료] 줄에 금지 구절 0, 셋 다 화면 복귀를 확인하지 못했다고 적음' "$m1Forbidden/$(@($m1Lines | Where-Object { $_.Contains('화면 복귀를 확인하지 못') }).Count)" '0/3'
+# ④ 연장 함수: 조정 마감을 먼저 구하고(양보 · 캡처 실패 둘 다 - 양보 조정만이면 같은 회전 실패 시간을 남은 시간에서 빠뜨려 연장을 과하게 씀), 예산은 전송 때만 줄어듭니다
+$extFnAst = [System.Management.Automation.Language.Parser]::ParseInput((Body 'Update-AbyssReturnDeadlineOnSend'), [ref]$null, [ref]$null)
+$extFreeze = @(Get-CommandNodes -Root $extFnAst -Name 'Get-FreezeAdjustedDeadline')
+$extGrant = @(Get-CommandNodes -Root $extFnAst -Name 'Get-AbyssReturnGrantMs')
+Check-Equal '배선(복귀연장 3.4 ④): Update-AbyssReturnDeadlineOnSend 는 Get-FreezeAdjustedDeadline 1곳 (Get-AbyssReturnGrantMs 앞), Get-YieldAdjustedDeadline 0곳' "$($extFreeze.Count)/$($extGrant.Count)/$(@(Get-CommandNodes -Root $extFnAst -Name 'Get-YieldAdjustedDeadline').Count)/$([int]($extFreeze[0].Extent.StartOffset -lt $extGrant[0].Extent.StartOffset))" '1/1/0/1'
+# ⑤ 계약값: 사용자 값 그대로이고 스크립트 상수입니다 (config 를 거치지 않아 configSchemaVersion 그대로 - 값을 바꾸려면 사용자 결정 U-R-3 부터)
+$srcEnd = @([System.Management.Automation.Language.Parser]::ParseInput($src, [ref]$null, [ref]$null).EndBlock.Statements)
+$limitAssigns = @($srcEnd | Where-Object { ($_ -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq '$abyssReturnTotalLimitSeconds') })
+Check-Equal '계약값(복귀연장 U-R-3): $abyssReturnTotalLimitSeconds 최상위 대입 1곳 = 180, 설정을 거치지 않음' "$($limitAssigns.Count)/$($limitAssigns[0].Right.Extent.Text)/$([int]($src -match 'Get-Config\w+ [^\r\n]*abyssReturnTotalLimitSeconds'))" '1/180/0'
+# ⑥ Write-LifeDiagnostics -WithLogCopy: 사본은 바깥 try 의 finally 입니다 - 캡처 실패 catch 와 -CaptureOnly 반환을 모두 지나도 남고, 사본 실패는 그 안의 try 가 받습니다. 시각 이름은 try 앞이라 finally 가 늘 읽습니다
+$diagAst = [System.Management.Automation.Language.Parser]::ParseInput((Body 'Write-LifeDiagnostics'), [ref]$null, [ref]$null)
+$diagEnd = @($diagAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true).Body.EndBlock.Statements)
+$diagTry = @($diagEnd | Where-Object { $_ -is [System.Management.Automation.Language.TryStatementAst] })
+$diagStampAt = @($diagEnd | Where-Object { $_.Extent.Text -like '$diagStamp = *' })
+$diagFinallyIf = $(if (($diagTry.Count -eq 1) -and ($null -ne $diagTry[0].Finally)) { @($diagTry[0].Finally.Statements) } else { @() })
+Check-Equal '배선(복귀연장 2.4): 진단의 바깥 try 1곳 · finally 첫 문장 if ($WithLogCopy) 안에 복사와 그 실패를 받는 try, 시각 이름 대입은 try 앞 함수 본문 문장 · catch 절 1개' (
+  ($diagTry.Count -eq 1) -and ($diagStampAt.Count -eq 1) -and ($diagFinallyIf.Count -eq 1) -and ($diagFinallyIf[0] -is [System.Management.Automation.Language.IfStatementAst]) -and
+  ($diagFinallyIf[0].Clauses[0].Item1.Extent.Text -ceq '$WithLogCopy') -and (@(Get-CommandNodes -Root $diagFinallyIf[0] -Name 'Copy-Item').Count -eq 1) -and
+  ($diagTry[0].CatchClauses.Count -eq 1) -and ([array]::IndexOf($diagEnd, $diagStampAt[0]) -lt [array]::IndexOf($diagEnd, $diagTry[0]))) 'True'
 
 if ($fails -gt 0) { "FAIL: $fails 건"; exit 1 }
 "OK: 전부 통과"

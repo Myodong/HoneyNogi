@@ -126,7 +126,7 @@ function Test-CaptureRecovered {
 function Focus-Game { param($Game) }
 function Test-GameForeground { param($Game) return $true }   # 시뮬레이션은 항상 전면 가정
 # 클릭 스텁: **매번 두 메타를 초기화**하고 시나리오 시퀀스로 전송/생략을 정합니다 (Codex 지침).
-# 시퀀스가 소진되면 전송 성공으로 봅니다. 공지 좌표(ptNoticeClose)의 전송 성공만 공지를 닫습니다.
+# 시퀀스가 소진되면 전송 성공으로 봅니다. 공지 X 입구(Click-NoticeBoardClose)의 전송 성공만 공지를 닫습니다.
 $script:clickSeq = @()          # 'ok' / 'user-active' / 'cursor-not-ready'
 $script:clickCalls = 0
 $script:noticeClickSent = 0
@@ -137,10 +137,11 @@ function Click-GamePoint {
   $script:lastClickPerformed = ($r -eq 'ok')
   $script:lastClickSkipReason = $(if ($r -eq 'ok') { '' } else { $r })
   [Console]::WriteLine("CLICK#$($script:clickCalls)=$r")
-  if ($ReferenceX -eq $script:ptNoticeClose[0] -and $ReferenceY -eq $script:ptNoticeClose[1]) {
+  if ($ReferenceX -eq $script:simNoticeClosePoint[0] -and $ReferenceY -eq $script:simNoticeClosePoint[1]) {
     if ($script:lastClickPerformed) { $script:noticeOpen = $false; $script:noticeClickSent++ }
   }
 }
+function Click-NoticeBoardClose { param($Game) Click-GamePoint -Game $Game -ReferenceX $script:simNoticeClosePoint[0] -ReferenceY $script:simNoticeClosePoint[1] }
 # 수량 판독 스텁: 시나리오가 시퀀스를 주면 순서대로, 소진 후에는 마지막 값을 계속 돌려줍니다
 $script:countSeq = @()
 $script:countCalls = 0
@@ -160,7 +161,7 @@ function Get-GameRegionOcrText {
 }
 $rgLifeQuestTracker = @(980, 212, 285, 55)
 $ocrKoreanEngine = $null
-$ptNoticeClose = @(1228, 67)
+$simNoticeClosePoint = @(1228, 67)
 $script:screenCaptureFailing = $false
 
 # 운영 기본 설정값 (시나리오가 덮어씀)

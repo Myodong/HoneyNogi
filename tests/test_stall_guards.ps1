@@ -293,9 +293,9 @@ Assert-Case '최소화: IsIconic 검사는 진입 1 + 루프 1 = 정확히 2곳'
 $waitCodeOnly = (($waitBody -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
 Assert-Case '최소화: 캡처 경로 스로틀을 공유하지 않는다' `
   ([bool]($waitCodeOnly -match 'lastMinimizedRestoreAt')) 'False'
-# 직접 좌표 변환을 쓰는 곳도 같은 복원 계약에 넣어야 합니다 (난이도 알약 탐색 / 생활 목록 드래그)
-Assert-Case '최소화: 복원 대기를 부르는 곳 3곳 (클릭 + 난이도 + 생활 스크롤)' `
-  ([regex]::Matches($workerCode, 'Wait-GameRestoredIfMinimized -Game \$Game').Count) 3
+# 직접 좌표 변환을 쓰는 곳도 같은 복원 계약에 넣어야 합니다 (난이도 알약 탐색 / 생활 목록 드래그 / 공지 X - 창 크기로 자리를 재므로 복원 뒤에 재야 합니다)
+Assert-Case '최소화: 복원 대기를 부르는 곳 4곳 (클릭 + 난이도 + 생활 스크롤 + 공지 X)' `
+  ([regex]::Matches($workerCode, 'Wait-GameRestoredIfMinimized -Game \$Game').Count) 4
 foreach ($direct in @('Find-DgDifficultyPoint', 'Invoke-LifeListScroll')) {
   $b = [string](Get-SourceFunctionDefinitions -Path $workerPath -Names @($direct))
   Assert-Case "최소화: $direct 도 복원 계약에 포함" `

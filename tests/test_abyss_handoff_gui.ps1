@@ -155,6 +155,8 @@
 #   [새 행] SS1c(커스텀 'other' 대기 중 예약 → 확인이 소비 → 안전 중지) · CX1(커스텀 마지막 바퀴 끝 → 옛 나가기 → 지정 바퀴 완료) · MX-G1 · MX-G2(섞인 목록의 입장 방식 바뀜 →
 #        'entry-change' 이어 감 줄 → 옛 나가기 exit 0 → Step · 다음 기동 none · 다음 항목 env) · MX-G3(랜덤 진행 · 섞인 목록 바퀴 끝 → 실제 Start-NextCycle 의 NEXT_BOUNDARY 'mixed' →
 #        'next-unknown' → Step 바퀴 넘김 · 새 순열) · MX-G4(입장 방식 바뀜 판 + 결정 뒤 예약 → 출구 ② → 안전 중지) · FN1(정적 - 마무리 실행 안내 끝말).
+#   [구현 단위 복귀 연장 3.4] 복귀 마감 뒤 안전 중지 - 복귀 루프 모의에 셋째 출구의 [완료] 줄(워커 원문 캡처 · -Plan ReturnExpired), 진단 모의에 -WithLogCopy(워커 서명 - 결합 0). 복귀 루프가 모의라 워커 변이로는
+#        빨개지지 않고, SS1e · SS1f 는 코드 0 계상 줄 · 기록 소비를 깨는 GUI 미러 변이로 지켜집니다
 #   [구현 단위 5b-8] 재입장 대기 손 모의에 -ReportFieldReturn(워커 서명 - 결합 0) · 받은 스위치 기록 · FC-G1~G3(재매칭 패널 ESC 취소 → 필드 확정 'field-cancelled' 끝 코드 4 의 GUI 틱 -
 #        비커스텀 기록 계상 · 커스텀 마커 계상 · 전송 뒤 예약).
 $ErrorActionPreference = 'Stop'
@@ -638,6 +640,8 @@ function Get-WorkerDoneReason {
 # 복귀 루프 모의(하니스 ① - 구현 명세 ⑤b6 3.4 ⑯ · B-8)가 쓰는 워커 원문 [완료] 사유 둘: 필드 확정 출구 ②의 안전 중지 예약 소비 줄 · 복귀 중 던전 안 2연속의 코드 4 줄
 # (변수 자리 ${insideStreak} 는 진짜 루프가 멈추는 연속 수 2 로 채웁니다 - GUI 는 줄 끝 표지 꼬리만 봄)
 $RETURN_SAFE_STOP_DONE = Get-WorkerDoneReason -Fragment '던전 밖(HUD) 확인 시점에서 회차를 마칩니다' -InFunction 'Return-ToAbyssSelection'
+# 복귀 마감이 끝났을 때의 안전 중지 줄 (구현 단위 복귀 연장 1.5 - 코드 0 인데 화면 복귀를 확인하지 못한 출구): GUI 는 이 글자가 아니라 종료 코드로 계상합니다
+$RETURN_EXPIRED_DONE = Get-WorkerDoneReason -Fragment '화면 복귀를 확인하지 못해 이 시점에서 회차를 마칩니다' -InFunction 'Return-ToAbyssSelection'
 $RETURN_INSIDE_DONE = Get-WorkerDoneReason -Fragment '선택 화면 복귀 중 던전 안 상태(HUD + 던전 목표)를 확인해' -Values @{ insideStreak = 2 } -InFunction 'Return-ToAbyssSelection'
 
 # ===== GUI 의존 모형 =====
@@ -759,11 +763,12 @@ function Invoke-AbyssExitClick {
 $script:returnSelectionCodes = New-Object System.Collections.Generic.List[string]
 $script:returnSelectionLeaveReasons = New-Object System.Collections.Generic.List[string]
 $script:returnInsideCode4 = $false   # 복귀 루프가 '복귀 중 던전 안 2연속' 코드 4 로 끝남(옛 나가기 경로의 코드 4 꼴 - 구현 명세 ⑤b6 SS7)
+$script:returnExpiredDone = $false   # 안전 중지 소비가 마감 만료 출구의 줄로 끝남(구현 단위 복귀 연장 M1 - 코드는 넘겨받은 그대로, 문구만 다름)
 function Return-ToAbyssSelection {
     # 선택 화면 복귀 루프(워커 실제 서명) - 넘겨받은 안전 중지 종료 코드를 적습니다(결합 7: 완료 기록 저장이 실패해도 본류가 같은 코드로 복귀하는지).
     # 구현 명세 ② 2.3: 워커 서명에 코드 10 출구의 열쇠 닫기 사유 -LeaveEntryReason(빈 값 = 닫지 않음)이 더해져 같은 모양으로 받고, 받은 값은 따로 적습니다
     # (결합 0 이 이 모의와 워커의 서명을 대조하고, 결합 7 꼬리 사본의 본류 끝 호출이 이 인자를 넘깁니다 - 결합 7 의 복귀 코드 기대는 그대로)
-    # 구현 명세 ⑤b6(3.4 ⑯ 하니스 ① · B-8): 진짜 루프의 두 출구(필드 확정 ② · 출처 있는 선택 화면 ①) 모형 - 안전 중지 예약 파일이 있으면 소비하고 필드 확정 출구 ②의
+    # 구현 명세 ⑤b6(3.4 ⑯ 하니스 ① · B-8): 진짜 루프의 두 출구(필드 확정 ② · 출처 있는 선택 화면 ①) 모형(-Plan ReturnExpired 면 소비 줄이 마감 만료 출구의 줄) - 안전 중지 예약 파일이 있으면 소비하고 필드 확정 출구 ②의
     # [완료] 줄(워커 원문 캡처) 뒤 넘겨받은 코드로 끝납니다(정리 전용 코드 10 의 줄은 모형 밖 - 예약과 함께 닿으면 TEST-UNREACHABLE). -Plan ReturnInside 면 '복귀 중 던전 안
     # 2연속' 의 [완료] 줄(워커 원문 캡처) 뒤 코드 4. 그 밖은 돌아옵니다(선택 화면 복귀 - 부른 쪽이 '[완료] 어비스 선택 화면 복귀 완료' 를 씀). 예약 파일 경로는 부른 쪽
     # (Invoke-WorkerClearedRecord)의 지역 변수 $safeStopFlagPath 를 동적 범위로 읽습니다(클릭 루프 모의와 같음 - 그 밖에서 부르면 경로 없음 = 예약 없음)
@@ -777,7 +782,7 @@ function Return-ToAbyssSelection {
     if ([IO.File]::Exists([string]$safeStopFlagPath)) {
         if ($SafeStopExitCode -ne 0) { throw ('TEST-UNREACHABLE: Return-ToAbyssSelection 안전 중지 코드 ' + $SafeStopExitCode) }
         [IO.File]::Delete($safeStopFlagPath)
-        Write-RunLog ('[완료] ' + $RETURN_SAFE_STOP_DONE)
+        Write-RunLog ('[완료] ' + $(if ($script:returnExpiredDone) { $RETURN_EXPIRED_DONE } else { $RETURN_SAFE_STOP_DONE }))
         Stop-WorkerTailExit $SafeStopExitCode
     }
 }
@@ -861,7 +866,7 @@ function Invoke-AbyssRetryClick {
 }
 function Write-LifeDiagnostics {
     # 진단 캡처(워커 실제 서명) - 횟수만
-    param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly)
+    param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly, [switch]$WithLogCopy)
     $script:diagCalls++
 }
 function Get-HandoffEnvSnapshot {
@@ -3728,7 +3733,7 @@ function Invoke-WorkerClearedRecord {
     #   있음(행 폴더의 safe_stop.flag) · -Plan = 끝 함수 안 모의의 결과 차례(OtherWait · Reentry · RetryClick · ExitClick · SafeStopOnClick · CrashBeforeDone) ·
     #   -HandoffRole = 이 워커의 이어받기 역할(폴백 ② 의 재개 판 판정이 읽음 - 기본 none)
     # ⑤b6(구현 명세 ⑤b6 3.4 ⑯ · B-8): -Plan 에 결정 뒤 예약을 만드는 모의 둘(SafeStopOnOtherWait = '다른 던전 가기' 대기 · SafeStopOnExitClick = 나가기 헬퍼 - SafeStopOnClick 은
-    #   클릭 루프)과 복귀 루프의 코드 4(ReturnInside = '복귀 중 던전 안 2연속')를 더했고, 꼬리 전체('whole')가 exit · 예외 없이 끝나면 종료 코드 0 입니다(워커는 본류 try 뒤
+    #   클릭 루프)과 복귀 루프의 코드 4(ReturnInside = '복귀 중 던전 안 2연속' · ReturnExpired = 안전 중지 소비를 마감 만료 출구의 줄로 - 구현 단위 복귀 연장)를 더했고, 꼬리 전체('whole')가 exit · 예외 없이 끝나면 종료 코드 0 입니다(워커는 본류 try 뒤
     #   스크립트가 끝남 - 옛 나가기 경로의 정상 끝)
     param([bool]$Custom, [bool]$CleanupOnly = $false, [string]$ClearOutcome = 'clear', [switch]$HoldLock, [string]$Run = 'record', [switch]$UpdateThrows,
         [switch]$RetryRoute, [string]$Mode = '', [string]$Matching = '', [switch]$SafeStop, [hashtable]$Plan = @{}, [string]$HandoffRole = 'none')
@@ -3787,6 +3792,7 @@ function Invoke-WorkerClearedRecord {
     $script:safeStopOnOtherWait = [bool]$Plan.SafeStopOnOtherWait
     $script:safeStopOnExitClick = [bool]$Plan.SafeStopOnExitClick
     $script:returnInsideCode4 = [bool]$Plan.ReturnInside
+    $script:returnExpiredDone = [bool]$Plan.ReturnExpired
     $script:crashBeforeDoneLine = [bool]$Plan.CrashBeforeDone
     $script:otherWaitCalls = 0
     $script:reentryCalls = 0
@@ -3819,6 +3825,7 @@ function Invoke-WorkerClearedRecord {
         $script:safeStopOnOtherWait = $false
         $script:safeStopOnExitClick = $false
         $script:returnInsideCode4 = $false
+        $script:returnExpiredDone = $false
         if ($HoldLock) { Unlock-LogFiles }
     }
     # 꼬리 전체가 exit 없이 · 예외 없이 끝남 = 워커 스크립트 끝 = 종료 코드 0(구현 명세 ⑤b6 3.4 ⑯ 하니스 ② · B-8 - 옛 나가기 경로의 '[완료] 어비스 선택 화면 복귀 완료' 뒤
@@ -4223,6 +4230,28 @@ function Test-CaseRewardTailCoupling {
         ('{0} || gui|=== 1회차 완료 === / decision|0 / stop|안전 중지|False · 계상 1 · 기록 cleared/pending/1 · 사유 [{1}]' -f
             (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['safe-stop']) -Done $RETURN_SAFE_STOP_DONE),
             $RETURN_SAFE_STOP_DONE)
+    # SS1e 복귀 마감 뒤 안전 중지 (구현 단위 복귀 연장 M1 · 1.4 C1 · 11-03 08:45 모양): SS1 과 같은 흐름에서 복귀 루프가 마감 만료 출구의 줄로 끝납니다 - 코드 0 이라 GUI 후속은 SS1 과 같습니다
+    #     (+1 · 기록 소비 · '안전 중지' 정지, 사유 [완료] 줄은 창에). 11-03 은 이 자리가 코드 1 이라 오류 정지 · 계상 0 이었습니다
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -SafeStop -Plan @{ ReturnExpired = $true }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS1e (GUI 틱) 예약 → 안전 중지 결정 exit → 옛 나가기 · 복귀 마감 출구가 예약 소비 · exit 0 → +1 · 기록 소비 · 안전 중지 정지" `
+        ('{0} || {1} · 계상 {2} · 기록 {3} · 사유 [{4}]' -f (Get-RewardWorkerText $worker), $tick.Row.Flow, $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), $tick.Reason) `
+        ('{0} || gui|=== 1회차 완료 === / decision|0 / stop|안전 중지|False · 계상 1 · 기록 cleared/pending/1 · 사유 [{1}]' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['safe-stop']) -Done $RETURN_EXPIRED_DONE),
+            $RETURN_EXPIRED_DONE)
+    # SS1f 재검사 경로 (1.4 C1 'retry-attempt 포함'): 결정 때는 예약이 없어 '다시 하기' 로 가고 클릭 직전 재검사가 예약을 봅니다 - 재입장 요청 기록(retry-attempt)이 남은 채 옛 나가기 → 복귀 마감 출구 · exit 0.
+    #     코드 0 끝 처리가 그 기록을 소비합니다('클리어 이상' - H36 과 같은 갈래). 코드 1 이었다면 '재개 기능이 꺼져' 오류 정지입니다 - 그 줄 0 을 함께 봅니다
+    $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; StopRequested = $true }
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('safe-stop'); SafeStopOnClick = $true; ReturnExpired = $true }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $tick = Invoke-RewardTick $worker
+    Assert-Case "SS1f (GUI 틱) '다시 하기' 직전 재검사 안전 중지 → retry-attempt 기록 뒤 옛 나가기 · 복귀 마감 출구 · exit 0 → +1 · 그 기록 소비 · 안전 중지 정지 · '재개 기능이 꺼져' 줄 0" `
+        ('{0} || {1} · 계상 {2} · 기록 {3} · 사유 [{4}] · 재개 꺼짐 줄 {5}' -f (Get-RewardWorkerText $worker), $tick.Row.Flow, $tick.Row.Completed, (Get-EntryText $tick.Row.Journal $workerNonce), $tick.Reason, [int]([string]$tick.Row.Flow).Contains($C1_RETRY_OFF)) `
+        ('{0} || gui|=== 1회차 완료 === / decision|0 / stop|안전 중지|False · 계상 1 · 기록 retry-attempt/pending/1 · 사유 [{1}] · 재개 꺼짐 줄 0' -f
+            (Get-RewardWorkerWant -Exit '0' -Entry 'retry-attempt/retry/run' -Waits 'o0/r0/c1' -Helper 1 -Returns '0' -Done $RETURN_EXPIRED_DONE),
+            $RETURN_EXPIRED_DONE)
     # SS3 '다시 하기' 결정 뒤 예약(F9 - 클릭 루프가 짝을 못 찾는 사이에 들어옴, 모의가 결과를 돌려주기 직전에 만듦) → 'no-pair' 폴백 ① '다른 던전 가기' 'unconfirmed' → 예약
     #     그대로(워커 삭제 0 - 소비는 확인 뒤만) · 진단 · 코드 4 → (GUI 틱) 이 실행의 클리어 기록으로 +1 · 그 기록 적용 · 정상 정지(예약 파일은 GUI 정지가 지움 - 실제 Stop-AllRun 몫,
     #     이 파일의 정지는 모의). 설계 '플래그 0' = 이 행의 GUI 정지 1 + S3 의 정지 함수 예약 파일 삭제(정적 - 내부 검토 반영). 구현 명세 ⑤b6 3.4: 예약이 보상 결정 때 있으면

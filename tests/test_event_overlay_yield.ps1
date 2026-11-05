@@ -42,7 +42,7 @@ $script:userYieldTotalMs = [double]0
 $rgStellaTitle = @(1,1,1,1); $rgStellaPickBtn = @(2,2,2,2); $rgEventTodayOff = @(3,3,3,3)
 $rgEventCloseBtn = @(4,4,4,4); $rgNoticeBoardTabs = @(5,5,5,5); $rgNpcDialogue = @(6,6,6,6)
 $rgEventSkip = @(7,7,7,7); $rgEventReward = @(8,8,8,8); $rgEventConfirm = @(9,9,9,9)
-$ptStellaCard = @(640,420); $ptStellaClose = @(1229,67); $ptNoticeBoardClose = @(1092,135)
+$ptStellaCard = @(640,420); $ptStellaClose = @(1229,67)
 $ptClearCenter = @(636,358); $ocrKoreanEngine = $null
 
 function Write-RunLog { param([string]$Message) $script:logs += $Message }
@@ -90,6 +90,7 @@ function Invoke-ClickModel {
   if ($result -eq 'sent') { $script:clicks++; $script:screen = 'known' }   # 실제 전송으로만 닫힘
 }
 function Click-GamePoint { param($Game, $ReferenceX, $ReferenceY) Invoke-ClickModel }
+function Click-NoticeBoardClose { param($Game) Invoke-ClickModel }
 function Click-ScreenPoint { param($X, $Y) Invoke-ClickModel }
 $script:spacePresses = 0
 function Press-KeyOnce { param($VirtualKey) $script:spacePresses++; $script:screen = 'known' }   # 메타를 건드리지 않음 (실제 계약)

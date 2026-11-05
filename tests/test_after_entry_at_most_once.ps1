@@ -21,7 +21,7 @@
 # 하니스 다섯 층(명세 3.3):
 #   ① 키 층    실제 Invoke-AfterEntryKeys(-KeyContract) · 실제 자기 항목 생성·인덱스 기록 · 저장소 워커 사본 · 임시 폴더 파일. 키 목록은 워커 원문의 해석 문장
 #              (run:1846~1870)을 픽스처 config(config.json 과 같은 두 키)로 그대로 돌린 $afterEntryActions. 열쇠는 실제 생성 또는 실제 Consume-Handoff 가 채웁니다
-#   ② 루프 층  실제 Return-ToAbyssSelection(exit 6곳 → 'WORKER-EXIT:' 예외) · 화면 모형 · 가상 시계 · 닫기 함수 기록 스텁(호출·인자·Remove-Item/exit 순서).
+#   ② 루프 층  실제 Return-ToAbyssSelection(exit 7곳 → 'WORKER-EXIT:' 예외) · 화면 모형 · 가상 시계 · 닫기 함수 기록 스텁(호출·인자·Remove-Item/exit 순서).
 #              부르는 문장은 본류 'left' 블록의 원문 호출 문장 그대로입니다(그 문장의 -LeaveEntryReason 을 함께 지남)
 #   ③ 저장소 층 실제 Close-AbyssKeyEntryOnLeave · Add-AbyssJournalEnteredEntry · Add-AbyssJournalClearedEntry 직접 호출 + 실제 저장소 + 임시 폴더 파일
 #   ④ 본류 층  워커 최상위 try 의 형제 문장 [2.1 블록 ~ run:18527 if 앞](시작 구간 A)과 [키 지점 블록 ~ try 끝](조각 B)을 AST 로 잘라 exit 토큰을 뒤에서부터
@@ -45,6 +45,7 @@
 # 단계 2.7 에서 더한 것(명세 3.3 OK13 · 2.7 G5 · 5절 A-2 R-6 (나)): OK13 - 클리어 대기 모의 'error'(코드 1 흉내 예외 - 본류 조각 밖으로 전파) · GUI 원문
 #   Get-CustomErrorAction(오류 대응 판정 - 재시도 2회 → 3회째 정지). 명세 3.3 의 ⑳ 행은 이것으로 전부입니다.
 # 구현 명세 ⑤b5 에서 더한 것(3.1 ⑳ · 3.4): 'left' 추출이 [완료] 쓰기 둘(if 밖 준비 실행 줄 · 마무리 실행 if 안 줄)을 각각 캡처 · R2-S2 의 'left' 안전 중지 코드 식 ·
+#   R2-F3(구현 단위 복귀 연장 - 마감 뒤 안전 중지: 닫기 0 · 호출부 코드 · 갈래 줄 · 루프 층) · R2-D1(같은 단위 - 실제 Write-LifeDiagnostics 의 로그 사본) ·
 #   R2-L5(마무리 실행 'left' → 코드 4 · 본류+루프 층) · R2-L6(같은 판 두 출구(W 확정 뒤 · 출처 완료 시점) F9 → 코드 4 · 거점 퇴장 문구(명세 리뷰 2 RV-9) · 루프 층) · R6-RC1 워커 쪽(워커 2대 - 'other' 끝 안 끊김 → 복구 워커의 완료 기록
 #   읽기 0 · 선택 화면 진단 + 코드 4). 본류 꼬리의 두 끝 함수는 모의입니다(R6-RC1 만 'other' 끝에 닿음 - 다른 행은 모드 입력이 없어 경로 거짓 = 옛 나가기).
 # 구현 명세 ⑤b6 에서 고친 것(3.4 ⑳ - 다음 항목의 입장 방식이 다르거나 다음 항목이 없으면 결정 'entry-change' → 옛 나가기): R6-RC1 의 결정 사유 switch 캡처를 대입 대상
@@ -154,6 +155,11 @@ $LOOP_SAFE_STOP_LEFT_FIELD_LINE = '[완료] 안전 중지 예약 확인 - 거점
 $LOOP_SAFE_STOP_LEFT_SELECTION_LINE = '[완료] 안전 중지 예약 확인 - 거점 퇴장한 판은 회차로 세지 않고 선택 화면 복귀 완료 시점에서 마칩니다'
 $LOOP_SAFE_STOP_ROUND_FIELD_LINE = '[완료] 안전 중지 예약 확인 - 던전 밖(HUD) 확인 시점에서 회차를 마칩니다'
 $LOOP_SAFE_STOP_ROUND_SELECTION_LINE = '[완료] 안전 중지 예약 확인 - 선택 화면 복귀 완료 시점에서 회차를 마칩니다'
+# 구현 단위 복귀 연장 1.5 - 마감 뒤 안전 중지 세 갈래 줄(명세 문안 그대로 - 계약. 소스 갈래 글자와 같은지는 R2-L6 이 봅니다)
+$LOOP_SAFE_STOP_EXPIRED_LINE = '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못해 이 시점에서 회차를 마칩니다. 게임 화면을 확인해 주세요'
+$LOOP_SAFE_STOP_EXPIRED_READY_LINE = '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못했고 준비/정리 실행이라 회차로 세지 않고 마칩니다. 게임 화면을 확인해 주세요'
+$LOOP_SAFE_STOP_EXPIRED_LEFT_LINE = '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못했고 거점 퇴장한 판은 회차로 세지 않고 마칩니다. 게임 화면을 확인해 주세요'
+$LOOP_EXPIRED_DIAG = '어비스 복귀 마감 안전 중지|True|True'
 $LOOP_MENU_UNPROVEN_LINE = '[완료] 선택 화면 복귀 중 필드를 확인하지 못한 채 메뉴가 계속 열려 있어 자동 조작을 중단합니다 (던전 안일 수 있음). 화면을 확인하고 다시 시작해 주세요.'
 $LOOP_INSIDE_STOP_PREFIX = '[완료] 선택 화면 복귀 중 던전 안 상태(HUD + 던전 목표)를 확인해 자동 조작을 중단합니다'
 $LOOP_FIELD_CONFIRM_PREFIX = '[어비스] 던전 밖(HUD) 확인'
@@ -725,9 +731,11 @@ if (($rawKeysIndexes.Count -eq 1) -and ($actionsForIndexes.Count -eq 1) -and ($r
 $config = ([pscustomobject]@{ afterEntry = [pscustomobject]@{ keyDelayMs = 500 } } | ConvertTo-Json -Depth 5) | ConvertFrom-Json
 # 선분기가 빌려 쓰는 파티원 상수 셋(W · 알 수 없음 30초 · 스윕 연속 한도 - 명세 2.5 ④·⑩ · B20 '새 상수 0')도 소스 대입 그대로 - 빠지면 시계가 0초로 돌아
 # 첫 알 수 없음 회전에서 이벤트 정리를 부르는 등 모형이 소스와 달라집니다. 재입장 대기의 무변화 창($abyssReclickQuietSeconds - 구현 단위 ⑤a 부터 선분기 B2 단계가
-# 그 함수를 부름)도 같은 이유로 소스 대입 그대로입니다(보고 끔 호출이라 결과는 같음 - 구현 명세 ④ C3)
+# 그 함수를 부름)도 같은 이유로 소스 대입 그대로입니다(보고 끔 호출이라 결과는 같음 - 구현 명세 ④ C3). 복귀 전체 상한($abyssReturnTotalLimitSeconds - 구현 단위 복귀 연장)이 빠지면
+# 연장 예산이 음수라 복귀 루프가 조용히 연장 0 으로 돕니다
 foreach ($settingLeft in @('$timeoutClear', '$timeoutExit', '$timeoutHud', '$timeoutAbyssMenu', '$timeoutAbyssSelect', '$timeoutPartyMatch',
-        '$memberFieldSettleSeconds', '$memberUnknownOverlaySeconds', '$memberSweepStreakLimit', '$ptClearCenter', '$afterEntryDelayMs', '$abyssReclickQuietSeconds')) {
+        '$memberFieldSettleSeconds', '$memberUnknownOverlaySeconds', '$memberSweepStreakLimit', '$ptClearCenter', '$afterEntryDelayMs', '$abyssReclickQuietSeconds',
+        '$abyssReturnTotalLimitSeconds')) {
     $settingAssign = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq $settingLeft) }) | Select-Object -First 1
     if ($null -eq $settingAssign) { $extractionProblems.Add("워커 최상위 값 대입 $settingLeft 을(를) 찾지 못했습니다"); continue }
     try { Invoke-Expression $settingAssign.Extent.Text } catch { $extractionProblems.Add("워커 값 대입 $settingLeft 실행 실패: $($_.Exception.Message)") }
@@ -740,7 +748,8 @@ $rgPopupClose = @(380, 590, 320, 60)
 $rgAbyssMenu = @(850, 180, 350, 520)
 $rgHomeEndEsc = @(875, 60, 265, 55)
 $ptEscButton = @(1083, 89)
-$ptNoticeClose = @(1092, 135)
+$noticeCloseTryLimit = 2
+function Click-NoticeBoardClose { param($Game) Click-GamePoint -Game $Game -ReferenceX 1078 -ReferenceY 149 }
 $rgStellaTitle = @(50, 45, 230, 45)
 $rgStellaPickBtn = @(740, 632, 450, 50)
 $ptStellaCard = @(640, 420)
@@ -796,6 +805,7 @@ $script:screenTimeline = New-Object System.Collections.Generic.List[object]     
 $script:timelineStart = [datetime]'2026-10-13 12:00:00'
 $script:inOwnClose = $false
 $script:updateTags = New-Object System.Collections.Generic.List[string]
+$script:diagRecords = New-Object System.Collections.Generic.List[string]
 $script:resolveResults = New-Object System.Collections.Generic.List[string]
 $script:guiEvents = New-Object System.Collections.Generic.List[string]
 $script:activeQueue = New-Object System.Collections.Generic.List[bool]
@@ -1022,8 +1032,9 @@ function Invoke-AutoRefocus {
     return $false
 }
 function Write-LifeDiagnostics {
-    param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly)
+    param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly, [switch]$WithLogCopy)
     $script:diagCalls++
+    $script:diagRecords.Add(('{0}|{1}|{2}' -f $Context, [bool]$CaptureOnly, [bool]$WithLogCopy))   # 문맥 · 두 스위치 (구현 단위 복귀 연장 R2-F3)
 }
 function Focus-Game {
     param([System.Diagnostics.Process]$Game)
@@ -1759,7 +1770,7 @@ function Reset-WorkerRunState {
             'eventOverlayCalls', 'iconCalls', 'exitClickCalls')) { Set-Variable -Name $counterName -Scope Script -Value 0 }
     foreach ($list in @($script:workerLogLines, $script:keyPresses, $script:keyPressTrace, $script:events, $script:exitRecords, $script:setCalls,
             $script:enteredTags, $script:keyCalls, $script:keyOutcomes, $script:closeCalls, $script:closeUpdateTags, $script:returnCalls, $script:updateTags,
-            $script:ownCloseCalls, $script:ownCloseUpdateTags, $script:overlayStops, $script:screenTimeline)) { $list.Clear() }
+            $script:ownCloseCalls, $script:ownCloseUpdateTags, $script:overlayStops, $script:screenTimeline, $script:diagRecords)) { $list.Clear() }
     $script:inOwnClose = $false
     $script:timelineStart = $script:vclock
     $script:spyCounts = @{}
@@ -2025,6 +2036,7 @@ function Invoke-LoopRow {
         MenuCloses = $script:menuCloseKeys
         ExitClicks = $script:exitClickCalls
         Probes     = $script:probeCalls
+        Diags      = (@($script:diagRecords) -join ';')
     }
 }
 
@@ -2721,6 +2733,21 @@ function Test-RowR2LoopExits {
     Assert-Case 'R2-F2 [루프 층] left + 출처 완료 시점 안전 중지 → 닫기·플래그 소비·종료 순서 · 닫기 호출 · exit · 안전 중지 줄(선택 화면 복귀 완료) · 예외' `
         (J @((Get-CloseOrderText -Events $loop.Events), $loop.CloseCalls, $loop.ExitCode, (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_SELECTION_LINE), $loop.Thrown)) `
         (J @('close:abandoned-death-exit|selection-proven > remove-flag > exit:10', 'abandoned-death-exit|selection-proven', '10', 1, ''))
+    # F3 - 마감 만료 + 안전 중지 (구현 단위 복귀 연장 M1): 복귀 루프가 마감까지 화면을 못 찾으면 화면을 모르는 채 끝납니다 - 던전 밖 확정 출구가 아니라 닫기 0 · 플래그 소비 → 호출부 코드 10.
+    #      줄은 코드 10 갈래 하나 · 진단은 문맥과 두 스위치 (변이: 새 출구에서 열쇠 닫기 → 닫기 1 / 갈래 바꿔치기 → 그 줄 0). 열쇠 항목은 다음 시작의 own 선분기가 받습니다
+    $loop = Invoke-LoopRow -StartScreen 'loading' -Configure { $script:safeStopFlag = $true }
+    Assert-Case 'R2-F3 [루프 층] left + 로딩이 마감까지 + 안전 중지 → 소비·종료 순서 · 닫기 호출 0 · exit · 코드 10 갈래 줄 · 다른 두 갈래 줄 0 · W 뒤 출구 줄 0 · 진단(문맥|두 스위치) · 예외' `
+        (J @((Get-CloseOrderText -Events $loop.Events), $loop.CloseCalls, $loop.ExitCode, (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_EXPIRED_READY_LINE),
+                (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_EXPIRED_LEFT_LINE), (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_EXPIRED_LINE),
+                (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_FIELD_LINE), $loop.Diags, $loop.Thrown)) `
+        (J @('remove-flag > exit:10', '', '10', 1, 0, 0, 0, $LOOP_EXPIRED_DIAG, ''))
+    #      마무리 실행의 'left' 는 같은 자리에서 코드 4 · 'left' 갈래 줄 하나 (클리어하지 않은 판이라 회차로 세지 않음 - 명세 리뷰 2 RV-9 와 같은 이유)
+    $loop = Invoke-LoopRow -StartScreen 'loading' -Configure { $script:finishOnly = $true; $script:safeStopFlag = $true }
+    $script:finishOnly = $false
+    Assert-Case "R2-F3 [루프 층] 마무리 실행 left + 로딩이 마감까지 + 안전 중지 → 소비·종료 순서 · 닫기 호출 0 · exit · 'left' 갈래 줄 · 다른 두 갈래 줄 0 · 진단(문맥|두 스위치) · 예외" `
+        (J @((Get-CloseOrderText -Events $loop.Events), $loop.CloseCalls, $loop.ExitCode, (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_EXPIRED_LEFT_LINE),
+                (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_EXPIRED_READY_LINE), (Get-LineCount -Lines $loop.Logs -Exact $LOOP_SAFE_STOP_EXPIRED_LINE), $loop.Diags, $loop.Thrown)) `
+        (J @('remove-flag > exit:4', '', '4', 1, 0, 0, $LOOP_EXPIRED_DIAG, ''))
     # E2 - W 뒤 메뉴 출처 미확인 코드 4: W 확정 → ESC(토큰) → 양보로 토큰 폐기 → 열린 메뉴를 3회 닫아도(게임이 무시) 남음 → 코드 4 · 닫기 0 (변이: 닫기를 첫 W 확정으로 이동)
     $loop = Invoke-LoopRow -StartScreen 'field' -Configure { $script:yieldAfterEsc = 1; $script:menuSticky = $true }
     Assert-Case 'R2-E2 [루프 층] left → W 확정 · ESC 1 · 메뉴 닫기 3 → exit · 닫기 호출 0 · 메뉴 출처 미확인 줄 · 예외' `
@@ -2735,6 +2762,59 @@ function Test-RowR2LoopExits {
     Assert-Case 'R2-E8(나) [루프 층] left → 보상 화면 나가기 헬퍼 미검출 → 헬퍼 호출 · exit · 닫기 호출 0 · 예외' `
         (J @($loop.ExitClicks, $loop.ExitCode, $loop.CloseCalls, $loop.Thrown)) `
         (J @(1, '4', '', ''))
+}
+
+function Test-RowR2DiagCopy {
+    # R2-D1 (구현 단위 복귀 연장 1.3 · 2.4): 실제 Write-LifeDiagnostics 의 -WithLogCopy. 코드 1 이 아닌 출구는 최상위 catch 의 사본을 타지 않아 run 로그가 회전되면 조사 재료가 0 이 됩니다
+    #   (11-03 08:45 은 png 가 회전으로 사라지고 error_*.log 사본으로 조사했습니다). 루프 층의 진단은 모의라 복사 · 회전 · 실패 갈래는 여기서 실제 본문으로 돕니다 (같은 임시 폴더 · 가상 시계 이름)
+    Initialize-Row -Custom $false
+    Invoke-Expression ($workerTopFunctions['Write-LifeDiagnostics'].Extent.Text -replace '^function Write-LifeDiagnostics', 'function Write-LifeDiagnosticsReal')
+    $config = $null
+    $script:runLogTargetPath = Join-Path $script:logDir 'mabinogi_run_once.log'
+    [IO.File]::WriteAllText($script:runLogTargetPath, '', $UTF8_PLAIN)
+    $diagContext = '어비스 복귀 마감 안전 중지'
+    $copyLinePrefix = "[진단] $diagContext - 로그 사본 저장: "
+    # (가) -CaptureOnly 반환을 지나도 사본 1 · 이름은 오류 세트 규칙 · 앞서 찍은 [완료] 줄이 사본 안 · 사본 줄은 복사 뒤라 사본 밖 · 최상위 catch 의 사본 줄 0
+    Write-RunLog $LOOP_SAFE_STOP_EXPIRED_LINE
+    Write-LifeDiagnosticsReal -Game $null -Context $diagContext -CaptureOnly -WithLogCopy
+    $copies = @(Get-ErrorLogFiles)
+    $copyText = $(if ($copies.Count -eq 1) { [IO.File]::ReadAllText($copies[0]) } else { '' })
+    $copyName = $(if ($copies.Count -eq 1) { [IO.Path]::GetFileName($copies[0]) } else { '' })
+    Assert-Case 'R2-D1 (가) 실제 진단 -CaptureOnly -WithLogCopy → 사본 수 · 이름 · 그 안의 [완료] 줄 · 사본 줄 1(사본 밖) · 오류 사본 줄 0 · 저장 실패 줄 0' `
+        (J @($copies.Count, $copyName, $copyText.Contains($LOOP_SAFE_STOP_EXPIRED_LINE), (Get-LineCount -Lines @($script:workerLogLines) -Prefix $copyLinePrefix), $copyText.Contains($copyLinePrefix),
+                (Get-LineCount -Lines @($script:workerLogLines) -Prefix $DIAG_COPY_PREFIX), (Get-LineCount -Lines @($script:workerLogLines) -Prefix '[진단] 로그 사본 저장 실패'))) `
+        (J @(1, ('error_{0}.log' -f $script:vclock.ToString('yyyyMMdd_\hHH\mmm\sss')), 'True', 1, 'False', 0, 0))
+    # (나) 스위치가 없으면 사본 0 - 다른 진단의 동작은 그대로입니다
+    Start-Sleep -Seconds 1
+    Write-LifeDiagnosticsReal -Game $null -Context '어비스 메뉴 항목 미발견' -CaptureOnly
+    Assert-Case 'R2-D1 (나) 실제 진단 스위치 없음 → 사본 수 그대로' (@(Get-ErrorLogFiles).Count) 1
+    # (다) 캡처가 던져도(이 하니스에는 창 좌표 형식이 없음) catch 가 받고 finally 가 사본을 남깁니다 - png 실패가 로그 사본을 막지 않습니다 (설계 리뷰 1/2 ④)
+    Start-Sleep -Seconds 1
+    $diagThrown = ''
+    try { Write-LifeDiagnosticsReal -Game (Get-Process -Id $PID) -Context $diagContext -CaptureOnly -WithLogCopy } catch { $diagThrown = [string]$_.Exception.Message }
+    Assert-Case 'R2-D1 (다) 캡처 실패 → 예외 밖으로 0 · 진단 수집 실패 줄 1 · 사본 2' `
+        (J @($diagThrown, (Get-LineCount -Lines @($script:workerLogLines) -Prefix '[진단] 진단 수집 실패'), @(Get-ErrorLogFiles).Count)) (J @('', 1, 2))
+    # (라) 회전: 오래된 사본 12개를 두고 새 사본을 남기면 최신 10개만 (최상위 catch 의 사본과 같은 규칙)
+    foreach ($oldIndex in 0..11) {
+        $oldPath = Join-Path $script:logDir ('error_19990101_h00m00s{0:00}.log' -f $oldIndex)
+        [IO.File]::WriteAllText($oldPath, 'old', $UTF8_PLAIN)
+        [IO.File]::SetLastWriteTime($oldPath, ([datetime]'2000-01-01').AddMinutes($oldIndex))
+    }
+    Start-Sleep -Seconds 1
+    Write-LifeDiagnosticsReal -Game $null -Context $diagContext -CaptureOnly -WithLogCopy
+    $rotated = @(Get-ErrorLogFiles | ForEach-Object { [IO.Path]::GetFileName($_) })
+    Assert-Case 'R2-D1 (라) 회전 → 사본 10 · 새 사본 셋 남음 · 가장 오래된 표본 지워짐' `
+        (J @($rotated.Count, @($rotated | Where-Object { $_ -like 'error_2026*' }).Count, @($rotated | Where-Object { $_ -eq 'error_19990101_h00m00s00.log' }).Count)) (J @(10, 3, 0))
+    # (마) 복사 실패(로그 파일 없음)는 안쪽 try 가 받아 [진단] 줄만 남고 출구를 막지 않습니다 - 사본 줄 0
+    Start-Sleep -Seconds 1
+    $script:runLogTargetPath = Join-Path $script:logDir 'does_not_exist.log'
+    $linesBefore = $script:workerLogLines.Count
+    $diagThrown = ''
+    try { Write-LifeDiagnosticsReal -Game $null -Context $diagContext -CaptureOnly -WithLogCopy } catch { $diagThrown = [string]$_.Exception.Message }
+    $newLines = @($script:workerLogLines | Select-Object -Skip $linesBefore)
+    $script:runLogTargetPath = ''
+    Assert-Case 'R2-D1 (마) 복사 실패 → 예외 밖으로 0 · 새 줄 1(저장 실패) · 사본 줄 0' `
+        (J @($diagThrown, $newLines.Count, (Get-LineCount -Lines $newLines -Prefix '[진단] 로그 사본 저장 실패'), (Get-LineCount -Lines $newLines -Prefix $copyLinePrefix))) (J @('', 1, 1, 0))
 }
 
 # ===== R2 저장소 층 =====
@@ -3394,7 +3474,8 @@ function Test-InChangedBranch {
 function Test-StaticRows {
     $loopAst = $workerTopFunctions['Return-ToAbyssSelection']
     $closeAst = $workerTopFunctions['Close-AbyssKeyEntryOnLeave']
-    # S1 - 닫기 호출 = 워커 전체 2 · 둘 다 복귀 루프 안 · 출처 완료 블록 첫 문장(selection-proven) · W 뒤 안전 중지 블록 첫 문장(field) · 매개변수 [string]$LeaveEntryReason = ''
+    # S1 - 닫기 호출 = 워커 전체 2 · 둘 다 복귀 루프 안 · 출처 완료 블록 첫 문장(selection-proven) · W 뒤 안전 중지 블록 첫 문장(field) · 매개변수 [string]$LeaveEntryReason = ''.
+    #   구현 단위 복귀 연장: while 뒤 마감 만료 출구도 같은 조건식의 if 입니다 - 그 자리는 화면을 몰라 닫기가 없으므로(R2-F3 · test_abyss_screen_signatures 3c) W 뒤 블록은 최상위 while 안에서만 찾습니다
     $closeCallNodes = @(Get-CommandAsts -Root $workerAst -Name 'Close-AbyssKeyEntryOnLeave')
     $closeInLoop = @($closeCallNodes | Where-Object { Test-AstWithin -Node $_ -Ancestor $loopAst })
     $selectionFirst = '(복귀 루프 없음)'
@@ -3404,8 +3485,9 @@ function Test-StaticRows {
         $selectionIfs = @($loopAst.FindAll({ param($node) ($node -is [IfStatementAst]) -and ($node.Clauses[0].Item1.Extent.Text -eq '$selectionConfirmed') -and
                     (@(Get-CommandAsts -Root $node.Clauses[0].Item2 -Name 'Test-Path').Count -gt 0) }, $true))
         $selectionFirst = $(if ($selectionIfs.Count -eq 1) { Get-NormalizedCode -Node @($selectionIfs[0].Clauses[0].Item2.Statements)[0] } else { '(완료 블록 {0}개)' -f $selectionIfs.Count })
+        $loopWhile = @($loopAst.Body.EndBlock.Statements | Where-Object { ($_ -is [WhileStatementAst]) -and ($_.Condition.Extent.Text -eq '$true') }) | Select-Object -First 1
         $fieldStopIfs = @($loopAst.FindAll({ param($node) ($node -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $node.Clauses[0].Item1) -eq 'Test-Path -LiteralPath $safeStopFlagPath') }, $true) |
-                Where-Object { ($selectionIfs.Count -eq 1) -and -not (Test-AstWithin -Node $_ -Ancestor $selectionIfs[0]) })
+                Where-Object { ($selectionIfs.Count -eq 1) -and -not (Test-AstWithin -Node $_ -Ancestor $selectionIfs[0]) -and (Test-AstWithin -Node $_ -Ancestor $loopWhile) })
         $fieldFirst = $(if ($fieldStopIfs.Count -eq 1) { Get-NormalizedCode -Node @($fieldStopIfs[0].Clauses[0].Item2.Statements)[0] } else { '(W 뒤 안전 중지 블록 {0}개)' -f $fieldStopIfs.Count })
         $leaveParams = @($loopAst.Body.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'LeaveEntryReason' })
         $leaveParam = $(if ($leaveParams.Count -eq 1) { '{0} = {1}' -f $leaveParams[0].StaticType.Name, [string]$leaveParams[0].DefaultValue.Extent.Text } else { '(매개변수 {0}개)' -f $leaveParams.Count })
@@ -3539,7 +3621,8 @@ function Test-RowR2LeftFinish {
     #   출구도 같은 코드 4): (가) W 확정 뒤(필드 출구 - field) (나) 출처 완료 시점('어비스' 클릭 순간 예약 - 선택 화면 출구 selection-proven, R2-F2 의 마무리 실행 짝).
     #   두 출구의 줄 = 거점 퇴장 문구(구현 명세 ⑤b5 명세 리뷰 2 RV-9 - 'abandoned-death-exit' 이고 코드 10 이 아닌 갈래: 클리어하지 않은 판이라 회차로 세지 않음 · GUI 계상 0) - 리뷰 문안을
     #   계약으로 고정하고 복귀 루프 원문의 그 갈래 문자열(소스 캡처 - 출구마다 1)과 같은지 함께 봅니다. 옛 '회차를 마칩니다' 줄 · 준비/정리 실행 줄은 0
-    #   (변이: 그 갈래 제거 → 옛 '회차를 마칩니다' 줄 1 · 새 줄 0 / 두 출구 문구 바꿔치기 → 각 출구 새 줄 0)
+    #   (변이: 그 갈래 제거 → 옛 '회차를 마칩니다' 줄 1 · 새 줄 0 / 두 출구 문구 바꿔치기 → 각 출구 새 줄 0).
+    #   구현 단위 복귀 연장: 소스 갈래는 while 뒤 마감 만료 출구까지 셋입니다 (그 출구의 동작은 R2-F3)
     $leftStopLines = @()
     if ($workerTopFunctions.ContainsKey('Return-ToAbyssSelection')) {
         $leftStopIfs = @($workerTopFunctions['Return-ToAbyssSelection'].FindAll({ param($node) ($node -is [IfStatementAst]) -and ($node.Clauses.Count -eq 2) -and ($node.Clauses[0].Item1.Extent.Text -eq '$SafeStopExitCode -eq 10') -and
@@ -3551,15 +3634,16 @@ function Test-RowR2LeftFinish {
     $script:finishOnly = $false
     $loopSelection = Invoke-LoopRow -StartScreen 'field' -Configure { $script:finishOnly = $true; $script:flagOnAbyssClick = $true }
     $script:finishOnly = $false
-    Assert-Case 'R2-L6 [루프 층] 마무리 실행 left + 두 출구 안전 중지 → (가) W 확정 뒤 · (나) 출처 완료 시점: 닫기·플래그 소비·종료 순서 · 닫기 호출 · exit · 거점 퇴장 줄(리뷰 문안) · 옛 회차 줄 0 · 준비/정리 실행 줄 0 · 예외 || 소스: 그 갈래 문자열(필드 · 선택 화면 각 1 · 합 2)' `
+    Assert-Case 'R2-L6 [루프 층] 마무리 실행 left + 두 출구 안전 중지 → (가) W 확정 뒤 · (나) 출처 완료 시점: 닫기·플래그 소비·종료 순서 · 닫기 호출 · exit · 거점 퇴장 줄(리뷰 문안) · 옛 회차 줄 0 · 준비/정리 실행 줄 0 · 예외 || 소스: 그 갈래 문자열(필드 · 선택 화면 · 마감 만료 각 1 · 합 3)' `
         (J @((Get-CloseOrderText -Events $loopField.Events), $loopField.CloseCalls, $loopField.ExitCode, (Get-LineCount -Lines $loopField.Logs -Exact $LOOP_SAFE_STOP_LEFT_FIELD_LINE),
                 (Get-LineCount -Lines $loopField.Logs -Exact $LOOP_SAFE_STOP_ROUND_FIELD_LINE), (Get-LineCount -Lines $loopField.Logs -Exact $LOOP_SAFE_STOP_FIELD_LINE), $loopField.Thrown,
                 (Get-CloseOrderText -Events $loopSelection.Events), $loopSelection.CloseCalls, $loopSelection.ExitCode, (Get-LineCount -Lines $loopSelection.Logs -Exact $LOOP_SAFE_STOP_LEFT_SELECTION_LINE),
                 (Get-LineCount -Lines $loopSelection.Logs -Exact $LOOP_SAFE_STOP_ROUND_SELECTION_LINE), (Get-LineCount -Lines $loopSelection.Logs -Exact $LOOP_SAFE_STOP_SELECTION_LINE), $loopSelection.Thrown,
-                @($leftStopLines | Where-Object { $_ -ceq $LOOP_SAFE_STOP_LEFT_FIELD_LINE }).Count, @($leftStopLines | Where-Object { $_ -ceq $LOOP_SAFE_STOP_LEFT_SELECTION_LINE }).Count, $leftStopLines.Count)) `
+                @($leftStopLines | Where-Object { $_ -ceq $LOOP_SAFE_STOP_LEFT_FIELD_LINE }).Count, @($leftStopLines | Where-Object { $_ -ceq $LOOP_SAFE_STOP_LEFT_SELECTION_LINE }).Count,
+                @($leftStopLines | Where-Object { $_ -ceq $LOOP_SAFE_STOP_EXPIRED_LEFT_LINE }).Count, $leftStopLines.Count)) `
         (J @('close:abandoned-death-exit|field > remove-flag > exit:4', 'abandoned-death-exit|field', '4', 1, 0, 0, '',
                 'close:abandoned-death-exit|selection-proven > remove-flag > exit:4', 'abandoned-death-exit|selection-proven', '4', 1, 0, 0, '',
-                1, 1, 2))
+                1, 1, 1, 3))
 }
 
 function Test-RowR6RC1 {
@@ -3660,7 +3744,7 @@ try {
         @{ Name = 'SE9'; Needs = $storageReady }, @{ Name = 'SE12'; Needs = $mainReady },
         @{ Name = 'R2Left'; Needs = $mainReady }, @{ Name = 'R2LeftPlain'; Needs = $mainReady }, @{ Name = 'R2Cleanup'; Needs = $mainReady }, @{ Name = 'R2C3'; Needs = $mainReady },
         @{ Name = 'R2E1'; Needs = $mainReady }, @{ Name = 'R2E6'; Needs = $mainReady }, @{ Name = 'R2E9'; Needs = $mainReady },
-        @{ Name = 'R2LoopExits'; Needs = $loopReady }, @{ Name = 'R2Storage'; Needs = $storageReady }, @{ Name = 'R2L2s'; Needs = $storageReady },
+        @{ Name = 'R2LoopExits'; Needs = $loopReady }, @{ Name = 'R2DiagCopy'; Needs = $loopReady }, @{ Name = 'R2Storage'; Needs = $storageReady }, @{ Name = 'R2L2s'; Needs = $storageReady },
         @{ Name = 'OK1'; Needs = $handoffReady }, @{ Name = 'OK2'; Needs = $handoffReady }, @{ Name = 'OK3'; Needs = $handoffReady }, @{ Name = 'OK4'; Needs = $handoffReady },
         @{ Name = 'OK5'; Needs = $handoffReady }, @{ Name = 'OK6'; Needs = $handoffReady }, @{ Name = 'OK7'; Needs = $handoffReady }, @{ Name = 'OK8'; Needs = $handoffReady },
         @{ Name = 'OK9'; Needs = $handoffReady }, @{ Name = 'OK10'; Needs = $handoffReady }, @{ Name = 'OK11'; Needs = $handoffReady }, @{ Name = 'OK12'; Needs = $handoffReady },

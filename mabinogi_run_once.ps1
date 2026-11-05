@@ -488,6 +488,9 @@ $timeoutExit        = Get-ConfigInteger $config @('timeoutsSeconds', 'exitButton
 $timeoutHud         = Get-ConfigInteger $config @('timeoutsSeconds', 'homeEndEscHud') 30 1 600
 $timeoutAbyssMenu   = Get-ConfigInteger $config @('timeoutsSeconds', 'abyssMenu') 15 1 600
 $timeoutAbyssSelect = Get-ConfigInteger $config @('timeoutsSeconds', 'abyssSelectionScreen') 15 1 600
+# 어비스 복귀 루프 전체 상한 (구현 단위 복귀 연장 · 사용자 결정 U-R-3): 아는 창을 눌러 마감을 늘려도 양보 · 캡처 실패를 뺀 시간으로 이 값까지입니다.
+# 스크립트 상수라 configSchemaVersion 은 그대로입니다. 위 세 값의 합이 이 값 이상이면 연장 없이 그 합만 씁니다
+$abyssReturnTotalLimitSeconds = 180
 $contentCategory = [string](Get-ConfigValue $config @('contentCategory') 'abyss')
 # 심층던전 모드: 던전과 화면 구조·좌표가 동일해 던전 사이클을 공유하고, 차이(재화·라벨·
 # 난이도·제목 조각)만 데이터로 치환합니다 (2026-07-27 설계 합의 - 아래 심층 데이터 구역 참고)
@@ -633,7 +636,11 @@ $rgAbyssMenu   = @(Get-ConfigValue $config @('ocrRegions', 'abyssMenu') @(850, 1
 $rgAbyssCards  = @(Get-ConfigValue $config @('ocrRegions', 'abyssCards') @(690, 110, 280, 310)) # 어비스 선택 화면 우측 던전 배너 3장의 제목 영역 (2026-07-16 개편 화면 실측)
 $rgMenuExitLabel = @(Get-ConfigValue $config @('ocrRegions', 'menuExitLabel') @(1160, 600, 112, 90)) # ESC 메뉴 우하단 '게임 종료' 문구 (메뉴 열림 2차 신호, 두 창 크기 실측)
 $rgNoticeTabs    = @(170, 495, 930, 62)   # 공지 게시판 팝업 하단 탭 줄(공지사항/이벤트/쿠폰 입력/FAQ) - 2026-07-19 타 PC 캡처 실측
-$ptNoticeClose   = @(1092, 135)           # 공지 게시판 팝업 우상단 X - 같은 캡처 실측 (공용 X 후보 1090,137과 동일 계열)
+# 공지 게시판 우상단 X 자리 (2026-11-05 실기): 공지 창은 클라이언트 높이에 비례하고 가로 가운데에 놓여 기준 좌표가 창마다 다릅니다 - 고정점 (1092,135) 는 1908 150% 에서 글자 위였고
+# 1272 150% 에서는 오른쪽 14 · 위 13.5 로 빗나가 42번 눌러도 안 닫혔습니다. 비율은 그 두 창의 X 글자 중심 실측입니다 (Get-NoticeCloseReferenceFromClient). 숫자를 바꾸면 tests\test_notice_close_point.ps1 이 그림으로 다시 잽니다
+$noticeCloseCenterRatio = 0.6689   # 클라이언트 가운데 → X 가로 거리 ÷ 클라이언트 높이
+$noticeCloseTopRatio    = 0.1567   # 클라이언트 위 → X 세로 거리 ÷ 클라이언트 높이
+$noticeCloseTryLimit    = 2        # 복귀 1번에 공지 X 를 누르는 횟수 - 그래도 남으면 X 후보로 넘깁니다 (사용자 결정 U-R-10)
 $rgAbyssSelect = @(Get-ConfigValue $config @('ocrRegions', 'abyssSelectionTitle') @(0, 25, 240, 95))
 $rgDetailTitle = @(Get-ConfigValue $config @('ocrRegions', 'detailTitle') @(30, 100, 350, 65))
 $ptDetailBack  = @(Get-ConfigValue $config @('clickPoints', 'detailBack') @(43, 67))
@@ -733,7 +740,7 @@ $rgEventTodayOff = @(Get-ConfigValue $config @('ocrRegions', 'eventTodayOff') @(
 $rgEventCloseBtn = @(Get-ConfigValue $config @('ocrRegions', 'eventCloseButton') @(100, 600, 550, 80))
 # 웹뷰형 공지 보드(공지사항/이벤트/쿠폰 입력/FAQ 탭): 탭 글자로 감지하고 전용 X 로 닫음 (2026-07-17 실측)
 $rgNoticeBoardTabs  = @(Get-ConfigValue $config @('ocrRegions', 'noticeBoardTabs') @(600, 500, 480, 55))
-$ptNoticeBoardClose = @(Get-ConfigValue $config @('clickPoints', 'noticeBoardClose') @(1090, 137))
+$ptNoticeBoardClose = @(Get-ConfigValue $config @('clickPoints', 'noticeBoardClose') @(1090, 137))   # 2026-11-05 부터 창 정보를 못 읽을 때의 대체 자리입니다 (Get-NoticeCloseReferencePoint)
 $ptStellaCard   = @(Get-ConfigValue $config @('clickPoints', 'stellaCard') @(640, 420))
 $ptStellaClose  = @(Get-ConfigValue $config @('clickPoints', 'stellaClose') @(1229, 67))   # 전체 화면 UI 공용 닫기(X) 위치 (스텔라 픽/인벤토리 실측 동일)
 # 우측 퀘스트 추적기 첫 줄 영역: 던전 안에서는 '<던전 이름> 클리어' 목표가 고정 표시되므로
@@ -2329,6 +2336,10 @@ public static class HoneyNogiInput {
   [DllImport("user32.dll")]
   public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
 
+  // Client origin for the notice board close point (2026-11-05). This one is used for a click, not diagnostics.
+  [DllImport("user32.dll")]
+  public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
+
   [DllImport("user32.dll")]
   public static extern uint GetDpiForWindow(IntPtr hWnd);
 
@@ -3223,6 +3234,54 @@ function Click-GamePoint {
   Wait-GameRestoredIfMinimized -Game $Game
   $point = Get-ScaledScreenPoint -Game $Game -ReferenceX $ReferenceX -ReferenceY $ReferenceY
   Click-ScreenPoint -X $point.X -Y $point.Y
+}
+
+function Get-NoticeCloseReferenceFromClient {
+  # 공지 게시판 X 의 기준 좌표를 구합니다 (순수 계산 - 진리표 tests\test_notice_close_point.ps1). 화면 좌표를 구한 뒤 기준 좌표계로 되돌립니다 - Click-GamePoint 가 창 비율로 다시 환산합니다
+  param([int]$WindowLeft, [int]$WindowTop, [int]$WindowWidth, [int]$WindowHeight, [int]$ClientLeft, [int]$ClientTop, [int]$ClientWidth, [int]$ClientHeight)
+  $screenX = $ClientLeft + ($ClientWidth / 2) + ($ClientHeight * $noticeCloseCenterRatio)
+  $screenY = $ClientTop + ($ClientHeight * $noticeCloseTopRatio)
+  return @(
+    [int][Math]::Round(($screenX - $WindowLeft) * $referenceWidth / $WindowWidth),
+    [int][Math]::Round(($screenY - $WindowTop) * $referenceHeight / $WindowHeight)
+  )
+}
+
+function Get-NoticeCloseReferencePoint {
+  # 지금 창의 공지 X 기준 좌표입니다. 창 정보를 못 읽으면 고정 자리로 돌아갑니다 - 그 자리가 빗나가면 호출부의 재판독이 받습니다
+  param([System.Diagnostics.Process]$Game)
+  try {
+    $windowRect = New-Object HoneyNogiInput+RECT
+    $clientRect = New-Object HoneyNogiInput+RECT
+    $clientOrigin = New-Object HoneyNogiInput+POINT
+    if ([HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$windowRect) -and
+        [HoneyNogiInput]::GetClientRect($Game.MainWindowHandle, [ref]$clientRect) -and
+        [HoneyNogiInput]::ClientToScreen($Game.MainWindowHandle, [ref]$clientOrigin)) {
+      $windowWidth = $windowRect.Right - $windowRect.Left
+      $windowHeight = $windowRect.Bottom - $windowRect.Top
+      $clientWidth = $clientRect.Right - $clientRect.Left
+      $clientHeight = $clientRect.Bottom - $clientRect.Top
+      if (($windowWidth -gt 0) -and ($windowHeight -gt 0) -and ($clientWidth -gt 0) -and ($clientHeight -gt 0)) {
+        return Get-NoticeCloseReferenceFromClient -WindowLeft $windowRect.Left -WindowTop $windowRect.Top -WindowWidth $windowWidth -WindowHeight $windowHeight `
+          -ClientLeft $clientOrigin.X -ClientTop $clientOrigin.Y -ClientWidth $clientWidth -ClientHeight $clientHeight
+      }
+    }
+  } catch {
+    Write-RunLog "[진단] 공지 X 자리를 계산하지 못해 고정 자리를 씁니다: $($_.Exception.Message)"
+  }
+  return $ptNoticeBoardClose
+}
+
+function Click-NoticeBoardClose {
+  # 공지 게시판 X 를 누르는 공용 입구입니다. 클릭 메타($script:lastClickPerformed · lastClickSkipReason)는 Click-ScreenPoint 가 세웁니다 (규칙 4)
+  param([System.Diagnostics.Process]$Game)
+  # 최소화된 창의 GetWindowRect 는 실패 없이 화면 밖 좌표를 돌려줍니다 (Get-ScaledScreenPoint 주석) - 자리를 재기 전에 복원을 기다립니다.
+  # Click-GamePoint 를 타지 않습니다: 그 안의 복원 대기가 한 번 더 돌면, 첫 대기에서 안 풀린 창이 둘째 대기에서 풀릴 때 대체 자리를 재지 않고 누릅니다 (구현 리뷰 P2).
+  # 끝내 복원되지 않으면 아래 환산이 Click-GamePoint 와 같은 문구로 던집니다
+  Wait-GameRestoredIfMinimized -Game $Game
+  $closePoint = Get-NoticeCloseReferencePoint -Game $Game
+  $screenPoint = Get-ScaledScreenPoint -Game $Game -ReferenceX $closePoint[0] -ReferenceY $closePoint[1]
+  Click-ScreenPoint -X $screenPoint.X -Y $screenPoint.Y
 }
 
 function Get-CursorParkPoint {
@@ -6200,7 +6259,7 @@ function Invoke-AbyssExitClick {
         if (Test-UserRecentlyActive) { $fieldStreak = 0; Wait-UserYieldEnd -Game $Game -Context $Context; continue }
         if ($passed -eq '선택 화면') {
           # 같은 회전 복구 회전의 선택 화면 양성 = 이 회전의 마지막 실패 뒤 새로 찍은 성공 캡처 셋(증거 → 패널 배제 → 접힌 패널 배제)이라 무효 표본이
-          # 아닙니다 - 판정 없이 'selection' 으로 넘깁니다 ('expired' 판정보다 앞: 'expired' 면 복귀 루프 throw → 코드 1 → 커스텀 복구 워커가 같은 화면에서
+          # 아닙니다 - 판정 없이 'selection' 으로 넘깁니다 ('expired' 판정보다 앞: 'expired' 면 안전 중지가 없을 때 복귀 루프 throw → 코드 1 → 커스텀 복구 워커가 같은 화면에서
           # 모양만으로 완료하던 길 - 반영본 검증 09-30 리뷰4, 09-30 리뷰5 P1-1 로 'gone' → 'selection')
           Write-RunLog "[안내] $Context - 보상 화면 '나가기' 가 보이지 않고 어비스 선택 화면이 보입니다 - 워커가 연 화면인지 알 수 없어 누르지 않고 복귀 판정에 맡깁니다 (판독: '$($read.Text)')"
           return @{ Result = 'selection'; FrozenMs = $frozenMs }
@@ -6807,7 +6866,7 @@ function Invoke-EventSkipOrConfirm {
     [System.Diagnostics.Process]$Game,
     [string]$LogPrefix = '',
     $Outcome = $null   # [ref] 또는 생략. 타입을 [ref] 로 박으면 PS 5.1 이 기본값 $null 변환에 실패해
-                       # 기존 호출부(어비스 복귀 루프)가 통째로 죽습니다 - 회귀 테스트가 잡음 (2026-09-11)
+                       # 인자를 생략한 호출이 통째로 죽습니다 - 회귀 테스트가 잡음 (2026-09-11)
   )
 
   # 출석/이벤트 화면의 '출석부 건너뛰기' 또는 보상 요약의 '확인' 버튼을 찾아 클릭합니다.
@@ -6815,6 +6874,7 @@ function Invoke-EventSkipOrConfirm {
   # -Outcome (선택, 2026-09-11): 반환값과 별개로 **이번 회전에서 무슨 일이 있었는지**를 돌려줍니다.
   #   'user-active' = 사용자 조작을 만나 기다린 뒤 아무것도 누르지 않고 $false 로 돌아감
   #   'sent'        = Space 를 눌렀음 (Press-KeyOnce 는 클릭 메타를 안 건드려 호출부가 알 수 없음)
+  #   'confirm-word' = '확인' 글자 클릭을 실제로 보냈음 (화면 게이트 없이 낱말 하나로 누른 경우 - 어비스 복귀 루프가 마감 연장 사유에서 뺍니다. 반환값은 그대로 $true)
   #   그 밖의 경로는 빈 문자열 - 호출부가 $script:lastClickPerformed 메타로 판단합니다.
   # 왜 필요한가: 양보 후의 $false 를 '처리할 이벤트 없음'으로 읽는 호출부(Clear-EventOverlay)가
   # 중앙/X 폴백으로 내려가 양보 직후 엉뚱한 화면을 눌렀습니다. 반환값을 바꾸면 안 됩니다 -
@@ -6864,6 +6924,7 @@ function Invoke-EventSkipOrConfirm {
   if ($confirmPoint) {
     Focus-Game -Game $Game
     Click-ScreenPoint -X $confirmPoint.X -Y $confirmPoint.Y
+    if ($script:lastClickPerformed -and ($Outcome -is [ref])) { $Outcome.Value = 'confirm-word' }   # 낱말 하나로 눌러 보낸 경우 - 복귀 루프가 연장 사유에서 뺍니다 (구현 단위 복귀 연장 · 규칙 3 의 [ref] 선택 인자 모양)
     if ($script:lastClickPerformed) { Write-RunLog "[안내] ${LogPrefix}보상 확인 클릭" }
     Start-Sleep -Seconds 2
     return $true
@@ -7018,10 +7079,10 @@ function Clear-EventOverlay {
       } elseif (Find-GameTextPoint -Game $Game -ReferenceX $rgNoticeBoardTabs[0] -ReferenceY $rgNoticeBoardTabs[1] `
           -RegionWidth $rgNoticeBoardTabs[2] -RegionHeight $rgNoticeBoardTabs[3] -SearchText '쿠폰') {
         # 웹뷰형 공지 보드(공지사항/이벤트/쿠폰 입력/FAQ 탭 - 실측 2026-07-17):
-        # 텍스트 버튼이 없어 팝업 우상단 X(1090,137)로 닫습니다. 중앙 클릭 폴백이
+        # 텍스트 버튼이 없어 팝업 우상단 X 로 닫습니다 (자리는 창마다 다릅니다 - Get-NoticeCloseReferenceFromClient). 중앙 클릭 폴백이
         # 프로모션 썸네일을 눌러 다른 화면을 열지 않도록 폴백보다 먼저 처리합니다.
         Focus-Game -Game $Game
-        Click-GamePoint -Game $Game -ReferenceX $ptNoticeBoardClose[0] -ReferenceY $ptNoticeBoardClose[1]
+        Click-NoticeBoardClose -Game $Game
         # 09-10 23:51 실측: 생략된 클릭이 이 로그를 그대로 남겼습니다 - 전송됐을 때만 기록
         if ($script:lastClickPerformed) { Write-RunLog '[안내] 공지 보드 팝업 - 우상단 닫기(X) 클릭' }
         Start-Sleep -Seconds 2
@@ -12322,7 +12383,7 @@ function Invoke-NormalDungeonCycle {
     if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix "$($script:contentTag) ") { continue }
     if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
       Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+      Click-NoticeBoardClose -Game $Game
       if ($script:lastClickPerformed) {
         Write-RunLog "$($script:contentTag) 공지 게시판 팝업 감지 - X로 닫기 (복귀 대기 중)"
       } else {
@@ -13048,7 +13109,7 @@ function Invoke-HuntingGroundCycle {
     if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[사냥터] ') { continue }
     if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
       Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+      Click-NoticeBoardClose -Game $Game
       Write-RunLog $(if ($script:lastClickPerformed) { '[사냥터] 공지 게시판 팝업 감지 - X로 닫기 (복귀 대기 중)' } else { "[사냥터] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' }))" })
       Start-Sleep -Seconds 2
       continue
@@ -14785,29 +14846,57 @@ function Test-AbyssSelectionProvenance {
   return ($Expected -and ($ExpectedSerial -eq $ReferenceSerial) -and ($ExpectedYieldMs -eq $YieldMs))
 }
 
+function Get-AbyssReturnGrantMs {
+  # 복귀 마감에 더할 ms (순수 판정 - 진리표 test_abyss_return_loop RLX0). 남은 시간이 남길 시간보다 짧으면 그 차이를 남은 연장 예산 안에서 돌려줍니다. 마감은 늘기만 합니다
+  param([double]$RemainingMs, [double]$KeepMs, [double]$BudgetLeftMs)
+  $needMs = $KeepMs - $RemainingMs
+  if (($needMs -le 0) -or ($BudgetLeftMs -le 0)) { return [double]0 }
+  return [double][Math]::Min($needMs, $BudgetLeftMs)
+}
+
+function Update-AbyssReturnDeadlineOnSend {
+  # 복귀 루프가 아는 창에 입력을 실제로 보낸 회전에서만 부릅니다 (사용자 결정 U-R-1 · U-R-3). 전송 판단은 호출부 몫입니다.
+  # 조정 마감을 먼저 구합니다 - 안 하면 곧 더해질 양보 · 캡처 실패 시간을 남은 시간에서 빠뜨려 연장을 과하게 씁니다. 같은 기준값이라 이중 가산이 없습니다.
+  # 연장 예산은 전송 때만 줄어 양보 · 캡처 실패 시간은 상한에 들지 않습니다 (규칙 4 · 15)
+  param([ref]$Deadline, [ref]$SeenYieldMs, [ref]$SeenCaptureFailMs, [ref]$ExtendLeftMs, [double]$KeepMs)
+  $adjustedDeadline = Get-FreezeAdjustedDeadline -Deadline $Deadline -SeenYieldMs $SeenYieldMs -SeenCaptureFailMs $SeenCaptureFailMs
+  $grantMs = Get-AbyssReturnGrantMs -RemainingMs (($adjustedDeadline - (Get-Date)).TotalMilliseconds) -KeepMs $KeepMs -BudgetLeftMs ([double]$ExtendLeftMs.Value)
+  if ($grantMs -le 0) { return }
+  $Deadline.Value = $Deadline.Value.AddMilliseconds($grantMs)
+  $ExtendLeftMs.Value = [double]$ExtendLeftMs.Value - $grantMs
+  Write-RunLog "[안내] 복귀 중 아는 창을 눌러 복귀 대기 시간을 늘립니다 (판독: 연장 $([int]($grantMs / 1000))초, 남은 연장 $([int]($ExtendLeftMs.Value / 1000))초)"
+}
+
 function Return-ToAbyssSelection {
   param(
     [System.Diagnostics.Process]$Game,
     # 복귀 도중 안전 중지 예약을 소비할 때 쓸 종료 코드 (2026-08-01 전수 점검: 준비 실행
     # (코드 10이어야 함)이 이 함수의 안전 중지 분기에서 무조건 exit 0 으로 끝나 던전을 돌지
-    # 않은 실행이 완료 회차로 계상됐음 - 호출부가 자기 문맥의 코드를 전달. 리뷰 승인)
+    # 않은 실행이 완료 회차로 계상됐음 - 호출부가 자기 문맥의 코드를 전달. 리뷰 승인).
+    # 셋째 출구 (구현 단위 복귀 연장 M1 · 사용자 결정 U-R-4): while 뒤의 마감 만료 + 안전 중지도 이 코드로 끝납니다 - 출처 완료 · 필드 확정 두 출구와 달리 화면 복귀를 확인하지 못한 채입니다
     [int]$SafeStopExitCode = 0,
     # 던전을 나온 판의 열쇠 항목을 닫을 때 남길 사유 (구현 명세 ② 2.3 · 설계 R2 3.3 ①): 'left'(거점 퇴장 - 'abandoned-death-exit')와 정리 전용
     # ('cleanup-only') 출구만 넘깁니다. 넘기면 이 루프가 던전 밖 확정으로 끝나는 두 출구(출처 완료 블록 · 필드 확정 뒤 안전 중지 블록) 직전에 닫고,
     # 빈 값이면 닫지 않습니다 - ESC 메뉴·필드 시작(입장 전)과 정상 판(cleared 가 이미 닫음)은 빈 값입니다. 'abandoned-death-exit' 인데 안전 중지 코드가 10 이
-    # 아니면(마무리 실행의 'left' - 코드 4) 두 출구의 안전 중지 [완료] 문구를 '거점 퇴장한 판은 회차로 세지 않고 …' 로 적습니다(명세 리뷰 2 RV-9)
+    # 아니면(마무리 실행의 'left' - 코드 4) 두 출구의 안전 중지 [완료] 문구를 '거점 퇴장한 판은 회차로 세지 않고 …' 로 적습니다(명세 리뷰 2 RV-9).
+    # 셋째 출구(while 뒤 마감 만료 + 안전 중지 - 구현 단위 복귀 연장 M1)는 던전 밖을 확정하지 못한 채 끝나므로 열쇠 항목을 닫지 않고 이 사유는 [완료] 문구 갈래에만 씁니다 - 다음 시작의 own 선분기가 받습니다
     [string]$LeaveEntryReason = ''
   )
 
   # 던전 밖에서 어비스 선택 화면으로 돌아가는 과정을 '상태 기반'으로 반복합니다.
   # 매 반복마다 현재 화면을 다시 판단해 필요한 조작만 하므로, ESC 클릭이 빗나가거나
   # 사용자가 화면을 조작해 뒤로 가더라도 스스로 다시 시도해 복구합니다.
-  $deadline = (Get-Date).AddSeconds($timeoutHud + $timeoutAbyssMenu + $timeoutAbyssSelect)
+  $returnBaseSeconds = $timeoutHud + $timeoutAbyssMenu + $timeoutAbyssSelect   # 기본 예산 - 정상 전이 몫
+  $deadline = (Get-Date).AddSeconds($returnBaseSeconds)
+  $returnKeepMs = [double]$returnBaseSeconds * 1000                            # 아는 창을 누른 뒤 남길 시간 = 기본 예산 (구현 단위 복귀 연장 0.3)
+  $returnExtendLeftMs = [double]($abyssReturnTotalLimitSeconds - $returnBaseSeconds) * 1000   # 0 이하면 Get-AbyssReturnGrantMs 가 연장 0 을 돌려줍니다
   $loggedHud = $false
   $loggedMenu = $false
   $lastFocus = Get-Date
   $unknownSince = $null   # '알 수 없는 화면' 상태가 시작된 시각 (오클릭으로 열린 우편함 등 복구용)
   $xAttempts = 0          # 닫기(X) 후보 순환 인덱스
+  $noticeCloseTries = 0   # 이번 복귀에서 공지 X 를 쓴 횟수 - 줄지 않습니다. 닫혔다가 다시 뜬 공지도 구분하지 않고 X 후보가 받습니다 (U-R-10)
+  $noticeHandedToX = $false   # 공지를 X 후보로 넘겼다는 줄을 한 번만 남기기 위한 표시
   $stellaHandled = 0      # 복귀 중 스텔라 픽 처리 횟수 (무한 클릭 방지 상한용)
   $abyssMenuMissCount = 0 # 메뉴에서 '어비스' 글자를 못 찾은 횟수 (진단 캡처 1회용)
   $escMissCount = 0       # 일반 · 이진화 판독이 모두 'ESC' 를 못 찾은 회전 수 - 찾으면 0. 홀수 회전은 커서를 치우고 다시 읽고, 짝수 회전은 고정점을 누릅니다
@@ -14840,7 +14929,7 @@ function Return-ToAbyssSelection {
   $selectionConfirmed = $false
   $unprovenancedLogged = $false   # '출처 없는 선택 화면' 안내는 루프당 1회
   # 필드 확정(W) 상태 (⑥e 설계 2.14 - 반영본 검증, 09-30 리뷰5): HUD + 추적기 던전명 없음 유효 표본이 끊김 없이 2개 이상이고 첫 표본부터
-  # $memberFieldSettleSeconds 이상일 때만 필드로 확정해 안전 중지 소비·공지 X·ESC 를 합니다. '끊김 없이' = 확정 대기 회전이 곧바로 이어짐 - 회전 서두에서
+  # $memberFieldSettleSeconds 이상일 때만 필드로 확정해 안전 중지 소비·HUD 분기의 공지 X·ESC 를 합니다. '끊김 없이' = 확정 대기 회전이 곧바로 이어짐 - 회전 서두에서
   # 직전 회전이 남긴 표식만 이어받고($fieldSettleAlive), 그 밖의 모든 회전(동결·양보·표식·완료·패널·선택 화면·메뉴·보상·알 수 없음·던전 안·캡처 실패)은
   # 연속을 끊습니다 - 끊는 자리를 폐기 줄마다 열거하지 않으므로 빠뜨릴 자리가 없습니다
   $fieldSettleNext = $false
@@ -14854,7 +14943,7 @@ function Return-ToAbyssSelection {
     $script:lastClickSkipReason = ''   # 직전 회전의 생략 메타가 남아 오발동하지 않게 (규칙 4)
     $fieldSettleAlive = $fieldSettleNext; $fieldSettleNext = $false   # 직전 회전이 필드 확정 대기로 끝났을 때만 필드 모양 연속이 이어짐 (그 밖의 회전은 모두 끊음 - 2.14)
     if ($selectionConfirmed) {
-      # 완료 (⑥e 설계 2.14 - 09-30 리뷰5 P1-1): 워커 자신의 '어비스' 클릭 뒤 출처가 살아 있는 판독이 선택 화면을 확인했습니다. 이 루프의 완료 문구·
+      # 완료 (⑥e 설계 2.14 - 09-30 리뷰5 P1-1): 워커 자신의 '어비스' 클릭 뒤 출처가 살아 있는 판독이 선택 화면을 확인했습니다. 선택 화면 완료의 문구·
       # 안전 중지 소비는 여기 한 곳입니다. 확인은 그 판독에서 끝났으므로 그 뒤의 조작·캡처 실패와 무관합니다 - 누르는 것이 없어(소비·exit·return 뿐)
       # 규칙 4 대상이 아니고, 회전 서두라 동결·게이트·일반 만료보다 먼저입니다 (마감 경계에서 선택 화면이 나타나면 성공이 먼저 - ⑥a 구현 리뷰 2차 P1).
       # 선택 화면 도달 직전의 안전 중지 예약도 여기서 소비합니다 (2026-08-01 3차 점검: 이 return 이 HUD 분기의 안전 중지 확인보다 먼저라,
@@ -14917,7 +15006,7 @@ function Return-ToAbyssSelection {
     #      읽힙니다 (09-18 실측, 설계 합의 A3). 자동 입장이 이어지면 아래 던전 안 판정이 코드 4 로 정직하게 멈춥니다.
     #      ⑥a (2026-09-26 설계 합의): 파티 준비 패널·접힌 준비 패널도 같은 취급입니다 - 준비 패널의 '나가기' 는 패널 닫기, 접힌 패널의
     #      '나가기' 는 던전 퇴장이고, 여기서 판정하지 않으면 '알 수 없는 화면 20초' 폴백이 X 후보를 누릅니다. 두 패널이 마감까지
-    #      이어지면 진단 + 코드 4 입니다 (재매칭 패널은 기존 동작 그대로 throw).
+    #      이어지면 진단 + 코드 4 입니다 (재매칭 패널은 안전 중지가 없으면 throw, 있으면 while 뒤 M1 - 구현 단위 복귀 연장).
     $panelKindNow = Get-AbyssPanelKind -Game $Game
     $entryWaitingNow = ($panelKindNow -eq 'none') -and (-not $script:screenCaptureFailing) -and (Test-AbyssEntryWaiting -Game $Game)
     # 만료 판정은 이 회전의 판독이 유효할 때만, 그리고 **성공(선택 화면) 판정 뒤에** 봅니다 (⑥a 구현 리뷰 1차 P1 - 옛 자리는 이 회전에 한 번도
@@ -14925,7 +15014,7 @@ function Return-ToAbyssSelection {
     # 판정하지 않습니다 - 이미 복구면 조정 마감만 보는 복구 회전, 아직 실패 중이면 판정 자리에서 이 회전을 끝내고 다음 회전은 동결 블록(마감 되돌림
     # 없음 - 실패 시간은 누적 차분, 양보 게이트 앞 복구 탐침)과 표식 회전(탐침이 되살렸으면 판독 없이 조정 마감만)이 받습니다 (⑥e 설계 2.13 - 규칙 15).
     # 만료 판정 산술은 모두 Get-FreezeAdjustedDeadline(양보 + 캡처 실패 누적 차분)입니다 (⑥e 설계 2.13 - 같은 회전 실패 → 복구의 실패 시간도 마감에서 뺌).
-    # 패널은 성공 상태가 아니므로 패널 분기 안에서 이 패널 표본으로 판정합니다: 준비·접힌 패널이면 진단 + 코드 4, 재매칭 패널이면 기존 throw.
+    # 패널은 성공 상태가 아니므로 패널 분기 안에서 이 패널 표본으로 판정합니다: 준비·접힌 패널이면 진단 + 코드 4, 재매칭 패널이면 안전 중지가 없으면 throw, 있으면 while 뒤 M1.
     if ($panelKindNow -ne 'none' -or $entryWaitingNow) {
       if ((-not $script:screenCaptureFailing) -and ($script:captureFailSerial -eq $turnSerial) -and
           (Get-Date) -ge (Get-FreezeAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs))) {
@@ -14979,7 +15068,7 @@ function Return-ToAbyssSelection {
     }
     if ((-not $script:screenCaptureFailing) -and $script:captureFailSerial -ne $turnSerial) {
       # 복구 회전 (⑥e 설계 2.13·㉻): 이 회전 판독(패널·선택 화면) 도중 실패했다가 이미 복구 - 이 회전 판독으로 판정·조작하지 않고 조정 마감만 봅니다
-      # (마감은 실패 시간을 이미 뺌 - 규칙 15, 판정이 아님). 만료면 일반 만료와 같은 break(→ 기존 throw). 복구 뒤 대기가 마감을 흘립니다 - ⑥a 는 이 회전을
+      # (마감은 실패 시간을 이미 뺌 - 규칙 15, 판정이 아님). 만료면 일반 만료와 같은 break(→ 안전 중지가 없으면 throw, 있으면 while 뒤 M1). 복구 뒤 대기가 마감을 흘립니다 - ⑥a 는 이 회전을
       # 두 만료 판정의 일련번호 조건으로 건너뛴 채 뒤 분기로 보내, 같은 회전 복구가 매 회전 이어지면 마감에 영영 닿지 않았습니다 (⑥a 회귀 - HEAD 는 서두 판정)
       if ((Get-Date) -ge (Get-FreezeAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs))) { break }
       Start-Sleep -Milliseconds 700
@@ -15168,7 +15257,8 @@ function Return-ToAbyssSelection {
       }
       if (-not $loggedHud) { Write-RunLog "[어비스] 던전 밖(HUD) 확인 - 필드 모양이 ${memberFieldSettleSeconds}초 이어져 ESC 로 메뉴를 엽니다"; $loggedHud = $true }
       # 안전 중지가 예약된 경우: 어차피 멈출 것이므로 어비스 선택 화면까지 복귀하지 않고
-      # 던전 밖이 확인된 이 시점에서 회차를 마칩니다. 필드 확정 뒤에만 소비합니다 - 1표본 오독이면 던전 안에서 호출부 코드(본류 0 → 계상)로 끝났음 (2.14)
+      # 던전 밖이 확인된 이 시점에서 회차를 마칩니다. 마감 전에는 필드 확정 뒤에만 소비합니다 - 1표본 오독이면 던전 안에서 호출부 코드(본류 0 → 계상)로 끝났음 (2.14).
+      # 마감이 끝나면 안전 중지가 없으면 throw, 있으면 while 뒤 M1 이 필드 확정 없이 소비합니다 (구현 단위 복귀 연장 · 사용자 결정 U-R-4 에 따른 의도적 예외)
       if (Test-Path -LiteralPath $safeStopFlagPath) {
         # 던전 밖 확정 출구 ② (구현 명세 ② 2.3 · 설계 R2 3.3 ③): 필드 확정(W) 뒤 안전 중지로 끝나는 출구 - 호출부가 사유를 넘겼으면 열쇠 항목을 먼저 닫습니다
         if ($LeaveEntryReason) { Close-AbyssKeyEntryOnLeave -Reason $LeaveEntryReason -Screen 'field' }
@@ -15189,14 +15279,20 @@ function Return-ToAbyssSelection {
       # (2026-07-19 06:42 타 PC 실측: 6시 리셋 후 이 팝업으로 ESC 18회 헛클릭 → 시간 초과)
       if (Test-NoticeBoardPopup -Game $Game) {
         Focus-Game -Game $Game
-        Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+        Click-NoticeBoardClose -Game $Game
         if ($script:lastClickPerformed) {
           Write-RunLog '[어비스] 공지 게시판 팝업 감지 - X로 닫기'
+          # 탭 글자로 창을 확정한 뒤 누른 X 라 아는 창입니다 - 눌러 보는 X 후보(사용자 결정 U-R-2)와 다릅니다 (구현 단위 복귀 연장 X8).
+          # 연장은 5) 분기와 같은 횟수까지입니다 (U-R-10 - 11-05 실기: 안 닫히는 창에 연장을 다 썼습니다). 클릭은 막지 않습니다 - 이 분기에는 X 후보가 없어 막으면 공지를 덮은 채 ESC 만 누릅니다
+          if ($noticeCloseTries -lt $noticeCloseTryLimit) { Update-AbyssReturnDeadlineOnSend -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs) -ExtendLeftMs ([ref]$returnExtendLeftMs) -KeepMs $returnKeepMs }
+          $noticeCloseTries++
         } else {
           Write-RunLog "[어비스] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 회전에서 재시도"
           if ($script:lastClickSkipReason -eq 'user-active') {
             $fieldProven = $false; $insideStreak = 0; $insideSince = $null; $selectionExpected = $false   # 조작 생략·양보 = 토큰·연속 수·선택 화면 출처 폐기 (누적 양보 차분이 0 인 경계에서도 fail-closed - 구현 리뷰 3차 P1 / 2.14)
             Invoke-UserYieldWithDeadline -Game $Game -Context '어비스 선택 화면 복귀' -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs)
+          } else {
+            $noticeCloseTries++   # 커서 미확인은 횟수를 씁니다 (규칙 4 - 자동화 자신의 실패)
           }
         }
         Start-Sleep -Seconds 2
@@ -15263,21 +15359,26 @@ function Return-ToAbyssSelection {
       # 호출 직전에 조정해야 같은 회전의 앞 판독에서 난 실패 시간이 빠진 마감이 넘어갑니다
       $exitParentDeadline = Get-FreezeAdjustedDeadline -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs)
       $exitClick = Invoke-AbyssExitClick -Game $Game -LogPrefix '[어비스]' -Context '나가기 클릭 (복구 재시도)' -ParentDeadline $exitParentDeadline
-      if ($exitClick.Result -eq 'expired') { break }   # 헬퍼 안 복구 회전만 이어져 복귀 대기 한도에 닿음 → 기존 throw(코드 1). 'selection' 은 아래 2초 뒤 다음 회전 1) 의 출처 없는 선택 화면이 받음 (2.14)
+      if ($exitClick.Result -eq 'expired') { break }   # 헬퍼 안 복구 회전만 이어져 복귀 대기 한도에 닿음 → 안전 중지가 없으면 throw(코드 1), 있으면 while 뒤 M1. 'selection' 은 아래 2초 뒤 다음 회전 1) 의 출처 없는 선택 화면이 받음 (2.14)
       Start-Sleep -Seconds 2
       continue
     }
 
     # 5) 어느 상태도 아니면 출석/이벤트 화면이 덮였을 수 있으므로 '건너뛰기'/'확인' 버튼을
     #    찾아 클릭합니다 (6시 리셋 이벤트가 복귀 도중 뜨는 경우 대응. 없으면 그냥 대기).
+    $script:lastClickPerformed = $false   # 이벤트 헬퍼의 Space · 캡처 실패 미룸 경로는 메타를 쓰지 않아 앞 회전의 참이 남습니다 - 이 회전 값만 읽게 (규칙 4)
+    $eventOutcome = ''
     if (-not $script:screenCaptureFailing) {
       # 복구 분기 진입 = 토큰 폐기 (구현 리뷰 4차 P1): ESC 를 보낸 뒤 메뉴가 아닌 화면(이벤트·스텔라·고스트·알 수 없음)이면 토큰의 전제가
       # 이미 깨졌고, 아래 헬퍼들의 내부 양보(0ms 로 끝나 누적에 안 잡히는 경우 포함) 중 재입장·던전 안 메뉴가 가능합니다 - 위 8곳의 직접
       # 폐기는 이 헬퍼 안 양보를 못 덮습니다. 연속 수도 새로(비증거 화면 - 4차 P2). 선택 화면 출처도 같은 이유로 폐기합니다 - 워커가 연 선택 화면이
       # 아닌 화면을 본 뒤의 선택 화면은 기대한 전이가 아닙니다 (⑥e 설계 2.14)
       $fieldProven = $false; $insideStreak = 0; $insideSince = $null; $selectionExpected = $false
-      if (Invoke-EventSkipOrConfirm -Game $Game -LogPrefix '복귀 중 ') {
+      if (Invoke-EventSkipOrConfirm -Game $Game -LogPrefix '복귀 중 ' -Outcome ([ref]$eventOutcome)) {
         $unknownSince = $null
+        # 참은 전송이 아닙니다 - 클릭 생략 · 주간 팝업 캡처 실패 미룸도 참입니다. 클릭은 메타로, 메타를 안 쓰는 Space 는 Outcome 'sent' 로 봅니다 (구현 단위 복귀 연장 X1~X5).
+        # '확인' 글자는 화면 게이트 없이 낱말 하나로 눌러 창을 확정하지 못하므로 연장 사유가 아닙니다 (X1b)
+        if (($script:lastClickPerformed -and $eventOutcome -ne 'confirm-word') -or ($eventOutcome -eq 'sent')) { Update-AbyssReturnDeadlineOnSend -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs) -ExtendLeftMs ([ref]$returnExtendLeftMs) -KeepMs $returnKeepMs }
         continue
       }
 
@@ -15296,6 +15397,7 @@ function Return-ToAbyssSelection {
           if ($script:lastClickPerformed) {
             $stellaHandled++
             Write-RunLog '[안내] 복귀 중 스텔라 픽 감지 - 가운데 카드 선택'
+            Update-AbyssReturnDeadlineOnSend -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs) -ExtendLeftMs ([ref]$returnExtendLeftMs) -KeepMs $returnKeepMs   # 아는 창 전송 (구현 단위 복귀 연장 X6 - 자체 상한 5회는 그대로)
           } elseif ($script:lastClickSkipReason -eq 'user-active') {
             $fieldProven = $false; $insideStreak = 0; $insideSince = $null; $selectionExpected = $false   # 조작 생략·양보 = 토큰·연속 수·선택 화면 출처 폐기 (누적 양보 차분이 0 인 경계에서도 fail-closed - 구현 리뷰 3차 P1 / 2.14)
             Invoke-UserYieldWithDeadline -Game $Game -Context '어비스 선택 화면 복귀' -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs)
@@ -15312,6 +15414,7 @@ function Return-ToAbyssSelection {
           if ($script:lastClickPerformed) {
             $stellaHandled++
             Write-RunLog '[안내] 복귀 중 스텔라 픽 2단계 - 확정 버튼 클릭'
+            Update-AbyssReturnDeadlineOnSend -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs) -ExtendLeftMs ([ref]$returnExtendLeftMs) -KeepMs $returnKeepMs   # 아는 창 전송 (구현 단위 복귀 연장 X6 - 자체 상한 5회는 그대로)
           } elseif ($script:lastClickSkipReason -eq 'user-active') {
             $fieldProven = $false; $insideStreak = 0; $insideSince = $null; $selectionExpected = $false   # 조작 생략·양보 = 토큰·연속 수·선택 화면 출처 폐기 (누적 양보 차분이 0 인 경계에서도 fail-closed - 구현 리뷰 3차 P1 / 2.14)
             Invoke-UserYieldWithDeadline -Game $Game -Context '어비스 선택 화면 복귀' -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs)
@@ -15326,12 +15429,45 @@ function Return-ToAbyssSelection {
       # '나중에'를 눌러야 함. 확정 판별(두 버튼 문구 게이트)이라 20초 대기 없이 즉시 처리.
       if (Close-GhostRegisterPrompt -Game $Game -LogPrefix '[안내] 복귀 중 ') {
         $unknownSince = $null
+        # 참은 전송이 아닙니다 - 클릭이 생략돼도 참입니다. 실제로 '나중에' 를 보낸 회전만 늘립니다 (구현 단위 복귀 연장 X7)
+        if ($script:lastClickPerformed) { Update-AbyssReturnDeadlineOnSend -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs) -ExtendLeftMs ([ref]$returnExtendLeftMs) -KeepMs $returnKeepMs }
         continue
       }
+      # 공지 게시판이 HUD 까지 가린 화면 (2026-11-04 기준선 실기 · 사용자 결정 U-R-8): 이 PC 1272 창에서 Home 으로 공지 게시판을 연 동안 Home/End/ESC 글자가 읽히지 않아 3) HUD 분기의 공지 블록에
+      # 닿지 못하고 X 후보 둘째 자리에서 닫혔습니다 - 양보를 뺀 20초 동안 HUD 판독이 한 번도 참이 아니었습니다 (글자가 왜 안 읽혔는지는 그림이 없어 모릅니다).
+      # 그 블록의 주석('HUD 는 가장자리로 계속 보임')은 07-19 타 PC 에서 그랬다는 관측이고 그런 PC 는 그 블록이 받습니다 - 여기는 HUD 가 읽히지 않는 모양입니다.
+      # 이 자리인 이유: 앞 경로(협동 창 · 네트워크 · 출석부 · 지원품 · '확인' · 주간 · 스텔라 · 고스트)가 전부 먼저 돌아 이 판독은 지금이라면 X 후보로 갈 회전에만 닿습니다.
+      # 결과는 아래 가드를 지난 뒤에 씁니다 - 이 판독이 캡처 실패로 거짓이면 X 후보로 새지 않고, 같은 회전 앞 판독이 실패했으면 공지가 참이어도 누르지 않습니다 (규칙 15)
+      $noticeCovered = Test-NoticeBoardPopup -Game $Game
       # 이 회전 판독 도중 캡처 실패가 있었으면 여기서 끝냅니다 (⑥e 설계 2.13 - 반영본 검증, 09-30 리뷰5): 이 분기는 진입 때만 플래그를 봐서, 안의 판독
-      # (이벤트·스텔라·고스트)에서 실패가 시작되면 '알 수 없음' 자체가 실패한 판독의 음성일 수 있습니다 - 그 음성으로 알 수 없음 시계를 시작·진행하거나
+      # (이벤트·스텔라·고스트·공지)에서 실패가 시작되면 '알 수 없음' 자체가 실패한 판독의 음성일 수 있습니다 - 그 음성으로 알 수 없음 시계를 시작·진행하거나
       # X 후보 (1229,67)(던전 퇴장 문·오버레이 X 자리)를 누르거나 플래그 참인 채 양보하지 않습니다 (규칙 15 ①③⑤). 판정 자리 끝냄과 같은 모양
       if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) { Start-Sleep -Milliseconds 700; continue }
+      # 횟수 상한 (사용자 결정 U-R-10 · 2026-11-05 실기): 이 블록은 '알 수 없음' 구간을 끊고 continue 하므로 상한이 없으면 클릭이 빗나갈 때 아래 X 후보에 영영 못 닿습니다 -
+      # 1272 · 창 DPI 144 에서 42번 헛클릭하고 코드 1 로 끝났습니다. 상한을 넘기면 공지가 보여도 아래로 내려갑니다. X 후보 둘째 (1090,137) 은 창 DPI 96 에서는 글자 위라 닫지만(11-04) 1272 · 창 DPI 144 에서는 눌러도 안 닫힙니다(11-05 손 시험) - 그 창에서는 넘겨도 마감에서 끝납니다
+      if ($noticeCovered -and $noticeCloseTries -lt $noticeCloseTryLimit) {
+        # 알아본 회전이면 전송 여부와 무관하게 '알 수 없음' 구간을 끊습니다 - 공지가 그 구간을 끊었으므로 남겨 두면 뒤의 로딩이 옛 시계로 X 후보를 앞당깁니다.
+        # 토큰 · 연속 수 · 선택 화면 출처는 이 분기 머리에서 이미 폐기했고 그 뒤로 발급이 없어 HUD 분기처럼 다시 지우지 않습니다
+        $unknownSince = $null
+        Focus-Game -Game $Game
+        Click-NoticeBoardClose -Game $Game
+        if ($script:lastClickPerformed) {
+          $noticeCloseTries++
+          Write-RunLog '[어비스] 공지 게시판 팝업 감지 - X로 닫기 (HUD 가려짐)'
+          # 탭 글자로 창을 확정한 뒤 누른 X 라 아는 창입니다 - 눌러 보는 X 후보(사용자 결정 U-R-2)와 다릅니다 (U-R-8)
+          Update-AbyssReturnDeadlineOnSend -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) -SeenCaptureFailMs ([ref]$seenFailMs) -ExtendLeftMs ([ref]$returnExtendLeftMs) -KeepMs $returnKeepMs
+        } else {
+          Write-RunLog "[어비스] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 회전에서 재시도"
+          # 'user-active' 만 양보하고 횟수를 남깁니다 - 'cursor-not-ready' 는 시간과 횟수를 소모합니다 (규칙 4). 둘 다 연장 없음
+          if ($script:lastClickSkipReason -eq 'user-active') { Invoke-UserYieldWithDeadline -Game $Game -Context '어비스 선택 화면 복귀' -Deadline ([ref]$deadline) -SeenYieldMs ([ref]$seenYieldMs) } else { $noticeCloseTries++ }
+        }
+        Start-Sleep -Seconds 2
+        continue
+      }
+      if ($noticeCovered -and -not $noticeHandedToX) {
+        $noticeHandedToX = $true
+        Write-RunLog "[어비스] 공지 게시판이 X 를 $noticeCloseTryLimit 번 시도해도 남아 있어 X 후보로 넘깁니다"
+      }
       # 5.5) 알 수 없는 화면이 계속되면(오클릭으로 열린 우편함/전체 화면 UI 등 - 실측 2026-07-17)
       #      알려진 닫기(X) 위치를 순환 클릭해 원래 화면으로 복구를 시도합니다.
       #      단, 나가기 직후 화면 전환(페이드/로딩)도 몇 초간 '알 수 없음'으로 보이므로
@@ -15377,6 +15513,24 @@ function Return-ToAbyssSelection {
     Start-Sleep -Milliseconds 700
   }
 
+  # 마감 만료 출구 (구현 단위 복귀 연장 M1 · 사용자 결정 U-R-4~7): 위 만료 break 다섯 곳이 모두 여기로 옵니다. 연장 여부 · 상한 도달과 무관하게 마감이 끝나는 때입니다(U-R-6).
+  # 신호를 여기서 읽어 연장 중에 건 안전 중지도 받고 도중에 취소한 것은 받지 않습니다. 안전 중지가 걸려 있으면 오류가 아니라 호출부 코드로 끝냅니다 - 코드 1 은 비커스텀이면
+  # 클리어한 판이 오류 정지 · 미계상이고(11-03 08:45), 코드 4 로 고정하면 보상 · S 시작 판이 미계상입니다. W · 출처를 거치지 않는 셋째 소비 · 종료 자리로 U-R-4 에 따른 의도적 예외입니다.
+  # 소비는 확인 직후입니다 - 진단 뒤로 밀면 캡처 · 복사 동안 취소하고 다시 건 신호까지 지울 수 있습니다. 화면을 모르므로 열쇠 항목은 닫지 않습니다(던전 밖 확정 출구 전용).
+  # 안전 중지가 없으면 지금처럼 오류입니다 (U-R-5)
+  if (Test-Path -LiteralPath $safeStopFlagPath) {
+    Remove-Item -LiteralPath $safeStopFlagPath -Force -ErrorAction SilentlyContinue
+    if ($SafeStopExitCode -eq 10) {
+      Write-RunLog '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못했고 준비/정리 실행이라 회차로 세지 않고 마칩니다. 게임 화면을 확인해 주세요'
+    } elseif ($LeaveEntryReason -eq 'abandoned-death-exit') {
+      # 마무리 실행의 'left'(거점 퇴장 - 코드 4): 위 두 출구와 같은 이유로 회차로 세지 않습니다(명세 리뷰 2 RV-9)
+      Write-RunLog '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못했고 거점 퇴장한 판은 회차로 세지 않고 마칩니다. 게임 화면을 확인해 주세요'
+    } else {
+      Write-RunLog '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못해 이 시점에서 회차를 마칩니다. 게임 화면을 확인해 주세요'
+    }
+    Write-LifeDiagnostics -Game $Game -Context '어비스 복귀 마감 안전 중지' -CaptureOnly -WithLogCopy   # [완료] 줄 뒤 - 사본에 그 줄까지 들어갑니다
+    exit $SafeStopExitCode
+  }
   throw '어비스 선택 화면 복귀 대기 시간이 초과됐습니다.'
 }
 
@@ -17996,9 +18150,11 @@ function Write-LifeDiagnostics {
   # 22:45 실패도 캡처 부재로 원인 미확정 → 신설). 스크린샷은 error_* 명명/보관 정책 공유.
   # -CaptureOnly: 화면 캡처만 남기고 목록행/상세 덤프는 생략 (소멸 판정 근거 캡처 용도 -
   # 대기 루프 안이라 추가 OCR 3회의 시간·로그 소음을 피한다. 2026-08-14 신설)
-  param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly)
+  # -WithLogCopy: 같은 시각 이름의 로그 사본(error_시각.log)도 남깁니다 - 코드 1 이 아닌 출구는 최상위 catch 의 사본을 타지 않아, run 로그 회전 뒤에는 조사 재료가 사라집니다
+  # (11-03 08:45 은 png 가 회전으로 없어져 error_*.log 사본으로 조사했습니다. 구현 단위 복귀 연장 1.3)
+  param([System.Diagnostics.Process]$Game, [string]$Context, [switch]$CaptureOnly, [switch]$WithLogCopy)
+  $diagStamp = Get-Date -Format 'yyyyMMdd_\hHH\mmm\sss'
   try {
-    $diagStamp = Get-Date -Format 'yyyyMMdd_\hHH\mmm\sss'
     if ($Game) {
       $diagRect = New-Object HoneyNogiInput+RECT
       if ([HoneyNogiInput]::GetWindowRect($Game.MainWindowHandle, [ref]$diagRect)) {
@@ -18037,6 +18193,26 @@ function Write-LifeDiagnostics {
     Write-RunLog "[진단] $Context - 상세 영역 판독: '$diagDetail'"
   } catch {
     Write-RunLog "[진단] 진단 수집 실패: $($_.Exception.Message)"
+  } finally {
+    # finally 라 캡처 실패 catch 와 위 -CaptureOnly 반환을 모두 지나도 사본이 남습니다. 복사 · 회전은 최상위 catch 의 오류 로그 사본과 같은 규칙입니다
+    # (그 자리는 [분석용] 줄과 진단 줄이 얽혀 있어 함수로 빼지 않고 회전 식이 겹치는 것을 받아들였습니다 - 구현 단위 복귀 연장 2.4)
+    if ($WithLogCopy) {
+      try {
+        $diagLog = Join-Path $logDir "error_$diagStamp.log"
+        Copy-Item -LiteralPath $script:runLogTargetPath -Destination $diagLog -Force
+        Write-RunLog "[진단] $Context - 로그 사본 저장: $diagLog"
+        $keepLogs = Get-ConfigInteger $config @('diagnostics', 'keepScreenshots') 10 0 1000
+        if ($keepLogs -gt 0) {
+          $oldLogs = @(Get-ChildItem -LiteralPath $logDir -Filter 'error_*.log' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepLogs)
+          foreach ($old in $oldLogs) {
+            Remove-Item -LiteralPath $old.FullName -Force -ErrorAction SilentlyContinue
+          }
+        }
+      } catch {
+        Write-RunLog "[진단] 로그 사본 저장 실패: $($_.Exception.Message)"
+      }
+    }
   }
 }
 
@@ -18899,7 +19075,7 @@ function Invoke-LifeGatherCycle {
       elseif (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { $popupHandled = $true; $initialPopupLastBranch = '주간 리셋 팝업' }
       elseif (Test-NoticeBoardPopup -Game $Game) {
         Focus-Game -Game $Game
-        Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+        Click-NoticeBoardClose -Game $Game
         # 전송된 클릭에만 '닫기'라고 씁니다 (던전·어비스 복귀 분기와 같은 계약)
         Write-RunLog $(if ($script:lastClickPerformed) { '[생활] 공지 게시판 팝업 감지 - X로 닫기 (시작 확인 중)' } else { "[생활] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })
         $popupHandled = $true
@@ -19107,7 +19283,7 @@ function Invoke-LifeGatherCycle {
       }
       if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
         Focus-Game -Game $Game
-        Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+        Click-NoticeBoardClose -Game $Game
         Write-RunLog $(if ($script:lastClickPerformed) { '[생활] 공지 게시판 팝업 감지 - X로 닫기' } else { "[생활] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 회전에서 재시도" })
         Start-Sleep -Seconds 2
       }
@@ -19262,7 +19438,7 @@ function Invoke-LifeGatherCycle {
     if (Close-WeeklyCoopResetPopup -Game $Game -LogPrefix '[생활] ') { continue }
     if (-not $script:screenCaptureFailing -and (Test-NoticeBoardPopup -Game $Game)) {
       Focus-Game -Game $Game
-      Click-GamePoint -Game $Game -ReferenceX $ptNoticeClose[0] -ReferenceY $ptNoticeClose[1]
+      Click-NoticeBoardClose -Game $Game
       # 전송된 클릭에만 'X로 닫기' 를 씁니다 - 사용자 조작으로 클릭이 취소돼도 닫았다고 적던 거짓 로그 (2026-10-02 설계 검토,
       # 초기 확인 루프의 같은 갈래와 같은 꼴). 동작(2초 뒤 재판독)은 그대로입니다 - 대기·회전 환원은 이슈 목록 4절의 B급 후속
       Write-RunLog $(if ($script:lastClickPerformed) { '[생활] 공지 게시판 팝업 감지 - X로 닫기 (채집 대기 중)' } else { "[생활] 공지 게시판 X 닫기 건너뜀 ($(if ($script:lastClickSkipReason -eq 'user-active') { '사용자 조작' } else { '커서 미확인' })) - 다음 감지에서 재시도" })

@@ -426,7 +426,7 @@ $parentOtherCalls = [regex]::Matches($workerSource, '\$exitClick = Invoke-AbyssE
 Check-Equal '배선: -ParentDeadline 을 넘기는 헬퍼 호출 5곳 = 복귀 루프 1(조정 마감) + 본류 3 + 다른 던전 가기 끝 함수 1(복귀 루프 예산, 호출 E if 다음 문장 Return-ToAbyssSelection)' ("$([regex]::Matches($workerSource, 'Invoke-AbyssExitClick -Game [^\r\n]*-ParentDeadline').Count)/$parentReturnCalls/$parentMainCalls/$parentOtherCalls") '5/1/3/1'
 $returnDef = Remove-SourceComments -Text ([string](Get-SourceFunctionDefinitions -Path $workerPath -Names @('Return-ToAbyssSelection')))
 # ★ 뒤집음(⑥e 설계 2.13): 복구 루프의 만료 판정은 Get-FreezeAdjustedDeadline(캡처 실패 누적 차분 포함)이라 헬퍼 FrozenMs 를 더하면 같은 실패 시간이
-#   두 번 더해집니다(⑥a 필드 복귀 루프의 선례). 'expired' 는 호출 바로 다음 줄에서 break(→ 기존 throw)
+#   두 번 더해집니다(⑥a 필드 복귀 루프의 선례). 'expired' 는 호출 바로 다음 줄에서 break(→ 안전 중지가 없으면 throw, 있으면 while 뒤 마감 출구)
 Check-Equal '배선: 복구 루프는 헬퍼 FrozenMs 를 마감에 더하지 않음 (이중 가산 금지)' ([regex]::Matches($returnDef, 'FrozenMs').Count) 0
 Check-Equal "배선: 복구 루프는 호출 직전 조정 마감을 넘기고 'expired' 를 다음 줄에서 break" ([bool]($returnDef -match '\$exitParentDeadline = Get-FreezeAdjustedDeadline -Deadline \(\[ref\]\$deadline\)[^\r\n]*\r?\n\s*\$exitClick = Invoke-AbyssExitClick -Game \$Game [^\r\n]*-ParentDeadline \$exitParentDeadline\s*\r?\n\s*if \(\$exitClick\.Result -eq ''expired''\) \{ break \}')) 'True'
 Check-Equal '배선: 복구 루프에 옛 메타 분기(나가기 클릭 건너뜀) 없음' ([bool]($returnDef -match '나가기 클릭 건너뜀')) 'False'
