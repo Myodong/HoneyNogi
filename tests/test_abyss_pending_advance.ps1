@@ -28,8 +28,8 @@
 #       손상이면 문구 그대로. [S5] 태그 변수의 선언·대입·읽는 곳과 정지 사유 함수의 호출 소유자.
 # 지키는 것 (단계 2.8 - 코드 1 행. 설계 v10 6.1 'GUI 코드 1 라우팅' · dev:990 · v11 R1 6.3a · 구현 명세 ① 2.8 · 3.4 · 5절 A6·A10):
 #   [C] 실제 config·journal·마커로 실제 라우팅(Invoke-Code1JournalRouting)을 돌립니다: reentered 뒤 코드 1 → 계상 1·전진 1·다음 판 기동(마무리 복구 0) → 전진 총 2 ·
-#       진행 저장 실패면 대기열 code1-routed → 마무리 실행 완주로 전진 총 2 · 재입장 요청(retry-*) 뒤 코드 1 → 켜진 빌드는 재개 기동 1(-PreserveMarker - 기동 직후 마커
-#       owner i 그대로) · 재개 뒤 두 번째 코드 1 → 기동 0 · 이 빌드(재개 기능 꺼짐) → 기동 0·정지·보존 · 안전 중지 → 기동 0·보존 · 마무리 실행 기동의 코드 1(타이머
+#       진행 저장 실패면 대기열 code1-routed → 마무리 실행 완주로 전진 총 2 · 재입장 요청(retry-*) 뒤 코드 1 → 켜진 빌드(⑤c 부터 배포본)는 재개 기동 1(-PreserveMarker - 기동 직후 마커
+#       owner i 그대로) · 재개 뒤 두 번째 코드 1 → 기동 0 · 꺼진 빌드(행 안 거짓 - ⑤c 부터 배포본은 켬) → 기동 0·정지·보존 · 안전 중지 → 기동 0·보존 · 마무리 실행 기동의 코드 1(타이머
 #       갈래 첫 문장을 AST 로 잘라 점소싱) → 재시작 0 → 다음 수동 시작 Role next(커스텀) / 새 실행 id 라 후보 없음(비커스텀 - 수용 창 고정) · 클리어 기록 → 라우팅
 #       'legacy-cleared' → 타이머의 $markerExists 대입문(AST 로 잘라 점소싱)이 참 → 마무리 복구(명세 5절 A10) · 코드 1 은 클리어 기록을 소비하지 않음(A6ⓐ).
 #       타이머 갈래 전체(복구 문구·기동 env)는 test_abyss_handoff_gui 의 틱 행이 돌립니다.
@@ -47,8 +47,8 @@
 #       S0·S3 읽기 실패(사용 중·손상·읽기 실패·예외) → 시작 거부·파일 그대로(사용 중은 잠금 파일 안내) · S0 대기열 반영(마지막 바퀴 마지막 판의 완주 원소가
 #       남아도 S1 이 바뀐 진행으로 완주 판정 - 추가 회차 0) · 대기열 반영 실패 → 거부 · 계상 전에 끝난 미적용 reentered → 전진 1·applied(launchState 그대로)
 #       → 첫 기동이 next 로 이어받음 · 그 진행 위치 없음·전진 실패·applied 실패(다음 시작에 이중 전진 0) / S3 컨텍스트 재시도·끝내 없음(미적용 클리어 이상이
-#       있으면 거부 · 없으면 마커 게이트로) · 클리어 기록 → 마무리 복구 예약 + 마커 게이트 건너뜀(마커 있음·없음) · 재입장 요청 → 재개 기능 꺼짐 = 거부 /
-#       켜진 빌드 = 재개 수동 1회(재개 횟수 +1 · 마커 정리 0) · 어비스 커스텀이 아니면 journal 접근 0. 이어받기 행: 코드 10 마무리 복구 기동(소비 생략) → 다음
+#       있으면 거부 · 없으면 마커 게이트로) · 클리어 기록 → 마무리 복구 예약 + 마커 게이트 건너뜀(마커 있음·없음) · 재입장 요청 → 꺼진 빌드(행 안 거짓) = 거부 /
+#       켜진 빌드(⑤c 부터 배포본) = 재개 수동 1회(재개 횟수 +1 · 마커 정리 0) · 어비스 커스텀이 아니면 journal 접근 0. 이어받기 행: 코드 10 마무리 복구 기동(소비 생략) → 다음
 #       시작 복구 · 명세 리뷰 3 P1(커스텀 코드 0 + 마커 없음 + 클리어 기록 + 진행 저장 실패 - 타이머 코드 0·11 갈래 본문을 AST 로 잘라 점소싱) → 다음 시작 복구
 #       예약 1·재입장 0.
 #   단계 2.7~2.9 구현 검증 보강(2026-10-09 - 생존 변이 9): S3 판정 안의 예외 → 거부(SG2′ - 진행 위치 읽기 예외 주입 $script:contextThrows) · 주인 확인 불가는
@@ -62,6 +62,10 @@
 #   [PC5′] (구현 명세 ⑤b5 명세 리뷰 2 RV-11 - PC5 의 클리어 전 짝) 같은 시작(진행 저장 실패 보류 · 넘긴 N1 · 앞 판 i 의 완료 마커 남음)에서 마무리 실행 워커가 그 판을
 #       클리어하기 전 코드 4(워커 원문 [완료] 사유) → 타이머 코드 4 갈래가 앞 판 마커를 이번 판의 클리어 근거로 쓰지 않음(계상 0 · 전진 0 · N1 launched - G3) → 다음 수동
 #       시작(실제 S0 · S3 · 마커 게이트 · 첫 기동)이 대기열을 1회 반영한 뒤 next:N1 로 같은 nonce/index 를 이어받음(재입장 0 - 입장 직후 키 재전송 0)
+# 지키는 것 (구현 명세 ⑤c 5c-4 - 재입장 재개 스위치를 켠 빌드. 사용자 결정 U-⑤c-1 · U-⑤c-2 · 명세 3.6 ⑰):
+#   [C3′] 재입장 요청 뒤 코드 1 → 재개(계상 0 · 전진 0) → reentered → 재입장 실행부 → 완주 = 전진 총 2 · 계상 총 2 · [C14] 재개 기동의 코드 1 밖 종료(-1) → 예전 오류 정지 ·
+#       넘긴 nonce done → 다음 수동 시작 S3 재개(launched 로 되돌림) · [R6-RC4] 커스텀 재개의 재전달 표지 코드 4 → 보류 → 다음 시작 재개 → 표지 없는 코드 4 → 그 판 계상 총 1 ·
+#       [SG5⁰] 배포본 기본값(행 안 대입 0)으로 S3 재개 · [SG5c] 재개 횟수 2 에서도 S3 수동 1회 · [SG5⁗] 묘비 막힘 + S3 재개 → 무시 플래그 거짓 · 계상 같음(C20 없음)
 # 방법:
 #   - GUI 함수와 저장소 묶음(머리 주석 ~ '묶음 끝' 표지 주석 사이 최상위 함수)을 이 파일 최상위에서 정의합니다(명세 ① 2.0 체크리스트 6 -
 #     클로저가 부를 수 있는 함수는 최상위 정의뿐). config·journal·마커는 케이스마다 새 임시 폴더의 실제 파일이고, 진행 전진·위치는 실제
@@ -73,7 +77,7 @@
 #   - 실패는 실제 파일로 일으킵니다: 잠금 = abyss_handoff.lock 을 만들어 쥠 · 손상 = 본 파일·직전본을 잘린 JSON 으로 · 기록 실패 = 본 파일을
 #     FileShare.Read 로 쥠(교체 실패) · 읽기 실패 = 본 파일을 FileShare.None 으로 쥠 · 진행 저장 실패 = config.json 을 FileShare.Read 로 쥠
 #     (읽기는 되고 교체만 실패 - 실제 Step-CustomProgress 의 실패 경로).
-# 단계별 행(구현 명세 ① 3.4): 2.5a 큐 함수 [Q][A] · 2.6 실행부·완주 [P] · 2.8 코드 1 [C] · 2.9 시작 게이트 [SG].
+# 단계별 행(구현 명세 ① 3.4): 2.5a 큐 함수 [Q][A] · 2.6 실행부·완주 [P] · 2.8 코드 1 [C] · 2.9 시작 게이트 [SG] · ⑤c 재개 [C3′ · C14 · R6-RC4 · SG5⁰ · SG5c · SG5⁗].
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing   # 단계 2.6 행 - 실행부·기동의 상태줄 색([System.Drawing.Color]::Firebrick 등)
 $fails = 0
@@ -151,6 +155,7 @@ $C1_FINISH_FORMAT = '마무리 실행 중 오류 종료(코드 {0}) - 자동 재
 $C1_RETRY_OFF = '재입장 요청 뒤 오류 종료 - 재개 기능이 꺼져 있어 완료 기록을 보존하고 정지 (캐릭터가 던전 안일 수 있습니다)'
 $C1_RESUMED_AGAIN = '재입장 요청 뒤 재개한 판도 오류 종료 - 자동 재개는 한 번뿐이라 완료 기록을 보존하고 정지 (캐릭터가 던전 안일 수 있습니다)'
 $C1_SAFE_NOTICE = '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 다음 시작에서 재개)'
+$C1_STOP_PLAIN_FORMAT = '오류 종료(코드 {0}) - 로그 확인'   # 코드 1 밖 크래시 코드의 예전 오류 정지(타이머 예전 처리 else 글자 그대로 - 구현 명세 ⑤c C14)
 # 시작 게이트 S0·S3 의 시작 거부·안내 (단계 2.9 - 설계 v10 6.1 'S0·S3 locked → 시작 금지' · 명세 2.9 · 5절 A11·B10·C11 의 글자, 설계에 글자가 없는 것은
 # 구현 글자를 계약으로 고정). 사용 중은 다른 '사용 중' 정지와 같은 잠금 파일 안내, 손상은 파일 위치 안내, 주인 확인 불가는 마커 게이트와 같은 글자
 $SG_REFUSE_LOCKED = '[오류] 완료 기록 파일이 사용 중입니다 - 잠시 뒤 다시 시작해 주세요 ' + $LOCKED_GUIDE
@@ -222,7 +227,7 @@ if ($bundleFunctionNames -notcontains 'Update-AbyssJournal' -or $bundleFunctionN
 }
 $script:abyssJournalSavedBy = 'gui'
 $script:customConfigSection = $ABYSS_SECTION
-# 단계 2.8 - 재개 기능 플래그는 GUI 원문의 스크립트 수준 대입 값 그대로(이 빌드 = 꺼짐), 켜진 빌드 행만 잠시 참(명세 3.4 '하니스에서 GUI 플래그를 참으로')
+# 단계 2.8 - 재개 기능 플래그는 GUI 원문의 스크립트 수준 대입 값 그대로(⑤c 부터 켬). 재개 행은 행 안에서 참, 꺼진 빌드 행(C5 · C11 꺼짐 칸 · SG5 꺼짐 칸)만 행 안에서 잠시 거짓 - 기본값으로 도는 행은 SG5⁰ 하나(명세 ⑤c 1.11 · 3.2 (라))
 $retryFlagAssigns = @($guiAst.EndBlock.Statements | Where-Object { ($_ -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq '$script:abyssPartyRetryEnabled') })
 if ($retryFlagAssigns.Count -ne 1) { throw ('GUI 의 재개 기능 플래그 스크립트 수준 대입이 1개가 아닙니다 ({0}개)' -f $retryFlagAssigns.Count) }
 $GUI_RETRY_FLAG = [bool](Invoke-Expression $retryFlagAssigns[0].Right.Extent.Text)
@@ -1566,6 +1571,20 @@ function Get-JournalResumeAttempts {
     return -1
 }
 
+$script:workerAstForReasons = $null
+function Get-WorkerDoneReasonByPrefix {
+    # 워커 원문 [완료] 사유 캡처(PC5 꼴 - 구현 명세 ⑤c 3.6 ⑰ 재개 행): 홑따옴표 문자열 상수 중 -Prefix 로 시작하는 것이 정확히 1개여야 하고(아니면 멈춤 - 대체 문구로
+    #   넘어가지 않음 · 구현 리뷰 B P3 선례), '[완료] ' 뒤 사유를 돌려줍니다. 워커 AST 는 처음 부를 때 한 번만 읽습니다
+    param([string]$Prefix)
+    if ($null -eq $script:workerAstForReasons) {
+        $script:workerAstForReasons = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'mabinogi_run_once.ps1'), [ref]$null, [ref]$null)
+    }
+    $reasonNodes = @($script:workerAstForReasons.FindAll({ param($node) ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -and
+                ([string]$node.Value).StartsWith($Prefix, [StringComparison]::Ordinal) }, $true))
+    if ($reasonNodes.Count -ne 1) { throw ("워커 원문 사유 '{0}' 가 정확히 1개가 아닙니다({1}개)" -f $Prefix, $reasonNodes.Count) }
+    return ([string]$reasonNodes[0].Value).Substring('[완료] '.Length)
+}
+
 function Get-CaseFileState {
     # journal(본 파일·직전본·목록) · 어비스 마커 · config 내용 해시 - '파일 그대로' 단언용
     return ('{0} · {1} · {2}' -f (Get-JournalState), (Get-FileDigest $script:customAbyssMarkerFile), (Get-FileDigest $script:configPath))
@@ -1595,7 +1614,7 @@ function Test-CaseCode1Routing {
     Assert-Case 'C2 reentered 뒤 코드 1 + 진행 저장 실패 → 대기열 C1(code1-routed · N1 · 1/0) · 마무리 실행 기동 → 완주 → 대기열 순서 반영 1/2(전진 총 2) · 대기열 빔 · 보류 사유 오류 정지' `
         ('{0} → {1} · [{2}] · {3}' -f $afterRoute, (Get-ProgressText), (Get-PendingText), ($script:stops -join ' / ')) '1:handled · [C1:N1:1/0] · 1/0 · finish-only/step-failed → 1/2 · [] · 커스텀 진행 기록 저장 실패|True'
 
-    # C3 retry-clicked / retry-attempt 뒤 코드 1 · 켜진 빌드(진리표 - 명세 3.4 '하니스가 GUI 플래그를 참으로') → handled · 재개 기동 1(RESUME_REENTRY 1 · HANDOFF_NONCE N1 · RESTART·
+    # C3 retry-clicked / retry-attempt 뒤 코드 1 · 켜진 빌드(행 안 참) → handled · 재개 기동 1(RESUME_REENTRY 1 · HANDOFF_NONCE N1 · RESTART·
     #    RECOVERY 빈 값) · 마커 정리 0(-PreserveMarker) → 기동 직후 마커 owner = i 그대로(재개 판이 이어서 소비할 근거 - 시작 게이트 대조 참) · 재개 횟수 1 · 진행 1/0 · 계상 0
     $resumeTexts = foreach ($stage in @('retry-clicked', 'retry-attempt')) {
         $null = Initialize-Code1Case ('c3_resume_' + $stage) -Stage $stage
@@ -1608,6 +1627,53 @@ function Test-CaseCode1Routing {
     }
     Assert-Case 'C3 켜진 빌드 · retry-clicked || retry-attempt 뒤 코드 1 → handled · 재개 기동 1(RESUME 1 · N1 · RESTART·RECOVERY 빈 값) · 마커 정리 0 · 마커 owner i 그대로 · 재개 횟수 1 · 진행 1/0 · 계상 0 · resume' `
         ($resumeTexts -join ' || ') 'retry-clicked: 1:handled · 1 · 1|N1 · [|] · 0 · True · 1 · 1/0 · 1 · resume || retry-attempt: 1:handled · 1 · 1|N1 · [|] · 0 · True · 1 · 1/0 · 1 · resume'
+    # C3′ (구현 명세 ⑤c 3.6 ⑰ · 1.9 InsideHandoff) 재입장 요청(retry-clicked || retry-attempt · nextOwner i+1 - 워커가 클리어 기록 때 적는 값) 뒤 코드 1 · 켜진 빌드 →
+    #     handled · 계상 0 · 전진 0 · 재개 기동 1(RESUME 1 · OWNER = i · 마커 정리 0 · 기동 직후 마커 owner i) → 재개 워커가 그 판을 재입장(reentered 기록 - 워커
+    #     Set-AbyssJournalReentered 와 같은 단계 변경을 실제 저장소로) → 코드 0(타이머 코드 0·11 갈래 본문 점소싱) → 재입장 실행부: 계상 1 · 전진 1 · next:N1 기동 · N1 launched ·
+    #     경고 0(nextOwner 가 GUI 확정 값과 같음) → 다음 판(Role next N1) 완주 - 그 워커의 클리어 기록이 열쇠 N1 을 같은 저장에서 닫음 → 코드 0 → 계상 1 · 전진 1 · fresh 기동 ·
+    #     클리어 기록 소비 → 전진 총 2 · 계상 총 2 (dev:990 의 reentered 사슬을 재개 기동에서 - 재개는 계상도 전진도 하지 않음)
+    $resumeChainTexts = foreach ($stage in @('retry-clicked', 'retry-attempt')) {
+        $info = Initialize-Code1Case ('c3p_resume_chain_' + $stage) -Stage $stage
+        Write-TestJournal -Entries @(New-StartEntry -Stage $stage -Nonce $NONCE_1 -Next)
+        $cyclesStart = $script:completedCycles
+        $progressStart = Get-ProgressText
+        $script:abyssPartyRetryEnabled = $true
+        try { $route = @(Invoke-Code1JournalRouting -ExitCode 1) } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
+        $launchEnv = $(if ($script:launches.Count -gt 0) { $script:launches[0] } else { @{} })
+        $ownerProbe = Join-Path $script:caseFolder 'owner_probe.marker'
+        [IO.File]::WriteAllText($ownerProbe, [string]$launchEnv['HONEYNOGI_CUSTOM_OWNER'])
+        $probeOwner = Read-CustomMarkerOwner -Path $ownerProbe
+        $atRoute = '{0} · 계상 {1} · 전진 {2} · {3} · {4} · OWNER {5} · 마커 정리 {6} · 마커 owner i {7} · 재개 횟수 {8}' -f (Get-ResultText $route),
+            ($script:completedCycles - $cyclesStart), $script:stepCalls, (Get-ProgressText), (Get-LaunchText),
+            $(if ($null -eq $probeOwner) { '(무효)' } else { '{0}/{1}/{2}' -f $probeOwner.version, $probeOwner.index, $probeOwner.generation }),
+            $script:markerClears, (Test-MarkerRecoveryAtStart), (Get-JournalResumeAttempts $NONCE_1)
+        # 재개 워커의 reentered 기록(감시 밖 실제 저장 - 워커 쪽 행동은 test_abyss_resume_reentry) → 코드 0
+        $reenterMutator = { param($journal, $change) foreach ($reenterEntry in @($journal.entries)) { if ([string]$reenterEntry.nonce -eq $NONCE_1) { $reenterEntry.stage = 'reentered'; $change.Changed = $true } } }
+        $reenterResult = & $script:realUpdateAbyssJournal -Path $script:abyssJournalPath -Mutator $reenterMutator
+        if ([string]$reenterResult.Tag -ne 'changed') { throw ('픽스처 reentered 기록 실패: ' + [string]$reenterResult.Tag) }
+        Reset-Observation
+        $cyclesBefore = $script:completedCycles
+        $exitCode = 0
+        $null = . $code0Block
+        $atResume = '계상 {0} · 전진 {1} · {2} · {3} · N1 {4} · 경고 {5} · 정지 {6}' -f ($script:completedCycles - $cyclesBefore), $script:stepCalls, (Get-ProgressText), (Get-LaunchText),
+            (Get-JournalEntryText $NONCE_1), @($script:guiLogLines | Where-Object { ([string]$_).StartsWith('[경고]') }).Count, $script:stops.Count
+        # 다음 판(Role next N1) 완주 - 그 워커의 클리어 기록이 열쇠 N1 을 같은 저장에서 닫음
+        Add-FinishWorkerResult -OwnerNext $info.OwnerNext -CloseKeyNonce $NONCE_1
+        Reset-Observation
+        $cyclesBefore = $script:completedCycles
+        $exitCode = 0
+        $null = . $code0Block
+        $atFinish = '계상 {0} · 전진 {1} · {2} · {3} · N1 {4} · NS {5} · 정지 {6}' -f ($script:completedCycles - $cyclesBefore), $script:stepCalls, (Get-ProgressText), (Get-LaunchText),
+            (Get-JournalEntryText $NONCE_1), (Get-JournalEntryText $NONCE_S), $script:stops.Count
+        '{0}: {1} → {2} → {3} → {4} → {5} · 계상 총 {6}' -f $stage, $atRoute, $atResume, $atFinish, $progressStart, (Get-ProgressText), ($script:completedCycles - $cyclesStart)
+    }
+    $resumeChainWant = foreach ($stage in @('retry-clicked', 'retry-attempt')) {
+        ('{0}: 1:handled · 계상 0 · 전진 0 · 1/0 · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · OWNER 3/0/{1} · 마커 정리 0 · 마커 owner i True · 재개 횟수 1 → ' +
+            '계상 1 · 전진 1 · 1/1 · 기동 next:N1 2번 · RESTART [] · 재입장 0 · N1 reentered/launched/1 · 경고 0 · 정지 0 → ' +
+            '계상 1 · 전진 1 · 1/2 · 기동 fresh 3번 · RESTART [] · 재입장 1 · N1 reentered/done/1 · NS cleared/pending/1 · 정지 0 → 1/0 → 1/2 · 계상 총 2') -f $stage, $GENERATION
+    }
+    Assert-Case 'C3′ 재입장 요청 뒤 코드 1 → 재개(계상 0 · 전진 0 · OWNER i · 마커 정리 0) → reentered → 코드 0 재입장 실행부(계상 1 · 전진 1 · next) → 완주(계상 1 · 전진 1) → 전진 총 2 · 계상 총 2 (retry-clicked || retry-attempt)' `
+        ($resumeChainTexts -join ' || ') ($resumeChainWant -join ' || ')
     # C4 재개 뒤 두 번째 코드 1(같은 항목 · 재개 횟수 1 - 첫 코드 1 의 결과 그대로 · 켜진 빌드) → handled · 기동 0 · 정지(자동 재개는 한 번뿐) · 파일 그대로(재개 횟수 1 · 마커)
     #    (다음 수동 시작의 S3 재개 수동 1회는 [SG] SG5 - 재개 횟수 1 이어도 수동은 한 번 더)
     $null = Initialize-Code1Case 'c4_resume_again' -Stage 'retry-clicked'
@@ -1623,11 +1689,12 @@ function Test-CaseCode1Routing {
     Assert-Case 'C4 재개 뒤 두 번째 코드 1 → handled · 기동 0 · 정지(한 번뿐) · 재개 횟수 1 · 파일 그대로' `
         ('{0} · {1} · {2} · {3} · {4}' -f (Get-ResultText $route), $script:launches.Count, ($script:stops -join ' / '), (Get-JournalResumeAttempts $NONCE_1), ((Get-CaseFileState) -ceq $stateBefore)) `
         ('1:handled · 0 · {0}|True · 1 · True' -f $C1_RESUMED_AGAIN)
-    # C5 이 빌드(재개 기능 꺼짐 - GUI 원문 값) + retry-clicked + 코드 1 → handled · 기동 0 · 정지(꺼짐) · journal·마커·config 그대로 (명세 3.4 '플래그 off + retry-* + 코드 1 → 기동 0·
+    # C5 스위치를 끈 빌드(행 안 거짓 - 구현 명세 ⑤c 3.2 (라)-1) + retry-clicked + 코드 1 → handled · 기동 0 · 정지(꺼짐) · journal·마커·config 그대로 (명세 3.4 '플래그 off + retry-* + 코드 1 → 기동 0·
     #    정지·보존') || C6 켜진 빌드 + 안전 중지 → handled · 기동 0 · [안내] 1줄 · '안전 중지' 정지 · 파일 그대로 (dev:888)
     $null = Initialize-Code1Case 'c5_retry_off' -Stage 'retry-clicked'
+    $script:abyssPartyRetryEnabled = $false
     $stateBefore = Get-CaseFileState
-    $route = @(Invoke-Code1JournalRouting -ExitCode 1)
+    try { $route = @(Invoke-Code1JournalRouting -ExitCode 1) } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
     $offText = '{0} · {1} · {2} · {3}' -f (Get-ResultText $route), $script:launches.Count, ($script:stops -join ' / '), ((Get-CaseFileState) -ceq $stateBefore)
     $null = Initialize-Code1Case 'c6_retry_safe_stop' -Stage 'retry-clicked'
     $script:stopRequested = $true
@@ -1635,7 +1702,7 @@ function Test-CaseCode1Routing {
     $stateBefore = Get-CaseFileState
     try { $route = @(Invoke-Code1JournalRouting -ExitCode 1) } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
     $safeText = '{0} · {1} · {2} · {3} · {4}' -f (Get-ResultText $route), $script:launches.Count, (Format-LogLines), ($script:stops -join ' / '), ((Get-CaseFileState) -ceq $stateBefore)
-    Assert-Case ('C5 재개 기능 꺼짐(GUI 원문 값 {0}) + retry-clicked → handled · 기동 0 · 정지(꺼짐) · 파일 그대로 || C6 켜진 빌드 + 안전 중지 → handled · 기동 0 · [안내] · 안전 중지 · 파일 그대로' -f $GUI_RETRY_FLAG) `
+    Assert-Case 'C5 스위치를 끈 빌드 + retry-clicked → handled · 기동 0 · 정지(꺼짐) · 파일 그대로 || C6 켜진 빌드 + 안전 중지 → handled · 기동 0 · [안내] · 안전 중지 · 파일 그대로' `
         ('{0} || {1}' -f $offText, $safeText) ('1:handled · 0 · {0}|True · True || 1:handled · 0 · {1} · 안전 중지|False · True' -f $C1_RETRY_OFF, $C1_SAFE_NOTICE)
 
     # C7 마무리 실행 기동(H32b 커스텀 - 재입장 실행부의 진행 저장 실패 → 대기열 A1 + 마무리 실행)의 코드 1 → 타이머 코드 1 갈래 첫 문장(AST 로 잘라 점소싱)이 오류 정지 · 재시작 0 ·
@@ -1718,7 +1785,7 @@ function Test-CaseCode1Routing {
         ('resume/N1 · 1:handled · {0}|True · 저장 0 · retry-clicked/launched/0 → launched · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · 재개 횟수 2' -f $C1_RESUMED_AGAIN)
 
     # C11 단계 2.7·2.8 구현 리뷰 P2 · 다른 nonce → 그것만 닫음 · 다음 시작의 이어받기는 그대로: 진행 i = 2번 칸(1/1) · 앞 판(1/0)의 재입장 N2(nextOwner = i · 적용 · launched - 이번
-    #     기동이 next 로 받은 항목) · 이 판의 재입장 요청 N1(owner i) · 마커 i. (가) 이 빌드(재개 기능 꺼짐) → 정지(꺼짐) · N2 done · N1 그대로 · 저장 1 → 다음 수동 시작 → S3 거부
+    #     기동이 next 로 받은 항목) · 이 판의 재입장 요청 N1(owner i) · 마커 i. (가) 스위치를 끈 빌드(행 안 거짓) → 정지(꺼짐) · N2 done · N1 그대로 · 저장 1 → 다음 수동 시작 → S3 거부
     #     (재개 꺼짐 안내 - SG5 와 같음) · 기동 0 || (나) 켜진 빌드 + 안전 중지 → [안내] → N2 done → 안전 중지 → 다음 수동 시작(켜진 빌드) → 재개 수동 1회 · 첫 기동 resume:N1 2번 ·
     #     재개 횟수 1
     $c11Texts = foreach ($c11Case in @(@{ N = '꺼짐'; RetryOn = $false; SafeStop = $false }, @{ N = '켜짐 + 안전 중지'; RetryOn = $true; SafeStop = $true })) {
@@ -1744,14 +1811,14 @@ function Test-CaseCode1Routing {
         }
         '{0}: {1} → {2} · {3} · {4} · 재개 횟수 {5}' -f $c11Case.N, $routeText, $outcome, (Format-GateLogLines), (Get-LaunchText), (Get-JournalResumeAttempts $NONCE_1)
     }
-    Assert-Case ('C11 다른 nonce(next N2) · 꺼짐(GUI 원문 값 {0}) → 정지 · N2 done · N1 그대로 · 저장 1 → 다음 시작 S3 거부 || 켜짐 + 안전 중지 → N2 done → 다음 시작 재개 resume:N1 2번' -f $GUI_RETRY_FLAG) `
+    Assert-Case 'C11 다른 nonce(next N2) · 스위치를 끈 빌드 → 정지 · N2 done · N1 그대로 · 저장 1 → 다음 시작 S3 거부 || 켜짐 + 안전 중지 → N2 done → 다음 시작 재개 resume:N1 2번' `
         ($c11Texts -join ' || ') `
         (('꺼짐: 1:handled · [] · {0}|True · 저장 1 · reentered/done/1 · retry-clicked/pending/0 → refused@S3 · {1} · 기동 0 · 재개 횟수 0 || ' +
             '켜짐 + 안전 중지: 1:handled · [{2}] · 안전 중지|False · 저장 1 · reentered/done/1 · retry-clicked/pending/0 → launched · {3} · 기동 resume:N1 2번 · RESTART [] · 재입장 0 · 재개 횟수 1') -f
             $C1_RETRY_OFF, $SG_REFUSE_RETRY_OFF, $C1_SAFE_NOTICE, $SG_RESUME_NOTICE)
 }
 
-# ===== C 코드 1 예전 처리(recover/retry)의 안전 중지 - 이번 기동 nonce (recover 닫음 · retry 열어 둠) (단계 2.7·2.8 구현 리뷰 확인 라운드 · 설계 v10 6.1 dev:883·891 · 명세 2.8 ③) =====
+# ===== C 코드 1 예전 처리(recover/retry)의 안전 중지 - 이번 기동 nonce (recover 닫음 · retry 열어 둠) (단계 2.7·2.8 구현 리뷰 확인 라운드 · 설계 v10 6.1 dev:883·891 · 명세 2.8 ③) · C14 재개 기동의 코드 1 밖 종료(구현 명세 ⑤c 3.6) =====
 function Invoke-LegacySafeStopRow {
     # C12·C13 한 칸 - 진행 i = 2번 칸(1/1) · 앞 판(1/0)의 재입장 N2(nextOwner = i · 적용 · launched - 이번 기동이 next 로 받은 항목) + (선택) 이 판의 미적용 클리어 기록 N1
     # (owner i) · (선택) 완료 마커(owner i)에서 안전 중지 + 코드 1 → 실제 라우팅 → 타이머 예전 처리(AST 로 잘라 점소싱). -LaunchNonce 빈 값 = 넘긴 nonce 없음(기동 종류 none).
@@ -1823,6 +1890,30 @@ function Test-CaseCode1LegacySafeStop {
         ($c13Texts -join ' || ') `
         ('있음: 1:legacy · 복구 대기 False · [] · 안전 중지|False · 읽기 1/저장 0 · N2 reentered/launched/1 · N1 (없음) · journal 그대로 1 · 기동 0 → launched · [] · 기동 next:N2 2번 · RESTART [] · 재입장 0 || ' +
             '없음: 1:legacy · 복구 대기 False · [] · 안전 중지|False · 읽기 1/저장 0 · N2 reentered/launched/1 · N1 (없음) · journal 그대로 1 · 기동 0')
+    # C14 (구현 명세 ⑤c 3.6 ⑰ · 사용자 결정 U-⑤c-1) 재개 기동의 코드 1 밖 종료(-1): 켜진 빌드 · 재입장 요청(N1) 뒤 코드 1 → 재개 기동(resume/N1 · 재개 횟수 1) → 그 재개 판이
+    #     코드 -1 → 실제 라우팅이 journal 을 열지 않고 'legacy'(첫 조건 - 코드 1 이 아님) → 타이머 예전 처리(else 갈래 점소싱 - 타이머 차례 그대로 라우팅 반환을 넘김):
+    #     오류 정지(예전 글자) · 기동 0 · 끝 처리가 넘긴 N1 을 done(클리어 전 정지 술어 밖 - 구현 단계 ⑤c G6) · 재개 횟수 그대로 → 다음 수동 시작(켜진 빌드) → S3 가 launchState 를
+    #     보지 않고 재개 수동 1회 · 첫 기동 resume:N1 · 후보 고르기 ① 이 done 을 launched 로 되돌림 · 재개 횟수 2 (자동 재개 없음 - 커스텀은 다음 시작 S3 가 받음)
+    $null = Initialize-Code1Case 'c14_resume_other_exit' -Stage 'retry-clicked'
+    $script:abyssPartyRetryEnabled = $true
+    try {
+        $null = @(Invoke-Code1JournalRouting -ExitCode 1)
+        $launchBefore = '{0}/{1}' -f $script:lastLaunchKind, (Get-NonceLabel ([string]$script:lastLaunchNonce))
+        Reset-Observation
+        $route = @(Invoke-Code1JournalRouting -ExitCode -1)
+        if ([string]$route[0] -ne 'handled') { $null = Invoke-Code1LegacyBlock -exitCode -1 -code1Route ([string]$route[0]) }
+        $stopText = '{0} · {1} · {2} · 기동 {3} · 읽기·저장 {4}/{5} · N1 {6} · 재개 횟수 {7}' -f $launchBefore, (Get-ResultText $route), ($script:stops -join ' / '), $script:launches.Count,
+            $script:readCalls, $script:updateCalls, (Get-JournalEntryText $NONCE_1), (Get-JournalResumeAttempts $NONCE_1)
+        Initialize-StartCase -KeepFolder
+        $script:abyssPartyRetryEnabled = $true
+        $outcome = Invoke-ManualStart
+    } finally {
+        $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG
+    }
+    Assert-Case 'C14 재개 기동의 코드 -1 → legacy(읽기 0) · 오류 정지 · 기동 0 · N1 done · 재개 횟수 1 → 다음 수동 시작 → 재개 수동 1회 · 첫 기동 resume:N1 · N1 launched · 재개 횟수 2' `
+        ('{0} → {1} · {2} · N1 {3} · 재개 횟수 {4}' -f $stopText, $outcome, (Get-LaunchText), (Get-JournalEntryText $NONCE_1), (Get-JournalResumeAttempts $NONCE_1)) `
+        ('resume/N1 · 1:legacy · {0}|True · 기동 0 · 읽기·저장 0/1 · N1 retry-clicked/done/0 · 재개 횟수 1 → launched · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · N1 retry-clicked/launched/0 · 재개 횟수 2' -f
+            ($C1_STOP_PLAIN_FORMAT -f -1))
 }
 
 # ===== SG 시작 게이트 S0·S3 (단계 2.9 - 설계 v10 6.3 dev:941~948 · 6.1 읽기 계약 · 명세 2.9 · 3.4 · 5절 A6·A11·B10) =====
@@ -2089,7 +2180,7 @@ function Test-CaseStartS3 {
     Assert-Case 'SG4′ 지금 칸의 적용된 cleared → 복구 안내 0 · 첫 기동 fresh(새 입장) || SG4″ post-clear-stop → 마무리 복구(복구 안내 1 · recover)' ($sg4More -join ' || ') `
         ('적용된 cleared: launched · 복구 안내 0 · 기동 fresh 1번 · RESTART [] · 재입장 1 || post-clear-stop: launched · 복구 안내 1 · 기동 recover 1번 · RESTART [1] · 재입장 0')
 
-    # SG5 S3 재입장 요청(retry-clicked) - 재개 기능 꺼짐(GUI 원문 값) → 시작 거부(해제 방법 안내 - 명세 5절 B10) · 파일 그대로 · 기동 0 / 켜진 빌드(진리표 - 명세 3.4)
+    # SG5 S3 재입장 요청(retry-clicked) - 스위치를 끈 빌드(행 안 거짓 - 구현 명세 ⑤c 3.2 (라)-1) → 시작 거부(해제 방법 안내 - 명세 5절 B10) · 파일 그대로 · 기동 0 / 켜진 빌드(행 안 참)
     #     → 재개 수동 1회: 재개 횟수 0 → 1 · [경고] 안내 · 첫 기동 = 재개(RESUME 1 · HANDOFF_NONCE = 그 항목 · RESTART·RECOVERY 빈 값) · 마커 정리 0(-PreserveMarker) ·
     #     예약은 기동 뒤 비움 / 재개 횟수 1(자동 재개 뒤 두 번째 오류로 멈춘 판) → 다음 수동 시작이 한 번 더 허용(dev:889) → 2
     Initialize-StartCase 'sg5_retry_off'
@@ -2098,7 +2189,8 @@ function Test-CaseStartS3 {
     Write-TestMarkers -Lap 1 -Index 0
     $stateBefore = Get-CaseFileState
     Reset-Observation
-    $offOutcome = Invoke-ManualStart
+    $script:abyssPartyRetryEnabled = $false
+    try { $offOutcome = Invoke-ManualStart } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
     $offText = '{0} · {1} · 파일 그대로 {2} · {3}' -f $offOutcome, (Format-GateLogLines), ((Get-CaseFileState) -ceq $stateBefore), (Get-LaunchText)
     $onTexts = foreach ($priorAttempts in @(0, 1)) {
         Initialize-StartCase ('sg5_retry_on_' + $priorAttempts)
@@ -2114,11 +2206,35 @@ function Test-CaseStartS3 {
             @($script:guiLogLines | Where-Object { $_ -ceq $SG_RESUME_NOTICE }).Count, (Get-LaunchText), [string]$resumeEnv['HONEYNOGI_CUSTOM_RECOVERY'], $script:markerClears,
             ((Get-MarkerState) -ceq $markerBefore), (Get-JournalResumeAttempts $NONCE_1), $script:customResumePending, $script:customResumeNonce
     }
-    Assert-Case ('SG5 S3 retry-clicked · 재개 기능 꺼짐(GUI 원문 값 {0}) → 시작 거부(해제 방법) · 파일 그대로 || 켜진 빌드 → 재개 수동 1회(재개 횟수 +1 · RESUME · 마커 정리 0 · 예약 비움) · 재개 횟수 1 이어도 수동은 한 번 더' -f $GUI_RETRY_FLAG) `
+    Assert-Case ('SG5 S3 retry-clicked · 스위치를 끈 빌드 → 시작 거부(해제 방법) · 파일 그대로 || 켜진 빌드 → 재개 수동 1회(재개 횟수 +1 · RESUME · 마커 정리 0 · 예약 비움) · 재개 횟수 1 이어도 수동은 한 번 더') `
         ('{0} || {1}' -f $offText, ($onTexts -join ' || ')) `
         (('refused@S3 · {0} · 파일 그대로 True · 기동 0 || ' -f $SG_REFUSE_RETRY_OFF) +
             '재개 횟수 0: launched · 안내 1 · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · RECOVERY [] · 마커 정리 0 · 마커 그대로 True · 재개 횟수 1 · 예약 False/[] || ' +
             '재개 횟수 1: launched · 안내 1 · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · RECOVERY [] · 마커 정리 0 · 마커 그대로 True · 재개 횟수 2 · 예약 False/[]')
+
+    # SG5⁰ (구현 명세 ⑤c 3.2 (라)-2 · 1.11 ②) 배포본 기본값 - 행 안 대입 없이(Initialize-StartCase 가 GUI 원문 값으로 둠) S3 재입장 요청(retry-clicked) → 재개 수동 1회 ·
+    #      첫 기동 resume:N1 · 재개 횟수 1. 스위치를 끄면 시작 거부로 갈림(명세 4절 G-M1 · 3.9 '스위치 꺼짐' 재현 - 실제 값에 게이트 로그를 넣어 거부 문구가 FAIL 줄에 보임)
+    Initialize-StartCase 'sg5_default_switch'
+    Write-TestConfig -Lap 1 -Index 0
+    Write-TestJournal -Entries @(New-StartEntry -Stage 'retry-clicked' -Nonce $NONCE_1)
+    Write-TestMarkers -Lap 1 -Index 0
+    Reset-Observation
+    $defaultOutcome = Invoke-ManualStart
+    Assert-Case ('SG5⁰ 기본값(GUI 원문 값 {0} · 행 안 대입 0) · S3 retry-clicked → 재개 수동 1회 · 첫 기동 resume:N1 · 재개 횟수 1' -f $GUI_RETRY_FLAG) `
+        ('{0} · {1} · {2} · 재개 횟수 {3}' -f $defaultOutcome, (Format-GateLogLines), (Get-LaunchText), (Get-JournalResumeAttempts $NONCE_1)) `
+        ('launched · {0} · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · 재개 횟수 1' -f $SG_RESUME_NOTICE)
+    # SG5c (구현 명세 ⑤c 3.6 ⑰ - 실기 2-C 전제) 재개 횟수 2(자동 재개 · 수동 재개를 한 번씩 한 판)에서도 S3 는 재개 횟수를 보지 않고 재개 수동 1회 · 첫 기동 resume:N1 ·
+    #      재개 횟수 3 (수동 재개에는 상한이 없음 - 자동 재개만 한 번뿐)
+    Initialize-StartCase 'sg5c_resume_attempts_2'
+    Write-TestConfig -Lap 1 -Index 0
+    Write-TestJournal -Entries @(New-StartEntry -Stage 'retry-clicked' -Nonce $NONCE_1 -ResumeAttempts 2)
+    Write-TestMarkers -Lap 1 -Index 0
+    Reset-Observation
+    $script:abyssPartyRetryEnabled = $true
+    try { $sg5cOutcome = Invoke-ManualStart } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
+    Assert-Case 'SG5c 재개 횟수 2 · S3 retry-clicked → 재개 수동 1회 · 첫 기동 resume:N1 · 재개 횟수 3' `
+        ('{0} · {1} · {2} · 재개 횟수 {3}' -f $sg5cOutcome, (Format-GateLogLines), (Get-LaunchText), (Get-JournalResumeAttempts $NONCE_1)) `
+        ('launched · {0} · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · 재개 횟수 3' -f $SG_RESUME_NOTICE)
 
     # SG5′ 켜진 빌드의 재개 횟수 기록 실패 - S3 읽기 뒤 다른 기록 주체가 잠금(읽은 뒤 갈고리) → 시작 거부(사용 중 문구 + 안내) · 예약 0 · 재개 횟수 그대로 · 기동 0
     Initialize-StartCase 'sg5_record_locked'
@@ -2160,6 +2276,33 @@ function Test-CaseStartS3 {
     Assert-Case 'SG5″ 켜진 빌드 · 재개 횟수 기록 예외 → refused@S3 · [오류] 예외 줄 · 예약 0 · 재개 횟수 0 · 기동 0 || SG5‴ 읽은 뒤 단계 바뀜(실제 -Expect) → 거부(재개 기록 저장 실패) · 예약 0' `
         ('{0} || {1}' -f $throwText, $expectText) `
         ('refused@S3 · {0} · 예약 False · 재개 횟수 0 · 기동 0 || 실행 False · {1} · 예약 False · 재개 횟수 0' -f ($SG_EXCEPTION_FORMAT -f $INJECTED_STORE_EXCEPTION), $SG_RESUME_SAVE_FAIL)
+
+    # SG5⁗ (구현 명세 ⑤c 3.6 ⑰ · ① C20 을 넣지 않은 이유) 묘비 막힘(-MarkerStaleBlocked) + S3 재개 → 마커 게이트는 S3 가 'none' 일 때만 돌아 무시 플래그 거짓 · 첫 기동은
+    #      -PreserveMarker 라 MARKER = 경로 → 재개 워커의 표지 없는 코드 4(필드 확정 - 워커 원문) → 마커 있음 = 마커 규칙(정리 1) || 없음 = 기록 규칙(정리 0) · 둘 다 계상 1 ·
+    #      전진 1 · 소비 · done (C20 없이 계상이 같음을 고정)
+    $staleFieldReason = Get-WorkerDoneReasonByPrefix '[완료] 재입장 재개 - 시작 화면을 재입장 상태로 확인하지 못해 정지합니다'
+    $sg5StaleTexts = foreach ($withMarker in @($true, $false)) {
+        Initialize-StartCase ('sg5_stale_resume_' + $withMarker)
+        Write-TestConfig -Lap 1 -Index 0
+        Write-TestJournal -Entries @(New-StartEntry -Stage 'retry-clicked' -Nonce $NONCE_1)
+        if ($withMarker) { Write-TestMarkers -Lap 1 -Index 0 }
+        Reset-Observation
+        $script:abyssPartyRetryEnabled = $true
+        try { $staleOutcome = Invoke-ManualStart -MarkerStaleBlocked $true } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
+        $staleMarkerEnv = $(if ($script:launches.Count -gt 0) { [string]$script:launches[0]['HONEYNOGI_CUSTOM_MARKER'] } else { '(기동 없음)' })
+        $staleLaunch = '{0} · {1} · MARKER 경로 {2} · 무시 {3}' -f $staleOutcome, (Get-LaunchText), ($staleMarkerEnv -ceq $script:customAbyssMarkerFile), [bool]$script:customMarkerIgnore
+        Reset-Observation
+        $cyclesBefore = $script:completedCycles
+        $script:lastWorkerDoneReason = $staleFieldReason
+        $exitCode = 4
+        $null = . $code4Block
+        '마커 {0}: {1} → 계상 {2} · 전진 {3} · {4} · 마커 정리 {5} · N1 {6}' -f $withMarker, $staleLaunch, ($script:completedCycles - $cyclesBefore), $script:stepCalls,
+            (Get-ProgressText), $script:markerClears, (Get-JournalEntryText $NONCE_1)
+    }
+    Assert-Case 'SG5⁗ 묘비 막힘 + S3 재개 → 무시 False · MARKER 경로 → 표지 없는 코드 4 → 계상 1 · 전진 1 · 소비 · done (마커 있음 = 마커 규칙 || 없음 = 기록 규칙)' `
+        ($sg5StaleTexts -join ' || ') `
+        ('마커 True: launched · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · MARKER 경로 True · 무시 False → 계상 1 · 전진 1 · 1/1 · 마커 정리 1 · N1 retry-clicked/done/1 || ' +
+            '마커 False: launched · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · MARKER 경로 True · 무시 False → 계상 1 · 전진 1 · 1/1 · 마커 정리 0 · N1 retry-clicked/done/1')
 
     # SG6 범위 - 어비스 커스텀 시작이 아니면(던전 커스텀 섹션) S0·S3 둘 다 journal 접근 0(읽기 0) · 거부 0 · 그 기록은 그대로(명세 2.9 '어비스 커스텀만')
     Initialize-StartCase 'sg6_dungeon_custom'
@@ -2397,6 +2540,71 @@ function Test-CasePc5FinishUnconfirmed {
         ('{0}/{1}/{2} · N1 {3}' -f $pc5Resolved.Status, $pc5Resolved.Kind, (Get-NonceLabel ([string]$pc5Resolved.Nonce)), (Get-JournalEntryText $NONCE_1)) 'none/none/ · N1 reentered/done/1'
 }
 
+function Test-CaseResumeOverlayHold {
+    # R6-RC4 (구현 명세 ⑤c 3.6 ⑰ · 설계 v11 R6 7.5 RC4 · 명세 5절 B1) 커스텀 재입장 요청(retry-clicked · 마커 i) · 켜진 빌드:
+    #   ① 코드 1 → 재개 기동(resume/N1 · 재개 횟수 1)
+    #   ② 재개 워커의 재전달 표지 코드 4(워커 원문 꼬리 선택 화면 · ESC 메뉴 · 사용 중 - 셋 다 같은 nonce 를 다시 넘기는 표지) → 타이머 코드 4 갈래 본문(점소싱 - 실제
+    #      Invoke-Code4Accounting)이 보류: 계상 0 · 전진 0 · 읽기·저장 0 · 마커 그대로 · N1 launched(미적용) · 정상 정지
+    #   ③ 다음 수동 시작(실제 S0 · S3 · 첫 기동 · 켜진 빌드) → S3 재개 수동 1회 · 첫 기동 resume:N1 · 재개 횟수 2
+    #   ④ 그 재개 워커의 표지 없는 코드 4(필드 확정 - 워커 원문) → 마커 규칙 +1 · 전진 1 · 마커 정리 · N1 소비 · done · 정상 정지
+    #   그 판(i)의 계상 총 1(② 0 + ④ 1) - 보류 동안 사용자가 손으로 마친 클리어는 기록이 없어 셈에 들지 않음(구현 명세 ⑤c 3.6 R6-RC4 '손으로 마친 클리어 계상 0' 을
+    #   사슬 계상 1 로 고정)
+    $rc4Reasons = @{
+        selection = (Get-WorkerDoneReasonByPrefix '[완료] 이어받은 판의 시작 화면이 어비스 선택 화면입니다 - 던전 안 오버레이일 수 있어 안·밖을 확인하지 못해 조작 없이 정지합니다. 오버레이를 닫은 뒤')
+        menu = (Get-WorkerDoneReasonByPrefix '[완료] 이어받은 판의 시작 화면이 ESC 메뉴입니다 - 메뉴가 화면을 가려 안·밖을 확인하지 못해 조작 없이 정지합니다. 메뉴를 닫은 뒤')
+        locked = (Get-WorkerDoneReasonByPrefix '[완료] 완료 기록 파일이 사용 중이라 이어받을 역할을')
+        field = (Get-WorkerDoneReasonByPrefix '[완료] 재입장 재개 - 시작 화면을 재입장 상태로 확인하지 못해 정지합니다')
+    }
+    $rc4Texts = foreach ($tailKind in @('selection', 'menu', 'locked')) {
+        $null = Initialize-Code1Case ('r6rc4_' + $tailKind) -Stage 'retry-clicked'
+        $script:abyssPartyRetryEnabled = $true
+        try {
+            # ① 코드 1 → 재개
+            $route = @(Invoke-Code1JournalRouting -ExitCode 1)
+            $atRoute = '{0} · {1} · 재개 횟수 {2}' -f (Get-ResultText $route), (Get-LaunchText), (Get-JournalResumeAttempts $NONCE_1)
+            # ② 재전달 표지 코드 4 → 보류
+            Reset-Observation
+            $markerBefore = Get-FileDigest $script:customAbyssMarkerFile
+            $cyclesBefore = $script:completedCycles
+            $script:lastWorkerDoneReason = $rc4Reasons[$tailKind]
+            $exitCode = 4
+            $null = . $code4Block
+            $holdStops = @($script:stops)
+            $holdDelta = $script:completedCycles - $cyclesBefore
+            $atHold = '계상 {0} · 전진 {1} · {2} · 읽기·저장 {3}/{4} · 마커 그대로 {5} · N1 {6} · 재개 횟수 {7} · 정지 {8}개 오류 {9} 워커 사유 {10}' -f $holdDelta, $script:stepCalls,
+                (Get-ProgressText), $script:readCalls, $script:updateCalls, ((Get-FileDigest $script:customAbyssMarkerFile) -ceq $markerBefore), (Get-JournalEntryText $NONCE_1),
+                (Get-JournalResumeAttempts $NONCE_1), $holdStops.Count, $(if ($holdStops.Count -eq 1) { $holdStops[0].EndsWith('|True') } else { '-' }),
+                $(if ($holdStops.Count -eq 1) { $holdStops[0].Contains((Get-ReasonHead $rc4Reasons[$tailKind])) } else { '-' })
+            # ③ 다음 수동 시작
+            Initialize-StartCase -KeepFolder
+            $script:abyssPartyRetryEnabled = $true
+            $outcome = Invoke-ManualStart
+            $atStart = '{0} · {1} · 재개 횟수 {2}' -f $outcome, (Get-LaunchText), (Get-JournalResumeAttempts $NONCE_1)
+        } finally {
+            $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG
+        }
+        # ④ 표지 없는 코드 4(필드 확정)
+        Reset-Observation
+        $cyclesBefore = $script:completedCycles
+        $script:lastWorkerDoneReason = $rc4Reasons['field']
+        $exitCode = 4
+        $null = . $code4Block
+        $fieldStops = @($script:stops)
+        $fieldDelta = $script:completedCycles - $cyclesBefore
+        $atField = '계상 {0} · 전진 {1} · {2} · 마커 정리 {3} · 마커 {4} · N1 {5} · 정지 {6}개 오류 {7}' -f $fieldDelta, $script:stepCalls, (Get-ProgressText),
+            $script:markerClears, [IO.File]::Exists($script:customAbyssMarkerFile), (Get-JournalEntryText $NONCE_1), $fieldStops.Count,
+            $(if ($fieldStops.Count -eq 1) { $fieldStops[0].EndsWith('|True') } else { '-' })
+        '{0}: {1} → {2} → {3} → {4} · 사슬 계상 {5}' -f $tailKind, $atRoute, $atHold, $atStart, $atField, ($holdDelta + $fieldDelta)
+    }
+    $rc4Want = foreach ($tailKind in @('selection', 'menu', 'locked')) {
+        ('{0}: 1:handled · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · 재개 횟수 1 → 계상 0 · 전진 0 · 1/0 · 읽기·저장 0/0 · 마커 그대로 True · N1 retry-clicked/launched/0 · ' +
+            '재개 횟수 1 · 정지 1개 오류 False 워커 사유 True → launched · 기동 resume:N1 1번 · RESTART [] · 재입장 0 · 재개 횟수 2 → 계상 1 · 전진 1 · 1/1 · 마커 정리 1 · 마커 False · ' +
+            'N1 retry-clicked/done/1 · 정지 1개 오류 False · 사슬 계상 1') -f $tailKind
+    }
+    Assert-Case 'R6-RC4 커스텀 재개 + 재전달 표지 코드 4(선택 화면 || ESC 메뉴 || 사용 중) → 보류(계상·전진·읽기·저장 0 · launched) → 다음 시작 재개(재개 횟수 2) → 표지 없는 코드 4 → +1 · 전진 · 소비 · done (사슬 계상 1)' `
+        ($rc4Texts -join ' || ') ($rc4Want -join ' || ')
+}
+
 function Test-CasePc5PreClear {
     # PC5′ (구현 명세 ⑤b5 명세 리뷰 2 RV-11 - PC5 의 클리어 전 짝) - PC5 와 같은 시작(재입장 실행부 진행 저장 실패 → 대기열 A1 · 마무리 실행 step-failed · 넘긴 N1)에서 마무리
     #   실행 워커가 그 판(i+1)을 클리어하기 전 코드 4(게임 서버 연결 끊김 - 워커 원문 [완료] 사유)로 끝남. 클리어 기록 0 → N1 은 워커가 닫지 않고, 완료 마커는 앞 판 i 의 것
@@ -2515,16 +2723,34 @@ function Test-CaseStartStatic {
             'if ($crNode.PSObject.Properties[''progress''] -and $crNode.progress) { $crProgress = $crNode.progress } } ¶ if ($crProgress) {')
     # S9 S3 자리(명세 2.9): 묘비 소비 if 바로 뒤 S3 판정 → 적용(실패면 커스텀 끄고 return) → 바깥 if(none 일 때만) 안에 마커 게이트 if 하나(조건식 원문 그대로) · 그 뒤는
     #    안전 중지 신호 제거 - 원문
+    #    (창 모양이 바뀐 트리 - 예: 적용 if 뒤에 새 문장 - 에서도 예외가 아니라 값으로 FAIL 하게 if 문장 여부를 먼저 봄 - 구현 사전 대조 반영)
     $tombstoneIf = $startStatements[$s3At - 1]
     $outerIf = $startStatements[$s3At + 2]
-    $outerBody = @($outerIf.Clauses[0].Item2.Statements)
+    $outerIsIf = ($outerIf -is [System.Management.Automation.Language.IfStatementAst])
+    $outerBody = @(if ($outerIsIf) { $outerIf.Clauses[0].Item2.Statements })
     $s3Shape = '{0} ¶ {1} ¶ {2} ¶ {3} · {4} · {5} ¶ {6} ¶ {7}' -f [int]$tombstoneIf.Extent.Text.StartsWith('if ($script:customActive -and (Test-CustomMarkerStale -Path $customMarkerFile))'),
-        $startS3Statements[0].Extent.Text, $startS3Statements[1].Extent.Text, $outerIf.Clauses[0].Item1.Extent.Text, $outerBody.Count,
-        $(if ($outerBody.Count -eq 1) { $outerBody[0].Clauses[0].Item1.Extent.Text } else { '' }), [int]($null -eq $outerIf.ElseClause), $startStatements[$s3At + 3].Extent.Text
+        $startS3Statements[0].Extent.Text, $startS3Statements[1].Extent.Text, $(if ($outerIsIf) { $outerIf.Clauses[0].Item1.Extent.Text } else { '(if 아님)' }), $outerBody.Count,
+        $(if (($outerBody.Count -eq 1) -and ($outerBody[0] -is [System.Management.Automation.Language.IfStatementAst])) { $outerBody[0].Clauses[0].Item1.Extent.Text } else { '' }),
+        [int]($outerIsIf -and ($null -eq $outerIf.ElseClause)), $startStatements[$s3At + 3].Extent.Text
     Assert-Case 'S9 S3 자리: 묘비 소비 if 뒤 · S3 판정 대입 → 적용 if → 바깥 if(none) 안 문장 = 마커 게이트 if 하나 · 바깥 if 의 else 없음 · 다음 문장 = 안전 중지 신호 제거' $s3Shape `
         ('1 ¶ $startJournal = Get-AbyssStartJournalAction ¶ if (-not (Invoke-AbyssStartJournalAction -Plan $startJournal)) { $script:customActive = $false; return } ¶ ' +
             '$startJournal.Action -eq ''none'' · 1 · $script:customActive -and -not $markerStaleBlocked -and (Test-Path -LiteralPath $customMarkerFile) ¶ 1 ¶ ' +
             'Remove-Item -LiteralPath $safeStopFlag -Force -ErrorAction SilentlyContinue')
+    # S9′ 마커 무시 플래그($script:customMarkerIgnore)를 세우는 곳 = 최상위 선언 · Start-NextCycle 둘(마커 정리 성공 · 실패) · 시작 처리 마커 게이트 하나(서수 정렬).
+    #     재개용 무시(① C20 - 구현 명세 ⑤c 0.4 (다) · SG5⁗ '넣지 않은 이유')가 시작 처리 어디에 생기든 잡음 - SG5⁗ 는 점소싱한 S3 창 안만 봄(구현 사전 대조 반영)
+    $ignoreAssigns = @($guiAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq '$script:customMarkerIgnore') }, $true))
+    [string[]]$ignoreOwners = @($ignoreAssigns | ForEach-Object {
+            $ignoreParent = $_.Parent
+            $ignoreOwner = '(함수 밖)'
+            while ($null -ne $ignoreParent) {
+                if ($ignoreParent -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $ignoreOwner = $ignoreParent.Name; break }
+                $ignoreParent = $ignoreParent.Parent
+            }
+            $ignoreOwner
+        })
+    [Array]::Sort($ignoreOwners, [StringComparer]::Ordinal)
+    Assert-Case 'S9′ 마커 무시 플래그 대입 소유자(최상위 · Start-NextCycle 둘 · 시작 처리 마커 게이트 하나 - 재개용 무시 없음)' ('{0}|{1}' -f $ignoreAssigns.Count, ($ignoreOwners -join ',')) `
+        '4|(함수 밖),Invoke-StartAutomation,Start-NextCycle,Start-NextCycle'
     # S10 첫 기동(명세 2.9 '첫 기동') = 시작 처리의 마지막 문장: 재개 예약이면 -PreserveMarker -ResumeNonce 기동 뒤 예약 비움, 아니면 인자 없는 기동 - 원문(주석 뺌·공백 정규화)
     Assert-Case 'S10 첫 기동: if (재개 예약) { 재개 기동 → 예약 비움 } else { 기동 }' (((Remove-SourceComments -Text $firstLaunchStatement.Extent.Text) -replace '\s+', ' ').Trim()) `
         ('if ($script:customResumePending) { Start-NextCycle -PreserveMarker -ResumeNonce $script:customResumeNonce $script:customResumePending = $false ' +
@@ -2623,7 +2849,7 @@ function Test-CaseStatic {
 $caseFunctions = @('Test-CaseHarness', 'Test-CaseRecord', 'Test-CaseRecordReject', 'Test-CaseRecordStoreFail', 'Test-CaseAdvanceEmpty',
     'Test-CaseAdvanceOrder', 'Test-CaseAdvanceSkip', 'Test-CaseAdvanceStepFail', 'Test-CaseAdvanceRestart', 'Test-CaseAdvanceFail',
     'Test-CaseAdvanceHeadCheck', 'Test-CasePendingTag', 'Test-CaseHandoffExecution', 'Test-CaseHandoffQueueGuide', 'Test-CaseCode1Routing', 'Test-CaseCode1LegacySafeStop',
-    'Test-CaseStartReadFailure', 'Test-CaseStartS3', 'Test-CaseStartS0', 'Test-CaseStartContinuation', 'Test-CasePc5FinishUnconfirmed', 'Test-CasePc5PreClear', 'Test-CaseStartStatic', 'Test-CaseStatic')
+    'Test-CaseStartReadFailure', 'Test-CaseStartS3', 'Test-CaseStartS0', 'Test-CaseStartContinuation', 'Test-CasePc5FinishUnconfirmed', 'Test-CaseResumeOverlayHold', 'Test-CasePc5PreClear', 'Test-CaseStartStatic', 'Test-CaseStatic')
 $totalWatch = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     foreach ($caseFunction in $caseFunctions) {

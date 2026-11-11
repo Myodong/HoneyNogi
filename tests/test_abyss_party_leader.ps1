@@ -42,14 +42,20 @@
 #   '나가기' → 필드, 같은 입장 방식의 다른 던전 · 난이도는 '다른 던전 가기')
 #   구현 단위 5b-8(재매칭 패널 ESC 취소 → 필드 확정이면 곧바로 정지 - 구현 명세 5b-8 3절)이 더한 계열: §6 FC-P(필드 결과 열) · §7 FC-L · §8b 정적 FC-S ·
 #   §10 FC-X · FC-J · 정적 FC-S15 · FC-S16 · FC-S19 (GUI 결합은 test_abyss_handoff_gui.ps1 FC-G · 보존 줄은 test_log_tail_offset.ps1)
+#   구현 단계 ⑤c(재입장 재개) 5c-1 이 더한 계열: §6a RG(재개 유예 판정 순수 진리표) · 정적 RG-S · R5-P2 · R5-P14 갱신(구현 명세 ⑤c 3.2 (가) · 3.4)
+#   ⑤c 5c-2(선분기 Role resume 열 · 재개 끝 'timeout' 까지 · 공유 정지 함수)가 고친 계수: N4-P2 · FC-S13 · FC-S14 · FC-S15~S17 · FC-S22 · P0 · P5d-1 · R6-P10 ·
+#   §10 하니스의 대상 · 센티널 · 올림(Stop-AbyssReentryFieldCancelled) (구현 명세 ⑤c 3.2 (나) - 재개 워커 행은 test_abyss_resume_reentry.ps1)
+#   ⑤c 5c-3(재평가 · 재클릭 · 멈춤 끝 · 끝(other) -ExitOnly)이 고친 계수: P5b-2 · R3 S2 · R3 S5 · P0 · P5d-1 · P5e-9 (구현 명세 ⑤c 3.2 (다) - P5e-9 는 재개 판단 줄이 같은 끝말을
+#   하나 더해 같이 고침)
 # 보관 캡처·OCR 엔진 없이 늘 돌아 SKIP 경로가 없습니다.
 # 뒤 단위가 이 파일에 더할 자리(설계 v11 R5 8절 · 구현 명세 ④ 2.2-1):
 #   ⑤ - WA-X3~X5·X12 · WA-S(S10 포함 - S10 에 클릭 경로 문구 변형 셋 · 두 번째 판독 실패 변형(④′ 뒤 공용 스윕 행)) · 정적 R5-P1·P2·P12·P16 의 두 클릭
 #       루프 몫 · R5-P13 · 변이 R5-M36~M39 와 R5-M46·M47 의 두 클릭 루프 꼴 · N4-M4·M30·M31·M37 의 두 클릭 루프 꼴. 배선 갱신은 ⑤a 가 했습니다 - N4-P2(호출 1 =
 #       선분기 B2 단계 · ⑤b·⑤c 가 호출 자리 수를 더함) · R5-P5·N4-P9·N4-P14 의 S2 대조 대상(선분기 S2 삭제 → 고정 접두·조각 상수 - 이 파일 $S2_PATTERN 과 동치 단언)
 #       ⑤b 가 채운 몫(구현 단계 ⑤b1~⑤b5): 위 행·정적·변이의 두 클릭 루프 꼴(⑤b3 §9 '다른 던전 가기' 대기 · ⑤b4 §10 '다시 하기' 클릭 루프) · N4-P2 호출 3(⑤b4 - 폴백 ② 호출 E ·
-#       원 워커 호출 B) · 배선 갱신 P5b-2 · P5b-4 · P5c-3 · P5c-4 · P0 · P5d-1 · P5d-2 · R3 S2 · S7(⑤b5 - 본류 보상 화면 꼬리의 자리 수 · ⓪ 대입). 남은 ⑤c(재개) 몫 - resume
-#       기동의 대기 행 · P5b-4 · P5b-5 · R3 S7 의 ④ 승계 꼴(P5b-8 은 그대로 - 호출이 생긴 단계부터 그 호출 전부에 걸림)
+#       원 워커 호출 B) · 배선 갱신 P5b-2 · P5b-4 · P5c-3 · P5c-4 · P0 · P5d-1 · P5d-2 · R3 S2 · S7(⑤b5 - 본류 보상 화면 꼬리의 자리 수 · ⓪ 대입). ⑤c 5c-1 이 P5b-4 · P5b-5 ·
+#       R3 S7 의 ④ 승계 꼴을 채웠고, 5c-2 · 5c-3 이 재개 끝의 호출 자리(P0 · P5d-1 · P5b-2 · R3 S2 · R3 S5)를 더했습니다. resume 기동의 대기 행은
+#       test_abyss_resume_reentry.ps1(⑲) 몫입니다(P5b-8 은 그대로 - 호출이 생긴 단계부터 그 호출 전부에 걸림)
 #   ⑥d - WA-C(C7 포함) · WA-L31·L40·L42(목표 'field'·'reward' 행) · WA-E · WA-R(E5·R5 에 클릭 경로 문구 변형 셋 · 두 번째 판독 실패 변형) · WA-X14~X18 ·
 #       정적 R5-P15·P17 · R5-P1·P2·P12·P16 의 ⑥d 두 클릭 루프 몫 · R5-P13(입장하기·준비 취소 몫) · R5-P4·P8·R5-P16·N4-P4·N4-P12 갱신 ·
 #       FC-S19(대기 스위치 수 3 · 호출 B 인자 - -ChallengeFewMembers 가 붙으면) · FC-S22(끝(retry) 명령 허용 집합 - 파티장 경로가 명령을 더하면) 갱신 ·
@@ -498,7 +504,8 @@ $ORIGINAL_FUNCTION_NAMES = @(
     'Test-AbyssRewardText', 'New-AbyssMemberClock', 'Update-AbyssMemberClockFreeze', 'Set-AbyssMemberClock', 'Suspend-AbyssMemberClock',
     'Resume-AbyssMemberClock', 'Test-AbyssMemberClockExpired', 'Get-FreezeAdjustedDeadline', 'Get-YieldAdjustedDeadline',
     'Invoke-UserYieldWithDeadline', 'Register-CaptureSuccess', 'Get-CaptureFailTotalMs', 'Test-AbyssReadyPanelText', 'Test-AbyssMatchingPanelText',
-    'Step-AbyssFieldSettle')   # 필드 확정 걸음 - 대기 함수의 필드 결과 켬이 부름(구현 단위 5b-8 - 그 전에는 선분기만 불러 의존 추출이 묵시로 올림)
+    'Step-AbyssFieldSettle',   # 필드 확정 걸음 - 대기 함수의 필드 결과 켬이 부름(구현 단위 5b-8 - 그 전에는 선분기만 불러 의존 추출이 묵시로 올림)
+    'Resolve-AbyssResumeGrace')   # 재개 유예 판정 - 대기 함수 ⑩ 의 resume 유예 갈래가 부름 · §6a 진리표 RG 가 원문으로 돌림(구현 명세 ⑤c 2.4 · 2.5 · 3.4)
 # 이름 바꿔 올리는 원문 (같은 이름은 아래 감시·모의가 차지). 앞 둘은 exit 센티널 치환 · 가운데 셋은 선단언 전용 · 끝은 스윕 생략 사유 분류 감시용
 #   (명세 3.2.1 은 분류를 '원문 그대로' 로 적었습니다 - 이 파일은 같은 원문을 감시 뒤에 두어 회전마다 분류 결과를 기록합니다(WA-L13 'counted' 수 · WA-L14
 #   '굶김 예산 미소모'). 감시는 받은 인자를 그대로 넘기고 결과를 그대로 돌려줘 동작이 같습니다)
@@ -550,7 +557,7 @@ try {
     exit 1
 }
 # 대기 함수·순수 판정은 exit 0 을 확인한 뒤 그대로 올립니다 - exit 가 있으면 같은 프로세스의 하니스가 끝나므로 준비 단계에서 멈춥니다(명세 3.2.1)
-foreach ($targetName in @('Wait-AbyssReentry', 'Resolve-AbyssReentryVerdict')) {
+foreach ($targetName in @('Wait-AbyssReentry', 'Resolve-AbyssReentryVerdict', 'Resolve-AbyssResumeGrace')) {
     if (-not $workerFunctions.ContainsKey($targetName)) { "FAIL 준비: 워커 최상위에 $targetName 이(가) 없습니다"; exit 1 }
     $targetExits = @($workerFunctions[$targetName].FindAll({ param($candidate) $candidate -is [ExitStatementAst] }, $true)).Count
     if ($targetExits -gt 0) { "FAIL 준비: $targetName 안에 exit ${targetExits}개 - 하니스를 같은 프로세스에서 돌릴 수 없습니다"; exit 1 }
@@ -1406,6 +1413,52 @@ foreach ($verdictRow in $VERDICT_ROWS) {
     Check-Equal ("{0} 분류 {1} · 던전 안 연속 {2} · 패널 관측 {3} · 목표 {4} · 보고 {5} · 무변화 만료 {6} · 필드 확정 {7} · 필드 결과 {8} → '{9}'" -f $verdictRow) "[$verdictActual]" "[$($verdictRow[9])]"
 }
 
+# ── §6a 재개 유예 판정 Resolve-AbyssResumeGrace 진리표 RG (구현 명세 ⑤c 3.4 · 설계 v11 R5 4.3 ④ - 원문 실행 · 비교는 -ceq) ───────────────────────────────
+# 열 = 이름 · Streak · Run · GraceRun · GraceOpen · QuietOpen · Report · LastKind · Reverted · 기대. 행마다 여덟 입력을 다 적습니다 - 줄여 적으면 기대가 바뀝니다('/ X 거짓' 꼴
+#   변형을 RG1 에서 만들면 RG4 · RG7 · RG8 · RG10 · RG12 가 'inside-first', LastKind '' · Reverted 참으로 채우면 RG4 · RG5 가 'unread' · RG5 · RG7 · RG8 이 'reverted').
+#   RG13 은 두 호출 자리에서 생기지 않는 입력(연속 1 ∧ 되돌림 표식)으로 첫 if 가 'reward' · 'reverted' 보다 앞이라는 판정식 꼴만 봅니다 - 다섯 if 의 차례는 정적 R5-P14 가
+#   소스 차례로 고정하고, 두 호출 자리에서는 부르는 쪽 불변식으로 다섯 창이 서로 배타라 차례가 결과를 바꾸지 않습니다(명세 3.4 '차례')
+$GRACE_ROWS = @(
+    @('RG1', 1, 1, 0, $true, $true, $false, 'inside', $false, 'inside-first'),
+    @('RG2', 1, 2, 0, $false, $false, $false, 'inside', $false, 'inside-first'),        # 상한 없음 - 시계 둘 다 닫힘
+    @('RG3', 1, 1, 1, $true, $true, $false, 'inside', $false, 'inside-extend'),
+    @('RG4', 1, 1, 1, $false, $true, $false, 'inside', $false, ''),
+    @('RG5', 1, 2, 1, $true, $true, $false, 'inside', $false, ''),                     # 새 연속은 미루지 않음
+    @('RG6', 0, 1, 0, $true, $true, $true, 'reward3', $false, 'reward'),
+    @('RG7', 0, 1, 0, $true, $true, $false, 'reward3', $false, ''),
+    @('RG8', 0, 1, 0, $true, $false, $true, 'reward3', $false, ''),
+    @('RG9', 0, 0, 0, $true, $true, $false, '', $false, 'unread'),
+    @('RG10', 0, 0, 0, $true, $false, $false, '', $false, ''),
+    @('RG11', 0, 1, 0, $true, $true, $false, 'inside', $true, 'reverted'),
+    @('RG12', 0, 1, 0, $false, $true, $false, 'inside', $true, ''),
+    @('RG13', 1, 1, 0, $true, $true, $true, 'reward3', $true, 'inside-first'))         # 차례 꼴 표본 - 불변식 밖 입력 · 행동 계약 아님
+# RG14 - 기다리는 상태 일곱(패널류 · 팝업 · 접힌 패널 · 알 수 없음 · S · 확정 전 필드 모양)은 무변화 창 · 보고가 열려 있어도 어느 창도 아닙니다
+foreach ($waitingKind in @('ready', 'matching', 'popup', 'entry-waiting', 'unknown', 'prompt', 'field')) { $GRACE_ROWS += , @(('RG14 ' + $waitingKind), 0, 1, 0, $true, $true, $true, $waitingKind, $false, '') }
+$graceColumnProblems = @($GRACE_ROWS | Where-Object { @($_).Count -ne 10 } | ForEach-Object { [string]$_[0] })
+Check-True ('§6a 표 모양 - 모든 행 10열(이름 · 여덟 입력 · 기대) · 행 {0}(RG1~RG13 + RG14 일곱 = 20)' -f $GRACE_ROWS.Count) (($graceColumnProblems.Count -eq 0) -and ($GRACE_ROWS.Count -eq 20)) ($graceColumnProblems -join ',')
+foreach ($graceRow in $GRACE_ROWS) {
+    $graceActual = ''
+    try {
+        $graceActual = [string](Resolve-AbyssResumeGrace -InsideStreak $graceRow[1] -InsideRun $graceRow[2] -InsideGraceRun $graceRow[3] -InsideGraceOpen $graceRow[4] `
+                -QuietOpen $graceRow[5] -ReportRewardReturn $graceRow[6] -LastKind $graceRow[7] -Reverted $graceRow[8])
+    } catch {
+        $graceActual = 'THREW: ' + $_.Exception.Message
+    }
+    Check-Equal ("{0} 연속 {1} · 번호 {2} · 쓴 번호 {3} · 유예 시계 안 {4} · 무변화 창 안 {5} · 보고 {6} · 마지막 분류 '{7}' · 되돌림 {8} → '{9}'" -f $graceRow) "[$graceActual]" "[$($graceRow[9])]"
+}
+# RG-S 순수 정적(주석 뺀 사본) - 명령 0 · 접두 변수($script: 등) 0 · return 6 · 반환 집합 (구현 명세 ⑤c 3.4 '정적'. 다섯 if 의 차례는 R5-P14 가 봄)
+$graceNode = Get-WorkerFunction 'Resolve-AbyssResumeGrace'
+$graceCommandCount = @($graceNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true)).Count
+$graceQualifiedCount = @($graceNode.FindAll({ param($candidate) ($candidate -is [VariableExpressionAst]) -and (-not $candidate.VariablePath.IsUnqualified) }, $true)).Count
+$graceReturns = @($graceNode.FindAll({ param($candidate) $candidate -is [ReturnStatementAst] }, $true))
+[string[]]$graceReturnValues = @($graceReturns | ForEach-Object {
+        $returnConstants = @($_.FindAll({ param($candidate) $candidate -is [StringConstantExpressionAst] }, $true))
+        $(if ($returnConstants.Count -eq 1) { [string]$returnConstants[0].Value } else { '(값)' })
+    } | Sort-Object -Unique)
+[Array]::Sort($graceReturnValues, [StringComparer]::Ordinal)
+Check-Equal "RG-S 재개 유예 판정 순수 - 명령 0 · 접두 변수 0 · return 6 · 반환 집합 {'', inside-extend, inside-first, reverted, reward, unread}" `
+    ('명령 {0} · 접두 변수 {1} · return {2} · 반환=[{3}]' -f $graceCommandCount, $graceQualifiedCount, $graceReturns.Count, ($graceReturnValues -join ',')) '명령 0 · 접두 변수 0 · return 6 · 반환=[,inside-extend,inside-first,reverted,reward,unread]'
+
 # ── §6b ⑤b1 순수부 - 보상 결정 경로(RR) · 보상 결정(RD · MX) · '다른 던전 가기' 대기 분류(OC) · 시간 함수(V·U) · 정적(P5b) (구현 명세 ⑤b1 3절 · ⑤b6 3.1 · 3.2 - 비교는 -ceq) ──
 # 원문 그대로 올립니다(사본 재구현 금지). 시간 재판단 행(U)은 블록 안에서만 실제 Get-DgTimeVerdict 를 올립니다 - 파일 최상위의 같은 이름은 waiter 의
 # 호출 0 을 세는 기록 모의라 그대로 둡니다. 시계는 이 파일의 Get-Date 모의($script:vclock)를 씁니다
@@ -1643,14 +1696,14 @@ foreach ($pureEntry in $PURE_5B1_COMMANDS.GetEnumerator()) {
         ($PURE_5B1_FORMAT -f $pureEntry.Value, '', '', '', $PURE_5B1_ASSIGNS[$pureEntry.Key], '', '', '', '', 0, 0)
 }
 $NEW_5B1_NAMES = @('Test-AbyssRetryRoute', 'Resolve-AbyssRewardDecision', 'Resolve-AbyssOtherWaitScreen', 'Update-AbyssRetryTimeVerdict', 'Get-AbyssUntilTime')
-# P5b-2 자리 수 (구현 명세 ⑤b3 3.4 · ⑤b4 3.4 · ⑤b5 3.4) - 새 함수 다섯의 워커 안 호출과 그 자리(소스 차례 · 자리 '' = 본류 - 함수 밖): 분류 = '다른 던전 가기' 대기 1 ·
-#   재판단 = '다시 하기' 클릭 루프 1 + 본류 보상 결정 인자 1 · 경로 술어 · 보상 결정 = 본류 보상 화면 꼬리 1씩 · 지정 시각 읽기 = 본류 자리7 1(⑤b5 W1 - 명세 3.4 표의 P5b-2 칸은
-#   셋만 적었지만 읽기도 이 단계에서 0 → 1 이 됩니다 - 정적 P5e-4 가 그 자리를 따로 고정)
-$P5B2_EXPECTED_SITES = [ordered]@{ 'Test-AbyssRetryRoute' = '1[]'; 'Resolve-AbyssRewardDecision' = '1[]'; 'Resolve-AbyssOtherWaitScreen' = '1[Wait-AbyssOtherSelection]';
-    'Update-AbyssRetryTimeVerdict' = '2[Invoke-AbyssRetryClick,]'; 'Get-AbyssUntilTime' = '1[]' }
+# P5b-2 자리 수 (구현 명세 ⑤b3 3.4 · ⑤b4 3.4 · ⑤b5 3.4 · ⑤c 3.2 (다)) - 새 함수 다섯의 워커 안 호출과 그 자리(소스 차례 · 자리 '' = 본류 - 함수 밖): 분류 = '다른 던전 가기' 대기 1 ·
+#   재판단 = '다시 하기' 클릭 루프 1 + 재개 끝 재평가 결정 인자 1(⑤c 5c-3) + 본류 보상 결정 인자 1 · 경로 술어 = 본류 1 · 보상 결정 = 재개 끝 재평가 1(⑤c 5c-3) + 본류 보상 화면 꼬리 1 ·
+#   지정 시각 읽기 = 본류 자리7 1(⑤b5 W1 - 명세 3.4 표의 P5b-2 칸은 셋만 적었지만 읽기도 이 단계에서 0 → 1 이 됩니다 - 정적 P5e-4 가 그 자리를 따로 고정)
+$P5B2_EXPECTED_SITES = [ordered]@{ 'Test-AbyssRetryRoute' = '1[]'; 'Resolve-AbyssRewardDecision' = '2[Complete-AbyssResumeWait,]'; 'Resolve-AbyssOtherWaitScreen' = '1[Wait-AbyssOtherSelection]';
+    'Update-AbyssRetryTimeVerdict' = '3[Invoke-AbyssRetryClick,Complete-AbyssResumeWait,]'; 'Get-AbyssUntilTime' = '1[]' }
 $p5b2Sites = @(foreach ($newName5b1 in $NEW_5B1_NAMES) { $siteNodes5b1 = @(Get-CommandNodes -Node $workerAst -Name $newName5b1); '{0}={1}[{2}]' -f $newName5b1, $siteNodes5b1.Count, ((@($siteNodes5b1 | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ',') }) -join ' · '
 $p5b2Expected = @(foreach ($newName5b1 in $NEW_5B1_NAMES) { '{0}={1}' -f $newName5b1, $P5B2_EXPECTED_SITES[$newName5b1] }) -join ' · '
-Check-Equal 'P5b-2 자리 수 - 새 함수 다섯의 워커 안 호출 = 분류 1(Wait-AbyssOtherSelection - ⑤b3) · 재판단 2(Invoke-AbyssRetryClick - ⑤b4 · 본류 - ⑤b5) · 경로 술어 · 보상 결정 · 지정 시각 읽기 본류 1씩(⑤b5)' $p5b2Sites $p5b2Expected
+Check-Equal 'P5b-2 자리 수 - 새 함수 다섯의 워커 안 호출 = 분류 1(Wait-AbyssOtherSelection - ⑤b3) · 재판단 3(Invoke-AbyssRetryClick - ⑤b4 · Complete-AbyssResumeWait - ⑤c 5c-3 · 본류 - ⑤b5) · 보상 결정 2(재개 끝 - ⑤c 5c-3 · 본류) · 경로 술어 · 지정 시각 읽기 본류 1씩(⑤b5)' $p5b2Sites $p5b2Expected
 [string[]]$verdictOwners5b1 = @(Get-CommandNodes -Node $workerAst -Name 'Get-DgTimeVerdict' | ForEach-Object { Get-EnclosingFunctionName $_ })
 [Array]::Sort($verdictOwners5b1, [StringComparer]::Ordinal)
 Check-Equal 'P5b-3 (R3 S1) Get-DgTimeVerdict 호출 소유자 = 던전 · 재판단 함수 각 1' ($verdictOwners5b1 -join ',') 'Invoke-NormalDungeonCycle,Update-AbyssRetryTimeVerdict'
@@ -1658,9 +1711,9 @@ $updateNode5b1 = Get-WorkerFunction 'Update-AbyssRetryTimeVerdict'
 $updateBody5b1 = @($updateNode5b1.Body.EndBlock.Statements | ForEach-Object { Get-NodeCode $_ }) -join ' ; '
 $updateEnv5b1 = @($updateNode5b1.FindAll({ param($candidate) ($candidate -is [VariableExpressionAst]) -and ($candidate.VariablePath.DriveName -eq 'env') }, $true)).Count
 $verdictAssignOwners5b1 = @($workerAst.FindAll({ param($candidate) ($candidate -is [AssignmentStatementAst]) -and (Test-IsVariable $candidate.Left 'script:abyssRetryTimeVerdict') }, $true) | ForEach-Object { Get-EnclosingFunctionName $_ }) -join ','
-# (⑤b5 3.4) 판단값 대입 = 이 함수 안 1 + 본류 보상 화면 꼬리 첫 문장 ⓪ 1(소스 차례 - 자리 '' = 본류). ④ 승계는 ⑤c 가 더함
-Check-Equal 'P5b-4 (R3 S3 · S9) 재판단 함수 본문 = 두 문장 원문 · env 0 · 워커의 판단값 대입 = 이 함수 안 1 + ⓪ 1(본류 꼬리 첫 문장 - ⑤b5) (④ 승계는 ⑤c 가 더함)' `
-    ('{0} · env {1} · 대입 [{2}]' -f $updateBody5b1, $updateEnv5b1, $verdictAssignOwners5b1) '$script:abyssRetryTimeVerdict = Get-DgTimeVerdict -UntilTime $script:abyssUntil -Now (Get-Date) ; return $script:abyssRetryTimeVerdict · env 0 · 대입 [Update-AbyssRetryTimeVerdict,]'
+# (⑤b5 3.4 · ⑤c 2.10) 판단값 대입 = 이 함수 안 1 + 승계 함수 Set-AbyssResumeCommit 1(이 함수 바로 뒤) + 본류 보상 화면 꼬리 첫 문장 ⓪ 1(소스 차례 - 자리 '' = 본류)
+Check-Equal 'P5b-4 (R3 S3 · S9) 재판단 함수 본문 = 두 문장 원문 · env 0 · 워커의 판단값 대입 = 이 함수 안 1 + 승계 함수 1(⑤c 2.10) + ⓪ 1(본류 꼬리 첫 문장 - ⑤b5)' `
+    ('{0} · env {1} · 대입 [{2}]' -f $updateBody5b1, $updateEnv5b1, $verdictAssignOwners5b1) '$script:abyssRetryTimeVerdict = Get-DgTimeVerdict -UntilTime $script:abyssUntil -Now (Get-Date) ; return $script:abyssRetryTimeVerdict · env 0 · 대입 [Update-AbyssRetryTimeVerdict,Set-AbyssResumeCommit,]'
 $untilUses5b1 = @($workerAst.FindAll({ param($candidate) ($candidate -is [VariableExpressionAst]) -and ($candidate.VariablePath.UserPath -eq 'script:abyssUntil') }, $true))
 $untilOutside5b1 = @($untilUses5b1 | Where-Object {
         $untilUse = $_
@@ -1668,9 +1721,12 @@ $untilOutside5b1 = @($untilUses5b1 | Where-Object {
             (@($untilUse.Parent.CommandElements | Where-Object { ($_ -is [CommandParameterAst]) -and ($_.ParameterName -eq 'UntilTime') }).Count -eq 1)
         $isReadAssign = ($untilUse.Parent -is [AssignmentStatementAst]) -and [object]::ReferenceEquals($untilUse.Parent.Left, $untilUse) -and ((Get-NodeCode $untilUse.Parent.Right) -ceq 'Get-AbyssUntilTime')
         $isClockFormat = ($untilUse.Parent -is [InvokeMemberExpressionAst]) -and ($untilUse.Parent.Member.Extent.Text -eq 'ToString') -and ((@($untilUse.Parent.Arguments | ForEach-Object { $_.Extent.Text }) -join ',') -eq "'HH:mm'")
-        -not ($isUntilArgument -or $isReadAssign -or $isClockFormat)
+        # 승계 함수 안의 해석 성공 판정 - '$null -ne $script:abyssUntil' 이항식 꼴(구현 명세 ⑤c 2.10 · 3.2 (가) - 개수는 보지 않음, 승계 함수 본문은 5c-2 의 5C-S1)
+        $isCommitTest = ($untilUse.Parent -is [BinaryExpressionAst]) -and ((Get-EnclosingFunctionName $untilUse) -eq 'Set-AbyssResumeCommit') -and
+            ($untilUse.Parent.Operator -eq [TokenKind]::Ine) -and ((Get-NodeCode $untilUse.Parent.Left) -ceq '$null') -and [object]::ReferenceEquals($untilUse.Parent.Right, $untilUse)
+        -not ($isUntilArgument -or $isReadAssign -or $isClockFormat -or $isCommitTest)
     }).Count
-Check-Equal 'P5b-5 (R3 S5 - 지금 몫) $script:abyssUntil 사용 = 허용 꼴만 (재판단 -UntilTime · 읽기 대입 · HH:mm 서식 - ④ 승계 꼴은 ⑤c 가 더함)' ('사용 {0} · 허용 밖 {1}' -f $untilUses5b1.Count, $untilOutside5b1) ('사용 {0} · 허용 밖 0' -f $untilUses5b1.Count)
+Check-Equal 'P5b-5 (R3 S5 - 지금 몫) $script:abyssUntil 사용 = 허용 꼴만 (재판단 -UntilTime · 읽기 대입 · HH:mm 서식 · 승계 함수의 $null -ne 이항식 - ⑤c 2.10)' ('사용 {0} · 허용 밖 {1}' -f $untilUses5b1.Count, $untilOutside5b1) ('사용 {0} · 허용 밖 0' -f $untilUses5b1.Count)
 function Get-ReturnLiteralOrder {
     # 함수 안 return 문마다 마지막 문자열 상수(없으면 '(값)') - 순위 문장의 차례 (R6-P12 · 결정 사유 순서)
     param($FunctionNode)
@@ -2802,7 +2858,7 @@ Check-True '(보고·필드 결과) FC-L19 M@0 · U@2.05 · I@4.05 → entered �
     ((Format-RowDetail $row) + (' 판독 selection={0} menu={1}' -f (Get-OverlayReadCount $row 'selection'), (Get-OverlayReadCount $row 'menu')))
 Check-RowCommon 'FC-L19' $row
 
-# ── §8 정적 (명세 3.5 - 주석 제거 사본 · AST · 뜻 판정. R5-P14 다섯 식 · R5-P2 Resume 인자 · N4-P10 생성 두 문장 · R5-P7 우변 '0' 은 구현 형상 계약 -
+# ── §8 정적 (명세 3.5 - 주석 제거 사본 · AST · 뜻 판정. R5-P14 다섯 식(구현 명세 ⑤c 부터 재개 유예 판정 Resolve-AbyssResumeGrace 의 if 다섯 · 소스 차례) · R5-P2 Resume 자리 · N4-P10 생성 두 문장 · R5-P7 우변 '0' 은 구현 형상 계약 -
 #    같은 뜻의 다른 꼴을 택하면 그 단언을 구현과 함께 갱신) ───────────────────────────────────────────────────────────────────────────
 $waiterNode = $workerFunctions['Wait-AbyssReentry']
 $verdictNode = $workerFunctions['Resolve-AbyssReentryVerdict']
@@ -2857,15 +2913,10 @@ function Get-RevertKind {
     return ''
 }
 function Get-GraceChain {
-    # ⑩ 의 resume 유예 갈래 - if ($ResumeGrace) 하나와 그 본문의 다섯 절 if (없으면 $null 들)
+    # ⑩ 의 resume 유예 갈래 - if ($ResumeGrace) 하나(없으면 $null). 판정식은 구현 명세 ⑤c 부터 Resolve-AbyssResumeGrace 의 if 다섯이라 갈래 안 체인은 보지 않습니다(R5-P14 · R5-P2)
     $graceIfs = @($waiterNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and (Test-IsVariable $candidate.Clauses[0].Item1 'ResumeGrace') }, $true))
     $graceIf = $(if ($graceIfs.Count -eq 1) { $graceIfs[0] } else { $null })
-    $chainIf = $null
-    if ($null -ne $graceIf) {
-        $chainIfs = @($graceIf.Clauses[0].Item2.Statements | Where-Object { $_ -is [IfStatementAst] })
-        if ($chainIfs.Count -eq 1) { $chainIf = $chainIfs[0] }
-    }
-    return [pscustomobject]@{ GraceIfCount = $graceIfs.Count; GraceIf = $graceIf; Chain = $chainIf }
+    return [pscustomobject]@{ GraceIfCount = $graceIfs.Count; GraceIf = $graceIf }
 }
 function Get-LineCode {
     # 노드가 시작하는 줄의 주석 뺀 원문 (단독 줄 판정용)
@@ -2943,7 +2994,7 @@ Check-True 'R5-P1 회전 순서(뜻 - 평가 순서): 서두 메타 비움 < ①
     ($r5p1Problems.Count -eq 0) ($r5p1Problems -join ' · ')
 
 # R5-P2 - 시계: New-AbyssMemberClock 3(본 시계 식 안 · 무변화 · 정지 유예) 모두 while 앞 · while 안 Set·Suspend·마감 조정 함수·AddSeconds·AddMilliseconds 0 ·
-#   while 안 Resume 2 = 첫 유예 갈래($insideGraceRun = $insideRun 다음 · $graceHold = $true 앞) · 되돌림 뒤 창 갈래 첫 문장(그다음 $graceHold = $true) · 인자 글자
+#   while 안 Resume 1 = resume 유예 갈래의 두 잎 if(조건 = 'inside-first' ∨ 'reverted' 창 · 본문 = 그 한 문장) · 인자 글자 (구현 명세 ⑤c 2.5 · 3.2 (가) - 갈래 안 체인 · $graceHold 자리는 보지 않음)
 $clockNewNodes = @(Get-CommandNodes -Node $waiterNode -Name 'New-AbyssMemberClock')
 $clockNewTargets = @($clockNewNodes | ForEach-Object {
         $ownerNode = $_.Parent
@@ -2958,26 +3009,18 @@ $whileForbiddenCommands = $(if ($null -ne $waiterWhile) { @($waiterWhile.FindAll
 $whileAddCalls = $(if ($null -ne $waiterWhile) { @($waiterWhile.FindAll({ param($candidate) ($candidate -is [InvokeMemberExpressionAst]) -and (@('AddSeconds', 'AddMilliseconds') -contains $candidate.Member.Extent.Text) }, $true)).Count } else { -1 })
 $resumeNodes = $(if ($null -ne $waiterWhile) { @(Get-CommandNodes -Node $waiterWhile -Name 'Resume-AbyssMemberClock') } else { @() })
 $graceChain = Get-GraceChain
-$resumeSites = @()
-if (($null -ne $graceChain.Chain) -and ($graceChain.Chain.Clauses.Count -eq 5)) {
-    $firstGraceStatements = @($graceChain.Chain.Clauses[0].Item2.Statements)
-    $firstRunIndex = -1; $firstResumeIndex = -1; $firstHoldIndex = -1
-    for ($statementIndex = 0; $statementIndex -lt $firstGraceStatements.Count; $statementIndex++) {
-        $graceStatement = $firstGraceStatements[$statementIndex]
-        if (($graceStatement -is [AssignmentStatementAst]) -and (Test-IsVariable $graceStatement.Left 'insideGraceRun') -and (Test-IsVariable $graceStatement.Right 'insideRun')) { $firstRunIndex = $statementIndex }
-        if (($null -ne (Get-StatementCommand $graceStatement)) -and ((Get-StatementCommand $graceStatement).GetCommandName() -eq 'Resume-AbyssMemberClock')) { $firstResumeIndex = $statementIndex }
-        if (($graceStatement -is [AssignmentStatementAst]) -and (Test-IsVariable $graceStatement.Left 'graceHold') -and (Test-IsVariable $graceStatement.Right 'true')) { $firstHoldIndex = $statementIndex }
-    }
-    if (($firstRunIndex -ge 0) -and ($firstRunIndex -lt $firstResumeIndex) -and ($firstResumeIndex -lt $firstHoldIndex)) { $resumeSites += ('첫유예:' + (Get-NodeCode $firstGraceStatements[$firstResumeIndex])) }
-    $revertWindowStatements = @($graceChain.Chain.Clauses[4].Item2.Statements)
-    if (($revertWindowStatements.Count -ge 2) -and ($null -ne (Get-StatementCommand $revertWindowStatements[0])) -and ((Get-StatementCommand $revertWindowStatements[0]).GetCommandName() -eq 'Resume-AbyssMemberClock') -and
-        ($revertWindowStatements[1] -is [AssignmentStatementAst]) -and (Test-IsVariable $revertWindowStatements[1].Left 'graceHold') -and (Test-IsVariable $revertWindowStatements[1].Right 'true')) {
-        $resumeSites += ('되돌림뒤창:' + (Get-NodeCode $revertWindowStatements[0]))
-    }
-}
+$resumeSites = @($resumeNodes | ForEach-Object {
+        $resumeIf = $_.Parent
+        while (($null -ne $resumeIf) -and -not ($resumeIf -is [IfStatementAst])) { $resumeIf = $resumeIf.Parent }
+        if ($null -eq $resumeIf) { '(if 밖) ' + (Get-NodeCode $_) }
+        else {
+            $resumeInGrace = ($null -ne $graceChain.GraceIf) -and (Test-AstWithin -Node $resumeIf -Ancestor $graceChain.GraceIf.Clauses[0].Item2)
+            '{0} ⇐ {1} · 본문 {2}문장 · 절 {3} · 유예 갈래 안 {4}' -f (Get-NodeCode $_), (Get-NodeCode $resumeIf.Clauses[0].Item1), @($resumeIf.Clauses[0].Item2.Statements).Count, $resumeIf.Clauses.Count, $resumeInGrace
+        }
+    })
 $r5p2Actual = '생성=[{0}] while 앞 {1} · while 안 금지 명령 {2} · Add* {3} · while 안 Resume {4} · 자리=[{5}]' -f ($clockNewTargets -join ','), $clockNewBeforeWhile, $whileForbiddenCommands, $whileAddCalls, $resumeNodes.Count, ($resumeSites -join ' | ')
-$r5p2Expected = '생성=[insideGraceClock(정지),quietClock,reentryClock] while 앞 3 · while 안 금지 명령 0 · Add* 0 · while 안 Resume 2 · 자리=[첫유예:Resume-AbyssMemberClock -Clock $insideGraceClock | 되돌림뒤창:Resume-AbyssMemberClock -Clock $insideGraceClock]'
-Check-Equal 'R5-P2 시계 - 생성 3(본 시계 식 안 · 무변화 · 정지 유예) 모두 while 앞 · while 안 Set·Suspend·마감 조정·생성·AddSeconds·AddMilliseconds 0 · while 안 Resume 2(⑩ 첫 유예 갈래 · 되돌림 뒤 창 갈래 첫 문장, 인자 -Clock $insideGraceClock)' $r5p2Actual $r5p2Expected
+$r5p2Expected = "생성=[insideGraceClock(정지),quietClock,reentryClock] while 앞 3 · while 안 금지 명령 0 · Add* 0 · while 안 Resume 1 · 자리=[Resume-AbyssMemberClock -Clock `$insideGraceClock ⇐ (`$graceWindow -eq 'inside-first') -or (`$graceWindow -eq 'reverted') · 본문 1문장 · 절 1 · 유예 갈래 안 True]"
+Check-Equal 'R5-P2 시계 - 생성 3(본 시계 식 안 · 무변화 · 정지 유예) 모두 while 앞 · while 안 Set·Suspend·마감 조정·생성·AddSeconds·AddMilliseconds 0 · while 안 Resume 1(⑩ resume 유예 갈래의 두 잎 if - inside-first ∨ reverted, 인자 -Clock $insideGraceClock - 구현 명세 ⑤c 2.5)' $r5p2Actual $r5p2Expected
 
 # R5-P3·R5-P4 - 관찰 전용: 이벤트 정리·X 후보·키·클릭 루프·나가기·복귀·안전 중지 파일·시간 지정·journal·클릭 0 · exit 0
 $R5P3_PATTERNS = [ordered]@{
@@ -3095,25 +3138,32 @@ $exactWhileCount = @($waiterNode.FindAll({ param($candidate) ($candidate -is [Wh
 $oneLineFlagIfs = $(if ($null -ne $waiterWhile) { @($waiterWhile.Body.Statements | Where-Object { ($_ -is [IfStatementAst]) -and (Test-IsVariable $_.Clauses[0].Item1 'script:screenCaptureFailing') -and ($_.Extent.StartLineNumber -eq $_.Extent.EndLineNumber) }).Count } else { -1 })
 Check-Equal 'R5-P12 회전 수준 한 줄 동결 if 0 · 정확 조건 if 는 ① 하나(정확 조건 절 / 줄 머리 continue 절 / 정확 조건 while = 1/1/0)' ('{0}/{1}/{2} · 한 줄 {3}' -f $exactClauseCount, $spinClauseCount, $exactWhileCount, $oneLineFlagIfs) '1/1/0 · 한 줄 0'
 
-# R5-P14 - resume 유예: $ResumeGrace 참조 = param 블록 밖 1(⑩ 마감 if 안) · 그 갈래의 다섯 식(정규화 글자 · 순서 - 구현 형상 계약) · else 0 · 기다리는 화면 문자열 0
+# R5-P14 - resume 유예: $ResumeGrace 참조 = param 블록 밖 1(⑩ 마감 if 안) · 그 갈래의 판정 호출 Resolve-AbyssResumeGrace 1 · 판정식 = Resolve-AbyssResumeGrace 본문 직속 if 다섯
+#   (각 절 1 · else 0 · 조건 글자를 소스 차례로 이어 견줌 - 정렬 · 집합 비교 금지: 다섯 if 의 차례를 고정하는 단언은 이것뿐, 구현 명세 ⑤c 3.2 (가) · 5C-M33b - 구현 형상 계약) ·
+#   기다리는 화면 문자열 0(갈래 · 판정식 둘 다)
 $R5P14_EXPRESSIONS = @(
-    '($insideStreak -eq 1) -and ($insideGraceRun -eq 0)',
-    '($insideStreak -eq 1) -and ($insideGraceRun -eq $insideRun) -and (-not (Test-AbyssMemberClockExpired -Clock $insideGraceClock))',
-    "`$quietOpen -and `$ReportRewardReturn -and (`$lastKind -eq 'reward3')",
-    "`$quietOpen -and (`$lastKind -eq '')",
-    '$insideGraceReverted -and (-not (Test-AbyssMemberClockExpired -Clock $insideGraceClock))')
+    '($InsideStreak -eq 1) -and ($InsideGraceRun -eq 0)',
+    '($InsideStreak -eq 1) -and ($InsideGraceRun -eq $InsideRun) -and $InsideGraceOpen',
+    "`$QuietOpen -and `$ReportRewardReturn -and (`$LastKind -eq 'reward3')",
+    "`$QuietOpen -and (`$LastKind -eq '')",
+    '$Reverted -and $InsideGraceOpen')
 $resumeGraceReferences = @($waiterNode.FindAll({ param($candidate) ($candidate -is [VariableExpressionAst]) -and ($candidate.VariablePath.UserPath -eq 'ResumeGrace') }, $true) |
         Where-Object { -not (Test-AstWithin -Node $_ -Ancestor $waiterNode.Body.ParamBlock) })
 $deadlineIfNode = @($waiterNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and (@($candidate.Clauses[0].Item1.FindAll({ param($commandNode) ($commandNode -is [CommandAst]) -and
                     ($commandNode.GetCommandName() -eq 'Test-AbyssMemberClockExpired') -and (Test-IsVariable (Get-CommandArgument -Command $commandNode -Name 'Clock') 'reentryClock') }, $true)).Count -gt 0) }, $true)) | Select-Object -First 1
 $referencesInDeadline = @($resumeGraceReferences | Where-Object { ($null -ne $deadlineIfNode) -and (Test-AstWithin -Node $_ -Ancestor $deadlineIfNode.Clauses[0].Item2) }).Count
-$chainConditions = $(if ($null -ne $graceChain.Chain) { @($graceChain.Chain.Clauses | ForEach-Object { Get-NodeCode $_.Item1 }) } else { @() })
-$chainElse = $(if ($null -ne $graceChain.Chain) { [int]($null -ne $graceChain.Chain.ElseClause) } else { -1 })
-$waitingStrings = $(if ($null -ne $graceChain.GraceIf) { @($graceChain.GraceIf.Clauses[0].Item2.FindAll({ param($candidate) $candidate -is [StringConstantExpressionAst] }, $true) | ForEach-Object { [string]$_.Value } |
-            Where-Object { @('ready', 'matching', 'popup', 'entry-waiting', 'unknown', 'prompt', 'field') -contains $_ }) } else { @('갈래 없음') })
-Check-Equal 'R5-P14 resume 유예 - $ResumeGrace 참조 param 밖 1(⑩ 마감 if 안) · 그 갈래 다섯 식(던전 안 첫 유예 · 연장 · 3버튼 · 첫 유효 회전 전 · 되돌림 뒤 창 - 정규화 글자·순서) · else 0 · 기다리는 화면 문자열 0' `
-    ('참조 {0}(마감 if 안 {1}) · 갈래 {2} · 식=[{3}] · else {4} · 문자열=[{5}]' -f $resumeGraceReferences.Count, $referencesInDeadline, $graceChain.GraceIfCount, ($chainConditions -join ' || '), $chainElse, ($waitingStrings -join ',')) `
-    ('참조 1(마감 if 안 1) · 갈래 1 · 식=[{0}] · else 0 · 문자열=[]' -f ($R5P14_EXPRESSIONS -join ' || '))
+$graceJudgeNode = Get-WorkerFunction 'Resolve-AbyssResumeGrace'
+$graceJudgeIfs = @($graceJudgeNode.Body.EndBlock.Statements | Where-Object { $_ -is [IfStatementAst] })
+$chainConditions = @($graceJudgeIfs | ForEach-Object { Get-NodeCode $_.Clauses[0].Item1 })
+$chainClauses = (@($graceJudgeIfs | ForEach-Object { $_.Clauses.Count })) -join ','
+$chainElse = @($graceJudgeIfs | Where-Object { $null -ne $_.ElseClause }).Count
+$graceJudgeCalls = $(if ($null -ne $graceChain.GraceIf) { @(Get-CommandNodes -Node $graceChain.GraceIf.Clauses[0].Item2 -Name 'Resolve-AbyssResumeGrace').Count } else { -1 })
+$waitingStrings = @(@($(if ($null -ne $graceChain.GraceIf) { $graceChain.GraceIf.Clauses[0].Item2 } else { $null }), $graceJudgeNode) | Where-Object { $null -ne $_ } |
+        ForEach-Object { $_.FindAll({ param($candidate) $candidate -is [StringConstantExpressionAst] }, $true) } | ForEach-Object { [string]$_.Value } |
+        Where-Object { @('ready', 'matching', 'popup', 'entry-waiting', 'unknown', 'prompt', 'field') -contains $_ })
+Check-Equal 'R5-P14 resume 유예 - $ResumeGrace 참조 param 밖 1(⑩ 마감 if 안) · 갈래 1 · 그 갈래 판정 호출 1 · 판정식 Resolve-AbyssResumeGrace 직속 if 다섯(던전 안 첫 유예 · 연장 · 3버튼 · 첫 유효 회전 전 · 되돌림 뒤 창 - 정규화 글자 · 소스 차례) · 각 절 1 · else 0 · 기다리는 화면 문자열 0' `
+    ('참조 {0}(마감 if 안 {1}) · 갈래 {2} · 판정 호출 {3} · 절=[{4}] · 식=[{5}] · else {6} · 문자열=[{7}]' -f $resumeGraceReferences.Count, $referencesInDeadline, $graceChain.GraceIfCount, $graceJudgeCalls, $chainClauses, ($chainConditions -join ' || '), $chainElse, ($waitingStrings -join ',')) `
+    ('참조 1(마감 if 안 1) · 갈래 1 · 판정 호출 1 · 절=[1,1,1,1,1] · 식=[{0}] · else 0 · 문자열=[]' -f ($R5P14_EXPRESSIONS -join ' || '))
 # R5-P14 되돌림 표식 대입 사실 - $insideGraceReverted = while 앞 $false 1 · while 안 $true 3(되돌림 if 본문 - ②·⑥ 살아 있는 연속 둘 · ④ 'yield' 조건 하나) ·
 #   while 안 $false 1(⑦ else 블록 안 · 바로 앞 문장 $lastKind = $screen) · 그 밖 0
 $flagAssignments = @($waiterNode.FindAll({ param($candidate) ($candidate -is [AssignmentStatementAst]) -and (Test-IsVariable $candidate.Left 'insideGraceReverted') }, $true))
@@ -3210,12 +3260,12 @@ $quietRightCommands = $(if ($quietTopLevel.Count -ge 1) { @($quietTopLevel[0].Ri
 Check-Equal 'N4-P1 $abyssReclickQuietSeconds - 최상위 대입 1 · 함수 안 0 · 우변 명령 0(config 읽기 0) · 값 10 (계약값 고정 - 설계 v10 의 10초, 측정은 ⑤ 실기)' `
     ('최상위 {0} · 함수 안 {1} · 우변 명령 {2} · 값 {3}' -f $quietTopLevel.Count, $quietInFunctions.Count, $quietRightCommands, $abyssReclickQuietSeconds) '최상위 1 · 함수 안 0 · 우변 명령 0 · 값 10'
 
-# N4-P2 - 배선(⑤a · ⑤b4): 워커의 Wait-AbyssReentry 호출 3(자리 = 이어받기 선분기 - B2 단계 · '다른 던전 가기' 끝 함수 - 폴백 ② 호출 E · '다시 하기' 끝 함수 - 원 워커 호출 B) ·
-#   Resolve-AbyssReentryVerdict 호출 1(자리 = Wait-AbyssReentry 안) - ⑤c 가 호출 자리(resume)를 더하며 갱신
+# N4-P2 - 배선(⑤a · ⑤b4 · ⑤c): 워커의 Wait-AbyssReentry 호출 4(자리 = 이어받기 선분기 2 - Role resume 의 호출 C(⑤c 5c-2) · B2 단계 / '다른 던전 가기' 끝 함수 - 폴백 ② 호출 E /
+#   '다시 하기' 끝 함수 - 원 워커 호출 B) · Resolve-AbyssReentryVerdict 호출 1(자리 = Wait-AbyssReentry 안)
 $waiterCallNodes = @(Get-CommandNodes -Node $workerAst -Name 'Wait-AbyssReentry')
 $verdictCallNodes = @(Get-CommandNodes -Node $workerAst -Name 'Resolve-AbyssReentryVerdict')
-Check-Equal 'N4-P2 배선(⑤a · ⑤b4) - 워커의 Wait-AbyssReentry 호출 3(자리 = Invoke-AbyssHandoffStart · Complete-AbyssOtherSelection · Complete-AbyssRetrySelection) · Resolve-AbyssReentryVerdict 호출 1(자리 = Wait-AbyssReentry 안)' `
-    ('대기 함수 호출 {0}=[{1}] · 순수 판정 호출 {2} · 자리=[{3}]' -f $waiterCallNodes.Count, ((@($waiterCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ','), $verdictCallNodes.Count, ((@($verdictCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ',')) '대기 함수 호출 3=[Invoke-AbyssHandoffStart,Complete-AbyssOtherSelection,Complete-AbyssRetrySelection] · 순수 판정 호출 1 · 자리=[Wait-AbyssReentry]'
+Check-Equal 'N4-P2 배선(⑤a · ⑤b4 · ⑤c) - 워커의 Wait-AbyssReentry 호출 4(자리 = Invoke-AbyssHandoffStart 2(호출 C · B2) · Complete-AbyssOtherSelection · Complete-AbyssRetrySelection) · Resolve-AbyssReentryVerdict 호출 1(자리 = Wait-AbyssReentry 안)' `
+    ('대기 함수 호출 {0}=[{1}] · 순수 판정 호출 {2} · 자리=[{3}]' -f $waiterCallNodes.Count, ((@($waiterCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ','), $verdictCallNodes.Count, ((@($verdictCallNodes | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ',')) '대기 함수 호출 4=[Invoke-AbyssHandoffStart,Invoke-AbyssHandoffStart,Complete-AbyssOtherSelection,Complete-AbyssRetrySelection] · 순수 판정 호출 1 · 자리=[Wait-AbyssReentry]'
 
 # N4-P3 - 순수 판정: 명령 0 · $script: 0 · exit·throw·try 0 · return 7 · 반환 문자열 = {entered, field, reward, field-cancelled(구현 단위 5b-8), cancelled, reclick, ''} ·
 #   -Target ValidateSet = {entry, reward, field}
@@ -3261,11 +3311,11 @@ $scriptAssignmentOk = ($scriptAssignments.Count -eq 1) -and ($scriptAssignments[
 ((Get-InnerExpression $scriptAssignments[0].Right) -is [StringConstantExpressionAst]) -and ([string](Get-InnerExpression $scriptAssignments[0].Right).Value -ceq '')
 Check-True "N4-P5 waiter 안 `$script: 대입 = 정확히 1 (`$script:lastClickSkipReason ← 빈 문자열 상수)" $scriptAssignmentOk ((@($scriptAssignments | ForEach-Object { Get-NodeCode $_ })) -join ' | ')
 
-# N4-P6 - waiter 명령 이름 집합 = 정확히 24 (구현 단위 5b-8 이 Step-AbyssFieldSettle · Test-AbyssSelectionScreen · Test-AbyssMenu 를 더함 - 허용 집합의 원본 - 구현이 도움 함수를 더하면 이 행과 명세 3.2.1 표 아래 첫 줄을 함께) · 순수 판정 0
+# N4-P6 - waiter 명령 이름 집합 = 정확히 25 (구현 단위 5b-8 이 Step-AbyssFieldSettle · Test-AbyssSelectionScreen · Test-AbyssMenu 를, ⑤c 가 Resolve-AbyssResumeGrace 를 더함 - 허용 집합의 원본 - 구현이 도움 함수를 더하면 이 행과 명세 3.2.1 표 아래 첫 줄을 함께) · 순수 판정 0
 $WAITER_COMMANDS_EXPECTED = @('ForEach-Object', 'Get-AbyssPanelKind', 'Get-Date', 'Invoke-PurchasePopupSweep', 'New-AbyssMemberClock', 'Resolve-AbyssHandoffStartScreen',
     'Resolve-AbyssMemberSweepTurn', 'Resolve-AbyssReentryVerdict', 'Resume-AbyssMemberClock', 'Select-Object', 'Start-Sleep', 'Test-AbyssMemberClockExpired',
     'Test-CaptureRecovered', 'Test-DungeonClearPrompt', 'Test-HomeEndEscHud', 'Test-InDungeonQuest', 'Test-SafeStopDuringCaptureFail', 'Test-UserRecentlyActive',
-    'Wait-UserYieldEnd', 'Where-Object', 'Write-RunLog', 'Step-AbyssFieldSettle', 'Test-AbyssSelectionScreen', 'Test-AbyssMenu')
+    'Wait-UserYieldEnd', 'Where-Object', 'Write-RunLog', 'Step-AbyssFieldSettle', 'Test-AbyssSelectionScreen', 'Test-AbyssMenu', 'Resolve-AbyssResumeGrace')
 $waiterCommandSet = @($waiterNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 $expectedCommandSet = @($WAITER_COMMANDS_EXPECTED | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 Check-Equal "N4-P6 waiter 명령 이름 집합 = 정확히 $($WAITER_COMMANDS_EXPECTED.Count)개(허용 집합) · 순수 판정 명령 0" `
@@ -3641,7 +3691,7 @@ Check-Equal 'FC-S12 재매칭 패널 확인 안내 - 잎 셋(보고 켬 · 1회 
     ("잎=[{0}] · 본문=[`$panelNoticed = `$true ; Write-RunLog '{1}'] · 앞 둘=[if @('popup', 'ready', 'matching', 'entry-waiting') -contains `$screen / if `$ReportRewardReturn -and (`$screen -eq 'popup') -and (-not `$popupNoticed)] · 뒤=[fieldSettled]" -f $fcPanelLeaves, $PANEL_NOTICE_TEXT)
 
 # FC-S13 (2.3-1 · 0.4) - 재입장 대기 호출의 필드 결과 스위치: 끝(retry) 호출 B 1 · 콜론 꼴(띄어 쓰면 스위치가 늘 켜지고 괄호 값이 위치 인자 $Clock 으로 묶임 - PS 5.1 실측) · 인자 =
-#   모드 예산 식(Get-AbyssReentryLimitSeconds 첫 if 조건)의 -eq → -ne(소스 캡처) · 끝(other) 호출 E · 선분기 B2 는 0
+#   모드 예산 식(Get-AbyssReentryLimitSeconds 첫 if 조건)의 -eq → -ne(소스 캡처) · 선분기 호출 C(⑤c 5c-2 - Role resume)는 호출 B 와 같은 식 · 끝(other) 호출 E · 선분기 B2 는 0
 $fcSwitchShape = (@(foreach ($fcCaller in @('Complete-AbyssRetrySelection', 'Complete-AbyssOtherSelection', 'Invoke-AbyssHandoffStart')) {
             $fcCalls = @(Get-CommandNodes -Node (Get-WorkerFunction $fcCaller) -Name 'Wait-AbyssReentry')
             $fcSwitchParams = @($fcCalls | ForEach-Object { $_.CommandElements } | Where-Object { ($_ -is [CommandParameterAst]) -and ($_.ParameterName -eq 'ReportFieldReturn') })
@@ -3649,11 +3699,11 @@ $fcSwitchShape = (@(foreach ($fcCaller in @('Complete-AbyssRetrySelection', 'Com
         })) -join ' · '
 $fcModeIfs = @((Get-WorkerFunction 'Get-AbyssReentryLimitSeconds').FindAll({ param($candidate) $candidate -is [IfStatementAst] }, $true))
 $fcModeCondition = $(if ($fcModeIfs.Count -ge 1) { Get-NodeCode $fcModeIfs[0].Clauses[0].Item1 } else { '(모드 if 없음)' })
-Check-Equal 'FC-S13 재입장 대기 호출의 필드 결과 스위치 - 끝(retry) 호출 B 1 · 콜론 꼴 · 인자 = 모드 예산 식의 -ne · 끝(other) 호출 E 0 · 선분기 B2 0' $fcSwitchShape `
-    ('Complete-AbyssRetrySelection:1/1[{0}] · Complete-AbyssOtherSelection:1/0[] · Invoke-AbyssHandoffStart:1/0[]' -f $fcModeCondition.Replace(' -eq ', ' -ne '))
+Check-Equal 'FC-S13 재입장 대기 호출의 필드 결과 스위치 - 끝(retry) 호출 B 1 · 콜론 꼴 · 인자 = 모드 예산 식의 -ne · 선분기 호출 C 1(⑤c - 같은 식) · 끝(other) 호출 E 0 · 선분기 B2 0' $fcSwitchShape `
+    ('Complete-AbyssRetrySelection:1/1[{0}] · Complete-AbyssOtherSelection:1/0[] · Invoke-AbyssHandoffStart:2/1[{0}]' -f $fcModeCondition.Replace(' -eq ', ' -ne '))
 
-# FC-S14 - 이름 있는 인자 ⊆ 피호출 param (전체 이름 - 대기 · 순수 판정 · Step 이 모두 단순 함수라 모르는 이름이 오류 없이 $args 로 사라짐 - PS 5.1 실측)
-$fcCallees = @('Wait-AbyssReentry', 'Resolve-AbyssReentryVerdict', 'Step-AbyssFieldSettle')
+# FC-S14 - 이름 있는 인자 ⊆ 피호출 param (전체 이름 - 대기 · 순수 판정 · Step · 재개 유예 판정 · 재개 끝(⑤c)이 모두 단순 함수라 모르는 이름이 오류 없이 $args 로 사라짐 - PS 5.1 실측)
+$fcCallees = @('Wait-AbyssReentry', 'Resolve-AbyssReentryVerdict', 'Step-AbyssFieldSettle', 'Resolve-AbyssResumeGrace', 'Complete-AbyssResumeWait')
 $fcUnknownNames = @(foreach ($fcCallee in $fcCallees) {
         $fcDeclared = @((Get-WorkerFunction $fcCallee).Body.ParamBlock.Parameters | ForEach-Object { [string]$_.Name.VariablePath.UserPath })
         foreach ($fcCall in @(Get-CommandNodes -Node $workerAst -Name $fcCallee)) {
@@ -3665,12 +3715,12 @@ $fcUnknownNames = @(foreach ($fcCallee in $fcCallees) {
 $fcCallCount = (@(foreach ($fcCallee in $fcCallees) { '{0} {1}' -f $fcCallee, @(Get-CommandNodes -Node $workerAst -Name $fcCallee).Count })) -join ' · '
 Check-True ('FC-S14 이름 있는 인자 ⊆ 피호출 param(전체 이름) - 호출 {0}' -f $fcCallCount) ($fcUnknownNames.Count -eq 0) ($fcUnknownNames -join ' · ')
 
-# FC-S17 - 'field-cancelled' 철자 정확히 3곳(판정 return · 대기 확정 줄 if · 끝(retry) 갈래) · 'field' 와 'cancel' 이 함께 든 다른 문자열 0 (한 곳만 틀리면 끝 갈래에 안 걸리고 재클릭 꼬리를 탐)
+# FC-S17 - 'field-cancelled' 철자 정확히 4곳(판정 return · 대기 확정 줄 if · 끝(retry) 갈래 · 재개 끝 갈래(⑤c 5c-2)) · 'field' 와 'cancel' 이 함께 든 다른 문자열 0 (한 곳만 틀리면 끝 갈래에 안 걸리고 재클릭 꼬리를 탐)
 $fcSpellNodes = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -ceq 'field-cancelled') }, $true))
 $fcSpellOwners = (@($fcSpellNodes | ForEach-Object { Get-EnclosingFunctionName $_ } | Sort-Object -CaseSensitive)) -join ','
 $fcLookalike = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -cne 'field-cancelled') -and ([string]$candidate.Value).Contains('field') -and ([string]$candidate.Value).Contains('cancel') }, $true) | ForEach-Object { [string]$_.Value })
-Check-Equal "FC-S17 'field-cancelled' 철자 3곳 · 닮은 글자 0" ('{0} [{1}] · 닮은 글자 [{2}]' -f $fcSpellNodes.Count, $fcSpellOwners, ($fcLookalike -join ',')) `
-    ('3 [{0}] · 닮은 글자 []' -f ((@('Complete-AbyssRetrySelection', 'Resolve-AbyssReentryVerdict', 'Wait-AbyssReentry') | Sort-Object -CaseSensitive) -join ','))
+Check-Equal "FC-S17 'field-cancelled' 철자 4곳 · 닮은 글자 0" ('{0} [{1}] · 닮은 글자 [{2}]' -f $fcSpellNodes.Count, $fcSpellOwners, ($fcLookalike -join ',')) `
+    ('4 [{0}] · 닮은 글자 []' -f ((@('Complete-AbyssResumeWait', 'Complete-AbyssRetrySelection', 'Resolve-AbyssReentryVerdict', 'Wait-AbyssReentry') | Sort-Object -CaseSensitive) -join ','))
 
 # FC-S18 - 계측 변수(run* · entry*)가 대기 함수의 if · while 조건 · Step · ⑨ 인자에 0 (로그 전용 - 필드 확정은 Step 상태만. 계측 $runField 는 끊김에서 안 비워짐)
 $fcGuardNodes = @($waiterNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -or ($candidate -is [WhileStatementAst]) }, $true) | ForEach-Object {
@@ -4395,12 +4445,13 @@ $otherRank1Ifs = @((Get-WorkerFunction 'Resolve-AbyssOtherWaitScreen').Body.Find
 $otherPanelCondition = $(if ($otherRank1Ifs.Count -eq 1) { (Get-NodeCode $otherRank1Ifs[0].Clauses[0].Item1).Replace('$PanelKind', '$panelKind').Replace('-Text $BottomText', '-Text ([string]$pairRead.Text)') } else { "(순위 1 if $($otherRank1Ifs.Count)개)" })
 $OTHER_EXCEPTION_CODE = '$selectionNow -and (-not (' + $otherPanelCondition + ')) -and (-not $script:screenCaptureFailing)'
 
-# P0 - 호출: 대기 = 끝 함수 안 1 · 끝 함수 = '다시 하기' 끝 함수 안 3 (구현 명세 ⑤b4 3.4 - 본류 배선은 5b-5)
+# P0 - 호출: 대기 = 끝 함수 안 1 · 끝 함수 = 끝(retry) 3 + 재개 끝 2 + 본류 1 (구현 명세 ⑤b4 3.4 · ⑤b5 · ⑤c)
 $otherWaitOwners = @(Get-CommandNodes -Node $workerAst -Name 'Wait-AbyssOtherSelection' | ForEach-Object { Get-EnclosingFunctionName $_ }) -join ','
-# (⑤b5 3.4) Complete-AbyssOtherSelection 4 = 끝(retry) 3 + 본류 보상 화면 꼬리의 'other' 갈래 1(소스 차례 - 자리 '' = 본류)
-Check-Equal 'P0(⑤b3) 워커 안 호출 - Wait-AbyssOtherSelection 자리 = Complete-AbyssOtherSelection 1 · Complete-AbyssOtherSelection 4(자리 = Complete-AbyssRetrySelection 3 - ⑤b4 · 본류 1 - ⑤b5)' `
+# (⑤b5 3.4 · ⑤c 5c-2 · 5c-3) Complete-AbyssOtherSelection 6 = 끝(retry) 3 + 재개 끝 2('cancelled' 갈래 - 5c-2 · 'record-failed' 의 -ExitOnly - 5c-3) + 본류 보상 화면 꼬리의 'other' 갈래 1
+#   (소스 차례 - 재개 끝은 끝(retry) 뒤 · 본류 앞, 자리 '' = 본류)
+Check-Equal 'P0(⑤b3) 워커 안 호출 - Wait-AbyssOtherSelection 자리 = Complete-AbyssOtherSelection 1 · Complete-AbyssOtherSelection 6(자리 = Complete-AbyssRetrySelection 3 - ⑤b4 · Complete-AbyssResumeWait 2 - ⑤c(cancelled 5c-2 · record-failed 5c-3 - -ExitOnly 는 ⑲ RCK3 · RCK4 행) · 본류 1 - ⑤b5)' `
     ('{0} / {1}=[{2}]' -f $otherWaitOwners, @(Get-CommandNodes -Node $workerAst -Name 'Complete-AbyssOtherSelection').Count, ((@(Get-CommandNodes -Node $workerAst -Name 'Complete-AbyssOtherSelection' | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ',')) `
-    'Complete-AbyssOtherSelection / 4=[Complete-AbyssRetrySelection,Complete-AbyssRetrySelection,Complete-AbyssRetrySelection,]'
+    'Complete-AbyssOtherSelection / 6=[Complete-AbyssRetrySelection,Complete-AbyssRetrySelection,Complete-AbyssRetrySelection,Complete-AbyssResumeWait,Complete-AbyssResumeWait,]'
 
 # R6-P1 - 출처 발급 `$otherExpected = `$true 1: 전송 갈래(if `$script:lastClickPerformed) 안 · 그 if 의 바로 앞 형제 = 클릭 · 'reward3' 클릭 갈래 안
 $otherIssueNodes = @($otherWaitNode.FindAll({ param($candidate) ($candidate -is [AssignmentStatementAst]) -and (Test-IsVariable $candidate.Left 'otherExpected') -and (Test-IsVariable $candidate.Right 'true') }, $true))
@@ -4566,11 +4617,12 @@ Check-Equal 'R6-P7(⑤b3) 시각 읽기 - 대기 / 끝 함수 0' ('{0}/{1}' -f [
 # R6-P8 - 복귀 루프 매개변수 무변경
 Check-Equal 'R6-P8(⑤b3) Return-ToAbyssSelection 매개변수 = Game · SafeStopExitCode · LeaveEntryReason' ((Get-DeclaredParameterNames -FunctionName 'Return-ToAbyssSelection') -join ',') 'Game,SafeStopExitCode,LeaveEntryReason'
 
-# R6-P10 - post-clear 표지 새 글자 0 (워커 전체: ' (post-clear)' 문자열 1 · 'post-clear-stop' 1 - 지금 그대로 · $script:postClearCommitted 0)
+# R6-P10 - post-clear 표지 새 글자 0 (워커 전체: ' (post-clear)' 문자열 0 - 그 꼬리를 담은 마지막 줄(재개 꺼짐 정지 S19)이 ⑤c 5c-2 에서 없어짐 · 'post-clear-stop' 1 - 지금 그대로 ·
+#   $script:postClearCommitted 0)
 $postClearStrings = @($workerAst.FindAll({ param($candidate) (($candidate -is [StringConstantExpressionAst]) -or ($candidate -is [ExpandableStringExpressionAst])) -and ([string]$candidate.Value).Contains(' (post-clear)') }, $true)).Count
 $postClearStops = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -ceq 'post-clear-stop') }, $true)).Count
 $postClearFlags = @($workerAst.FindAll({ param($candidate) ($candidate -is [VariableExpressionAst]) -and ($candidate.VariablePath.UserPath -eq 'script:postClearCommitted') }, $true)).Count
-Check-Equal "R6-P10(⑤b3) ' (post-clear)' 문자열 / 'post-clear-stop' 글자 / `$script:postClearCommitted" ('{0}/{1}/{2}' -f $postClearStrings, $postClearStops, $postClearFlags) '1/1/0'
+Check-Equal "R6-P10(⑤b3) ' (post-clear)' 문자열 / 'post-clear-stop' 글자 / `$script:postClearCommitted" ('{0}/{1}/{2}' -f $postClearStrings, $postClearStops, $postClearFlags) '0/1/0'
 
 # R6-P13 - 복구 기동 갈래 둘(Consume-Handoff 의 복구 선행 if · 본류 복구 시작 선택 화면 if) 안 journal 읽기·쓰기 0 (사용자 결정 U-R6-1 (가))
 $recoveryIfs5b3 = @((Get-WorkerFunction 'Consume-Handoff').FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and (Test-IsVariable $candidate.Clauses[0].Item1 'script:customRecoveryOnly') }, $true))
@@ -4759,9 +4811,9 @@ Check-Equal "-Ending 매개변수(⑤b3) - Complete-AbyssOtherSelection 의 Endi
 
 # ── §10 ⑤b4 '다시 하기' 클릭 루프 · 원 워커 재입장 대기(호출 B) · 재입장 완료 11/0 · 'none' 행 · 폴백 ② 호출 E - 행 · 정적 · 관측 0 재생 (구현 명세 ⑤b4 2.2 · 3.1 · 3.2 · 3.5 - 비교는 -ceq) ──
 # 대상(구현 명세 ⑤b4 1.2~1.5): Get-AbyssReentryLimitSeconds(모드 예산) · Invoke-AbyssRetryClick(클릭 루프 - 결과 @{ Result; LastKind }) · Complete-AbyssRetrySelection(끝 -
-#   'record-failed' · 클릭 직전 재검사의 'safe-stop' · 'last' 를 반환(구현 명세 ⑤b6 1.6 - 본류가 옛 나가기) · 나머지 exit) · Complete-AbyssInsideHandoff(재입장 완료 11/0) · Stop-AbyssReentryTimeout('none' 행 코드 4) · Complete-AbyssOtherSelection 넓힘(-Nonce ·
+#   'record-failed' · 클릭 직전 재검사의 'safe-stop' · 'last' 를 반환(구현 명세 ⑤b6 1.6 - 본류가 옛 나가기) · 나머지 exit) · Complete-AbyssInsideHandoff(재입장 완료 11/0) · Stop-AbyssReentryTimeout('none' 행 코드 4) · Stop-AbyssReentryFieldCancelled(필드 취소 끝 코드 4 - ⑤c 5c-2 가 끝(retry) 'field-cancelled' 갈래에서 옮긴 공유 정지 함수) · Complete-AbyssOtherSelection 넓힘(-Nonce ·
 #   폴백 ② 의 패널 셋 ∧ 재입장 요청 판 → 호출 E). 워커 안 호출은 끝(retry) 안과 끝(other) 안뿐입니다(본류 배선은 5b-5 - 아래 정적 P5d-1). 원문을 그대로 올립니다(사본 재구현
-#   금지) - exit 가 있는 셋은 exit 센티널 치환본(§3 Convert-ExitSentinel - 줄 단독 exit 만)이고 클릭 루프 · 모드 예산은 exit 0 을 확인한 뒤 그대로 올립니다. 다섯 중 하나라도
+#   금지) - exit 가 있는 넷은 exit 센티널 치환본(§3 Convert-ExitSentinel - 줄 단독 exit 만)이고 클릭 루프 · 모드 예산은 exit 0 을 확인한 뒤 그대로 올립니다. 여섯 중 하나라도
 #   워커에 없으면 'FAIL 준비' 로 끝납니다(§10 의 행 · 정적이 돌지 않음 - 명세 0.4)
 # 하니스(명세 2.2): §4 의 가상 시계(Ticks · 시계 훅) · 캡처 상태 모형(Register-MockFail · 원문 Register-CaptureSuccess · 실패 창 · 주기 실패 창) · 조작 창(Test-UserRecentlyActive ·
 #   Wait-UserYieldEnd 모의) · 스윕 모의(Set-SweepFrom - 'sent' · 'recover' · 'rect-click-throw' · 'click-throw-noreg' · 'gate-true') · 탐침 · 안전 확인(원문 센티널) · 안전 중지 파일 모의와
@@ -4773,7 +4825,8 @@ Check-Equal "-Ending 매개변수(⑤b3) - Complete-AbyssOtherSelection 의 Endi
 #   (설계 v11 R3 6.6 '시계는 사건 구동'), 마감 L · 모드 예산 · 짝 재판독 대기는 소스 캡처입니다(숫자 재기입 없음 - 규칙 9). 행 이름 = 시제품 연기 시험(⑤b4 시제품 mod5)의
 #   이름 · 설계 이름(R3 K · R1 W · R5 WA · R6 FB/SS) · 명세가 더한 이름(RC · RP · UP · UQ). 판독 훅 · 시계 훅은 스크립트 범위 스크립트블록이고 $script: 와 리터럴 · 스크립트
 #   상수만 읽습니다(GetNewClosure 금지 - 규칙 3)
-$RETRY_TARGET_NAMES = @('Get-AbyssReentryLimitSeconds', 'Invoke-AbyssRetryClick', 'Complete-AbyssRetrySelection', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout')
+$RETRY_TARGET_NAMES = @('Get-AbyssReentryLimitSeconds', 'Invoke-AbyssRetryClick', 'Complete-AbyssRetrySelection', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout',
+    'Stop-AbyssReentryFieldCancelled')   # 마지막 = 재입장 대기 필드 취소의 공유 정지 함수(⑤c 5c-2 - 끝(retry) 'field-cancelled' 갈래가 부름)
 foreach ($retryTargetName in $RETRY_TARGET_NAMES) {
     if (-not $workerFunctions.ContainsKey($retryTargetName)) { "FAIL 준비: 워커 최상위에 $retryTargetName 이(가) 없습니다 (구현 명세 ⑤b4 2.1)"; exit 1 }
 }
@@ -4785,6 +4838,7 @@ $retryClickNode = $workerFunctions['Invoke-AbyssRetryClick']
 $retryFinishNode = $workerFunctions['Complete-AbyssRetrySelection']
 $retryInsideNode = $workerFunctions['Complete-AbyssInsideHandoff']
 $retryNoneNode = $workerFunctions['Stop-AbyssReentryTimeout']
+$retryFieldCancelNode = $workerFunctions['Stop-AbyssReentryFieldCancelled']
 $retryLimitNode = $workerFunctions['Get-AbyssReentryLimitSeconds']
 
 # 상수 - 워커 최상위 대입을 config 기본값으로 평가합니다(Get-ConfigInteger 기본값 반환 모의 - §9 와 같음). 마감 L 은 §9 의 캡처를 그대로 씁니다
@@ -4857,9 +4911,9 @@ $RETRY_IH_BODY = "[완료] '다시 하기' 재입장 확인 - 직전 판을 회�
 $RETRY_IH_LINE = $RETRY_IH_BODY + (' [terminal=InsideHandoff nonce={0}]' -f $RETRY_NONCE)
 $RETRY_NONE_SOLO = "[완료] '다시 하기' 뒤 ${timeoutEntry}초 안에 입장을 확인하지 못해 정지합니다 (누르지 않음 - 늦게 입장하면 입장 직후 키 없이 던전에 들어갈 수 있으니 화면을 확인해 주세요)"
 $RETRY_NONE_PARTY = "[완료] '다시 하기' 뒤 ${timeoutPartyMatch}초 안에 입장을 확인하지 못했습니다 - 매칭 취소·나가기 없이 정지합니다 (매칭이 끝나면 입장 직후 키 없이 던전에 들어갈 수 있으니 화면을 확인해 주세요)"
-# 구현 단위 5b-8 - 재매칭 ESC 취소 정지 줄(끝(retry) 원문) · 재입장 대기의 재매칭 패널 확인 안내(원문)를 소스에서 캡처합니다(규칙 9). 정확히 하나가 아니면 준비를 멈추지 않고
-#   '(소스에 없음 N)' 으로 두고 정적 FC-S15 가 FAIL 로 알립니다 - 고치기 전 워커에서 이 절을 돌리면 FC-X 행이 지금 동작을 실패 줄에 남깁니다(고치기 전 재현)
-$retryFieldDoneNodes = @((Get-WorkerFunction 'Complete-AbyssRetrySelection').FindAll({ param($candidate) (($candidate -is [StringConstantExpressionAst]) -or ($candidate -is [ExpandableStringExpressionAst])) -and
+# 구현 단위 5b-8 - 재매칭 ESC 취소 정지 줄(공유 정지 함수 원문 - ⑤c 5c-2 가 끝(retry) 갈래에서 옮김) · 재입장 대기의 재매칭 패널 확인 안내(원문)를 소스에서 캡처합니다(규칙 9). 정확히 하나가 아니면 준비를 멈추지 않고
+#   '(소스에 없음 N)' 으로 두고 정적 FC-S15 가 FAIL 로 알립니다 - 공유 정지 함수가 없는 워커(⑤c 5c-2 전)는 위 대상 확인에서 'FAIL 준비' 로 먼저 멈춥니다
+$retryFieldDoneNodes = @((Get-WorkerFunction 'Stop-AbyssReentryFieldCancelled').FindAll({ param($candidate) (($candidate -is [StringConstantExpressionAst]) -or ($candidate -is [ExpandableStringExpressionAst])) -and
             ([string]$candidate.Value).StartsWith('[완료] 재매칭이 취소돼 필드로', [StringComparison]::Ordinal) }, $true))
 $RETRY_DONE_FIELD_CANCELLED = $(if ($retryFieldDoneNodes.Count -eq 1) { [string]$retryFieldDoneNodes[0].Value } else { '(소스에 없음 {0})' -f $retryFieldDoneNodes.Count })
 $retryPanelNoticeNodes = @((Get-WorkerFunction 'Wait-AbyssReentry').FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and
@@ -4906,6 +4960,7 @@ $retrySentinelStart = $script:sentinelChecks.Count
 $retryFinishDefinition = Convert-ExitSentinel -Text ([string]$retryFinishNode.Extent.Text) -Label 'Complete-AbyssRetrySelection'
 $retryInsideDefinition = Convert-ExitSentinel -Text ([string]$retryInsideNode.Extent.Text) -Label 'Complete-AbyssInsideHandoff'
 $retryNoneDefinition = Convert-ExitSentinel -Text ([string]$retryNoneNode.Extent.Text) -Label 'Stop-AbyssReentryTimeout'
+$retryFieldCancelDefinition = Convert-ExitSentinel -Text ([string]$retryFieldCancelNode.Extent.Text) -Label 'Stop-AbyssReentryFieldCancelled'
 foreach ($retrySentinel in @($script:sentinelChecks[$retrySentinelStart..($script:sentinelChecks.Count - 1)])) {
     if (($retrySentinel[1] -lt 1) -or ($retrySentinel[2] -ne $retrySentinel[1]) -or ($retrySentinel[3] -ne 0)) {
         "FAIL 준비: $($retrySentinel[0]) exit 센티널 - 원본 ExitStatementAst $($retrySentinel[1]) · 줄 단독 $($retrySentinel[2]) · 치환 뒤 $($retrySentinel[3]) (모두 줄 단독이어야 함 - 명세 1.4 · R5 2.1 끝)"
@@ -4915,6 +4970,7 @@ foreach ($retrySentinel in @($script:sentinelChecks[$retrySentinelStart..($scrip
 Invoke-Expression $retryFinishDefinition
 Invoke-Expression $retryInsideDefinition
 Invoke-Expression $retryNoneDefinition
+Invoke-Expression $retryFieldCancelDefinition
 
 # 화면 약어 → 판독값 (명세 2.2). 하단 판독문은 §4 $SCREEN_TABLE 의 실측 문자열 그대로(R · M · I · U)이거나 그 문자열에서 조각 하나를 뺀 변형입니다
 #   (Rr = R 의 '다세하기' 뺌 - 3버튼 서명 참 · '다시 하기' 점 없음 · '다른 던전 가기' 점 있음). S = 선택 화면(보상 위 오버레이 - 하단 '' · §9 의 S 와 같음).
@@ -6157,8 +6213,8 @@ $retryUpdateInDecision = @($retryUpdateMainNodes | Where-Object {
         ($timeArgument -is [PipelineAst]) -and ($timeArgument.PipelineElements.Count -eq 1) -and [object]::ReferenceEquals($timeArgument.PipelineElements[0], $updateNode) -and
             (@(Get-OtherAncestorIfs $updateNode | Where-Object { (Get-OtherFlatCode $_.Clauses[0].Item1) -ceq '$retryRoute' }).Count -eq 1)
     }).Count
-Check-Equal 'R3 S2 Update-AbyssRetryTimeVerdict 호출 = 클릭 루프 1(commit 표지 거짓 갈래 안 - 5b-4) + 본류 1(if ($retryRoute) 안 보상 결정 -TimeVerdict 인자 - ⑤b5) (resume ③ 은 ⑤c)' `
-    ('{0} · 갈래 안 {1} · 본류 결정 인자 {2}/{3}' -f ($retryUpdateOwners -join ','), $retryUpdateInCommit, $retryUpdateInDecision, $retryUpdateMainNodes.Count) 'Invoke-AbyssRetryClick, · 갈래 안 1 · 본류 결정 인자 1/1'
+Check-Equal 'R3 S2 Update-AbyssRetryTimeVerdict 호출 = 클릭 루프 1(commit 표지 거짓 갈래 안 - 5b-4) + 재개 끝 1(소유자 - 재평가 결정 -TimeVerdict 인자 자리는 ⑲ 5C-S3 · ⑤c 5c-3) + 본류 1(if ($retryRoute) 안 보상 결정 -TimeVerdict 인자 - ⑤b5)' `
+    ('{0} · 갈래 안 {1} · 본류 결정 인자 {2}/{3}' -f ($retryUpdateOwners -join ','), $retryUpdateInCommit, $retryUpdateInDecision, $retryUpdateMainNodes.Count) 'Invoke-AbyssRetryClick,Complete-AbyssResumeWait, · 갈래 안 1 · 본류 결정 인자 1/1'
 Check-Equal 'R3 S6 클릭 자리 차례 - 첫 시도 기록 if < commit 표지 거짓 갈래(안전 중지 < 재판단) < 바로 다음 문장 retry Click-GamePoint(사이 문장 0)' `
     ('기록<갈래={0} · 갈래[{1}] · 다음 = {2}' -f (($retryAttemptIfAt -ge 0) -and ($retryAttemptIfAt -lt $retryCommitIfAt)), $retryCommitShape, $retryAfterCommit) `
     '기록<갈래=True · 갈래[안전 중지 < 재판단] · 다음 = Click-GamePoint -Game $Game -ReferenceX $pairRead.Retry.X -ReferenceY $pairRead.Retry.Y'
@@ -6169,21 +6225,23 @@ $retryCommitFirst = @($retryCommitAssigns | Where-Object {
         ($ownerBlock -is [StatementBlockAst]) -and ($ownerBlock.Parent -is [IfStatementAst]) -and (Test-IsVariable $ownerBlock.Parent.Clauses[0].Item1 'script:lastClickPerformed') -and
             [object]::ReferenceEquals(@($ownerBlock.Statements)[0], $commitAssign) -and (Test-IsVariable $commitAssign.Right 'true')
     }).Count
-# (⑤b5 3.4) 대입 2 = 참 1(전송 확인 if 의 첫 문장) + 거짓 1(본류 보상 화면 꼬리 첫 문장 ⓪ - 자리 '' = 본류 · 우변 $false)
+# (⑤b5 3.4 · ⑤c 2.10) 대입 3 = 참 2(전송 확인 if 의 첫 문장 · 승계 함수 Set-AbyssResumeCommit) + 거짓 1(본류 보상 화면 꼬리 첫 문장 ⓪ - 자리 '' = 본류 · 우변 $false).
+#   이 단언은 참 대입 수와 전송 확인 if 첫 문장만 봅니다 - 승계 함수 안의 자리(조건 없는 본문 문장)는 5c-2 의 5C-S1 이 고정합니다
 $retryCommitTrue = @($retryCommitAssigns | Where-Object { Test-IsVariable $_.Right 'true' }).Count
 $retryCommitZero = @($retryCommitAssigns | Where-Object { ((Get-EnclosingFunctionName $_) -eq '') -and (Test-IsVariable $_.Right 'false') }).Count
-Check-Equal 'R3 S7 commit 표지 대입 = 워커 전체 2 · 참 1 = 전송 확인 if($script:lastClickPerformed) 의 첫 문장 · 거짓 1 = 본류 ⓪(⑤b5) (④ 승계는 ⑤c)' `
-    ('{0} · 참 {1}/{2} · 본류 ⓪ 거짓 {3}' -f $retryCommitAssigns.Count, $retryCommitTrue, $retryCommitFirst, $retryCommitZero) '2 · 참 1/1 · 본류 ⓪ 거짓 1'
+Check-Equal 'R3 S7 commit 표지 대입 = 워커 전체 3 · 참 2(그중 전송 확인 if($script:lastClickPerformed) 의 첫 문장 1 - 나머지 하나는 승계 함수, 그 자리는 5C-S1) · 거짓 1 = 본류 ⓪(⑤b5)' `
+    ('{0} · 참 {1}/{2} · 본류 ⓪ 거짓 {3}' -f $retryCommitAssigns.Count, $retryCommitTrue, $retryCommitFirst, $retryCommitZero) '3 · 참 2/1 · 본류 ⓪ 거짓 1'
 $retryClickSites = @(Get-CommandNodes -Node $workerAst -Name 'Click-GamePoint' | Where-Object { (Get-NodeCode (Get-CommandArgument -Command $_ -Name 'ReferenceX' -PositionalNames @())) -ceq '$pairRead.Retry.X' })
 Check-Equal "R3 S10 retry 짝 클릭(Click-GamePoint -ReferenceX `$pairRead.Retry.X) = 워커 전체 1 · 자리 = 클릭 루프" ('{0} · {1}' -f $retryClickSites.Count, ((@($retryClickSites | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ',')) '1 · Invoke-AbyssRetryClick'
-# R3 S5 · S8 ②③ - $script:abyssUntil 은 새 함수에서 HH:mm 서식(줄 ②③)으로만 · 줄 ② = 클릭 루프 'last' 갈래 안 1 · 줄 ③ = 재입장 완료 끝의 [완료] 줄 앞 1
-$retryUntilUses = @(foreach ($retryFunctionName in @('Invoke-AbyssRetryClick', 'Complete-AbyssRetrySelection', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout', 'Get-AbyssReentryLimitSeconds', 'Complete-AbyssOtherSelection')) {
+# R3 S5 · S8 ②③ - $script:abyssUntil 은 새 함수에서 HH:mm 서식(줄 ②③)으로만 · 줄 ② = 클릭 루프 'last' 갈래 안 1 · 줄 ③ = 재입장 완료 끝의 [완료] 줄 앞 1 ·
+#   재개 끝 1(재개 판단 'time' 사유 - ⑤c 5c-3)
+$retryUntilUses = @(foreach ($retryFunctionName in @('Invoke-AbyssRetryClick', 'Complete-AbyssRetrySelection', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout', 'Get-AbyssReentryLimitSeconds', 'Complete-AbyssOtherSelection', 'Complete-AbyssResumeWait')) {
         foreach ($untilUse in @((Get-WorkerFunction $retryFunctionName).FindAll({ param($candidate) ($candidate -is [VariableExpressionAst]) -and ($candidate.VariablePath.UserPath -eq 'script:abyssUntil') }, $true))) {
             $isClockFormat = ($untilUse.Parent -is [InvokeMemberExpressionAst]) -and ($untilUse.Parent.Member.Extent.Text -eq 'ToString') -and ((@($untilUse.Parent.Arguments | ForEach-Object { $_.Extent.Text }) -join ',') -eq "'HH:mm'")
             '{0}:{1}' -f $retryFunctionName, $(if ($isClockFormat) { 'HH:mm' } else { 'other' })
         }
     })
-Check-Equal 'R3 S5(5b-4 몫) 새 함수 · 넓힌 끝 함수의 $script:abyssUntil 사용 = 줄 ② · ③ 의 HH:mm 서식뿐 (클릭 루프 1 · 재입장 완료 끝 1)' (($retryUntilUses | Sort-Object) -join ' · ') 'Complete-AbyssInsideHandoff:HH:mm · Invoke-AbyssRetryClick:HH:mm'
+Check-Equal 'R3 S5(5b-4 몫 · ⑤c 5c-3) 새 함수 · 넓힌 끝 함수의 $script:abyssUntil 사용 = HH:mm 서식뿐 (클릭 루프 1 · 재입장 완료 끝 1 · 재개 끝 1 - 재개 판단 time 사유)' (($retryUntilUses | Sort-Object) -join ' · ') 'Complete-AbyssInsideHandoff:HH:mm · Complete-AbyssResumeWait:HH:mm · Invoke-AbyssRetryClick:HH:mm'
 $retryLineTwoNodes = @($workerAst.FindAll({ param($candidate) ($candidate -is [ExpandableStringExpressionAst]) -and ([string]$candidate.Value).StartsWith("[어비스] '다시 하기' 직전 판단: 지정 시간 ", [StringComparison]::Ordinal) }, $true))
 $retryLineThreeNodes = @($workerAst.FindAll({ param($candidate) ($candidate -is [ExpandableStringExpressionAst]) -and ([string]$candidate.Value).StartsWith('[어비스] 지정 시간 ', [StringComparison]::Ordinal) -and ([string]$candidate.Value).Contains("전에 '다시 하기'로 이어 가기로 정했습니다") }, $true))
 $retryLineTwoInLast = @($retryLineTwoNodes | Where-Object { @(Get-OtherAncestorIfs $_ | Where-Object { (Get-OtherFlatCode $_.Clauses[0].Item1) -ceq "(Update-AbyssRetryTimeVerdict) -eq 'last'" }).Count -eq 1 }).Count
@@ -6256,12 +6314,16 @@ Check-Equal 'P5d-0 클릭 루프 분류 호출 1 = -PromptVisible $false · 하�
     ('{0} · {1}' -f $retryClassifyCalls.Count, ((@($retryClassifyCalls | ForEach-Object { Get-NodeCode $_ })) -join ' | ')) `
     '1 · Resolve-AbyssHandoffStartScreen -PromptVisible $false -BottomText ([string]$pairRead.Text) -PanelKind $panelKind -HudVisible $hudNow -InDungeonQuest $questNow'
 
-# P5d-1 - 새 함수 다섯 · 넓힌 끝 함수의 호출 자리 (⑤b5 3.4 - 두 끝 함수만 본류 보상 화면 꼬리에서 1씩: 'other' 갈래 · 'retry' 갈래. 나머지는 본류 0 그대로)
+# P5d-1 - 새 함수 다섯 · 넓힌 끝 함수의 호출 자리 (⑤b5 3.4 - 두 끝 함수만 본류 보상 화면 꼬리에서 1씩: 'other' 갈래 · 'retry' 갈래. 나머지는 본류 0 그대로.
+#   ⑤c 5c-1 - 재개 시계 New-AbyssResumeClock 이 모드 예산을 부름. 5c-2 - 선분기(던전 안 2연속 · ⑩ 재개 시계)와 재개 끝('entered' · 'cancelled' · 'timeout')이 재입장 완료 · none 행 ·
+#   끝(other)을 부름. 5c-3 - 재개 끝이 끝(retry)(재클릭)과 'record-failed' 의 끝(other) -ExitOnly 를 부름 - 구현 명세 ⑤c 3.2 (가)~(다))
 $RETRY_SITE_NAMES = @('Get-AbyssReentryLimitSeconds', 'Invoke-AbyssRetryClick', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout', 'Complete-AbyssOtherSelection', 'Complete-AbyssRetrySelection')
 $retrySiteReport = @(foreach ($siteName in $RETRY_SITE_NAMES) { $siteNodes = @(Get-CommandNodes -Node $workerAst -Name $siteName); '{0}={1}[{2}]' -f $siteName, $siteNodes.Count, ((@($siteNodes | ForEach-Object { $siteOwner = Get-EnclosingFunctionName $_; $(if ($siteOwner) { $siteOwner } else { '(본류)' }) } | Sort-Object)) -join ',') }) -join ' · '
-Check-Equal 'P5d-1 새 함수 · 넓힌 끝 함수의 호출 자리 (모드 예산 2 · 클릭 루프 1 · 재입장 완료 2 · none 행 2 · 끝(other) = 끝(retry) 3 + 본류 1 · 끝(retry) = 본류 1 - ⑤b5)' $retrySiteReport `
-    ('Get-AbyssReentryLimitSeconds=2[Complete-AbyssOtherSelection,Complete-AbyssRetrySelection] · Invoke-AbyssRetryClick=1[Complete-AbyssRetrySelection] · Complete-AbyssInsideHandoff=2[Complete-AbyssOtherSelection,Complete-AbyssRetrySelection] · ' +
-        'Stop-AbyssReentryTimeout=2[Complete-AbyssOtherSelection,Complete-AbyssRetrySelection] · Complete-AbyssOtherSelection=4[(본류),Complete-AbyssRetrySelection,Complete-AbyssRetrySelection,Complete-AbyssRetrySelection] · Complete-AbyssRetrySelection=1[(본류)]')
+Check-Equal 'P5d-1 새 함수 · 넓힌 끝 함수의 호출 자리 (모드 예산 3(끝 둘 + 재개 시계 - ⑤c) · 클릭 루프 1 · 재입장 완료 4 · none 행 4(끝 둘 + 선분기 · 재개 끝 - ⑤c 5c-2) · 끝(other) = 끝(retry) 3 + 재개 끝 2 + 본류 1 · 끝(retry) = 재개 끝 1 + 본류 1 - ⑤b5 · ⑤c 5c-3)' $retrySiteReport `
+    ('Get-AbyssReentryLimitSeconds=3[Complete-AbyssOtherSelection,Complete-AbyssRetrySelection,New-AbyssResumeClock] · Invoke-AbyssRetryClick=1[Complete-AbyssRetrySelection] · ' +
+        'Complete-AbyssInsideHandoff=4[Complete-AbyssOtherSelection,Complete-AbyssResumeWait,Complete-AbyssRetrySelection,Invoke-AbyssHandoffStart] · ' +
+        'Stop-AbyssReentryTimeout=4[Complete-AbyssOtherSelection,Complete-AbyssResumeWait,Complete-AbyssRetrySelection,Invoke-AbyssHandoffStart] · ' +
+        'Complete-AbyssOtherSelection=6[(본류),Complete-AbyssResumeWait,Complete-AbyssResumeWait,Complete-AbyssRetrySelection,Complete-AbyssRetrySelection,Complete-AbyssRetrySelection] · Complete-AbyssRetrySelection=2[(본류),Complete-AbyssResumeWait]')
 
 # P5d-2 - 첫 시도 표식 $script:abyssRetryAttemptRecorded 대입 = 클릭 루프 안 $true 1 + 본류 보상 화면 꼬리 첫 문장 ⓪ 의 $false 1(⑤b5 - 소스 차례 · 자리 '' = 본류)
 $retryRecordedAssigns = @($workerAst.FindAll({ param($candidate) ($candidate -is [AssignmentStatementAst]) -and (Test-IsVariable $candidate.Left 'script:abyssRetryAttemptRecorded') }, $true) | ForEach-Object { '{0}:{1}' -f (Get-EnclosingFunctionName $_), (Get-NodeCode $_.Right) })
@@ -6314,8 +6376,11 @@ if ($null -ne $retryFinishWhile) {
 Check-Equal "P5d-8 끝(retry) 클릭 루프 결과 분기 차례 = record-failed 반환 < safe-stop·last 반환 < unconfirmed < 폴백 ① (-ne 'sent')" $retryFinishOrder `
     "record-failed[return 'record-failed'] < safe-stop·last[return `$retryResult] < unconfirmed < 폴백 ①"
 
-# FC-S15 (구현 단위 5b-8 2.3-2 · U-5b8-2) - 끝(retry) while 직속 재입장 결과 if 차례 · 본문(명령 이름 · exit) - 'field-cancelled' 갈래 = Write-RunLog ; exit 4 (입력 · 진단 · 기록 · 예약 · 다른
-#   끝 0 - FC-X 가 행동으로도 봄) · 정지 줄 = 사용자 결정 글자(고정 사본 - 행은 소스 캡처를 따라가므로 글자 변이는 이 단언만 잡음) · 끝(retry) 안 1 · 워커 전체 1 · 사유 80자 안(GUI 코드 4
+# FC-S15 (구현 단위 5b-8 2.3-2 · U-5b8-2 · ⑤c 5c-2) - 끝(retry) while 직속 재입장 결과 if 차례 · 본문(명령 이름 · exit) - 'field-cancelled' 갈래 = 공유 정지 함수 Stop-AbyssReentryFieldCancelled
+#   한 문장 · 그 함수 몸통 = 끝 블록 직속 'Write-RunLog ; exit 4'(⑤c 5c-2 가 몸통을 끝(retry) 밖으로 옮김 - 몸통 글자는 이 단언이 렌더로 보고, 입력 · 진단 · 기록 · 예약 ·
+#   다른 끝 0 의 행동은 FC-X(비커스텀)가 봄. 커스텀 가드로 더한 명령 · 대입은 FC-S22 허용 집합(끝(retry) 노드만 셈)과 FC-X 를 지나므로 이 렌더가 막음 - 변이 M84 꼴) ·
+#   정지 줄 = 사용자 결정 글자(고정 사본 - 행은 소스 캡처를
+#   따라가므로 글자 변이는 이 단언만 잡음) · 공유 정지 함수 안 1 · 워커 전체 1 · 사유 80자 안(GUI 코드 4
 #   상태줄은 사유를 80자에서 자름) · 표지 꼬리 0
 $FC_FIELD_CANCEL_DONE = "[완료] 재매칭이 취소돼 필드로 나왔습니다 - '다시 하기'를 다시 누르지 않고 멈춥니다"   # 사용자 결정 U-5b8-2 (2026-11-01)
 $fcResultOrder = '(while 없음)'
@@ -6327,20 +6392,23 @@ if ($null -ne $retryFinishWhile) {
             })) -join ' < '
 }
 $fcDoneWorkerCount = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -ceq $FC_FIELD_CANCEL_DONE) }, $true)).Count
-Check-Equal 'FC-S15 끝(retry) 재입장 결과 갈래 차례 · 본문 · 정지 줄 = U-5b8-2 글자(끝(retry) 안 1 · 워커 전체 1) · 사유 80자 안 · 표지 꼬리 0' `
-    ('{0} · 정지 줄 {1}/{2} · 글자 일치 {3} · 80자 안 {4} · 꼬리 {5}' -f $fcResultOrder, $retryFieldDoneNodes.Count, $fcDoneWorkerCount, ($RETRY_DONE_FIELD_CANCELLED -ceq $FC_FIELD_CANCEL_DONE),
-        (($RETRY_DONE_FIELD_CANCELLED.Length - '[완료] '.Length) -le 80), [int]$RETRY_DONE_FIELD_CANCELLED.Contains('[terminal=')) `
-    'entered[Complete-AbyssInsideHandoff] < cancelled[Complete-AbyssOtherSelection] < field-cancelled[Write-RunLog ; exit 4] < timeout[Stop-AbyssReentryTimeout] · 정지 줄 1/1 · 글자 일치 True · 80자 안 True · 꼬리 0'
+# 공유 정지 함수 몸통 - 끝 블록 직속 문장을 위 갈래 본문과 같은 렌더로(명령 이름 · exit · 그 밖 '(명령 아님)' - 커스텀 가드 if 도 '(명령 아님)' 으로 드러남)
+$fcFieldCancelBody = (@($retryFieldCancelNode.Body.EndBlock.Statements | ForEach-Object { $fcBodyCommand = Get-StatementCommand $_; $(if ($_ -is [ExitStatementAst]) { Get-NodeCode $_ } elseif ($null -ne $fcBodyCommand) { $fcBodyCommand.GetCommandName() } else { '(명령 아님)' }) })) -join ' ; '
+Check-Equal 'FC-S15 끝(retry) 재입장 결과 갈래 차례 · 본문 · 정지 줄 = U-5b8-2 글자(공유 정지 함수 안 1 · 워커 전체 1) · 사유 80자 안 · 표지 꼬리 0 · 공유 정지 함수 몸통' `
+    ('{0} · 정지 줄 {1}/{2} · 글자 일치 {3} · 80자 안 {4} · 꼬리 {5} · 몸통 [{6}]' -f $fcResultOrder, $retryFieldDoneNodes.Count, $fcDoneWorkerCount, ($RETRY_DONE_FIELD_CANCELLED -ceq $FC_FIELD_CANCEL_DONE),
+        (($RETRY_DONE_FIELD_CANCELLED.Length - '[완료] '.Length) -le 80), [int]$RETRY_DONE_FIELD_CANCELLED.Contains('[terminal='), $fcFieldCancelBody) `
+    'entered[Complete-AbyssInsideHandoff] < cancelled[Complete-AbyssOtherSelection] < field-cancelled[Stop-AbyssReentryFieldCancelled] < timeout[Stop-AbyssReentryTimeout] · 정지 줄 1/1 · 글자 일치 True · 80자 안 True · 꼬리 0 · 몸통 [Write-RunLog ; exit 4]'
 
-# FC-S16 (2.4) - 끝(retry) exit = 정확히 2 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' 갈래 · 'field-cancelled' 갈래 (§10 센티널 준비 게이트(줄 단독)의 사실을 이름 있는 단언으로)
+# FC-S16 (2.4 · ⑤c 5c-2) - 끝(retry) exit = 정확히 1 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' 갈래 ('field-cancelled' 갈래의 exit 는 ⑤c 5c-2 에서 공유 정지 함수로 옮김) (§10 센티널 준비
+#   게이트(줄 단독)의 사실을 이름 있는 단언으로)
 $fcRetryExits = @($retryFinishNode.FindAll({ param($candidate) $candidate -is [ExitStatementAst] }, $true))
 $fcRetryExitText = (@($fcRetryExits | ForEach-Object { '{0}@{1}' -f (Get-LineCode $_), (@(Get-EnclosingIfConditions -Node $_ -Stop $retryFinishNode) | Select-Object -First 1) })) -join ' / '
-Check-Equal "FC-S16 끝(retry) exit 2 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' · 'field-cancelled' 갈래" $fcRetryExitText "exit 4@`$retryResult -eq 'unconfirmed' / exit 4@`$reentryResult -eq 'field-cancelled'"
+Check-Equal "FC-S16 끝(retry) exit 1 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' 갈래" $fcRetryExitText "exit 4@`$retryResult -eq 'unconfirmed'"
 
-# FC-S22 (1절 4항 끝 · 구현 리뷰 2/2 의 4/5) - 끝(retry) 명령 이름 집합 = 정확히 8 (허용 집합 - N4-P6 꼴). FC-S15 는 정확 조건 갈래만 보고 FC-X 행은 비커스텀이라
+# FC-S22 (1절 4항 끝 · 구현 리뷰 2/2 의 4/5) - 끝(retry) 명령 이름 집합 = 정확히 9 (허용 집합 - N4-P6 꼴 · ⑤c 5c-2 가 공유 정지 함수를 더함 - 그 함수 몸통은 끝(retry) 노드 밖이라 FC-S15 의 렌더 칸이 봄). FC-S15 는 정확 조건 갈래만 보고 FC-X 행은 비커스텀이라
 #   'field-cancelled' 갈래 밖에 다른 꼴 조건(StartsWith · -like)이나 커스텀 가드로 더한 키 · 마커 · 기록 · 예약 명령이 빠져나갔음(변이 M83 · M84). 끝(retry)에 명령을 더하면 이 행과 명세 3.3 을 함께
 $RETRY_FINISH_COMMANDS_EXPECTED = @('Complete-AbyssInsideHandoff', 'Complete-AbyssOtherSelection', 'Get-AbyssReentryLimitSeconds', 'Invoke-AbyssRetryClick', 'Stop-AbyssReentryTimeout',
-    'Wait-AbyssReentry', 'Write-LifeDiagnostics', 'Write-RunLog')
+    'Stop-AbyssReentryFieldCancelled', 'Wait-AbyssReentry', 'Write-LifeDiagnostics', 'Write-RunLog')   # 공유 정지 함수 = ⑤c 5c-2 ('field-cancelled' 갈래)
 $fcRetryCommandSet = @($retryFinishNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 $fcRetryCommandUnnamed = @($retryFinishNode.FindAll({ param($candidate) ($candidate -is [CommandAst]) -and (-not $candidate.GetCommandName()) }, $true)).Count
 Check-Equal "FC-S22 끝(retry) 명령 이름 집합 = 정확히 $($RETRY_FINISH_COMMANDS_EXPECTED.Count)개(허용 집합) · 이름 없는 호출(& `$식) 0" `
@@ -7515,7 +7583,7 @@ Check-Equal 'P5e-8 결정 줄 원인 조각 키 - $otherCause(다른 던전 가�
     'boundary,item-change,next-owner-empty · safe-stop,finish-only,last-run · next-invalid,next-unknown,entry-change'
 
 # P5e-9 (구현 명세 ⑤b6 3.2 · 1.5) - 어비스 결정 줄 끝말(명세 1.5 의 A급 문구 - 행(T-)은 줄 글자를 소스에서 캡처하므로 끝말을 바꾼 워커는 이 정적이 잡습니다):
-#   '나가기'로 던전 밖에 나와 마칩니다 = 4(시간 1 · 멈춤 원인 1 · 직전 판단 2) · '나가기'로 던전 밖에 나와 다음 항목으로 넘어갑니다 = 1(이어 감 원인 ${moveCause}) · 'exit' 갈래 1 · 그 안
+#   '나가기'로 던전 밖에 나와 마칩니다 = 5(시간 1 · 멈춤 원인 1 · 직전 판단 2 · 재개 판단 1 - ⑤c 5c-3) · '나가기'로 던전 밖에 나와 다음 항목으로 넘어갑니다 = 1(이어 감 원인 ${moveCause}) · 'exit' 갈래 1 · 그 안
 #   if ($moveCause) 1(참 갈래 = 이어 감 줄 · else = 멈춤 원인 줄) · 어비스 줄의 '나가기'로 필드에 나와 마칩니다 0 · 던전 14-T 시간 줄의 '필드에 나와' 1(그대로) · '다른 던전 가기' 가 든 직전 판단 줄 0
 $T11_END_STOP = "'나가기'로 던전 밖에 나와 마칩니다"
 $T11_END_MOVE = "'나가기'로 던전 밖에 나와 다음 항목으로 넘어갑니다"
@@ -7526,6 +7594,7 @@ $t11StopLines = @($t11AbyssStrings | Where-Object { ([string]$_.Value).EndsWith(
 $t11StopTime = @($t11StopLines | Where-Object { ([string]$_.Value).StartsWith('[어비스] 지정 시간 ', [StringComparison]::Ordinal) }).Count
 $t11StopCauseLines = @($t11StopLines | Where-Object { ([string]$_.Value).StartsWith('[어비스] ${exitCause} ', [StringComparison]::Ordinal) })
 $t11StopJudge = @($t11StopLines | Where-Object { ([string]$_.Value).StartsWith("[어비스] '다시 하기' 직전 판단: ", [StringComparison]::Ordinal) }).Count
+$t11StopResume = @($t11StopLines | Where-Object { ([string]$_.Value).StartsWith('[어비스] 재개 판단: ', [StringComparison]::Ordinal) }).Count   # 재개 끝 재평가의 멈춤 줄(⑤c 5c-3)
 $t11MoveLines = @($t11AbyssStrings | Where-Object { ([string]$_.Value).EndsWith($T11_END_MOVE, [StringComparison]::Ordinal) })
 $t11MoveCauseLines = @($t11MoveLines | Where-Object { ([string]$_.Value).StartsWith('[어비스] ${moveCause} ', [StringComparison]::Ordinal) })
 $t11FieldAbyss = @($t11AbyssStrings | Where-Object { ([string]$_.Value).Contains($T11_END_FIELD) }).Count
@@ -7545,10 +7614,10 @@ if ($t11ExitBodies.Count -eq 1) {
         $t11MoveIfShape += (' · 참 갈래 이어 감 줄 {0} · else 멈춤 원인 줄 {1}' -f $t11MoveInThen, $t11StopInElse)
     }
 }
-Check-Equal "P5e-9 어비스 결정 줄 끝말 - 마칩니다(시간 · 멈춤 원인 · 직전 판단) · 넘어갑니다(이어 감 원인) · exit 갈래 · 그 안 if (`$moveCause) · 어비스 '필드에 나와' 0 · 던전 14-T '필드에 나와' 1 · 직전 판단 '다른 던전 가기' 0" `
-    ('마칩니다 {0}(시간 {1} · 멈춤 원인 {2} · 직전 판단 {3}) · 넘어갑니다 {4}(이어 감 원인 {5}) · exit 갈래 {6} · {7} · 어비스 필드에 나와 {8} · 던전 14-T 필드에 나와 {9} · 직전 판단 다른 던전 가기 {10}' -f
-        $t11StopLines.Count, $t11StopTime, $t11StopCauseLines.Count, $t11StopJudge, $t11MoveLines.Count, $t11MoveCauseLines.Count, $t11ExitBodies.Count, $t11MoveIfShape, $t11FieldAbyss, $t11FieldDungeon, $t11JudgeOther) `
-    '마칩니다 4(시간 1 · 멈춤 원인 1 · 직전 판단 2) · 넘어갑니다 1(이어 감 원인 1) · exit 갈래 1 · if ($moveCause) 1 · 참 갈래 이어 감 줄 1 · else 멈춤 원인 줄 1 · 어비스 필드에 나와 0 · 던전 14-T 필드에 나와 1 · 직전 판단 다른 던전 가기 0'
+Check-Equal "P5e-9 어비스 결정 줄 끝말 - 마칩니다(시간 · 멈춤 원인 · 직전 판단 · 재개 판단) · 넘어갑니다(이어 감 원인) · exit 갈래 · 그 안 if (`$moveCause) · 어비스 '필드에 나와' 0 · 던전 14-T '필드에 나와' 1 · 직전 판단 '다른 던전 가기' 0" `
+    ('마칩니다 {0}(시간 {1} · 멈춤 원인 {2} · 직전 판단 {3} · 재개 판단 {11}) · 넘어갑니다 {4}(이어 감 원인 {5}) · exit 갈래 {6} · {7} · 어비스 필드에 나와 {8} · 던전 14-T 필드에 나와 {9} · 직전 판단 다른 던전 가기 {10}' -f
+        $t11StopLines.Count, $t11StopTime, $t11StopCauseLines.Count, $t11StopJudge, $t11MoveLines.Count, $t11MoveCauseLines.Count, $t11ExitBodies.Count, $t11MoveIfShape, $t11FieldAbyss, $t11FieldDungeon, $t11JudgeOther, $t11StopResume) `
+    '마칩니다 5(시간 1 · 멈춤 원인 1 · 직전 판단 2 · 재개 판단 1) · 넘어갑니다 1(이어 감 원인 1) · exit 갈래 1 · if ($moveCause) 1 · 참 갈래 이어 감 줄 1 · else 멈춤 원인 줄 1 · 어비스 필드에 나와 0 · 던전 14-T 필드에 나와 1 · 직전 판단 다른 던전 가기 0'
 
 # P5e-10 (CT · 구현 명세 ⑤b6 3.2 · 1.10) - GUI ↔ 워커 경계 신호 계약: GUI Get-CustomNextHandoffEnv 안 입장 방식 미정 글자(문자열 상수 'mixed') 1 · 워커의 -NextEntryUnknown 인자 1(워커 전체) ·
 #   그 인자 = [string]$env:HONEYNOGI_CUSTOM_NEXT_BOUNDARY -eq '<GUI 글자>' (두 글자를 양쪽 소스에서 캡처해 대조 - 한쪽만 바꾸면 미정 신호가 끊겨 섞인 바퀴 끝이 '다른 던전 가기' 로 감)

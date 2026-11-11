@@ -13,7 +13,8 @@
 #        비면 소유자 해석 0(CH15′ - C15 · 표 ⑥ < ⑦) · stale 의 대조(일치하면 own - 표 ⑪) · 어비스는 호출 1 · customSpecInvalid 면 0(CH16 대조).
 #   [CH 보강] 단계 2.1 변이 검증(2026-10-13)에서 살아남은 변이를 잡는 행 - 표 ⑬ 의 나머지 갈래: next 의 nextOwner 불일치(5필드·세대 - CH12n) · resume 의
 #        owner 불일치(5필드·세대 - CH12r) · 다른 stage(cleared 의 owner 일치 / nextOwner 일치 - CH12s) · 열쇠 항목의 키 시작값은 afterEntry.index 그대로
-#        (CH10i - total 아님) · own·next·resume 뒤 FreshEntry·StartScreen 은 기본값 그대로(CH10s·CH13s·CH14s - 두 필드는 선분기 몫) · 손상은 소유자 해석보다
+#        (CH10i - total 아님) · own·next·resume 뒤 FreshEntry·StartScreen 은 기본값 그대로(CH10s·CH13s·CH14s - 두 필드는 선분기 몫) · 재개 재료 셋 Stage·At·RetryClicks 는
+#        resume 만 그 항목 값으로 채우고 own·next 는 기본값(CH10s·CH13s·CH14s·CH14c - 구현 명세 ⑤c 2.1) · 손상은 소유자 해석보다
 #        앞(CH5″ - 표 ⑤ < ⑦) · 소유자 해석은 항목 찾기보다 앞(CH15″ - 표 ⑦ < ⑧) · 본류 시작 구간이 own 역할을 그대로 넘김($roleNone 거짓 - CH16o).
 #        살아남았던 변이: 순서 ⑦↔⑧ · own/next 의 stage 조건 제거 · next 의 nextOwner 대조 제거 · resume 의 owner 대조 제거 · own 이 FreshEntry 를 씀 · 키
 #        시작값을 total 로 · 손상 뒤 반환 없음 · 블록이 Consume-Handoff 뒤 역할을 none 으로 덮어씀.
@@ -63,7 +64,10 @@
 #        등록의 원인 대입은 소스 캡처 $RECT_THROW_MESSAGE · $RECT_FAIL_CAUSE · $RECT_SUCCESS_CAUSE_RIGHTS) · B2W-1·2(B2 중 창 좌표 throw → 대기 함수의 제한
 #        catch → 동결 → 결론 inside. HEAD 는 예외 = 코드 1 경로 - 고치기 전 재현) · B2W-3(B2 앞 선분기 자신의 판독 throw 는 그대로 예외) · B2W-4~6(B2 안
 #        3버튼·S 관측 지속 · 양보 문맥 · Tpm 마감) · WA-F7 own·next(간접 양보 시간이 필드 확정 W 에 드는 HEAD 동작 고정 - 이슈 목록 카드). 정적 R5-P5(선분기
-#        S2 0)·R5-P9(호출 1 · 인자 · 가장 가까운 갈래 조건 = 패널류 넷)는 Test-StaticFlow 에 있습니다
+#        S2 0)·R5-P9(호출 역할별 2 - Role resume 호출 C · own·next B2 의 인자 · 가장 가까운 갈래 조건)는 Test-StaticFlow 에 있습니다
+#   [⑤c] 구현 단계 ⑤c 5c-2(구현 명세 ⑤c 3.2 (나) · 3.6 · 3.7): RS0(재개 → 선분기 던전 안 2연속 → 승계 → 재입장 완료 끝 - 옛 S19 정지 행) · RS0c(손상) ·
+#        RS0l(사용 중) · 정적 R5c-P1~P5(Role resume 열의 선분기 형상 - 전용 이름 자리 · $fieldAt · ⑨ · ⑩ · ④ 차례). own·next 행은 기대 그대로입니다.
+#        재개 워커가 끝 exit 까지 가는 나머지 행은 ⑲ test_abyss_resume_reentry.ps1 몫입니다
 # 방법:
 #   - 하니스 세 층(명세 ② 3.2): ① 함수 층 - Consume-Handoff 와 그 의존(저장소 워커 사본 묶음 · 소유자 해석 · 그 밖에 부르는 워커 최상위 함수)을 이 파일
 #     최상위에서 정의(체크리스트 6 - 클로저 mutator 가 부르는 함수는 최상위 정의만 보임) ② 본류 시작 구간 - 워커 최상위 try 의 형제 문장(이 단계 = 2.1 블록 ~
@@ -141,7 +145,7 @@ $LINE_OWNER_UNREADABLE = '[경고] 커스텀 항목 소유자 정보를 읽지 �
 $LINE_MISMATCH_FORMAT = '[경고] 넘겨받은 완료 기록이 이번 기동과 맞지 않아 이어받지 않고 진행합니다 ({0})'                                 # 표 ⑨ (제안 - 괄호 = 항목 stage)
 
 # 명세 ② 2.1 표의 기본값과 정적 단언의 원문(공백 정규화 뒤 비교)
-$HANDOFF_DEFAULT_TEXT = 'Role=none · Nonce= · CleanupOnly=False(bool) · FreshEntry=False(bool) · StartScreen= · AfterEntry=null · JournalState=ok'
+$HANDOFF_DEFAULT_TEXT = 'Role=none · Nonce= · CleanupOnly=False(bool) · FreshEntry=False(bool) · StartScreen= · AfterEntry=null · JournalState=ok · Stage= · At=null · RetryClicks=0'
 $BLOCK_CONDITION_TEXT = "(`$contentCategory -eq 'abyss') -and (-not `$script:customSpecInvalid)"   # P21 - 이 블록의 if 줄 = R3 S4·R4 P1 의 '선분기 첫 문장'
 $BLOCK_FIRST_STATEMENT_TEXT = "if ((Consume-Handoff) -eq 'stop') { exit 4 }"                       # P21 · 명세 2.1 표
 $MEMBER_IF_TEXT = 'if ($abyssPartyMemberRun) {'                                                     # R4-P1 앞 앵커(파티원 디스패치)
@@ -191,7 +195,6 @@ $S17_CUSTOM_TAIL = ' (이 판은 계상되지 않으며, 다음 시작은 정리
 $S17_PLAIN_TAIL = ' (다음 시작이 이 보상 화면을 마무리하며 그때 1회 계상합니다)'
 $RELEASE_TAIL = ' (release)'                                                 # 놓아줌 표지(J22) - S17 두 변형 · S18 · S20 끝에만
 $S18_B2_TIMEOUT_FORMAT = '[완료] {0} 에서 시작해 {1}초 안에 입장을 확인하지 못했습니다 - 취소·나가기 없이 정지합니다. 화면을 확인하고 다시 시작해 주세요. (release)'
-$S19_RESUME = '[완료] 재입장 재개 기능이 꺼져 있어 기록을 보존하고 정지합니다 (post-clear)'
 $S20_CREATE_FAIL = '[완료] 입장 기록 실패 - 재화 중복 소모를 막기 위해 입장 직후 키를 보내지 않고 정지합니다 (캐릭터는 던전 안) (release)'
 $KEYPOINT_CREATE_FAIL = '[완료] 입장 기록 실패 - 재화 중복 소모를 막기 위해 입장 직후 키를 보내지 않고 정지합니다 (캐릭터는 던전 안)'   # 본류 키 지점(Role none) - 꼬리 0
 $S4_CLOSE_FORMAT = '[어비스] 시작 화면이 던전 밖이라 이어받던 판의 기록을 닫았습니다 - 새 판으로 들어갑니다 (abandoned-pre-entry-start · {0})'
@@ -1483,11 +1486,23 @@ function Format-AfterEntry {
     return ('{0}/{1}' -f $indexText, $keysText)
 }
 
+function Format-HandoffAt {
+    # 재개 재료 At(그 항목의 at 객체) → 'retryAttempt=…,retryClicked=…'(재개 시계가 읽는 두 칸 - 값 없음 'null' · 객체 없음 'null', 구현 명세 ⑤c 2.1 · 2.3)
+    param($At)
+    if ($null -eq $At) { return 'null' }
+    $atParts = foreach ($atName in @('retryAttempt', 'retryClicked')) {
+        $atField = Get-AbyssJournalField -Object $At -Name $atName
+        $atValue = $(if (-not $atField.Has) { '(필드 없음)' } elseif ($null -eq $atField.Value) { 'null' } else { [string]$atField.Value })
+        '{0}={1}' -f $atName, $atValue
+    }
+    return (@($atParts) -join ',')
+}
+
 function Get-HandoffSnapshot {
     # $script:handoff → 단언용 값 (해시테이블·객체 공용 읽기 - 필드가 없으면 '(필드 없음)')
     $handoffState = $script:handoff
     $fields = @{}
-    foreach ($fieldName in @('Role', 'Nonce', 'CleanupOnly', 'JournalState', 'AfterEntry', 'FreshEntry', 'StartScreen')) { $fields[$fieldName] = Get-AbyssJournalField -Object $handoffState -Name $fieldName }
+    foreach ($fieldName in @('Role', 'Nonce', 'CleanupOnly', 'JournalState', 'AfterEntry', 'FreshEntry', 'StartScreen', 'Stage', 'At', 'RetryClicks')) { $fields[$fieldName] = Get-AbyssJournalField -Object $handoffState -Name $fieldName }
     $missing = '(필드 없음)'
     return [pscustomobject]@{
         Role         = $(if ($fields.Role.Has) { [string]$fields.Role.Value } else { $missing })
@@ -1498,6 +1513,10 @@ function Get-HandoffSnapshot {
         # 두 필드는 선분기(단계 2.5)가 씁니다 - Consume-Handoff 뒤에는 기본값 그대로여야 합니다(CH10s·CH13s·CH14s)
         FreshEntry   = $(if ($fields.FreshEntry.Has) { [string][bool]$fields.FreshEntry.Value } else { $missing })
         StartScreen  = $(if ($fields.StartScreen.Has) { [string]$fields.StartScreen.Value } else { $missing })
+        # 재개 재료 셋(구현 명세 ⑤c 2.1) - resume 만 그 항목 값으로 채우고 own·next 는 기본값 그대로(CH10s·CH13s·CH14s·CH14c)
+        Stage        = $(if ($fields.Stage.Has) { [string]$fields.Stage.Value } else { $missing })
+        At           = $(if ($fields.At.Has) { Format-HandoffAt $fields.At.Value } else { $missing })
+        RetryClicks  = $(if ($fields.RetryClicks.Has) { [string][int]$fields.RetryClicks.Value } else { $missing })
     }
 }
 
@@ -1517,6 +1536,9 @@ function New-RowResult {
         JournalState = $snapshot.JournalState
         FreshEntry   = $snapshot.FreshEntry
         StartScreen  = $snapshot.StartScreen
+        Stage        = $snapshot.Stage
+        At           = $snapshot.At
+        RetryClicks  = $snapshot.RetryClicks
         Logs         = (Format-Logs -Lines @($script:workerLogLines))
         Reads        = $script:journalReads
         Updates      = $script:journalUpdates
@@ -2102,9 +2124,9 @@ function Test-RowCH10 {
     Assert-Case 'CH10 own(entered · owner·세대 일치 · launched · index 2 · cleanupOnly 참) → Role own · Nonce NA · CleanupOnly 참 · AfterEntry 2/32,66 · 로그 0 · 읽기 1 · 쓰기 0 · 파일 불변 · 반환 · 예외 0' `
         (J @($row.Role, $row.Nonce, $row.CleanupOnly, $row.AfterEntry, $row.Logs, $row.Reads, $row.Updates, $row.Unchanged, $row.Returned, $row.Thrown)) `
         (J @('own', 'NA', 'True', '2/32,66', '[]', 1, 0, 'True', 'ok(1)', ''))
-    # CH10s - own 은 표 ⑪ 의 필드(Nonce · CleanupOnly · AfterEntry)만 씁니다. FreshEntry·StartScreen 은 선분기(단계 2.5)가 쓰는 자리라 기본값 그대로
-    Assert-Case 'CH10s 같은 own → FreshEntry 거짓 · StartScreen 빈 값 그대로(두 필드는 선분기 몫 - Consume-Handoff 는 쓰지 않음)' `
-        (J @($row.FreshEntry, $row.StartScreen)) (J @('False', ''))
+    # CH10s - own 은 표 ⑪ 의 필드(Nonce · CleanupOnly · AfterEntry)만 씁니다. FreshEntry·StartScreen 은 선분기(단계 2.5)가 쓰는 자리라 기본값 그대로 · 재개 재료 셋도 기본값(⑤c 2.1)
+    Assert-Case 'CH10s 같은 own → FreshEntry 거짓 · StartScreen 빈 값 그대로(두 필드는 선분기 몫 - Consume-Handoff 는 쓰지 않음) · Stage 빈 값 · At null · RetryClicks 0(재개 재료 셋은 resume 만)' `
+        (J @($row.FreshEntry, $row.StartScreen, $row.Stage, $row.At, $row.RetryClicks)) (J @('False', '', '', 'null', '0'))
     $oldEntry = New-ChOwnEntry -WithoutCleanupOnly
     $row = Invoke-ConsumeRow -Row @{ Custom = $true; Nonce = $NONCE_A; Entries = @($oldEntry) }
     Assert-Case 'CH11 own + cleanupOnly 필드 없는 옛 항목(픽스처에 필드 없음 확인) → Role own · Nonce NA · CleanupOnly 거짓 · AfterEntry 2/32,66 · 로그 0 · 반환 · 예외 0(설계 R2 C8)' `
@@ -2204,13 +2226,16 @@ function Test-RowCH13 {
     #   index·keys(첫 기록 전이라 keys null). FINISH_ONLY 는 역할 판정에 쓰지 않습니다(명세 2.1 표 아래 - 마무리 실행 기동도 next, dev:908)
     $nextEntry = New-FixtureEntry -Stage 'reentered' -Nonce $NONCE_B -Owner (New-ChOwner -Index 2) -NextOwner (New-ChOwner -Index 0) -Generation $CH_GENERATION `
         -Section $ABYSS_SECTION -RunId 'run-before' -LaunchState 'launched' -AfterIndex 0
+    # 재개 재료 셋 대조(구현 명세 ⑤c 2.1) - '다시 하기' 를 눌러 들어간 판의 현실 값처럼 retryClicks 1 을 넣어, next 가 그 칸을 기본값 0 그대로 두는지(CH13s)를
+    #   그 항목 값과 가릅니다(픽스처가 기본값 0 이면 대입을 모든 역할로 옮긴 꼴도 통과 - 5c-1 사전 대조)
+    $nextEntry.retryClicks = 1
     $expected = J @('next', 'NB', '0/null', '[]', 1, 0, 'True', 'ok(1)', '')
     $names = 'Role next · Nonce NB · AfterEntry 0/null · 로그 0 · 읽기 1 · 쓰기 0 · 파일 불변 · 반환 · 예외 0'
     $row = Invoke-ConsumeRow -Row @{ Custom = $true; Nonce = $NONCE_B; Entries = @($nextEntry); Applied = @($NONCE_B) }
     Assert-Case ('CH13 next(reentered · nextOwner 일치 · applied 에 nonce 있음) → applied 무관 · ' + $names) `
         (J @($row.Role, $row.Nonce, $row.AfterEntry, $row.Logs, $row.Reads, $row.Updates, $row.Unchanged, $row.Returned, $row.Thrown)) $expected
-    Assert-Case 'CH13s 같은 next → CleanupOnly 거짓 · FreshEntry 거짓 · StartScreen 빈 값 그대로(next 는 표 ⑩ 의 Nonce·AfterEntry 만 씀)' `
-        (J @($row.CleanupOnly, $row.FreshEntry, $row.StartScreen)) (J @('False', 'False', ''))
+    Assert-Case 'CH13s 같은 next → CleanupOnly 거짓 · FreshEntry 거짓 · StartScreen 빈 값 · Stage 빈 값 · At null · RetryClicks 0 그대로(next 는 표 ⑩ 의 Nonce·AfterEntry 만 씀 - 재개 재료 셋은 resume 만 · 픽스처 retryClicks 1 과 갈림)' `
+        (J @($row.CleanupOnly, $row.FreshEntry, $row.StartScreen, $row.Stage, $row.At, $row.RetryClicks)) (J @('False', 'False', '', '', 'null', '0'))
     $row = Invoke-ConsumeRow -Row @{ Custom = $true; Nonce = $NONCE_B; FinishOnly = '1'; Entries = @($nextEntry); Applied = @($NONCE_B) }
     Assert-Case ('CH13f 같은 next + FINISH_ONLY=1 → 같음(역할 판정에 FINISH_ONLY 0) · ' + $names) `
         (J @($row.Role, $row.Nonce, $row.AfterEntry, $row.Logs, $row.Reads, $row.Updates, $row.Unchanged, $row.Returned, $row.Thrown)) $expected
@@ -2224,8 +2249,18 @@ function Test-RowCH14 {
     Assert-Case 'CH14 resume(RESUME=1 · retry-attempt · owner 일치) - applied 밖 → Role resume · Nonce NC · 로그 0 · 읽기 1 · 쓰기 0 · 파일 불변 · 반환 · 예외 0' `
         (J @($row.Role, $row.Nonce, $row.Logs, $row.Reads, $row.Updates, $row.Unchanged, $row.Returned, $row.Thrown)) `
         (J @('resume', 'NC', '[]', 1, 0, 'True', 'ok(1)', ''))
-    Assert-Case 'CH14s 같은 resume → CleanupOnly 거짓 · AfterEntry null · FreshEntry 거짓 · StartScreen 빈 값 그대로(resume 은 표 ⑫ 의 Nonce 만 씀)' `
-        (J @($row.CleanupOnly, $row.AfterEntry, $row.FreshEntry, $row.StartScreen)) (J @('False', 'null', 'False', ''))
+    Assert-Case 'CH14s 같은 resume → CleanupOnly 거짓 · AfterEntry null · FreshEntry 거짓 · StartScreen 빈 값 그대로 · 재개 재료 셋 = 그 항목 값(Stage retry-attempt · At 두 칸 null · RetryClicks 0 - resume 은 표 ⑫ 의 Nonce 와 재개 재료 셋, 구현 명세 ⑤c 2.1)' `
+        (J @($row.CleanupOnly, $row.AfterEntry, $row.FreshEntry, $row.StartScreen, $row.Stage, $row.At, $row.RetryClicks)) (J @('False', 'null', 'False', '', 'retry-attempt', 'retryAttempt=null,retryClicked=null', '0'))
+    # CH14c - retry-clicked · retryClicks 1 · at 두 칸(재개 시계의 기준 시각) 이 든 항목 → 재개 재료 셋 = 그 항목 값. 픽스처는 New-FixtureEntry 로 만든 뒤 항목의 retryClicks · at 에
+    #   대입합니다(항목에 그 필드가 이미 있음 - 워커 New-AbyssJournalEntry). 위 retry-attempt 픽스처는 세 칸이 기본값이라 '그 항목 값' 과 '기본값' 을 가르지 못합니다
+    $clickedEntry = New-ChOwnEntry -Nonce $NONCE_C -Stage 'retry-clicked'
+    $clickedEntry.retryClicks = 1
+    $clickedEntry.at.retryAttempt = '2026-11-10T19:00:01.0000000+09:00'
+    $clickedEntry.at.retryClicked = '2026-11-10T19:00:02.0000000+09:00'
+    $row = Invoke-ConsumeRow -Row @{ Custom = $true; Nonce = $NONCE_C; Resume = '1'; Entries = @($clickedEntry); Applied = @() }
+    Assert-Case 'CH14c resume(retry-clicked · retryClicks 1 · at.retryAttempt · at.retryClicked) → Role resume · Nonce NC · Stage retry-clicked · At = 그 항목 두 시각 · RetryClicks 1 · 로그 0 · 쓰기 0 · 파일 불변 · 반환 · 예외 0' `
+        (J @($row.Role, $row.Nonce, $row.Stage, $row.At, $row.RetryClicks, $row.Logs, $row.Updates, $row.Unchanged, $row.Returned, $row.Thrown)) `
+        (J @('resume', 'NC', 'retry-clicked', 'retryAttempt=2026-11-10T19:00:01.0000000+09:00,retryClicked=2026-11-10T19:00:02.0000000+09:00', '1', '[]', 0, 'True', 'ok(1)', ''))
     $row = Invoke-ConsumeRow -Row @{ Custom = $true; Nonce = $NONCE_C; Resume = '1'; Entries = @($resumeEntry); Applied = @($NONCE_C) }
     Assert-Case 'CH14 같은 항목 - applied 안 → Role none · Nonce 빈 값 · 로그 0 · 읽기 1 · 쓰기 0 · 파일 불변 · 반환 · 예외 0' `
         (J @($row.Role, $row.Nonce, $row.Logs, $row.Reads, $row.Updates, $row.Unchanged, $row.Returned, $row.Thrown)) `
@@ -2433,7 +2468,7 @@ function Test-RowF {
 }
 
 # ===== 단계 2.5 - 선분기 루프 행 (층 ① - 실제 Consume-Handoff → 실제 Invoke-AbyssHandoffStart) =====
-$script:observedStops = @{}   # LG 의 실행 쪽 - 행이 본 정지 줄(S9~S20)을 문구 이름으로 모아 둡니다
+$script:observedStops = @{}   # LG 의 실행 쪽 - 행이 본 정지 줄(S9~S18 · S20 - S19 는 구현 단계 ⑤c 에서 없어짐)을 문구 이름으로 모아 둡니다
 
 function Save-ObservedStop {
     # 결과의 마지막 [완료] 줄을 문구 이름으로 모아 둡니다 (LG 가 정지 문구 성질을 한곳에서 봄)
@@ -3124,14 +3159,29 @@ function Test-RowV18 {
 }
 
 function Test-RowRS0 {
-    # RS0 - RESUME=1 + retry-clicked 항목 → Role resume → S19 · exit 4 · 판독·클릭·키 0 (J12 - ② 워커는 dev:904 1행만, resume 표는 ⑤). 층 ②
+    # RS0 (구현 명세 ⑤c 3.2 (나) · 2.6-8) - RESUME=1 + retry-clicked 항목 · 던전 안 지속 → Role resume → 선분기 던전 안 2연속 → 승계 → 재입장 완료 끝(reentered 기록 ·
+    #   재입장 완료 줄 · 지정 시각 없음이라 exit 0) · 입력·키 0 · StartScreen 빈 값 · 선분기 반환 0(본류로 돌아오지 않음). 층 ② (옛 S19 정지 행 - 재개 열의 나머지 행은 ⑲)
     $resumeRow = @{ Name = 'RS0'; Custom = $true; Nonce = $NONCE_C; Resume = '1'; Entries = @((New-ChOwnEntry -Nonce $NONCE_C -Stage 'retry-clicked')); Scenario = @{ Timeline = @(New-Timeline -Pairs @(0, 'I')) } }
     $result = Invoke-FlowRow -FlowRow $resumeRow -FlowLayer 'main'
-    Save-ObservedStop -Key 'S19' -Result $result
-    $selectorReads = @(@($result.ReadLog) | Where-Object { $_.Phase -eq 'selector' }).Count
-    Assert-Case 'RS0 RESUME=1 + retry-clicked(owner 일치) → Role resume · 선분기 1 · S19 · exit 4 · 선분기 판독 0 · 입력 0 · 기록 0(파일 불변) · 예외 0' `
-        (J @($result.Role, $result.SelectorCalls, (Get-StopLines $result), $result.ExitCode, $selectorReads, $result.Inputs, $result.Unchanged, $result.Thrown)) `
-        (J @('resume', 1, $S19_RESUME, '4', 0, 0, 'True', ''))
+    # 재입장 완료 줄 - 끝 함수 원문에서 캡처(⑯ · ④ 의 같은 줄 사본과 같은 글자 - 사본을 하나 더 두지 않음)
+    $insideDoneNodes = @(Get-StringNodes -Node (Get-FlowFunctionNode 'Complete-AbyssInsideHandoff') | Where-Object { ([string]$_.Value).StartsWith('[완료] ', [StringComparison]::Ordinal) })
+    $insideDone = $(if ($insideDoneNodes.Count -eq 1) { ([string]$insideDoneNodes[0].Value).Replace('$Nonce', $NONCE_C) } else { '(재입장 완료 줄 {0}개)' -f $insideDoneNodes.Count })
+    Assert-Case 'RS0 RESUME=1 + retry-clicked(owner 일치) · 던전 안 → Role resume · 선분기 1 · 반환 0 · 정지 줄 = 재입장 완료 줄(nonce NC) · exit 0 · 입력 0 · StartScreen 빈 값 · NC reentered · 쓰기 1 · 파일 변함 · 예외 0' `
+        (J @($result.Role, $result.SelectorCalls, $result.SelectorReturned, (Get-StopLines $result), $result.ExitCode, $result.Inputs, $result.StartScreen,
+            (Format-JournalEntry (Find-JournalEntry $result.Journal 'NC')), $result.UpdateTags, $result.Unchanged, $result.Thrown)) `
+        (J @('resume', 1, 'False', $insideDone, '0', 0, '', 'NC:reentered/launched//', 'selector#1:changed', 'False', ''))
+
+    # RS0c (구현 명세 ⑤c 3.6 · M19) - RESUME=1 + 본 파일·직전본 손상 → Role none · JournalState corrupt · 손상 [경고] 1(로그는 그 1줄) · 선분기 0 · exit 0건 · 입력 0.
+    #   손상은 역할 판정 앞에서 돌아옵니다(CH5 꼴 - 재개 기동이어도 같음. 설계 문안의 '클릭 0 · 코드 4' 는 옮기지 않음). 층 ①
+    $result = Invoke-FlowRow -FlowRow @{ Name = 'RS0c'; Custom = $true; Nonce = $NONCE_C; Resume = '1'; MainText = $CORRUPT_MAIN_TEXT; BakText = $CORRUPT_BAK_TEXT } -FlowLayer 'selector'
+    Assert-Case 'RS0c RESUME=1 + 본 파일·직전본 손상 → Role none · JournalState corrupt · 손상 [경고] 1 · 로그 1 · 선분기 0 · $roleNone 참 · exit 0건 · 입력 0 · 예외 0' `
+        (J @($result.Role, $result.JournalState, (Get-LineCount -Result $result -Line $LINE_CORRUPT), @($result.Lines).Count, $result.SelectorCalls, $result.RoleNone, $result.ExitCode, $result.Inputs, $result.Thrown)) `
+        (J @('none', 'corrupt', 1, 1, 0, 'True', '', 0, ''))
+    # RS0l (구현 명세 ⑤c 3.6) - RESUME=1 + retry-clicked + 완료 기록 사용 중(이 프로세스가 .lock 을 쥠) → 누르기 전 코드 4 ' (locked)'(CH3 꼴) · 클릭·키 0 · 파일 무변경 · 선분기 0. 층 ①
+    $result = Invoke-FlowRow -FlowRow @{ Name = 'RS0l'; Custom = $true; Nonce = $NONCE_C; Resume = '1'; Entries = @((New-ChOwnEntry -Nonce $NONCE_C -Stage 'retry-clicked')); HoldLock = $true } -FlowLayer 'selector'
+    Assert-Case 'RS0l RESUME=1 + retry-clicked + 잠금 점유 → exit 4 · 정지 줄 = (locked) 줄 · 입력 0 · 파일 불변 · 선분기 0 · $roleNone 미대입 · 예외 0' `
+        (J @($result.ExitCode, (Get-StopLines $result), $result.Inputs, $result.Unchanged, $result.SelectorCalls, $result.RoleNone, $result.Thrown)) `
+        (J @('4', $LINE_LOCKED, 0, 'True', 0, '(미대입)', ''))
 }
 
 function Test-RowB2Waiter {
@@ -3320,9 +3370,9 @@ function Test-RowLG {
     # LG - 정지 문구 단언 (명세 3.2 LG · 2.5 S9~S20 · J22): ① 실행 쪽 = 행들이 실제로 낸 정지 줄의 성질 ② 정적 쪽 = 주석 뺀 워커 사본의 문자열
     $Tpm = [int]$capturedTimeoutPartyMatch
     $stops = $script:observedStops
-    $needKeys = @('S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17-custom', 'S17-plain', 'S18', 'S19', 'S20', 'S15-20')
+    $needKeys = @('S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17-custom', 'S17-plain', 'S18', 'S20', 'S15-20')
     $missingKeys = @($needKeys | Where-Object { -not $stops.ContainsKey($_) })
-    Assert-True 'LG 실행 쪽 - 정지 문구 14종을 행들이 모두 냄(S9~S20 · S17 두 변형 · Tpm 20 의 S15)' ($missingKeys.Count -eq 0) ('없음: ' + ($missingKeys -join ','))
+    Assert-True 'LG 실행 쪽 - 정지 문구 13종을 행들이 모두 냄(S9~S18 · S20 · S17 두 변형 · Tpm 20 의 S15 - S19 는 구현 단계 ⑤c 에서 삭제)' ($missingKeys.Count -eq 0) ('없음: ' + ($missingKeys -join ','))
     $properties = @(
         @{ Name = "next·상세(next)·미결(next) 문구에 '수동으로 마치지 말고'"; Keys = @('S9', 'S11', 'S13', 'S15'); Fragment = '수동으로 마치지 말고'; Want = $true },
         @{ Name = "own 문구(선택 화면·메뉴·미결)에 '그 판을 마친 뒤'"; Keys = @('S10', 'S12', 'S16'); Fragment = '그 판을 마친 뒤'; Want = $true },
@@ -3332,7 +3382,7 @@ function Test-RowLG {
         @{ Name = "상세 두 문구에 '화면을 닫고 필드'"; Keys = @('S13', 'S14'); Fragment = '화면을 닫고 필드'; Want = $true },
         @{ Name = "미결 마감 초 = `${timeoutPartyMatch}(캡처값 $Tpm)"; Keys = @('S15', 'S16'); Fragment = ('{0}초 안에 확인하지 못해' -f $Tpm); Want = $true },
         @{ Name = '미결 마감 초 = ${timeoutPartyMatch}(Tpm 20 행)'; Keys = @('S15-20'); Fragment = '20초 안에 확인하지 못해'; Want = $true },
-        @{ Name = '오버레이·상세·미결·resume 정지 문구에 (release) 0'; Keys = @('S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S19'); Fragment = '(release)'; Want = $false })
+        @{ Name = '오버레이·상세·미결 정지 문구에 (release) 0'; Keys = @('S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16'); Fragment = '(release)'; Want = $false })
     foreach ($property in $properties) {
         $badKeys = @($property.Keys | Where-Object { $stops.ContainsKey($_) -and (([string]$stops[$_]).Contains($property.Fragment) -ne $property.Want) })
         Assert-True ('LG 실행 쪽 - ' + $property.Name) ($badKeys.Count -eq 0) ('어긋난 문구: ' + (@($badKeys | ForEach-Object { '{0}=[{1}]' -f $_, $stops[$_] }) -join ' / '))
@@ -3475,20 +3525,75 @@ function Test-StaticFlow {
     $selectorS2 = @(Get-CommandNodes -Node $selectorNode -Name 'Write-RunLog' | Where-Object { (@($_.CommandElements).Count -ge 2) -and ([string]$_.CommandElements[1].Extent.Text).Contains($selectorS2Fragment) }).Count
     Assert-Case 'R5-P5(선분기) 선분기 안 S2 줄 0' $selectorS2 0
 
-    # R5-P9(⑤a) - 선분기의 재입장 대기 호출 1 · 인자 이름(그 밖 0) · -LimitSeconds $timeoutPartyMatch · -Context '이어받기 시작' · 호출을 품은 가장 가까운 if 갈래
-    #   조건 = 패널류 넷의 -contains $screen(주석 뺀 사본 정규화 글자 정확 일치 - 집합에 하나를 더하거나 빼면 다른 글자) · $b2Stage·$b2Clock 참조 0 · S7 줄 1.
-    #   ⑤c 가 resume 갈래 호출을 더하면 '역할별 2' 로, ⑥d 가 파티장 판에 -ChallengeFewMembers 를 더하면 인자 이름 기대를 갱신합니다
+    # R5-P9(⑤a · ⑤c 5c-2) - 선분기의 재입장 대기 호출 = 역할별 2(소스 차례: Role resume 패널류·팝업·3버튼 첫 표본 갈래(호출 C) < own·next 패널류 갈래(B2 단계)) · 호출마다
+    #   인자 이름(그 밖 0) · -LimitSeconds · -Context '이어받기 시작' · 호출을 품은 가장 가까운 if 갈래 조건(주석 뺀 사본 정규화 글자 정확 일치 - 집합에 하나를 더하거나 빼면
+    #   다른 글자) · $b2Stage·$b2Clock 참조 0 · S7 줄 1(own·next 만). 호출 C 의 필드 결과 콜론 꼴 · 모드 식은 ④ FC-S13 · ⑲ 5C-S7 몫. ⑥d 가 파티장 판에 -ChallengeFewMembers 를
+    #   더하면 own·next 칸을 갱신합니다
     $panelBranchCondition = "@('popup', 'ready', 'matching', 'entry-waiting') -contains `$screen"
+    $resumeBranchCondition = "`$resumeRole -and (@('popup', 'ready', 'matching', 'entry-waiting', 'reward3') -contains `$screen)"   # 구현 명세 ⑤c 2.6-8 첫 줄
     $waitCalls = @(Get-CommandNodes -Node $selectorNode -Name 'Wait-AbyssReentry')
-    $waitArgs = @($waitCalls | ForEach-Object { (@($_.CommandElements | Where-Object { $_ -is [CommandParameterAst] } | ForEach-Object { $_.ParameterName }) -join ',') })
-    $waitLimit = (@($waitCalls | ForEach-Object { Get-CommandArgumentText -Command $_ -Parameter 'LimitSeconds' }) -join ',')
-    $waitContext = (@($waitCalls | ForEach-Object { Get-CommandArgumentText -Command $_ -Parameter 'Context' }) -join ',')
-    $waitNearest = @($waitCalls | ForEach-Object { [string](@(Get-EnclosingConditions -Node $_) | Select-Object -First 1) })
-    $waitInPanel = $(if (($waitNearest.Count -ge 1) -and (@($waitNearest | Where-Object { $_ -cne $panelBranchCondition }).Count -eq 0)) { 'OK' } else { '가장 가까운 조건=[' + ($waitNearest -join '] [') + ']' })
+    $waitRows = @($waitCalls | ForEach-Object {
+            '[{0}] {1} {2} [{3}]' -f (@($_.CommandElements | Where-Object { $_ -is [CommandParameterAst] } | ForEach-Object { $_.ParameterName }) -join ','),
+                (Get-CommandArgumentText -Command $_ -Parameter 'LimitSeconds'), (Get-CommandArgumentText -Command $_ -Parameter 'Context'),
+                [string](@(Get-EnclosingConditions -Node $_) | Select-Object -First 1)
+        })
     $b2Vars = @($selectorNode.FindAll({ param($node) ($node -is [VariableExpressionAst]) -and (@('b2Stage', 'b2Clock') -contains $node.VariablePath.UserPath) }, $true)).Count
     $s7Lines = @(Get-CommandNodes -Node $selectorNode -Name 'Write-RunLog' | Where-Object { (@($_.CommandElements).Count -ge 2) -and ([string]$_.CommandElements[1].Extent.Text).Contains(' 감지 - 입장을 기다립니다 (최대 ') }).Count
-    Assert-Case "R5-P9(⑤a) 선분기 재입장 대기 호출 1 · 인자 이름 · -LimitSeconds · -Context · 가장 가까운 갈래 조건 = $panelBranchCondition · b2Stage·b2Clock 0 · S7 줄 1" `
-        (J @($waitCalls.Count, ($waitArgs -join '/'), $waitLimit, $waitContext, $waitInPanel, $b2Vars, $s7Lines)) (J @(1, 'Game,LimitSeconds,Context', '$timeoutPartyMatch', "'이어받기 시작'", 'OK', 0, 1))
+    $waitWant = @(("[Game,Clock,Context,ReportRewardReturn,ReportFieldReturn,PanelSeen,ResumeGrace] (없음) '이어받기 시작' [{0}]" -f $resumeBranchCondition),
+        ("[Game,LimitSeconds,Context] `$timeoutPartyMatch '이어받기 시작' [{0}]" -f $panelBranchCondition))
+    Assert-Case "R5-P9(⑤a · ⑤c) 선분기 재입장 대기 호출 역할별 2(resume < own·next) · 호출마다 인자 이름 · -LimitSeconds · -Context · 가장 가까운 갈래 조건 · b2Stage·b2Clock 0 · S7 줄 1" `
+        (J @($waitCalls.Count, ($waitRows -join ' / '), $b2Vars, $s7Lines)) (J @(2, ($waitWant -join ' / '), 0, 1))
+
+    # R5c-P1 (구현 명세 ⑤c 3.7) - Role resume 전용 이름 아홉은 선분기에서 while 앞 초기화 또는 '$resumeRole' 항 조건 안에서만 대입·읽기(대기 함수도 같은 이름이라 선분기만 셈 - R4-P4 꼴)
+    $R5C_RESUME_NAMES = @('lastKind', 'insideRun', 'insideGraceRun', 'insideGraceReverted', 'resumeClock', 'quietClock', 'insideGraceClock', 'graceWindow', 'resumeWait')
+    $r5cWhile = @($selectorNode.Body.EndBlock.Statements | Where-Object { $_ -is [WhileStatementAst] }) | Select-Object -First 1
+    $r5cNameNodes = @($selectorNode.FindAll({ param($node) ($node -is [VariableExpressionAst]) -and ($R5C_RESUME_NAMES -contains $node.VariablePath.UserPath) }, $true))
+    $r5cOutside = @($r5cNameNodes | Where-Object {
+            $r5cNode = $_
+            $r5cBeforeWhile = ($null -ne $r5cWhile) -and ($r5cNode.Extent.StartOffset -lt $r5cWhile.Extent.StartOffset)
+            $r5cInResume = @(Get-EnclosingConditions -Node $r5cNode | Where-Object { $_ -cmatch '^\$resumeRole( -and |$)' }).Count -gt 0
+            -not ($r5cBeforeWhile -or $r5cInResume) } | ForEach-Object { '{0}@{1}' -f $_.VariablePath.UserPath, $_.Extent.StartLineNumber })
+    $r5cMissing = @($R5C_RESUME_NAMES | Where-Object { $r5cName = $_; @($r5cNameNodes | Where-Object { $_.VariablePath.UserPath -ceq $r5cName }).Count -eq 0 })
+    Assert-Case 'R5c-P1 선분기 Role resume 전용 이름 아홉 - 이름마다 1 이상 · while 앞 또는 $resumeRole 항 조건 밖 0' (J @(($r5cMissing -join ','), ($r5cOutside -join ','))) (J @('', ''))
+
+    # R5c-P2 (3.7 · 2.6-2 · 2.6-5) - $fieldAt 대입 2(서두 = $turnStart · ⑥ if ($resumeRole) = Get-Date) · $settleAlive 대입 2(서두 = $settleNext · 같은 if = $false). 자리 = 가장 가까운 if 조건(④ FC-S6 꼴)
+    $r5cAssignRows = @(foreach ($r5cLeft in @('$fieldAt', '$settleAlive')) {
+            (@($selectorNode.FindAll({ param($node) ($node -is [AssignmentStatementAst]) -and ($node.Left.Extent.Text -eq $r5cLeft) }, $true) |
+                ForEach-Object { '{0} = {1}@[{2}]' -f $r5cLeft, (Get-NormalizedCode -Node $_.Right), [string](@(Get-EnclosingConditions -Node $_) | Select-Object -First 1) })) -join ' | '
+        })
+    Assert-Case 'R5c-P2 $fieldAt 대입 2(서두 · ⑥ Role resume) · $settleAlive 대입 2(서두 · 같은 if)' ($r5cAssignRows -join ' || ') `
+        '$fieldAt = $turnStart@[] | $fieldAt = Get-Date@[$resumeRole] || $settleAlive = $settleNext@[] | $settleAlive = $false@[$resumeRole]'
+
+    # R5c-P3 (3.7 · 2.6-8) - ⑨ 결론 if 절 조건 = 앞 둘(2.6-8 글자) + 지금 다섯 그대로(옛 첫 갈래가 elseif) · else 0 (R4-P14 꼴 - 문장 목록 전체 글자)
+    $r5cNinthIfs = @($selectorNode.FindAll({ param($node) ($node -is [IfStatementAst]) -and (@($node.Clauses | Where-Object { (Get-NormalizedCode -Node $_.Item1) -ceq $panelBranchCondition }).Count -gt 0) }, $true))
+    $r5cNinthText = $(if ($r5cNinthIfs.Count -eq 1) { '{0} · else {1}' -f ((@($r5cNinthIfs[0].Clauses | ForEach-Object { Get-NormalizedCode -Node $_.Item1 })) -join ' || '), [int]($null -ne $r5cNinthIfs[0].ElseClause) } else { '(⑨ if {0}개)' -f $r5cNinthIfs.Count })
+    Assert-Case 'R5c-P3 ⑨ if 절 조건 = 2.6-8 앞 둘 + 지금 다섯 · else 0' $r5cNinthText `
+        ('{0} · else 0' -f ((@($resumeBranchCondition, "`$resumeRole -and (`$screen -eq 'prompt')", $panelBranchCondition, "(`$screen -eq 'inside') -and (`$insideStreak -ge 2)",
+            "(`$screen -eq 'prompt') -or (`$screen -eq 'reward3')", "(`$screen -eq 'selection') -or (`$screen -eq 'menu') -or (`$screen -eq 'detail')", "(`$screen -eq 'field') -and `$settleState.Confirmed")) -join ' || '))
+
+    # R5c-P4 (3.7 · 2.6-9) - ⑩ 마감 if 절 = $resumeRole || 미결 마감(지금 글자) · 이벤트 정리 if 첫 잎 (-not $resumeRole) (굶김·복구 항은 R4-P18)
+    $r5cTenthIfs = @($selectorNode.FindAll({ param($node) ($node -is [IfStatementAst]) -and (@($node.Clauses | Where-Object { (Get-NormalizedCode -Node $_.Item1) -ceq 'Test-AbyssMemberClockExpired -Clock $pendingClock' }).Count -gt 0) }, $true))
+    $r5cTenthText = $(if ($r5cTenthIfs.Count -eq 1) { (@($r5cTenthIfs[0].Clauses | ForEach-Object { Get-NormalizedCode -Node $_.Item1 })) -join ' || ' } else { '(⑩ if {0}개)' -f $r5cTenthIfs.Count })
+    $r5cCleanupIfs = @($selectorNode.FindAll({ param($node) ($node -is [IfStatementAst]) -and (@(Get-CommandNodes -Node $node.Clauses[0].Item2 -Name 'Clear-EventOverlay').Count -gt 0) }, $true))
+    $r5cCleanupHead = $(if ($r5cCleanupIfs.Count -eq 1) { [string]((Get-NormalizedCode -Node $r5cCleanupIfs[0].Clauses[0].Item1).StartsWith('(-not $resumeRole) -and ', [StringComparison]::Ordinal)) } else { '(정리 if {0}개)' -f $r5cCleanupIfs.Count })
+    Assert-Case 'R5c-P4 ⑩ 절 = $resumeRole || 미결 마감 · 이벤트 정리 if 첫 잎 (-not $resumeRole)' (J @($r5cTenthText, $r5cCleanupHead)) (J @('$resumeRole || Test-AbyssMemberClockExpired -Clock $pendingClock', 'True'))
+
+    # R5c-P5 (3.7 · 2.6-4) - ④ 스윕 참 갈래 직속 차례: 분류($sweepTurn = …) < 되돌림 if < $insideStreak = 0 < continue if (④ N4-P13 대기 함수 꼴 - 옛 차례면 'yield' 되돌림이 늘 거짓, 변이 5C-M1)
+    $r5cSweepIfs = @($selectorNode.FindAll({ param($node) ($node -is [IfStatementAst]) -and (@(Get-CommandNodes -Node $node.Clauses[0].Item1 -Name 'Invoke-PurchasePopupSweep').Count -gt 0) }, $true))
+    $r5cAt = @{ Classify = -1; Revert = -1; Zero = -1; Continue = -1 }
+    if ($r5cSweepIfs.Count -eq 1) {
+        $r5cSweepStatements = @($r5cSweepIfs[0].Clauses[0].Item2.Statements)
+        for ($r5cIndex = 0; $r5cIndex -lt $r5cSweepStatements.Count; $r5cIndex++) {
+            $r5cStatement = $r5cSweepStatements[$r5cIndex]
+            if (($r5cAt.Classify -lt 0) -and ($r5cStatement -is [AssignmentStatementAst]) -and ($r5cStatement.Left.Extent.Text -eq '$sweepTurn')) { $r5cAt.Classify = $r5cIndex }
+            if (($r5cAt.Revert -lt 0) -and ($r5cStatement -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $r5cStatement.Clauses[0].Item1) -ceq "`$resumeRole -and (`$sweepTurn.Action -eq 'yield') -and (`$insideStreak -gt 0)")) { $r5cAt.Revert = $r5cIndex }
+            if (($r5cAt.Zero -lt 0) -and ((Get-NormalizedCode -Node $r5cStatement) -ceq '$insideStreak = 0')) { $r5cAt.Zero = $r5cIndex }
+            if (($r5cAt.Continue -lt 0) -and ($r5cStatement -is [IfStatementAst]) -and (@($r5cStatement.FindAll({ param($node) $node -is [ContinueStatementAst] }, $true)).Count -gt 0)) { $r5cAt.Continue = $r5cIndex }
+        }
+    }
+    Assert-True 'R5c-P5 ④ 스윕 참 갈래(1개) 차례 = 분류 < 되돌림 if < $insideStreak = 0 < continue if' `
+        (($r5cSweepIfs.Count -eq 1) -and ($r5cAt.Classify -ge 0) -and ($r5cAt.Classify -lt $r5cAt.Revert) -and ($r5cAt.Revert -lt $r5cAt.Zero) -and ($r5cAt.Zero -lt $r5cAt.Continue)) `
+        ('스윕 if {0} · 분류 {1} · 되돌림 {2} · 연속 0 {3} · continue {4}' -f $r5cSweepIfs.Count, $r5cAt.Classify, $r5cAt.Revert, $r5cAt.Zero, $r5cAt.Continue)
 
     # V18 안내 줄 고정 사본($POPUP_NOTICE_LINE) ≡ 재입장 대기 소스 - V18 의 '안내 0' 이 문구 어긋남으로 공허하게 통과하지 않게 묶습니다(R5-P5(선분기) 조각
     #   동치와 같은 이유 - 워커 문구가 바뀌면 이 줄이 FAIL. 이 사본을 소스와 견주는 곳은 이 줄뿐 - test_abyss_party_leader N4-P14 는 자기 사본을 견줌)
@@ -3719,7 +3824,7 @@ try {
     $defaultText = '(대입 없음)'
     if ($handoffTop.Count -eq 1) {
         $defaultValue = Invoke-Expression $handoffTop[0].Right.Extent.Text
-        $defaultParts = foreach ($fieldName in @('Role', 'Nonce', 'CleanupOnly', 'FreshEntry', 'StartScreen', 'AfterEntry', 'JournalState')) {
+        $defaultParts = foreach ($fieldName in @('Role', 'Nonce', 'CleanupOnly', 'FreshEntry', 'StartScreen', 'AfterEntry', 'JournalState', 'Stage', 'At', 'RetryClicks')) {
             $field = Get-AbyssJournalField -Object $defaultValue -Name $fieldName
             if (-not $field.Has) { '{0}=(필드 없음)' -f $fieldName }
             elseif ($null -eq $field.Value) { '{0}=null' -f $fieldName }
@@ -3728,7 +3833,7 @@ try {
         }
         $defaultText = @($defaultParts) -join ' · '
     }
-    Assert-Case 'R4-P13 ② 기본값(명세 2.1 표) - Role none · Nonce 빈 값 · CleanupOnly·FreshEntry 거짓 · StartScreen 빈 값 · AfterEntry null · JournalState ok' $defaultText $HANDOFF_DEFAULT_TEXT
+    Assert-Case 'R4-P13 ② 기본값(명세 2.1 표 · 구현 명세 ⑤c 2.1) - Role none · Nonce 빈 값 · CleanupOnly·FreshEntry 거짓 · StartScreen 빈 값 · AfterEntry null · JournalState ok · Stage 빈 값 · At null · RetryClicks 0' $defaultText $HANDOFF_DEFAULT_TEXT
     $roleNoneAssigns = @(Find-WorkerAssignments -Left '$roleNone')
     $roleNoneAt = -1
     if ($null -ne $roleNoneStatement) { $roleNoneAt = $roleNoneStatement.Extent.StartOffset }

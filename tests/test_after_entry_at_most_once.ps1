@@ -28,7 +28,7 @@
 #              Stop-WorkerTailExit('WORKER-EXIT:N' 예외)로 바꿔 점소싱합니다. 사이의 run:18527 if 는 건너뜁니다 - 참 갈래 = 로그 1줄(정적 단언으로 모양 고정),
 #              거짓 갈래 = 카드 클릭·입장 흐름(이 하니스는 '선택 화면 시작 → 카드 → 입장' 을 일어난 것으로 봄). 앞 변수는 운영 대입과 같은 식(env 읽기 · 기본값 ·
 #              $startExitDetected 문장을 원문 그대로). 다음 기동은 GUI 원문 기동 env(Set-HandoffLaunchEnv → Resolve) + 실제 Consume-Handoff, 코드 10·4 뒤의 GUI
-#              끝 처리는 GUI 원문 Complete-AbyssExitJournal(명세 3.3 저장소 층 '다음 기동'), 수동 시작의 시작 게이트는 GUI 원문 S3(Get-AbyssStartJournalAction - OK1·OK11).
+#              끝 처리는 GUI 원문 Complete-AbyssExitJournal(명세 3.3 저장소 층 '다음 기동'), 수동 시작의 시작 게이트는 GUI 원문 S3(Get-AbyssStartJournalAction - OK1·OK11·OK13).
 #              Role≠none 기동은 시작 구간 A 안에서 실제 선분기(Invoke-AbyssHandoffStart - 분류 순수 함수·필드 확정·정지 함수·own 닫기·ownFreshEntry 생성 전부 실제)를
 #              지납니다 - 화면은 아래 화면 모형(+ 행이 정하는 시간표: 가상 시계 초 → 화면, 대기 모의가 시계를 밀 때 적용)이고 판독 모의는 그 화면의 하단 판독문
 #              (실측 모양)을 S 판정의 스태시에 둡니다(선분기의 순수 서명 함수 Test-AbyssRewardText·Test-AbyssEntryWaitingText·Test-AbyssFewMembersPopupText 는 실제)
@@ -51,6 +51,9 @@
 # 구현 명세 ⑤b6 에서 고친 것(3.4 ⑳ - 다음 항목의 입장 방식이 다르거나 다음 항목이 없으면 결정 'entry-change' → 옛 나가기): R6-RC1 의 결정 사유 switch 캡처를 대입 대상
 #   $otherCause 로 고름('exit' 갈래에 원인 조각 switch 둘이 더해짐) · R6-RC1 의 다음 항목 입력 두 줄(env HONEYNOGI_CUSTOM_NEXT = 픽스처 1번 토큰 · 워커 $script:customNext = 그 토큰 해석 -
 #   비우면 'entry-change' 라 'other' 끝에 닿지 않음) · 픽스처 1번을 같은 입장 방식(혼자하기)의 다른 던전으로(⑯ 과 같음).
+# 구현 명세 ⑤c 에서 더한 것(3.6 ⑳): RK1 - 재개 기동(GUI 원문 Set-HandoffLaunchEnv -ResumeNonce · Invoke-GuiLaunch 에 -ResumeNonce 를 더함) → 재개 워커(실제 선분기 재개 열 -
+#   던전 안 2연속 → 승계 → 재입장 완료 끝 exit 0 · 키 0 - 승계 판단은 test_abyss_resume_reentry 몫) → GUI 틱 모양(applied · 전진 - 틱 판정은 test_abyss_handoff_gui RZ3 · H38 · H39) → next 워커 Space · B 1회씩 → 끊김 →
+#   재기동 next 키 0 · 판 합계 Space 1 · B 1. 재개 시계의 혼자하기 예산 $timeoutEntry 를 상수 목록에 더함(행 안 $script:dungeonMode = 'solo' 일 때만 읽힘).
 # 다른 파일이 지키는 것: 새 워커 journal 함수의 자리·모양(묶음 끝 표지 뒤 · exit·try 0 · 클로저 수 · 'Changed' 모양 - S9) = test_abyss_journal_store W-ONLY ·
 #   Invoke-AfterEntryKeys 원문 제약(함수 이름 두 개 · 첫 숫자 대기 1200) = test_after_entry_popup · test_guard_constants · 고정 단언 갱신(명세 3.4) = 각 파일.
 using namespace System.Management.Automation.Language
@@ -110,7 +113,7 @@ $GUI_FUNCTION_NAMES = @(
     'Get-CustomCanonicalOwner', 'Get-CustomFingerprint', 'Get-CustomOrderKey', 'Format-CustomItemToken', 'ConvertTo-CustomMarkerOwnerJson',
     'New-CustomMarkerOwnerJson', 'Get-AbyssJournalLockedGuide', 'Get-AbyssJournalCorruptGuide', 'Get-InsideHandoffStopReason',
     'Complete-AbyssExitJournal', 'Get-AbyssExitStopReason',
-    # 수동 시작의 시작 게이트 S3(OK1·OK11 - 이어받을 클리어·재개 기록이 없으면 none: 마무리 복구·재개 예약 없이 일반 기동으로)
+    # 수동 시작의 시작 게이트 S3(OK1·OK11·OK13 - 이어받을 클리어·재개 기록이 없으면 none: 마무리 복구·재개 예약 없이 일반 기동으로)
     'Get-AbyssStartJournalAction', 'Read-AbyssStartJournal', 'Get-AbyssStartJournalRefusal',
     # 커스텀 코드 1 의 오류 대응 판정(OK13 - 마커 없으면 같은 항목 재시도 2회 → 3회째 정지, gui:11161~11211 의 Get-CustomErrorAction)
     'Get-CustomErrorAction')
@@ -732,10 +735,11 @@ $config = ([pscustomobject]@{ afterEntry = [pscustomobject]@{ keyDelayMs = 500 }
 # 선분기가 빌려 쓰는 파티원 상수 셋(W · 알 수 없음 30초 · 스윕 연속 한도 - 명세 2.5 ④·⑩ · B20 '새 상수 0')도 소스 대입 그대로 - 빠지면 시계가 0초로 돌아
 # 첫 알 수 없음 회전에서 이벤트 정리를 부르는 등 모형이 소스와 달라집니다. 재입장 대기의 무변화 창($abyssReclickQuietSeconds - 구현 단위 ⑤a 부터 선분기 B2 단계가
 # 그 함수를 부름)도 같은 이유로 소스 대입 그대로입니다(보고 끔 호출이라 결과는 같음 - 구현 명세 ④ C3). 복귀 전체 상한($abyssReturnTotalLimitSeconds - 구현 단위 복귀 연장)이 빠지면
-# 연장 예산이 음수라 복귀 루프가 조용히 연장 0 으로 돕니다
+# 연장 예산이 음수라 복귀 루프가 조용히 연장 0 으로 돕니다. 재개 시계의 혼자하기 예산($timeoutEntry - 구현 명세 ⑤c RK1 · Get-AbyssReentryLimitSeconds)이 빠지면 재개 시계가
+# 0초로 돌아 시작 줄 예산이 0 으로 찍히고 유예만으로 끝납니다
 foreach ($settingLeft in @('$timeoutClear', '$timeoutExit', '$timeoutHud', '$timeoutAbyssMenu', '$timeoutAbyssSelect', '$timeoutPartyMatch',
         '$memberFieldSettleSeconds', '$memberUnknownOverlaySeconds', '$memberSweepStreakLimit', '$ptClearCenter', '$afterEntryDelayMs', '$abyssReclickQuietSeconds',
-        '$abyssReturnTotalLimitSeconds')) {
+        '$abyssReturnTotalLimitSeconds', '$timeoutEntry')) {
     $settingAssign = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq $settingLeft) }) | Select-Object -First 1
     if ($null -eq $settingAssign) { $extractionProblems.Add("워커 최상위 값 대입 $settingLeft 을(를) 찾지 못했습니다"); continue }
     try { Invoke-Expression $settingAssign.Extent.Text } catch { $extractionProblems.Add("워커 값 대입 $settingLeft 실행 실패: $($_.Exception.Message)") }
@@ -1172,21 +1176,24 @@ function Invoke-AbyssExitClick {
 }
 function Complete-AbyssOtherSelection {
     # '다른 던전 가기' 끝(구현 명세 ⑤b5 - 본류 보상 화면 꼬리의 'other' 갈래가 부름). 이 하니스는 그 안(대기 · 확인 · 폴백)을 모형하지 않습니다 - 행이
-    # $script:otherEndCrash 를 세우면 'confirmed' 뒤 exit 전 끊김을 흉내 내는 예외(R6-RC1 의 워커 1), 아니면 닿으면 안 됨(다른 행은 모드 입력이 없어 경로 거짓 - 옛 나가기)
+    # $script:otherEndCrash 를 세우면 'confirmed' 뒤 exit 전 끊김을 흉내 내는 예외(R6-RC1 의 워커 1), 아니면 닿으면 안 됨(다른 행은 모드 입력이 없어 경로 거짓 - 옛 나가기).
+    # 서명은 ⑤c 2.9 -ExitOnly 까지(서명 대조)
     param(
         [System.Diagnostics.Process]$Game,
         [ValidateSet('ready', 'rematch-cancelled')][string]$Ending = 'ready',
-        [string]$Nonce = ''
+        [string]$Nonce = '',
+        [switch]$ExitOnly
     )
     $script:events.Add('other-end:' + $Ending)
     if ($script:otherEndCrash) { throw $OTHER_END_CRASH_MESSAGE }
     throw 'TEST-UNREACHABLE: Complete-AbyssOtherSelection'
 }
 function Complete-AbyssRetrySelection {
-    # '다시 하기' 끝(구현 명세 ⑤b5) - 이 파일의 행은 '다시 하기' 결정에 닿지 않습니다(닿으면 행 예외로 드러남)
+    # '다시 하기' 끝(구현 명세 ⑤b5 · ⑤c 2.8 -PriorSends) - 이 파일의 행은 '다시 하기' 결정에 닿지 않습니다(닿으면 행 예외로 드러남)
     param(
         [System.Diagnostics.Process]$Game,
-        [string]$Nonce
+        [string]$Nonce,
+        [int]$PriorSends = 0
     )
     throw 'TEST-UNREACHABLE: Complete-AbyssRetrySelection'
 }
@@ -1214,7 +1221,7 @@ function Get-CustomCurrentContext {
 }
 $lblStatus = [pscustomobject]@{ Text = ''; ForeColor = $null }
 $script:customConfigSection = $ABYSS_SECTION   # 시작 게이트 S3 가 어비스 커스텀 시작으로 보는 섹션(GUI 원문 변수)
-$script:abyssPartyRetryEnabled = $false        # 재입장 재개 기능 - ② 빌드는 꺼짐(GUI 사본 gui:2332)
+$script:abyssPartyRetryEnabled = $false        # 재입장 재개 스위치 - 이 파일에서 읽는 곳은 시작 게이트 S3(OK1 · OK11 · OK13 - 재입장 요청 기록 없음)뿐이라 값과 무관합니다(RK1 은 재개 기동을 직접 넘김 · 켜짐 · 꺼짐 갈래는 ⑯ · ⑰ 몫)
 $rbCatAbyss = [pscustomobject]@{ Checked = $true }
 $rbModeParty = [pscustomobject]@{ Checked = $false }
 $rbAbyssPartyMember = [pscustomobject]@{ Checked = $false }
@@ -1907,7 +1914,8 @@ function Invoke-Worker {
 function Invoke-GuiLaunch {
     # 다음 기동 env - GUI 원문 Set-HandoffLaunchEnv(먼저 비움 → 범위 술어 → Resolve 가 후보를 고르고 launched 로 적음). 커스텀 = 행 컨텍스트, 비커스텀 = 같은 실행 id.
     # -LaunchRestart = 오류 뒤 같은 항목 재시작($script:customRestart - 코드 1 자동 재시작은 끝 처리 없이 곧바로 기동, gui:11185~11202)
-    param([bool]$LaunchRestart = $false)
+    # -ResumeNonce = 재입장 재개 기동(코드 1 라우팅 · 시작 게이트 S3 의 Start-NextCycle -PreserveMarker -ResumeNonce 가 넘기는 값 - 빈 값이면 지금처럼, 구현 명세 ⑤c RK1)
+    param([bool]$LaunchRestart = $false, [string]$ResumeNonce = '')
     $script:mainCategory = 'battle'
     $rbCatAbyss.Checked = $true
     $script:customActive = [bool]$script:rowCustom
@@ -1918,7 +1926,7 @@ function Invoke-GuiLaunch {
     $launchThrown = ''
     $launchOk = '(호출 실패)'
     try {
-        $launchOk = [string](Set-HandoffLaunchEnv -CustomContext $script:rowContext)
+        $launchOk = [string](Set-HandoffLaunchEnv -ResumeNonce $ResumeNonce -CustomContext $script:rowContext)
     } catch {
         $launchThrown = [string]$_.Exception.Message
     }
@@ -1926,6 +1934,7 @@ function Invoke-GuiLaunch {
         Ok        = $launchOk
         Kind      = [string]$script:lastLaunchKind
         NonceEnv  = (Get-NonceLabel ([string][Environment]::GetEnvironmentVariable('HONEYNOGI_HANDOFF_NONCE', 'Process')))
+        ResumeEnv = [string][Environment]::GetEnvironmentVariable('HONEYNOGI_RESUME_REENTRY', 'Process')
         Resolve   = (@($script:resolveResults) -join ',')
         GuiEvents = (@($script:guiEvents) -join ' || ')
         Thrown    = $launchThrown
@@ -3497,8 +3506,8 @@ function Test-StaticRows {
         (J @(2, 2, "if (`$LeaveEntryReason) { Close-AbyssKeyEntryOnLeave -Reason `$LeaveEntryReason -Screen 'selection-proven' }",
                 "if (`$LeaveEntryReason) { Close-AbyssKeyEntryOnLeave -Reason `$LeaveEntryReason -Screen 'field' }", "String = ''"))
     # S2 - -LeaveEntryReason 을 넘기는 호출부 = 정확히 4 ('left' · 본류 끝 · 보상 시작 · S 시작) - 'left' 는 'abandoned-death-exit', 뒤 셋은 같은 정리 전용 식 / 넘기지 않는
-    #   호출 3(ESC 메뉴 · 필드 시작 - 입장 전 · '다른 던전 가기' 끝 함수의 폴백 ② - 구현 명세 ⑤b3 3.4: 정상 판은 cleared 가 열쇠 항목을 이미 닫아 빈 값 ·
-    #   기록 실패 판의 열린 항목은 ⑤b2 어-46 '수용')
+    #   호출 4(ESC 메뉴 · 필드 시작 - 입장 전 · '다른 던전 가기' 끝 함수의 폴백 ② - 구현 명세 ⑤b3 3.4: 정상 판은 cleared 가 열쇠 항목을 이미 닫아 빈 값 ·
+    #   기록 실패 판의 열린 항목은 ⑤b2 어-46 '수용' · 재개 멈춤 끝 Complete-AbyssResumeStop - 구현 명세 ⑤c 2.11, -LeaveEntryReason 0 은 ⑲ 5C-S5 가 고정)
     $returnCallNodes = @(Get-CommandAsts -Root $workerAst -Name 'Return-ToAbyssSelection')
     $withLeave = @($returnCallNodes | Where-Object { Test-CommandHasParameter -CommandAst $_ -ParameterName 'LeaveEntryReason' })
     $withoutLeave = @($returnCallNodes | Where-Object { -not (Test-CommandHasParameter -CommandAst $_ -ParameterName 'LeaveEntryReason') })
@@ -3520,7 +3529,7 @@ function Test-StaticRows {
     Assert-Case 'R2-S2 -LeaveEntryReason 호출부(자리=원문 - 정렬) · 넘기지 않는 호출 원문' `
         (J @((@($placeTexts | Sort-Object) -join ' || '), (@($withoutLeave | ForEach-Object { Get-NormalizedCode -Node $_ } | Sort-Object) -join ' || '))) `
         (J @((@($expectedPlaces | Sort-Object) -join ' || '), ((@('Return-ToAbyssSelection -Game $game -SafeStopExitCode 10', 'Return-ToAbyssSelection -Game $game -SafeStopExitCode 10',
-                    'Return-ToAbyssSelection -Game $Game -SafeStopExitCode $returnExitCode') | Sort-Object) -join ' || ')))
+                    'Return-ToAbyssSelection -Game $Game -SafeStopExitCode $returnExitCode', 'Return-ToAbyssSelection -Game $Game -SafeStopExitCode 0') | Sort-Object) -join ' || ')))
     # S3 - 닫기 함수 문자열에 [완료]·'선택 화면 복귀 확인' 0 · 성공 줄 문자열 1 · 그것이 'changed' 갈래 안
     $closeStrings = @()
     if ($null -ne $closeAst) { $closeStrings = @($closeAst.FindAll({ param($node) ($node -is [StringConstantExpressionAst]) -or ($node -is [ExpandableStringExpressionAst]) }, $true)) }
@@ -3695,6 +3704,52 @@ function Test-RowR6RC1 {
         (J @('none', '4', 1, 'True', 1, 0, 0, 0, '', 0))
 }
 
+# ===== 구현 명세 ⑤c - 재개 기동의 키 사슬 (3.6 ⑳ RK1) =====
+function Test-RowRK1 {
+    # RK1 (구현 명세 ⑤c 3.6 ⑳ · 1.7 A · 1.9 InsideHandoff 행) - AE1 꼴 워커 셋: 재개 기동(GUI 원문 -ResumeNonce - 후보 고르기 ① 이 그 항목을 launched 로) → 재개 워커
+    #   (실제 선분기 재개 열: 던전 안 2연속 → 승계 → 재입장 완료 끝 exit 0 · 키 0 · 시작 줄 예산 = 혼자하기 $timeoutEntry) → GUI 틱 모양(applied · 전진 - 틱 판정 자체는
+    #   test_abyss_handoff_gui RZ3 · H38 · H39) → next 워커(던전 안 이어받기) Space · B 1회씩 → 클리어 대기에서 끊김 → 재기동 next 키 0('이미 보낸 키' 2줄) · 판 합계 Space 1 · B 1.
+    #   재개 워커가 던전 안 키를 보내면(변이 5C-M27 첫 꼴) 재개 워커 키와 판 합계가 2 가 되고, 재입장 없이 끝나면 next 기동 · 항목 칸이 갈립니다. 승계(Set-AbyssResumeCommit)
+    #   판단은 test_abyss_resume_reentry RS1 · RS6 몫 - 커스텀 행이라 지정 시각 판단값이 늘 빈 값이어서 이 행에서는 갈리지 않음
+    Initialize-Row -Custom $true
+    Set-AfterEntryConfig
+    $resumeEntry = New-FixtureEntry -Stage 'retry-clicked' -Nonce $NONCE_A -Owner (ConvertTo-FiveFieldOwner (Get-RowCanonicalOwner -OwnerIndex 0)) `
+        -NextOwner (ConvertTo-FiveFieldOwner (Get-RowCanonicalOwner -OwnerIndex 1)) -Generation $CONTEXT_GENERATION -Section $ABYSS_SECTION -RunId $ROW_RUN_ID `
+        -LaunchState 'pending' -Decision 'retry' -AfterIndex 0 -AfterTotal $null -AfterKeys $null
+    $resumeEntry.attempts = 1
+    $resumeEntry.retryClicks = 1
+    Write-FixtureJournal -Entries @($resumeEntry)
+    $script:dungeonMode = 'solo'
+    try {
+        $launch = Invoke-GuiLaunch -LaunchRestart $false -ResumeNonce $NONCE_A
+        $resumeRun = Invoke-Worker -WorkerStart 'inside' -WorkerClear 'halt' -KeepHandoffEnv
+        $afterResume = Format-DiskEntry (Get-DiskEntry -Nonce $NONCE_A)
+        # GUI 틱(재입장 실행부)이 남기는 모양 - 이 항목 적용 · 진행 전진(다음 판 = 1번 칸). 필수 기록의 nextOwner 확정 · launched 유지는 워커가 적은 값 그대로
+        $script:editNonce = $NONCE_A
+        Edit-DiskJournal -Edit { param($journal) $journal.applied = [object[]]@(@($journal.applied) + $script:editNonce) }
+        $script:rowContext = New-AbyssContext -Index 1 -Generation $CONTEXT_GENERATION
+        $nextLaunch = Invoke-GuiLaunch -LaunchRestart $false
+        $nextRun = Invoke-Worker -WorkerStart 'inside' -WorkerClear 'crash' -KeepHandoffEnv
+        $afterNext = Format-DiskEntry (Get-DiskEntry -Nonce $NONCE_A)
+        $restartLaunch = Invoke-GuiLaunch -LaunchRestart $true
+        $restartRun = Invoke-Worker -WorkerRestart $true -WorkerStart 'inside' -WorkerClear 'halt' -KeepHandoffEnv
+    } finally {
+        $script:dungeonMode = $null
+        $script:abyssRetryTimeVerdict = $null
+        $script:abyssRetryCommitted = $null
+    }
+    Assert-Case 'RK1 [본류 층] 재개 기동 → 재개 워커(키 0 · 재입장 완료 끝) → GUI 틱 → next 워커 Space·B 1회씩 → 재기동 키 0 · 판 합계' `
+        (J @($launch.Kind, $launch.NonceEnv, $launch.Resolve, $launch.ResumeEnv, $resumeRun.Role, $resumeRun.NonceLabel, $resumeRun.ExitCode, (Format-KeyCounts -Keys $resumeRun.PressList),
+                $resumeRun.KeyCalls, $resumeRun.EnteredCalls, $resumeRun.StartScreen, $resumeRun.LastDone.EndsWith(" [terminal=InsideHandoff nonce=$NONCE_A]"),
+                (Get-LineCount -Lines $resumeRun.Logs -Prefix ('[어비스] 재입장 재개 시작 - 입장 대기 {0}초 ' -f $timeoutEntry)), $afterResume,
+                $nextLaunch.Kind, $nextLaunch.NonceEnv, $nextLaunch.Resolve, $nextLaunch.ResumeEnv, $nextRun.Role, $nextRun.AfterEntryIndex, (Format-KeyCounts -Keys $nextRun.PressList), $nextRun.Thrown,
+                $afterNext, $restartLaunch.Kind, $restartLaunch.NonceEnv, $restartRun.Role, $restartRun.AfterEntryIndex, (Format-KeyCounts -Keys $restartRun.PressList),
+                (Get-LineCount -Lines $restartRun.Logs -Fragment '이전 실행이 이미 보낸 키라'), $restartRun.Halted, (Get-RowKeyTotals))) `
+        (J @('resume', 'NA', 'ok/resume', '1', 'resume', 'NA', '0', 'Space 0 · B 0', '', 0, '', 'True', 1, 'reentered/launched/0/null/null/False//',
+                'next', 'NA', 'ok/next', '', 'next', '0', 'Space 1 · B 1', 'CRASH-CLEAR-WAIT', 'reentered/launched/2/2/[32,66]/False//',
+                'next', 'NA', 'next', '2', 'Space 0 · B 0', 2, 'True', 'Space 1 · B 1'))
+}
+
 # ===== 실행 =====
 try {
     # ① 추출 확인 · exit 치환(동작 행보다 먼저 - 명세 2.0-8) · 서명 대조
@@ -3750,7 +3805,7 @@ try {
         @{ Name = 'OK9'; Needs = $handoffReady }, @{ Name = 'OK10'; Needs = $handoffReady }, @{ Name = 'OK11'; Needs = $handoffReady }, @{ Name = 'OK12'; Needs = $handoffReady },
         @{ Name = 'OK13'; Needs = $handoffReady },
         @{ Name = 'R2C4'; Needs = $handoffReady }, @{ Name = 'R2C6'; Needs = $handoffReady }, @{ Name = 'R2C8'; Needs = $handoffReady },
-        @{ Name = 'R2E3'; Needs = $handoffReady }, @{ Name = 'R2E4'; Needs = $handoffReady },
+        @{ Name = 'R2E3'; Needs = $handoffReady }, @{ Name = 'R2E4'; Needs = $handoffReady }, @{ Name = 'RK1'; Needs = $handoffReady },
         @{ Name = 'R2LeftFinish'; Needs = $mainReady }, @{ Name = 'R6RC1'; Needs = $mainReady },
         @{ Name = 'TC'; Needs = $combinedReady })
     foreach ($rowGroup in $ROW_GROUPS) {

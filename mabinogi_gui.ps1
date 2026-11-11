@@ -482,7 +482,7 @@ function Get-AbyssJournalTimeText {
 
 function ConvertFrom-AbyssJournalTime {
   # journal 시각 문자열 → [DateTime](Kind Local). 빈 값·형식 오류는 $null. 쓰기 형식과 짝을 이 묶음에 고정해 두는 이유:
-  # 재개 마감(retryClicked + 300초)처럼 뒤 단계가 이 값을 계산에 씁니다(구현 명세 ① 5절 A2 ⑦).
+  # 재개 시계(New-AbyssResumeClock - 기준 시각 = at.retryClicked, 없으면 at.retryAttempt · 예산은 모드 예산 Get-AbyssReentryLimitSeconds)가 이 값을 계산에 씁니다(구현 명세 ① 5절 A2 ⑦ · 설계 v11 R5 4.3).
   param($Text)
   if ([string]::IsNullOrWhiteSpace([string]$Text)) { return $null }
   try {
@@ -1379,7 +1379,7 @@ function Remove-WorkerDoneMarkerTails {
   #  ' (start-unknown)'                        : 이어받기 시작 화면을 확인하지 못한 정지 - 재전달 표지
   #  ' (ownFreshEntry)'                        : 받은 항목 없이 새 입장을 확인한 진행 줄(정지 아님)
   #  ' (release)'                              : 놓아줌 - 워커가 그 항목의 판이 끝났다고 정한 정지
-  # ' (post-clear)' 는 넣지 않습니다 - 그 표지의 화면 숨김은 그 표지를 실제로 내는 뒤 단위 몫입니다(이 빌드에서는 생기지 않는 재개 기능 꺼짐 정지 줄에만 있음).
+  # ' (post-clear)' 는 넣지 않습니다 - 워커가 이 표지를 내지 않습니다(설계 R6 4절 - 계상은 그 판의 기록이 맡고, 표지를 담은 마지막 줄인 재개 꺼짐 정지 줄은 구현 단계 ⑤c 에서 없어졌습니다).
   # (문자열 가공뿐인 순수 함수라 실패 경로가 없습니다)
   param([AllowEmptyString()][string]$Text)
   $markerTails = @(' (selection-overlay)', ' (menu-overlay)', ' (locked)', ' (start-unknown)', ' (ownFreshEntry)', ' (release)')
@@ -2366,7 +2366,7 @@ $script:finishOnlyHold = $null       # 마무리 실행(finish-only) 기동의 �
 $script:abyssErrorStreak = 0         # 비커스텀 어비스 재입장(reentered) 뒤 코드 1 연속 수 - 세션 상한 판단(설계 v10 6.1 코드 1 라우팅)
 $script:customResumePending = $false # 다음 시작의 첫 기동을 재입장 재개(resume) 수동 1회로 띄울지 (시작 게이트 S3 가 예약 - 설계 v10 6.3)
 $script:customResumeNonce = ''       # 그 재개 대상 항목의 nonce
-$script:abyssPartyRetryEnabled = $false # 어비스 '다시 하기' 이어받기(retry·resume) 기능 플래그의 GUI 사본 - 이 빌드는 꺼짐(설계 v10 7절 - retry 를 켜는 단위와 함께만 켬)
+$script:abyssPartyRetryEnabled = $true # 재입장 재개(resume) 관문 - 코드 1 라우팅과 시작 게이트 S3 두 곳만 읽습니다. 거짓이면 재개 기동이 없습니다(오류 정지 · S3 시작 거부 - 구현 단계 ⑤c 앞 동작). 워커에는 사본이 없습니다(같은 exe 로만 배포 · 재개 기동 여부는 GUI 가 정함). 참의 전제 = 워커 Invoke-AbyssHandoffStart 의 Role resume 시작 루프(S19 제거는 회귀 SW1 · 시작 루프는 ⑲). 파티장 '다시 하기' 관문은 이 변수가 아닙니다(구현 단위 ⑥d 가 따로 둠)
 $script:abyssPendingLastTag = ''     # 완료 기록 대기열 함수(Add-AbyssPendingEntry·Invoke-AbyssPendingAdvance)가 이번 호출에서 실패한 저장소 태그(locked/corrupt/io-failed/expect-failed - 성공·그 밖 실패는 빈 값). 정지 문구의 잠금 파일 안내는 이 값으로 정합니다(Get-AbyssPendingStopReason - 단계 2.6 구현 리뷰)
 # --- 커스텀 반복(던전/어비스 리스트 모드) 실행 컨텍스트 ---
 $script:customActive = $false        # 이번 실행이 커스텀 반복 모드인지 (시작 시 확정 - 실행 중 라디오 변경 영향 차단)
@@ -8456,7 +8456,7 @@ function Add-AbyssPendingEntry {
   # (Invoke-AbyssPendingAdvance). 원소 = { owner(5필드 fingerprint·orderKey·lap·index·item), generation, nonce, stage, createdAt } - 세대는
   # journal 항목처럼 owner 의 형제 필드라 반영 쪽이 항목과 같은 대조(Test-AbyssJournalOwnerMatch)를 씁니다.
   #  -Stage      : inside-handoff(재입장 실행부의 진행 저장 실패) · code1-routed(코드 1 재입장 경로의 같은 실패) · finish-only-complete(마무리
-  #                실행 완주) 셋만 받습니다(명세 5절 B7 - post-clear-stop 은 그 기록 자리를 정하는 뒤 단위가 더함)
+  #                실행 완주) 셋만 받습니다(명세 5절 B7 - post-clear-stop 은 받지 않습니다: 설계 R6 4.5 로 그 기록을 쓰지 않습니다)
   #  -Owner      : 그 판의 owner(Get-CustomCanonicalOwner 반환·보류 Owner·journal 의 nextOwner - 해시테이블·JSON 객체 공용). 5필드만 옮깁니다
   #  -Generation : 그 판의 진행 세대(0 이상 정수)   -Nonce : 그 판의 완료 기록 nonce(반영 때 applied 에 들어감 - 같은 판의 원소 둘이 같은
   #                nonce 일 수 있음)
@@ -10151,7 +10151,7 @@ function Stop-AllRun {
 # 함수에 두고(tests\test_abyss_handoff_gui.ps1 이 이름으로 돌림), 호출 자리는 tests\test_time_until_mode.ps1 T4-e 원문 패턴이 지킵니다.
 # 이 묶음의 함수는 예외를 밖으로 내지 않습니다(명세 5절 A4) - 타이머 종료 처리는 $script:worker = $null 뒤라 예외가 나가면 다음 워커 없이
 # 실행 상태로 남습니다. 정지하는 함수는 사유·심각도를 Stop-AllRun 앞에서 정합니다(Stop-AllRun 이 기동 종류·보류를 비움).
-# 재입장 꼬리·reentered 는 어비스 '다시 하기'(혼자하기·우연한 만남)의 재입장 확인이 내므로 재입장 실행부·마무리 실행이 실제 게임에서 생깁니다(구현 명세 ⑤b4·⑤b5). 재개(resume) 기동은 이 빌드에서 꺼져 있어(구현 단계 ⑤c) 진리표 회귀로만 돕니다.
+# 재입장 꼬리·reentered 는 어비스 '다시 하기'(혼자하기·우연한 만남)의 재입장 확인이 내므로 재입장 실행부·마무리 실행이 실제 게임에서 생깁니다(구현 명세 ⑤b4·⑤b5). 재개(resume) 기동은 코드 1 라우팅과 시작 게이트 S3 가 띄웁니다(구현 단계 ⑤c - 스위치 $script:abyssPartyRetryEnabled).
 
 function Get-AbyssExitStopReason {
   # 종료 처리의 완료 기록 오류 정지 사유 꼬리 (설계 v11 R1 3.5 ⓑ) - 워커 [완료] 사유에 재입장 표지([terminal=InsideHandoff …])가 있으면
@@ -10173,10 +10173,10 @@ function Get-WorkerDoneMarkers {
   #                      (구현 명세 ② 2.7 G2 · 설계 v11 R4 3.3 - 안·밖 불명이면 판 소유권을 바꾸는 기록 없이 넘긴 기록을 보존)
   #  - Release           ' (release)'           : 놓아줌 - 워커가 그 항목의 판이 끝났다고 스스로 정한 정지(next 의 보상·클리어 화면 시작 · 이어받기 입장 대기 마감 ·
   #                      새 판 기록 실패). 재전달 집합에 넣지 않고 지금처럼 닫습니다 - Test-AbyssKeepLaunchOnStop 의 열어 둠도 이 표지로 끕니다(구현 명세 ② J22)
-  #  - PostClear         ' (post-clear)'        : 클리어 뒤 조건 정지 - 유효한 클리어 기록이 없을 때 이 표지로 1회 계상(설계 v10 6.1 ④)
+  #  - PostClear         ' (post-clear)'        : 클리어 뒤 조건 정지 - 유효한 클리어 기록이 없을 때 이 표지로 1회 계상(설계 v10 6.1 ④) - 지금 워커는 이 표지를 내지 않습니다(설계 R6 4절 - 판별 자리만 남겨 진리표로 지킵니다)
   #  - InsideHandoffNonce : 재입장 완료 줄 꼬리 '[terminal=InsideHandoff nonce=<guid>]' 의 nonce(없으면 빈 값)
-  # 잠금 표지는 어비스 시작의 완료 기록 읽기(워커 Consume-Handoff)가, 선택 화면·ESC 메뉴·시작 화면 미확인·놓아줌 표지는 이어받기 기동(own·next)이 냅니다
-  # (구현 명세 ② 2.1·2.5). 재입장 꼬리는 어비스 '다시 하기' 의 재입장 확인이 냅니다(구현 명세 ⑤b4·⑤b5). 재개·클리어 뒤 표지는 뒤 단위입니다 - 이 빌드에서는 생기지 않고, 판별 자리를 먼저 두어 진리표로 지킵니다.
+  # 잠금 표지는 어비스 시작의 완료 기록 읽기(워커 Consume-Handoff)가, 선택 화면·ESC 메뉴·시작 화면 미확인·놓아줌 표지는 이어받기 기동(own·next - 선택 화면·ESC 메뉴 표지는 재개도)이 냅니다
+  # (구현 명세 ② 2.1·2.5). 재입장 꼬리는 어비스 '다시 하기' 의 재입장 확인이 냅니다(구현 명세 ⑤b4·⑤b5). 클리어 뒤 표지는 워커가 내지 않습니다(설계 R6 4절) - 판별 자리만 남아 진리표로 지킵니다.
   # own·next·마무리 실행 기동의 클리어 전 정지는 표지와 무관하게 넘긴 nonce 를 열어 둡니다(구현 명세 ② 5절 A-2 R-6 (나) · ⑤b5 G3 - 코드 4·코드 1 정지 끝 처리가 부르는
   # Test-AbyssKeepLaunchOnStop) - 그중 놓아줌 표지만 닫습니다
   param([string]$Reason)
@@ -10204,7 +10204,7 @@ function Test-AbyssKeepLaunchOnStop {
   #                (같은 항목 3회째 정지는 $markerExists, 그 밖 오류 정지는 라우팅의 'legacy-cleared') - 클리어한 판은 지금처럼 닫습니다
   #  -Release    : 놓아줌 표지 ' (release)'(Get-WorkerDoneMarkers) - 워커가 그 항목의 판이 끝났다고 스스로 정한 정지는 지금처럼 닫습니다(코드 4 만 넘김)
   # 마무리 실행(finish-only) 기동도 같습니다 - 그 워커는 같은 항목을 Role next 로 받은 기동이라 클리어 전 정지면 다음 수동 시작이 같은 항목을 이어받습니다(커스텀 - 비커스텀은 시작마다 실행 id 가 새로 나 이어받지 못하고 이어받기 없이 시작, 구현 명세 ⑤b5 5 A ③)
-  # (구현 명세 ⑤b5 · 범위 ⑤-42 - 코드 1 은 마무리 실행 판별이 끝 처리 앞에서 정지해 이미 열어 둠). resume·none 은 늘 거짓입니다(resume 은 구현 단계 ⑤c 몫).
+  # (구현 명세 ⑤b5 · 범위 ⑤-42 - 코드 1 은 마무리 실행 판별이 끝 처리 앞에서 정지해 이미 열어 둠). resume·none 은 늘 거짓입니다 - resume 은 열어 둘 까닭이 없습니다: 넘긴 항목이 미적용 재입장 요청이면 다음 시작 S3 와 후보 고르기 ① 이 launchState 를 보지 않고 다시 고르고 launched 로 되돌립니다(구현 단계 ⑤c G6).
   # 부르는 곳 = 코드 4 계상(Invoke-Code4Accounting)의 끝 처리와
   # 타이머 코드 1 갈래의 정지 두 곳(같은 항목 3회째 · 그 밖 오류). 인자 값만 보는 순수 판정이라 실패 경로가 없습니다
   param([string]$LaunchKind, [bool]$AfterClear, [bool]$Release = $false)
@@ -10905,7 +10905,7 @@ function Close-AbyssLaunchNonceOnStop {
   # 오류 정지 두 곳(같은 항목 3회째 · 그 밖 오류)은 끝 처리 함수(Complete-AbyssExitJournal)가 하고, 그 두 곳은 own·next 기동의 클리어 전 정지(클리어 근거
   # 없음)면 nonce 를 열어 둡니다(구현 명세 ② 2.7 G5 · 5절 A-2 R-6 (나) - 위 두 안전 중지와 같은 기준). 이 함수를 부르는 정지들은 그대로 닫습니다.
   #  - 넘긴 nonce 가 없으면 journal 을 열지 않습니다
-  #  - 넘긴 nonce 가 라우팅한 항목(-RoutedNonce)이면 닫지 않습니다(journal 접근 0) - 그 항목은 다음 수동 시작의 몫입니다(재입장은 시작 게이트 S0 반영 뒤
+  #  - 넘긴 nonce 가 라우팅한 항목(-RoutedNonce)이면 닫지 않습니다(journal 접근 0) - 그 항목은 다음 수동 시작의 몫입니다(커스텀 - 비커스텀은 새 실행 id 라 이어받지 않음. 재입장은 시작 게이트 S0 반영 뒤
   #    첫 기동의 후보 고르기 next - done 이면 후보에서 빠짐, 재입장 요청은 S3 의 수동 재개). 재입장 실행부 필수 기록의 '같은 nonce 면 열어 둠' 과 같은 기준
   #  - 이미 done 이면 그 항목을 건드리지 않습니다(워커가 남긴 reason·screen 보존 - 끝 처리 ② 와 같은 mutation 모양)
   #  - 소비(applied)는 하지 않습니다 - 오류 종료는 클리어 기록을 다음 시작의 복구 근거로 남깁니다(명세 5절 A6ⓐ)
@@ -10944,7 +10944,7 @@ function Invoke-Code1JournalRouting {
   #  'legacy'         - 예전 처리 그대로(커스텀 오류 대응 recover/retry/3회째 정지 · 비커스텀 오류 정지)
   #  'legacy-cleared' - 예전 처리 + 이 판의 미적용 클리어 기록을 완료 마커처럼 마무리 복구 근거로 씀(명세 5절 A10 - 다음 시작 S3 의 '마커 등가'
   #                     와 같은 근거: 완료 마커를 못 쓴 판이 같은 항목을 처음부터 다시 돌지 않게)
-  # 코드 1 이 아니거나(그 밖 크래시 코드 - 명세 5절 B4) 어비스 완료 기록 실행(Test-AbyssHandoffRunActive)이 아니면 journal 을 열지 않고 'legacy'.
+  # 코드 1 이 아니거나(그 밖 크래시 코드 - 명세 5절 B4 · 자동 재개 없음: 사용자 결정 U-⑤c-1, 미적용 retry-* 는 커스텀의 다음 시작 S3 가 재개로 받음) 어비스 완료 기록 실행(Test-AbyssHandoffRunActive)이 아니면 journal 을 열지 않고 'legacy'.
   #  1 지금 owner - 커스텀은 지금 진행 위치(코드 1 은 진행 전진 전이라 끝난 판 i)의 5필드 + 세대, 비커스텀은 이번 실행 id. 진행 위치를 못
   #    읽으면 시작 게이트의 마커 대조와 같은 재시도(200ms × 3 - 설정 파일 일시 공유 위반이 대부분)
   #  2 잠금 읽기 1번 - 사용 중·손상·읽기 실패·예외면 계상·기동(재입장 이어받기·자동 재시작·재개)을 보류하고 오류 정지(설계 v10 6.1 읽기 계약의
@@ -10956,8 +10956,8 @@ function Invoke-Code1JournalRouting {
   #    reentered    - '다시 하기'로 다음 판에 들어간 뒤 죽음: (비커스텀) 재입장 오류 연속 +1 - 3회째면 실행부 앞에서 오류 정지(설계 R1 H48 - 죽음이
   #                   되풀이되는 환경에서 기동을 이어 가지 않음) → +1·완료 줄 → 재입장 실행부(커스텀 전진·필수 기록·다음 판 기동, 진행 저장
   #                   실패면 대기열 code1-routed)
-  #    retry-attempt·retry-clicked - 재입장 요청 뒤 죽음(던전 안일 수 있음): 자동 재개는 한 번뿐(resumeAttempts ≥ 1 이면 정지). 이 빌드는 재개
-  #                   기능이 꺼져($script:abyssPartyRetryEnabled) 기록을 보존하고 정지. 켜진 빌드: 안전 중지면 재개 없이 정지 / resumeAttempts +1
+  #    retry-attempt·retry-clicked - 재입장 요청 뒤 죽음(던전 안일 수 있음): 자동 재개는 한 번뿐(resumeAttempts ≥ 1 이면 정지). 스위치를 끈 빌드는
+  #                   기록을 보존하고 정지. 그 밖: 안전 중지면 재개 없이 정지(안내 끝말은 커스텀 · 비커스텀이 다름 - 사용자 결정 U-⑤c-2) / resumeAttempts +1
   #                   기록 → 재개(resume) 기동 1회(마커는 정리하지 않고 넘김 -PreserveMarker - 설계 v10 6.1)
   #    클리어(cleared·post-clear-stop) → 'legacy-cleared' / 없음 → 'legacy'
   # 소비(applied)는 하지 않습니다 - 미적용 기록이 다음 시작의 마무리 복구 근거로 남습니다(명세 5절 A6ⓐ). 기동(실행부·재개)은 try 밖 마지막 한 번 -
@@ -11067,7 +11067,7 @@ function Invoke-Code1JournalRouting {
     } elseif ($null -ne $retryEntry) {
       $retryNonce = [string]$retryEntry.nonce
       if ([int](Get-AbyssJournalField -Object $retryEntry -Name 'resumeAttempts').Value -ge 1) {
-        # 재개한 판도 죽었으면 자동으로 더 하지 않습니다(설계 v10 6.1 - 다음 수동 시작이 한 번 더 허용)
+        # 재개한 판도 죽었으면 자동으로 더 하지 않습니다(설계 v10 6.1 - 커스텀은 다음 수동 시작이 한 번 더 허용, 비커스텀은 새 실행 id 라 이어받지 않음)
         Close-AbyssLaunchNonceOnStop -RoutedNonce $retryNonce
         Stop-AllRun -IsError '재입장 요청 뒤 재개한 판도 오류 종료 - 자동 재개는 한 번뿐이라 완료 기록을 보존하고 정지 (캐릭터가 던전 안일 수 있습니다)'
         $lblStatus.ForeColor = [System.Drawing.Color]::Firebrick
@@ -11080,7 +11080,13 @@ function Invoke-Code1JournalRouting {
         return 'handled'
       }
       if ($script:stopRequested) {
-        Add-GuiLog '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 다음 시작에서 재개)'
+        # 안내 끝말은 다음 시작이 이 기록을 이어받는지로 가릅니다 (사용자 결정 U-⑤c-2): 커스텀은 시작 게이트 S3 가 재개를 한 번 예약하고, 비커스텀은 다음 시작이 새 실행 id 라
+        # 이 기록을 지난 기록으로 봅니다(Get-AbyssStartJournalAction 은 어비스 커스텀 시작만 봄)
+        if ($isCustom) {
+          Add-GuiLog '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 다음 시작에서 재개)'
+        } else {
+          Add-GuiLog '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 화면을 확인하고 다시 시작해 주세요)'
+        }
         Close-AbyssLaunchNonceOnStop -RoutedNonce $retryNonce
         Stop-AllRun '안전 중지'
         return 'handled'
@@ -11599,8 +11605,8 @@ function Get-AbyssStartJournalAction {
   #  2 지금 진행 위치를 마커 게이트와 같은 재시도(200ms × 3)로 읽습니다. 끝내 못 읽으면 어비스 커스텀의 미적용 '클리어 이상' 기록이 하나라도 있을 때
   #    refuse(주인을 가릴 수 없어 지우지 않고 멈춤 - 명세 5절 A11: 그냥 흘리면 마커 없는 클리어 판은 마커 게이트도 건너뛰어 같은 항목을 다시 돕니다),
   #    없으면 none(마커 게이트가 자기 재시도로 판단)
-  #  3 지금 owner(5필드 + 진행 세대)의 미적용 기록: 재입장 요청(retry-attempt·retry-clicked) → 재개 기능이 꺼진 빌드면 refuse(명세 5절 B10 - 이 빌드의
-  #    워커에는 재개 코드가 없음), 켜졌으면 resume(수동 1회) / 클리어(cleared·post-clear-stop - 재입장 요청 전) → recover(완료 마커가 없어도 마커와 같은
+  #  3 지금 owner(5필드 + 진행 세대)의 미적용 기록: 재입장 요청(retry-attempt·retry-clicked) → resume(수동 1회 - 재개 횟수는 보지 않음. 스위치를 끈 빌드는
+  #    refuse - 명세 5절 B10) / 클리어(cleared·post-clear-stop - 재입장 요청 전) → recover(완료 마커가 없어도 마커와 같은
   #    근거 - dev:947 '마커 등가') / 없음 → none. 같은 단계가 여럿이면 가장 최근(배열 뒤쪽). reentered 는 S0 몫이라 보지 않습니다(S0 가 반영했거나
   #    그 실패로 시작이 이미 멈춤)
   # 반환 @{ Action(none / recover / resume / refuse); Nonce; Reason; Context } - Reason = refuse 의 [오류] 줄, Context = 읽은 진행 컨텍스트(복구 예약의 PREV)
@@ -11657,7 +11663,7 @@ function Invoke-AbyssStartJournalAction {
   # 이 함수가 남김 - 부른 쪽은 커스텀 실행을 끄고 return).
   #  refuse  - 사유 한 줄
   #  recover - 마무리 복구 예약(Set-CustomRecoveryReservation - 마커 게이트와 같은 문장)
-  #  resume  - 재입장 재개 수동 1회 예약(재개 기능이 켜진 빌드 - 이 빌드에서는 판정이 refuse 라 진리표로만). 수동 재개도 그 기록의 재개 횟수를 +1 합니다 -
+  #  resume  - 재입장 재개 수동 1회 예약(스위치를 끈 빌드에서는 판정이 refuse 라 여기 오지 않음). 수동 재개도 그 기록의 재개 횟수를 +1 합니다 -
   #            재개한 판이 또 오류로 끝나면 자동 재개 없이 멈추게(명세 5절 B10 · 코드 1 라우팅의 '한 번뿐' 과 같은 기록). 예약은 첫 기동이 쓰고 비웁니다
   #  none    - 아무것도 하지 않음(마커 게이트가 판단)
   # 예외를 밖으로 내지 않습니다(명세 5절 A4)
@@ -12169,7 +12175,7 @@ function Invoke-StartAutomation {
     [Win32.PowerState]::SetThreadExecutionState($script:esKeepAwake) | Out-Null
     Set-UiRunning $true
     # 첫 기동 - 시작 게이트 S3 가 재입장 재개(수동 1회)를 예약했으면 그 항목을 잇는 재개 기동(마커는 정리하지 않고 넘김)으로 띄우고 예약을 비웁니다
-    # (구현 명세 ① 2.9 · 5절 B10 - 예약은 이 기동 하나에만. 재개 기능이 꺼진 이 빌드에서는 S3 가 시작을 거부해 예약이 생기지 않습니다)
+    # (구현 명세 ① 2.9 · 5절 B10 - 예약은 이 기동 하나에만. 스위치를 끈 빌드에서는 S3 가 시작을 거부해 예약이 생기지 않습니다)
     if ($script:customResumePending) {
       Start-NextCycle -PreserveMarker -ResumeNonce $script:customResumeNonce
       $script:customResumePending = $false

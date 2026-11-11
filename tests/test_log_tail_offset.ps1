@@ -876,7 +876,7 @@ if ($clearedSuccessTexts.Count -eq 1 -and $clearedWarningTexts.Count -eq 1 -and 
 # 캡처합니다(확장 문자열의 변수 자리는 표본 값으로 채움) - 한쪽만 바뀌면(워커 문구·GUI 규칙) 개발자 메모가 창에 뜨므로(명세 ② 0.4 ⑤) 두 소스를 함께 지나는 단언입니다.
 #  ① 꼬리 6종 H1 ' (selection-overlay)' · H2 ' (menu-overlay)' · H3 ' (locked)' · H4 ' (start-unknown)' · H5 ' (ownFreshEntry)' · H12 ' (release)' (명세 ② 2.7 G3):
 #     Remove-WorkerDoneMarkerTails 가 줄 끝 꼬리 하나만 지우고(앞 공백 + 괄호 + 정확한 낱말 + 줄 끝) 본문은 그대로, 창 줄 변환도 같은 결과. 꼬리 없는 같은 줄 ·
-#     근접 변형(꼬리 뒤 글자 · 앞 공백 없음 · 비슷한 낱말 · 문장 중간 인용) · ' (post-clear)'(R6·⑤ 몫이라 넣지 않음)은 그대로
+#     근접 변형(꼬리 뒤 글자 · 앞 공백 없음 · 비슷한 낱말 · 문장 중간 인용) · ' (post-clear)'(넣지 않음 - 워커가 내지 않음, 설계 R6 4절 · 판별 자리만 남음)은 그대로
 #  ② 줄 전체 숨김 7규칙 H6 R2 닫기 성공 · H7 own 닫기 성공 · H8 [어비스] 입장 계측 · H9 [어비스] 이어받기 시작 계측 · H10 [파티원] 입장 계측 · H11 입장 기록 저장 ·
 #     H13 [파티원] 퇴장 절차 계측: 시각 접두 있음·없음 모두 숨김, 근접 변형(뒤에 글이 더 붙음 · 다른 태그 · 다른 줄 안에 인용)은 그대로. H10 은 파티원 경로라 혼자
 #     실기(G-H1)로 못 보는 줄이어서(명세 ② 4.3) 워커 -f 의 왼쪽 형식 문자열 원문을 표본 값으로 채워 실제 변환에 넣는 것으로 대신합니다. H13(파티원 P 계측 줄 -
@@ -885,7 +885,7 @@ if ($clearedSuccessTexts.Count -eq 1 -and $clearedWarningTexts.Count -eq 1 -and 
 #     B2 단계의 줄도 그 함수가 써서 옛 H8(선분기)·H8w(재입장 대기) 두 표본을 하나로 합쳤습니다
 #  ③ 보존 줄(명세 ② 2.7 '보이는 그대로 둘 줄' · 3.4): [경고] 닫기 실패(R2·own) · cleared 저장 실패 · 필드 확정 결과 줄 · 키 '이미 보낸 키' 줄 · [안내] 복구 기동 ·
 #     B2 단계 시작 줄 · 이벤트 정리 안내 줄 · 권장 인원 팝업 관측 안내(재입장 대기 - 구현 명세 ④) · [경고] 재입장 클릭·완료 기록 실패(구현 명세 ⑤b2) ·
-#     재매칭 패널 확인 안내 · 필드 확정 결과 줄(재입장 대기) · 재매칭 ESC 취소 정지 줄(구현 단위 5b-8)
+#     재매칭 패널 확인 안내 · 필드 확정 결과 줄(재입장 대기) · 재매칭 ESC 취소 정지 줄(구현 단위 5b-8) · 재입장 재개 줄 넷(선분기 셋 - 시작 · 패널류·3버튼 감지 · 필드 정지 · 재개 끝의 재개 판단 줄 - 구현 단계 ⑤c)
 #  ④ 판별은 원문(명세 ② 2.7 · J11): 타이머 통상 tail 의 수집 식(기본·복구 로그)과 공통 최종 수집(Invoke-ExitLogFinalCollect)이 남기는 [완료] 사유에는 꼬리가
 #     남고 창 줄에서만 빠집니다. 코드 4 상태줄($code4Reason)의 꼬리 0 은 tests\test_abyss_handoff_gui.ps1 가 실제 타이머 틱으로 봅니다
 function Get-WorkerOwnerFunctionName {
@@ -1061,16 +1061,14 @@ foreach ($doneTailId in @($doneTailSamples.Keys)) {
       (Convert-WorkerLogLineForGui ('12:00:00 ' + $doneTailNear.Line) $false) ('12:00:00 ' + $doneTailNear.Line)
   }
 }
-# ' (post-clear)' 는 꼬리 목록에 넣지 않습니다(명세 ② 2.7 G3 - R6·⑤ 몫, 5절 C4). ② 빌드의 그 꼬리 줄은 S19(재입장 재개 꺼짐 정지) 하나입니다
+# ' (post-clear)' 는 꼬리 목록에 넣지 않습니다(명세 ② 2.7 G3 · 설계 R6 4절 - 워커가 내지 않음). 그 꼬리를 담은 마지막 워커 줄(재개 꺼짐 정지)은 구현 단계 ⑤c 에서 없어졌습니다
 $postClearNodes = @($workerAst.FindAll({ param($node)
       ($node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
        $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and ([string]$node.Value).Contains(' (post-clear)') }, $true))
-Check-Equal "워커: ' (post-clear)' 를 담은 문자열 = S19 1 (R6·⑤ 가 그 꼬리 줄을 더하거나 숨기면 이 절을 함께 손볼 것)" $postClearNodes.Count 1
-foreach ($postClearNode in $postClearNodes) {
-  $postClearRaw = Expand-WorkerStringSample -Node $postClearNode
-  Check-Equal "GUI: ' (post-clear)' 꼬리는 꼬리 제거 함수가 지우지 않음" (Remove-WorkerDoneMarkerTails -Text $postClearRaw) $postClearRaw
-  Check-Equal "GUI: ' (post-clear)' 꼬리 줄은 창 줄 그대로" (Convert-WorkerLogLineForGui ('12:00:00 ' + $postClearRaw) $true) ('12:00:00 ' + $postClearRaw)
-}
+Check-Equal "워커: ' (post-clear)' 를 담은 문자열 = 0 (R6 결정: 새로 내지 않음 - 되살리면 이 절을 함께 손볼 것)" $postClearNodes.Count 0
+$postClearRaw = '[완료] 표본 사유 (post-clear)'   # GUI 판별 자리는 남아 있어 숨기지 않는다는 계약은 표본 줄로 봅니다
+Check-Equal "GUI: ' (post-clear)' 꼬리는 꼬리 제거 함수가 지우지 않음" (Remove-WorkerDoneMarkerTails -Text $postClearRaw) $postClearRaw
+Check-Equal "GUI: ' (post-clear)' 꼬리 줄은 창 줄 그대로" (Convert-WorkerLogLineForGui ('12:00:00 ' + $postClearRaw) $true) ('12:00:00 ' + $postClearRaw)
 
 # ② 줄 전체 숨김 7규칙 - 계측 줄의 필드 모양 구간 꼬리는 워커 원문(선분기의 확장 문자열 · 파티원 관측 루프의 -f 형식)을 표본 1.4초로 채웁니다
 $hideHandoffStartAst = $workerAst.Find({ param($node)
@@ -1231,11 +1229,19 @@ $keepSpecs = @(
   @{ Label = '[경고] 재입장 완료 기록 실패(구현 명세 ⑤b2)'; Function = 'Set-AbyssJournalReentered'; Prefix = '[경고] 재입장 완료 기록을 저장하지 못했습니다'; Want = 1
      Fills = @(@{ failureKind = '파일 사용 중' }, @{ failureKind = '파일 손상' }, @{ failureKind = '기록 실패' }) }
   @{ Label = '권장 인원 팝업 관측 안내(재입장 대기)'; Function = 'Wait-AbyssReentry'; Prefix = '[안내] 권장 인원 팝업 관측'; Want = 1; Fills = @(@{}) }
-  # 구현 단위 5b-8 - 재입장 대기의 재매칭 패널 확인 안내 · 필드 확정 결과 줄(선분기 S3 와 같은 꼴 - 표본 수는 지역 변수) · 끝(retry)의 재매칭 ESC 취소 정지 줄
+  # 구현 단위 5b-8 - 재입장 대기의 재매칭 패널 확인 안내 · 필드 확정 결과 줄(선분기 S3 와 같은 꼴 - 표본 수는 지역 변수) · 재매칭 ESC 취소 정지 줄(공유 정지 함수 - 끝(retry) · 재개 끝이 부름, 구현 단계 ⑤c)
   @{ Label = '재매칭 패널 확인 안내(재입장 대기 - 구현 단위 5b-8)'; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 재매칭 패널 확인'; Want = 1; Fills = @(@{}) }
   @{ Label = "필드 확정 결과 줄(재입장 대기 'field-cancelled' - 구현 단위 5b-8)"; Function = 'Wait-AbyssReentry'; Prefix = '[어비스] 던전 밖(HUD) 확인 - '; Want = 1
      Fills = @(@{ memberFieldSettleSeconds = $hideSettleSeconds; settleSpan = '6.3'; settleCount = '9' }) }
-  @{ Label = '재매칭 ESC 취소 정지 줄(구현 단위 5b-8)'; Function = 'Complete-AbyssRetrySelection'; Prefix = '[완료] 재매칭이 취소돼 필드로'; Want = 1; Fills = @(@{}) }
+  @{ Label = '재매칭 ESC 취소 정지 줄(구현 단위 5b-8)'; Function = 'Stop-AbyssReentryFieldCancelled'; Prefix = '[완료] 재매칭이 취소돼 필드로'; Want = 1; Fills = @(@{}) }
+  # 구현 단계 ⑤c - 재입장 재개 줄 넷(선분기 셋 - 시작 · 패널류·3버튼 감지 · 필드 정지 · 재개 끝의 재개 판단 줄 - 구현 명세 ⑤c 3.6 M25): 새 줄이 꼬리 규칙에 깎이지 않음을 ⑤b8 선례대로 고정합니다
+  @{ Label = '재입장 재개 시작 줄(구현 단계 ⑤c)'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 재입장 재개 시작 - '; Want = 1
+     Fills = @(@{ resumeBudget = '300'; resumeLeft = '12.5'; resumeStage = 'retry-clicked' }, @{ resumeBudget = '45'; resumeLeft = '0'; resumeStage = 'retry-attempt' }) }
+  @{ Label = '재입장 재개 패널류·3버튼 감지 줄(구현 단계 ⑤c)'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[어비스] 재입장 재개: '; Want = 1
+     Fills = @(@{ resumeLabel = '재매칭 패널' }, @{ resumeLabel = '3버튼 보상' }) }
+  @{ Label = '재입장 재개 필드 정지 줄(구현 단계 ⑤c)'; Function = 'Invoke-AbyssHandoffStart'; Prefix = '[완료] 재입장 재개 - '; Want = 1; Fills = @(@{}) }
+  @{ Label = '재개 판단 줄(구현 단계 ⑤c 5c-3)'; Function = 'Complete-AbyssResumeWait'; Prefix = '[어비스] 재개 판단: '; Want = 1
+     Fills = @(@{ resumeCause = '안전 중지 예약 확인' }, @{ resumeCause = '마무리 실행' }, @{ resumeCause = '마지막 판' }, @{ resumeCause = '지정 시간 21:30 도달' }) }
   # 구현 단위 복귀 연장 1.5 - 마감 뒤 안전 중지 세 갈래: 코드 0 은 상태줄에 사유가 안 나와 화면을 확인하라는 안내가 창의 이 줄뿐입니다 - 꼬리 규칙에 깎이면 안 됩니다
   @{ Label = '마감 뒤 안전 중지 줄(구현 단위 복귀 연장)'; Function = 'Return-ToAbyssSelection'; Prefix = '[완료] 안전 중지 예약 확인 - 복귀 대기 시간 안에 화면 복귀를 확인하지 못'; Want = 3; Fills = @(@{}) }
 )

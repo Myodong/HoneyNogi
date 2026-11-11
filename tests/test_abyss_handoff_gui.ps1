@@ -51,8 +51,8 @@
 # 지키는 것 (단계 2.8 - 종료 처리 코드 1. 설계 v10 6.1 'GUI 코드 1 라우팅' · v11 R1 3.7 표 마지막 행·4·5.2 · 구현 명세 ① 2.8 · 5절 A5·A6·A10·B4):
 #   [C1] 행동 - 실제 타이머 틱의 코드 1 갈래가 마무리 실행 판별 → 실제 라우팅(Invoke-Code1JournalRouting) → 실제 재입장 실행부·기동(실제 후보 고르기)까지 돕니다:
 #        재입장 뒤 코드 1(H22~H26·H40·H43·H45 - 대기열 단계 code1-routed) · 비커스텀 재입장 오류 상한 3회째 = 실행부 앞 정지(H48 - 행동으로) · 마무리 실행 기동의
-#        코드 1·그 밖 코드(H32b·H32c - 재시작 0 · nonce launched · 대기열·마커 그대로) · 재입장 요청(retry-*) 뒤 코드 1(재개 기능 꺼짐 = 정지 · 재개 1회 뒤 정지 ·
-#        켜진 빌드 진리표 - 안전 중지 / resumeAttempts +1 → 재개 기동 / 기록 실패) · 클리어 기록 → 마무리 복구 근거(명세 5절 A10 'legacy-cleared') · 읽기 실패
+#        코드 1·그 밖 코드(H32b·H32c - 재시작 0 · nonce launched · 대기열·마커 그대로) · 재입장 요청(retry-*) 뒤 코드 1(재개 기능 꺼짐 = 정지(꺼진 빌드 행만 - 구현 단계 ⑤c 부터 켬) · 재개 1회 뒤 정지 ·
+#        켜진 빌드 - 안전 중지(안내 끝말 커스텀 · 비커스텀 - 사용자 결정 U-⑤c-2) / resumeAttempts +1 → 재개 기동 / 기록 실패) · 클리어 기록 → 마무리 복구 근거(명세 5절 A10 'legacy-cleared') · 읽기 실패
 #        (사용 중·손상·읽기 실패·예외) · 커스텀 진행 위치를 재시도 뒤에도 못 읽음(명세 리뷰 3 P2) · 처리 중 예외 · 정지 경로의 끝 처리(소비 0 · nonce done ·
 #        재기동은 nonce 유지).
 #   [E]  끝 처리 문구 - 오류 종료(코드 1·그 밖) = 코드 4 와 같은 '완료 표시를 남기지 못하고 정지 (기록 보존)' (정지하기로 정한 경로에서만 부름).
@@ -106,8 +106,8 @@
 #     없는 unchanged 도 접근).
 #   - 단계 2.7 의 완료 마커 유효 판정은 실제 함수(Test-CustomMarkerValidForCurrent - 임시 폴더의 마커 파일 · 디스크 컨텍스트 모형)이고, 진행 위치 읽기
 #     모형은 앞에서부터 정한 횟수만 $null 을 돌려줄 수 있습니다($script:contextNullReads - 설정 파일 일시 읽기 실패).
-#   - 단계 2.8 의 재개 기능 플래그($script:abyssPartyRetryEnabled)는 GUI 원문의 스크립트 수준 대입 값(이 빌드 = 꺼짐)을 그대로 씁니다 - 켜진 빌드 행만
-#     잠시 참으로 두고 되돌립니다(명세 3.4 '켜짐 갈래는 진리표'). 커스텀 예전 처리(recover/retry)의 오류 대응 판정은 실제 함수(Get-CustomErrorAction)입니다.
+#   - 단계 2.8 의 재개 기능 플래그($script:abyssPartyRetryEnabled)는 GUI 원문의 스크립트 수준 대입 값(구현 단계 ⑤c 부터 켬)을 그대로 씁니다 - 꺼진 빌드 행만
+#     잠시 거짓으로 두고 되돌립니다(Invoke-HandoffTickSwitchOff · 꺼짐 갈래는 배포본이 아니라 이 행으로만 돎). 커스텀 예전 처리(recover/retry)의 오류 대응 판정은 실제 함수(Get-CustomErrorAction)입니다.
 # 지키는 것 (단계 2.10 - 워커 몫과의 결합. 구현 명세 ① 2.10 · 3.3 '① 실동작 결합 행'):
 #   [C4 결합] 실제 Start-NextCycle 의 env → 워커의 실제 env 읽기 문장 → 워커 본류 끝 [완료 기록 if(W3) → 나가기 헬퍼] 두 문장(AST 점소싱)과 실제 기록 함수
 #        (Add-AbyssJournalClearedEntry · ConvertTo-AbyssJournalOwner) → GUI 코드 4·0 계상(비커스텀 · 커스텀 마커 없음) · 정리 전용 → 기록 0·계상 0 · 기록 저장
@@ -136,7 +136,7 @@
 #   [⑤b5 결합] 실제 Start-NextCycle env → 워커 원문 읽기(항목 · 다음 항목 · 마지막 판 · 마무리 실행 · 지정 시각) → 꼬리 전체(실제 경로 술어 · 보상 결정 · 재판단 · 클리어 기록 ·
 #        기록 확인 · 결정 사유 줄) → 두 끝 원문(exit 가로챔 - 그 안의 대기 둘 · 클릭 루프 · 진단은 결과 차례 모의) → 실제 타이머 틱: SS1 · SS3 · SS5~SS8 · SS11 · FB3 · FB4 ·
 #        FB10 · FB12 · FB13 · PC1~PC4 · PC6~PC8 · IH(재입장 11) · R6-RC1 · R6-RC2(Test-CaseRewardTailCoupling). PC5 는 test_abyss_pending_advance, 워커 쪽 행동은
-#        test_abyss_party_leader §9~§11, 재개(FB14 · FB18 · RC4 · RC5)는 구현 단계 ⑤c 몫입니다.
+#        test_abyss_party_leader §9~§11, 재개 FB14 · FB18 은 test_abyss_resume_reentry, R6-RC4 는 test_abyss_pending_advance, R6-RC5 는 이 절(R6-RC2 뒤)입니다.
 #   [G1 · G3] S6(직렬화 호출 소유자에 다음 판 env) · 결합 5([설정] 커스텀 줄 끝 NEXT_OWNER · NEXT_BOUNDARY) · KP0 · KP8 · H32e(마무리 실행의 클리어 전 정지도 열어 둠) ·
 #        H32d(클리어한 마무리 실행 판 - 워커가 넘긴 nonce 를 닫아 끝 처리가 건드리지 않음). 'unconfirmed' 정지 칸은 상태줄 자르기를 다시 쓰지 않음(SS7) · S3 에 정지 함수의
 #        예약 파일 삭제(SS3 · SS11 '플래그 0' 의 정적 몫) - 둘 다 내부 검토 반영.
@@ -159,6 +159,12 @@
 #        빨개지지 않고, SS1e · SS1f 는 코드 0 계상 줄 · 기록 소비를 깨는 GUI 미러 변이로 지켜집니다
 #   [구현 단위 5b-8] 재입장 대기 손 모의에 -ReportFieldReturn(워커 서명 - 결합 0) · 받은 스위치 기록 · FC-G1~G3(재매칭 패널 ESC 취소 → 필드 확정 'field-cancelled' 끝 코드 4 의 GUI 틱 -
 #        비커스텀 기록 계상 · 커스텀 마커 계상 · 전송 뒤 예약).
+# 지키는 것 (구현 명세 ⑤c 5c-4 - 재입장 재개 스위치를 켬 · 3.2 (라) · 3.6 ⑯ · 사용자 결정 U-⑤c-1 · U-⑤c-2):
+#   [RT0 · S7 · 단계 우선] 배포본 기본값(켬)을 행동 · 선언으로 고정(행 안 대입 없음 - 스위치를 끄면 이 셋과 test_abyss_pending_advance SG5⁰ 만 FAIL: 3.9 '스위치 꺼짐'
+#        재현) · [RT1 · NC3 · NC5 · NC6 · NC7] 꺼진 빌드 행은 Invoke-HandoffTickSwitchOff(행 안 거짓 - try/finally 로 되돌림) · [RT3 · NC4 · RT3′] 안전 중지 안내 끝말
+#        비커스텀 · 커스텀(G7) · [RT7] 코드 1 밖 크래시 코드(-1)는 자동 재개 없음 · [RZ1~RZ4] 재개 기동의 끝(코드 0 · 4 · 11 - 스위치를 읽지 않는 갈래) ·
+#   [R6-RC5] 비커스텀 재클릭 무반응 → 폴백 ① 뒤 끊김 → 재개 기동 → 재개 워커 선택 화면 표지 코드 4 · [SW1 · SW2] 켠 빌드에 워커 S19 없음 · 스위치를 쓰는 곳
+#        (GUI 셋 · 워커 0 - 한정자 무관).
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing   # 갈래의 상태줄 색([System.Drawing.Color]::SteelBlue 등)
 $fails = 0
@@ -357,7 +363,8 @@ $C1_NO_OWNER = '설정 파일을 읽지 못해 완료 기록의 주인을 확인
 $C1_STREAK_STOP = '오류 종료(코드 1) - 재입장한 판에서 3회 연속 오류라 이어 가지 않고 정지 (로그 확인)'                      # 설계 R1 H48
 $C1_RETRY_OFF = '재입장 요청 뒤 오류 종료 - 재개 기능이 꺼져 있어 완료 기록을 보존하고 정지 (캐릭터가 던전 안일 수 있습니다)' # dev:888 원문
 $C1_RESUMED_AGAIN = '재입장 요청 뒤 재개한 판도 오류 종료 - 자동 재개는 한 번뿐이라 완료 기록을 보존하고 정지 (캐릭터가 던전 안일 수 있습니다)'   # dev:889
-$C1_SAFE_NOTICE = '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 다음 시작에서 재개)'   # dev:888 원문
+$C1_SAFE_NOTICE = '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 다음 시작에서 재개)'   # dev:888 원문 - 커스텀
+$C1_SAFE_NOTICE_PLAIN = '[안내] 재입장 요청 뒤 오류 종료 - 안전 중지라 재개하지 않고 정지합니다 (캐릭터가 던전 안일 수 있습니다 - 화면을 확인하고 다시 시작해 주세요)'   # 비커스텀 - 사용자 결정 U-⑤c-2
 $C1_RESUME_NOTICE = '[경고] 오류 종료(코드 1) - 재입장 요청 뒤라 그 판을 이어받는 재개를 한 번 시작합니다'
 $C1_RESUME_LOCKED_FORMAT = '완료 기록 파일이 사용 중 - 재개를 보류하고 정지 ({0}) ' + $LOCKED_GUIDE
 $C1_RESUME_SAVE_FORMAT = '재개 기록 저장 실패 - 재개를 보류하고 정지 ({0})'
@@ -521,10 +528,10 @@ function Convert-WorkerExitText {
     if ($leftExits -gt 0) { throw ('{0} 사본에 exit 문이 {1}개 남았습니다' -f $Label, $leftExits) }
     return $Text
 }
-# ⑤b5 - 본류 보상 화면 꼬리의 두 끝과 그 끝이 부르는 재입장 완료 끝 · 대기 초과 끝(원문 · exit 가로챔). 그 안의 대기 둘('다른 던전 가기' 대기 · 재입장 대기) · 클릭 루프 ·
+# ⑤b5 - 본류 보상 화면 꼬리의 두 끝과 그 끝이 부르는 재입장 완료 끝 · 대기 초과 끝 · 필드 취소 끝(원문 · exit 가로챔 - 필드 취소 끝은 ⑤c 5c-2 의 공유 정지 함수). 그 안의 대기 둘('다른 던전 가기' 대기 · 재입장 대기) · 클릭 루프 ·
 # 진단 캡처는 아래 워커 쪽 모의입니다(구현 명세 ⑤b5 3.1 ⑯ '두 끝 함수 모의' 를 끝 함수 원문 + 대기 모의로 둠 - 3.3 의 R6-M13 · R6-M19 가 ⑯ FB4 · FB10 에서 잡히려면
 # 폴백 ② 갈래 · 취소 끝이 원문이어야 함)
-$WORKER_END_FUNCTION_NAMES = @('Complete-AbyssOtherSelection', 'Complete-AbyssRetrySelection', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout')
+$WORKER_END_FUNCTION_NAMES = @('Complete-AbyssOtherSelection', 'Complete-AbyssRetrySelection', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout', 'Stop-AbyssReentryFieldCancelled')
 foreach ($workerFunctionName in $WORKER_END_FUNCTION_NAMES) {
     $workerFunctionAsts = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($_.Name -eq $workerFunctionName) })
     if ($workerFunctionAsts.Count -ne 1) { throw ('워커 최상위 함수 정의가 1개가 아닙니다: {0} ({1}개)' -f $workerFunctionName, $workerFunctionAsts.Count) }
@@ -1847,8 +1854,8 @@ function Test-CaseStatic {
     }
     $declarationText = (@('$script:lastLaunchKind', '$script:lastLaunchNonce', '$script:runId', '$script:finishOnlyHold', '$script:abyssErrorStreak',
             '$script:customResumePending', '$script:customResumeNonce', '$script:abyssPartyRetryEnabled') | ForEach-Object { '{0}={1}' -f $_, $declarations[$_] }) -join ' '
-    Assert-Case 'S7 최상위 선언 8개(기본값 - 재입장 이어받기 플래그는 이 빌드에서 꺼짐)' $declarationText `
-        "`$script:lastLaunchKind='none' `$script:lastLaunchNonce='' `$script:runId='' `$script:finishOnlyHold=`$null `$script:abyssErrorStreak=0 `$script:customResumePending=`$false `$script:customResumeNonce='' `$script:abyssPartyRetryEnabled=`$false"
+    Assert-Case 'S7 최상위 선언 8개(기본값 - 재입장 재개 스위치는 켬)' $declarationText `
+        "`$script:lastLaunchKind='none' `$script:lastLaunchNonce='' `$script:runId='' `$script:finishOnlyHold=`$null `$script:abyssErrorStreak=0 `$script:customResumePending=`$false `$script:customResumeNonce='' `$script:abyssPartyRetryEnabled=`$true"
     # S5 env 무리 행동: Clear-HandoffEnv = 3개만(RUN_ID·커스텀 env 그대로) · Clear-CustomEnv 가 진행 세대 env 도 지움(명세 5절 A3)
     foreach ($envName in $ALL_ENV_NAMES) { [Environment]::SetEnvironmentVariable($envName, $STALE_VALUE, 'Process') }
     Clear-HandoffEnv
@@ -1917,7 +1924,7 @@ function Initialize-HandoffRow {
     $script:stepNextOrder = $null   # 랜덤 바퀴 전환의 새 순열(행이 이 함수 뒤에 정함 - 구현 명세 ⑤b6 MX-G3)
     $script:resetResult = $true
     $script:decisionMode = $DecisionMode
-    $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG   # 재개 기능 플래그 = GUI 원문 값(켜진 빌드 행은 이 뒤에서 잠시 참)
+    $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG   # 재개 기능 플래그 = GUI 원문 값(꺼진 빌드 행은 이 뒤에서 잠시 거짓)
     $script:running = $true
     $script:lastWorkerDoneReason = ''
     $lblStatus.Text = ''
@@ -2006,6 +2013,13 @@ function Invoke-HandoffTick {
         StateUnchanged = [int]($stateBefore -ceq (Get-FolderState -Folder $script:rowFolder))
         Disk = $(if ($null -eq $script:diskContext) { '(없음)' } else { '{0}/{1}' -f $script:diskContext.Lap, $script:diskContext.Index })
     }
+}
+
+function Invoke-HandoffTickSwitchOff {
+    # 스위치를 끈 빌드의 코드 1 틱 - 꺼짐 갈래는 배포본이 아니라 이 행으로만 돕니다(구현 단계 ⑤c)
+    param([hashtable]$Tick = @{})
+    $script:abyssPartyRetryEnabled = $false
+    try { return (Invoke-HandoffTick -ExitCode 1 @Tick) } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
 }
 
 function Get-EntryText {
@@ -4106,7 +4120,7 @@ function Test-CaseCode4CouplingWorker {
 #   (재입장 단계는 원문 기록 함수). 비커스텀의 입장 방식·매칭은 config 값(행 입력), 커스텀은 항목 토큰 해석 값입니다.
 # GUI 쪽: 그 종료 코드와 워커 줄(종료 직전 줄 - 최종 수집이 [완료] 사유를 읽음)로 실제 타이머 틱 1번 → 계상 · 완료 기록 소비 · 정지 사유 · 다음 기동 env(필요하면 다음 시작).
 # 행 이름 = 설계 v11 R6 7.2~7.5 표(SS · FB · PC) · R6-RC1 · R6-RC2(test_abyss_party_leader 의 5b-4 RC1a~RC2a 와 겹치지 않게 'R6-') · IH(재입장 11 - R1 2.2 · R3 3.6).
-# FB14 · FB18 · RC4 · RC5(재개) 는 구현 단계 ⑤c 몫입니다.
+# 재개(구현 단계 ⑤c): FB14 · FB18 = test_abyss_resume_reentry · R6-RC4 = test_abyss_pending_advance · R6-RC5 = 이 절 R6-RC2 뒤.
 # 구현 명세 ⑤b6(3.4 ⑯ · 3.1 ⑯): 멈춤 끝(안전 중지 · 마무리 실행 · 마지막 판 · 지정 시각)과 다음 항목의 입장 방식이 다르거나 모를 때의 결정은 'exit' = 옛 나가기(헬퍼 → 복귀 루프 모의
 #   → '[완료] 어비스 선택 화면 복귀 완료' → 스크립트 끝 exit 0, 예약이 있으면 복귀 루프 출구 ② 가 소비)라 그 행의 기대를 옛 나가기 꼴로 바꾸고, 'exit' 로는 닿지 않는 '다른 던전 가기'
 #   끝 갈래는 입구를 바꿨습니다(비커스텀 'retry' + 클릭 루프 'no-pair' 폴백 ① · 커스텀 같은 입장 방식 다른 던전). 새 행 SS1c · CX1 · MX-G1~MX-G4 는 이 절 끝입니다
@@ -4242,7 +4256,7 @@ function Test-CaseRewardTailCoupling {
             (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($exitFormat -f $exitMap['safe-stop']) -Done $RETURN_EXPIRED_DONE),
             $RETURN_EXPIRED_DONE)
     # SS1f 재검사 경로 (1.4 C1 'retry-attempt 포함'): 결정 때는 예약이 없어 '다시 하기' 로 가고 클릭 직전 재검사가 예약을 봅니다 - 재입장 요청 기록(retry-attempt)이 남은 채 옛 나가기 → 복귀 마감 출구 · exit 0.
-    #     코드 0 끝 처리가 그 기록을 소비합니다('클리어 이상' - H36 과 같은 갈래). 코드 1 이었다면 '재개 기능이 꺼져' 오류 정지입니다 - 그 줄 0 을 함께 봅니다
+    #     코드 0 끝 처리가 그 기록을 소비합니다('클리어 이상' - H36 과 같은 갈래). 코드 1 이었다면 안전 중지 안내 뒤 정지입니다(재개 없음 - RT3 와 같은 갈래. 스위치를 끈 빌드는 '재개 기능이 꺼져' 오류 정지 - 그 줄 0 을 함께 봅니다)
     $null = Start-RewardRow -Setup @{ DecisionMode = 'real'; StopRequested = $true }
     $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('safe-stop'); SafeStopOnClick = $true; ReturnExpired = $true }
     $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
@@ -4523,6 +4537,30 @@ function Test-CaseRewardTailCoupling {
         ('{0} || 계상 {1} · 정지 [{2}] · 기동 {3}' -f (Get-RewardWorkerText $worker), $tick.Row.Completed, (Get-StopFlags $tick.Row), $tick.Row.Launches) `
         ('{0} || 계상 0 · 정지 [True] · 기동 0' -f
             (Get-RewardWorkerWant -Exit '' -Thrown $WORKER_CRASH_MESSAGE -Entry 'cleared/retry/run' -Waits 'o1/r0/c1' -Done $CLEARED_SUCCESS_TEXT))
+    # R6-RC5 (구현 명세 ⑤c 3.6 ⑯) 비커스텀 '다시 하기' 전송 뒤 재클릭 무반응(재입장 대기 'reclick' 둘 - 판당 전송 2 상한) → '두 번 눌러도' 줄 → 폴백 ① '다른 던전 가기'
+    #     'confirmed' 뒤 [완료] 줄 앞에서 끊김(코드 1) → (GUI 틱 · 스위치 참) 재입장 요청 기록 → 재개 횟수 1 → 재개 기동(같은 nonce · RESUME 1) → 재개 워커의 선택 화면 표지
+    #     코드 4(워커 원문 - 재개 워커 자체는 test_abyss_resume_reentry) → 기록 규칙 +1 · 그 기록 소비 · launched(재전달 표지 - C4-14 와 같음) · 정상 정지
+    $resumeOverlayDone = Get-WorkerDoneReason -Fragment '오버레이를 닫은 뒤 판을 수동으로 마치지 말고' -InFunction 'Stop-AbyssHandoffOverlay'
+    $twiceNodes = @($workerAst.FindAll({ param($node) (($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -or
+                ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst])) -and ([string]$node.Value).Contains('두 번 눌러도 보상 화면이 그대로입니다') }, $true))
+    $twiceLine = $(if ($twiceNodes.Count -eq 1) { [string]$twiceNodes[0].Value } else { '(캡처 {0}개)' -f $twiceNodes.Count })
+    $null = Start-RewardRow -Setup $soloSetup
+    $worker = Invoke-WorkerClearedRecord -Custom $false -Run 'whole' -RetryRoute -Mode 'solo' -Matching '우연한 만남' -Plan @{ RetryClick = @('sent', 'sent'); Reentry = @('reclick', 'reclick'); OtherWait = $otherConfirmed; CrashBeforeDone = $true }
+    $workerNonce = $(if ($null -ne $worker.Entry) { [string]$worker.Entry.nonce } else { '' })
+    $script:abyssPartyRetryEnabled = $true
+    try {
+        $tick = Invoke-RewardTick $worker
+        $resumeTick = Invoke-HandoffTick -ExitCode 4 -Reason $resumeOverlayDone
+    } finally {
+        $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG
+    }
+    Assert-Case "R6-RC5 (GUI 틱) 비커스텀 재클릭 무반응 → 폴백 ① 확인 뒤 끊김(코드 1) → 재개 기동(같은 nonce · RESUME 1 · 재개 횟수 1) → 재개 워커 선택 화면 표지 코드 4 → +1 · 소비 · launched · 정상 정지" `
+        ('{0} || {1} · {2} · 같은 nonce {3} · RESUME {4} · 재개 횟수 {5} · 계상 {6} || 계상 {7} · 기록 {8} · 정지 [{9}] · 기동 {10} · 사유 원문 {11}' -f (Get-RewardWorkerText $worker),
+            $tick.Row.Flow, $tick.Row.Kind, [int]([string]$tick.Row.LaunchEnv['HONEYNOGI_HANDOFF_NONCE'] -ceq $workerNonce), $tick.Row.LaunchEnv['HONEYNOGI_RESUME_REENTRY'],
+            (Get-EntryResumeAttempts $tick.Row.Journal $workerNonce), $tick.Row.Completed, $resumeTick.Completed, (Get-EntryText $resumeTick.Journal $workerNonce), (Get-StopFlags $resumeTick),
+            $resumeTick.Launches, [int]([string]$script:lastWorkerDoneReason -ceq $resumeOverlayDone)) `
+        ('{0} || gui|{1} / launch|powershell.exe / gui|=== 1회차 시작 === · resume · 같은 nonce 1 · RESUME 1 · 재개 횟수 1 · 계상 0 || 계상 1 · 기록 retry-clicked/launched/1 · 정지 [False] · 기동 0 · 사유 원문 1' -f
+            (Get-RewardWorkerWant -Exit '' -Thrown $WORKER_CRASH_MESSAGE -Entry 'retry-clicked/retry/run' -Waits 'o1/r2/c2' -Decision $twiceLine -Done $twiceLine), $C1_RESUME_NOTICE)
 
     # ── 구현 명세 ⑤b6 3.1 ⑯ 새 행 - 결정 뒤 예약(SS1c) · 커스텀 마지막 바퀴 끝(CX1) · 섞인 목록(MX-G1~MX-G4) ──
     # SS1c 결정 뒤 예약(최소안 SS1c): 커스텀 같은 입장 방식의 다른 던전(item-change) → '다른 던전 가기' 대기 중에 예약(F9 - 모의 대기가 결과를 돌려주기 직전에 만듦) →
@@ -4598,8 +4636,8 @@ function Test-CaseRewardTailCoupling {
         ('{0} || 계상 1 · 전진 1 · 기록 cleared/pending/1 · 정지 [stop|안전 중지|False] · 기동 0 · 사유 [{1}]' -f
             (Get-RewardWorkerWant -Exit '0' -Entry 'cleared/exit/(없음)' -Waits 'o0/r0/c0' -Helper 1 -Returns '0' -Decision ($moveFormat -f $moveMap['entry-change']) -Done $RETURN_SAFE_STOP_DONE),
             $RETURN_SAFE_STOP_DONE)
-    # ── 구현 단위 5b-8 - 재매칭 패널 ESC 취소 → 필드 확정 'field-cancelled' 끝(코드 4 · 입력 0 · 기록 무변경)의 GUI 틱 (FC-G1~FC-G3). 캡처는 이 묶음 바로 앞(고치기 전 워커에서는 이 묶음만 빠짐) ──
-    $fieldCancelledDone = Get-WorkerDoneReason -Fragment '재매칭이 취소돼 필드로' -InFunction 'Complete-AbyssRetrySelection'
+    # ── 구현 단위 5b-8 - 재매칭 패널 ESC 취소 → 필드 확정 'field-cancelled' 끝(코드 4 · 입력 0 · 기록 무변경)의 GUI 틱 (FC-G1~FC-G3). 캡처는 이 묶음 바로 앞(공유 정지 함수가 없는 워커(⑤c 5c-2 전)는 위 끝 함수 올림에서 파일이 멈춤) ──
+    $fieldCancelledDone = Get-WorkerDoneReason -Fragment '재매칭이 취소돼 필드로' -InFunction 'Stop-AbyssReentryFieldCancelled'   # 공유 정지 함수(끝(retry) · 재개 끝이 부름 - 구현 단계 ⑤c)
     # FC-G1 (FB10 꼴) 우연한 만남 '다시 하기' 전송 1 → 재입장 대기 'field-cancelled'(호출 B 가 필드 결과 켬을 넘김) → 입력 0 · 정지 줄 · 코드 4 → (GUI 틱) retry-clicked 기록으로 +1 · 그 기록 소비 ·
     #     조건 정지(사유 원문 그대로 - 80자 안 U-5b8-2) · 다음 기동 0 → 다음 수동 시작 none
     $null = Start-RewardRow -Setup $soloSetup
@@ -4682,10 +4720,10 @@ function Test-CaseCode4Static {
     #   ① 표지 판별(Get-WorkerDoneMarkers) 반환 해시의 StartUnknown 항 1 · Release 항 1 - 값 = 원문 사유의 그 꼬리(앞 공백 + 괄호 + 낱말) 포함 여부
     #   ② 재전달 집합 = 계상 함수의 $relayMarker 대입 1 · 우변 = G2 원문(사용 중 · 선택 화면 · ESC 메뉴 · 시작 화면 미확인 넷 - 놓아줌 0)
     #   ③ 커스텀 재개 보류의 조건은 $relayMarker 그대로(G5) - 클리어 전 정지 술어를 더한 값(표지 또는 술어)을 읽으면 FAIL. ② 에서는 술어가 재개 기동을 늘
-    #      거짓으로 돌려 두 값의 행동이 같아 행동 행(C4-13)으로는 가를 수 없습니다 - 재개 기동의 클리어 전 정지를 다루는 뒤 단위(5절 C2 - ⑤)에서 갈리는
-    #      계약이라 정적으로 고정합니다(단계 2.7 구현 검증 - 그 변이가 수정 전 ⑯ 전체를 통과함)
+    #      거짓으로 돌려 두 값의 행동이 같아 행동 행(C4-13)으로는 가를 수 없습니다 - 술어에 resume 을 넣지 않기로 한 구현 단계 ⑤c G6(코드 변경 0 으로 닫힘)
+    #      뒤에도 그대로라 정적으로 고정합니다(단계 2.7 구현 검증 - 그 변이가 수정 전 ⑯ 전체를 통과함)
     #   ④ 숨김 2곳(5절 B13 = 꼬리 제거 함수 정의 1 · 호출 2): 호출 소유자 = 로그 줄 변환 + 타이머 · 두 호출 문장 원문(타이머는 꼬리 제거 → 공백 정규화 순서 -
-    #      J11) · 꼬리 목록 대입 1 · 그 목록에 ' (start-unknown)' 1 · ' (release)' 1 · ' (post-clear)' 0(G3 - 클리어 뒤 표지의 숨김은 그 표지를 내는 뒤 단위 몫)
+    #      J11) · 꼬리 목록 대입 1 · 그 목록에 ' (start-unknown)' 1 · ' (release)' 1 · ' (post-clear)' 0(G3 · 설계 R6 4절 - 워커가 그 표지를 내지 않아 숨길 줄이 없음, 판별 자리만 남음)
     $markersAst = Get-GuiFunctionAstByName 'Get-WorkerDoneMarkers'
     $markerPairs = @($markersAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $true) | ForEach-Object { $_.KeyValuePairs } |
             ForEach-Object { '{0}={1}' -f $_.Item1.Extent.Text, ((Remove-SourceComments -Text $_.Item2.Extent.Text) -replace '\s+', ' ').Trim() })
@@ -4847,20 +4885,30 @@ function Test-CaseCode1FinishOnly {
         ('1: stop|{0}|True · 0 · 0/0 · reentered/launched/1 || -1: stop|{1}|True · 0 · 0/0 · reentered/launched/1' -f ($C1_FINISH_FORMAT -f 1), ($C1_FINISH_FORMAT -f -1))
 }
 
-# ===== C1 행동 - 재입장 요청(retry-*) 뒤 코드 1 (dev:888·889 · 명세 2.8 ② · 3.4 '켜짐 갈래는 진리표' · 5절 B10) =====
+# ===== C1 행동 - 재입장 요청(retry-*) 뒤 코드 1 (dev:888·889 · 명세 2.8 ② · 구현 단계 ⑤c 부터 켬 - 꺼짐 갈래는 행 안 거짓 · 5절 B10) =====
 function Test-CaseCode1Retry {
     $runOwner = [pscustomobject]@{ runId = 'run-H' }
     $fixture = Get-CustomFixture
     $clickedPlain = New-FixtureEntry -Stage 'retry-clicked' -Owner $runOwner -Nonce $NONCE_A
     $attemptCustom = New-FixtureEntry -Stage 'retry-attempt' -Owner $fixture.FiveNow -Generation $H_GENERATION -Section $ABYSS_SECTION -Nonce $NONCE_A
-    # RT1 이 빌드(재개 기능 꺼짐 - GUI 원문 값) · retry-clicked(비커스텀) / retry-attempt(커스텀 · 마커 있음) → 정지(꺼짐 문구) · 빨강 · 계상·기동·저장 0 · 파일 그대로(마커 포함)
-    #    (명세 3.4 '플래그 off + retry-* + 코드 1 → 기동 0·정지·보존')
+    # RT0 배포본 기본값(GUI 원문 값 - 행 안 대입 없음) · retry-clicked(비커스텀) / retry-attempt(커스텀 · 마커 있음) → 재개 기동 resume/NA · 기동 1 · 정지 0
+    #     (S7 은 선언 글자만 보므로 기본값을 행동으로 고정 - 구현 명세 ⑤c 3.2 (라)-2 · 스위치를 끄면 꺼짐 정지로 갈림: 4절 G-M1 · 3.9 '스위치 꺼짐' 재현)
     Initialize-HandoffRow -Entries @($clickedPlain)
-    $rowPlain = Invoke-HandoffTick -ExitCode 1
+    $rowPlainDefault = Invoke-HandoffTick -ExitCode 1
     Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($attemptCustom)
     Write-ContextMarker -Context $fixture.Now
-    $rowCustom = Invoke-HandoffTick -ExitCode 1
-    Assert-Case ('RT1 재개 기능 꺼짐(GUI 원문 값 {0}) · 재입장 요청 뒤 코드 1 → 정지(꺼짐) · 빨강 · 계상/기동/저장 0 · 파일 그대로 (비커스텀 || 커스텀 - 전진·마커 정리 0)' -f $GUI_RETRY_FLAG) `
+    $rowCustomDefault = Invoke-HandoffTick -ExitCode 1
+    Assert-Case ('RT0 재개 기능 기본값(GUI 원문 값 {0} · 행 안 대입 없음) · 재입장 요청 뒤 코드 1 → 재개 기동 · 정지 0 (비커스텀 || 커스텀)' -f $GUI_RETRY_FLAG) `
+        ('{0}/{1} · {2} · 정지 [{3}] || {4}/{5} · {6} · 정지 [{7}]' -f $rowPlainDefault.Kind, $rowPlainDefault.Nonce, $rowPlainDefault.Launches, ((Get-StopEvents $rowPlainDefault) -join ' / '),
+            $rowCustomDefault.Kind, $rowCustomDefault.Nonce, $rowCustomDefault.Launches, ((Get-StopEvents $rowCustomDefault) -join ' / ')) 'resume/NA · 1 · 정지 [] || resume/NA · 1 · 정지 []'
+    # RT1 스위치를 끈 빌드(행 안 거짓 - Invoke-HandoffTickSwitchOff · 구현 명세 ⑤c 3.2 (라)-1) · retry-clicked(비커스텀) / retry-attempt(커스텀 · 마커 있음) → 정지(꺼짐 문구) · 빨강 ·
+    #    계상·기동·저장 0 · 파일 그대로(마커 포함) (명세 3.4 '플래그 off + retry-* + 코드 1 → 기동 0·정지·보존')
+    Initialize-HandoffRow -Entries @($clickedPlain)
+    $rowPlain = Invoke-HandoffTickSwitchOff
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($attemptCustom)
+    Write-ContextMarker -Context $fixture.Now
+    $rowCustom = Invoke-HandoffTickSwitchOff
+    Assert-Case 'RT1 재개 기능 꺼짐(스위치를 끈 빌드) · 재입장 요청 뒤 코드 1 → 정지(꺼짐) · 빨강 · 계상/기동/저장 0 · 파일 그대로 (비커스텀 || 커스텀 - 전진·마커 정리 0)' `
         ('{0} · {1} · {2}/{3}/{4} · {5} || {6} · {7}/{8}/{9} · {10} · {11}/{12}' -f $rowPlain.Flow, $rowPlain.Color, $rowPlain.Completed, $rowPlain.Launches, $rowPlain.Updates, $rowPlain.StateUnchanged,
             $rowCustom.Flow, $rowCustom.Completed, $rowCustom.Launches, $rowCustom.Updates, $rowCustom.StateUnchanged, $rowCustom.Steps, $rowCustom.MarkerClears) `
         ('stop|{0}|True · Firebrick · 0/0/0 · 1 || stop|{0}|True · 0/0/0 · 1 · 0/0' -f $C1_RETRY_OFF)
@@ -4884,12 +4932,22 @@ function Test-CaseCode1Retry {
         Assert-Case 'RT2 재개 1회 뒤 또 코드 1 → 정지(한 번뿐) · 기동 0 · 파일 그대로 (플래그 꺼짐 || 켜짐)' ($againTexts -join ' || ') `
             ('False: stop|{0}|True · 0 · 1 || True: stop|{0}|True · 0 · 1' -f $C1_RESUMED_AGAIN)
 
-        # RT3 켜진 빌드(진리표) + 안전 중지 → [안내] 1줄 → '안전 중지' 정지 · 재개 0 · 재개 횟수 기록 0 · 파일 그대로 (dev:888 원문 · 설계 R1 9절 미결 4)
+        # RT3 켜진 빌드 + 안전 중지 · 비커스텀 → [안내] 1줄(비커스텀 끝말 '화면을 확인하고 다시 시작' - 사용자 결정 U-⑤c-2) → '안전 중지' 정지 · 재개 0 · 재개 횟수
+        #     기록 0 · 파일 그대로 (설계 R1 9절 미결 4)
         Initialize-HandoffRow -Entries @($clickedPlain) -StopRequested $true
         $script:abyssPartyRetryEnabled = $true
         $row = Invoke-HandoffTick -ExitCode 1
         Assert-Case 'RT3 켜진 빌드 + 안전 중지 → [안내] → 안전 중지 정지 · 기동 0 · 저장 0 · 파일 그대로' ('{0} · {1} · {2} · {3}' -f $row.Flow, $row.Launches, $row.Updates, $row.StateUnchanged) `
-            ('gui|{0} / stop|안전 중지|False · 0 · 0 · 1' -f $C1_SAFE_NOTICE)
+            ('gui|{0} / stop|안전 중지|False · 0 · 0 · 1' -f $C1_SAFE_NOTICE_PLAIN)
+        # RT3′ 켜진 빌드 + 안전 중지 · 커스텀(retry-attempt · 마커 있음) → [안내] 1줄(커스텀 끝말 '다음 시작에서 재개' - 사용자 결정 U-⑤c-2: 다음 시작 S3 가 재개를 한 번 예약) →
+        #      '안전 중지' 정지 · 기동 0 · 저장 0 · 파일 그대로(마커 포함) · 전진·마커 정리 0 (구현 명세 ⑤c 3.6)
+        Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($attemptCustom) -StopRequested $true
+        Write-ContextMarker -Context $fixture.Now
+        $script:abyssPartyRetryEnabled = $true
+        $row = Invoke-HandoffTick -ExitCode 1
+        Assert-Case 'RT3′ 켜진 빌드 + 안전 중지 · 커스텀 → [안내](커스텀 끝말) → 안전 중지 정지 · 기동 0 · 저장 0 · 파일 그대로 · 전진/마커 정리 0' `
+            ('{0} · {1} · {2} · {3} · {4}/{5}' -f $row.Flow, $row.Launches, $row.Updates, $row.StateUnchanged, $row.Steps, $row.MarkerClears) `
+            ('gui|{0} / stop|안전 중지|False · 0 · 0 · 1 · 0/0' -f $C1_SAFE_NOTICE)
         # RT4 켜진 빌드 · 비커스텀 → 재개 횟수 0 → 1 기록 → [경고] → 재개 기동(실제 후보 고르기의 재개 = 같은 항목 · RESUME_REENTRY 1 · 기동 종류 resume) → 시작 줄 · 항목 launched(미적용)
         Initialize-HandoffRow -Entries @($clickedPlain)
         $script:abyssPartyRetryEnabled = $true
@@ -4970,6 +5028,22 @@ function Test-CaseCode1Retry {
         $stageRow = Invoke-HandoffTick -ExitCode 1 -PreUpdateAt 1 -PreUpdateHook $stageHook
         Assert-Case 'RT6′ 켜진 빌드 · 기록 직전 단계 바뀜(실제 -Expect) → 재개 기록 저장 실패 정지 · 기동 0 · 재개 횟수 0' `
             ('{0} · {1} · {2}' -f $stageRow.Flow, $stageRow.Launches, (Get-EntryResumeAttempts $stageRow.Journal $NONCE_A)) ('stop|{0}|True · 0 · 0' -f ($C1_RESUME_SAVE_FORMAT -f '기록 보존'))
+        # RT7 코드 1 밖 종료(그 밖 크래시 코드 -1 - 사용자 결정 U-⑤c-1: 자동 재개 없음, 라우팅은 journal 을 열지 않음 · 스위치를 읽지 않는 갈래라 행 안 대입 없음 - 구현 명세 ⑤c 3.6):
+        #     (가) 비커스텀 retry-clicked · (나) 커스텀 retry-attempt · 마커 → 예전 오류 정지 · 기동 0 · 읽기·저장 0 · 파일 그대로 || (다) 재개 기동(NA · 재개 횟수 1) → 같은 정지 ·
+        #     끝 처리가 넘긴 NA 를 done(클리어 전 정지 술어 밖 - 구현 단계 ⑤c G6) · 재개 횟수 그대로 · 저장 1
+        Initialize-HandoffRow -Entries @($clickedPlain)
+        $rowPlainCrash = Invoke-HandoffTick -ExitCode -1
+        Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($attemptCustom)
+        Write-ContextMarker -Context $fixture.Now
+        $rowCustomCrash = Invoke-HandoffTick -ExitCode -1
+        Initialize-HandoffRow -Entries @($resumedOnce) -LaunchKind 'resume' -LaunchNonce $NONCE_A
+        $rowResumeCrash = Invoke-HandoffTick -ExitCode -1
+        Assert-Case 'RT7 코드 -1 → 오류 정지(예전 글자) · 기동 0 · 읽기/저장 0 · 파일 그대로 (비커스텀 || 커스텀 - 전진·마커 정리 0) || 재개 기동 → 같은 정지 · NA done · 재개 횟수 1 · 저장 1' `
+            ('{0} · {1} · {2}/{3} · {4} || {5} · {6} · {7}/{8} · {9} · {10}/{11} || {12} · {13} · {14} · {15}/{16}' -f
+                $rowPlainCrash.Flow, $rowPlainCrash.Launches, $rowPlainCrash.Reads, $rowPlainCrash.Updates, $rowPlainCrash.StateUnchanged,
+                $rowCustomCrash.Flow, $rowCustomCrash.Launches, $rowCustomCrash.Reads, $rowCustomCrash.Updates, $rowCustomCrash.StateUnchanged, $rowCustomCrash.Steps, $rowCustomCrash.MarkerClears,
+                $rowResumeCrash.Flow, (Get-EntryText $rowResumeCrash.Journal $NONCE_A), (Get-EntryResumeAttempts $rowResumeCrash.Journal $NONCE_A), $rowResumeCrash.Reads, $rowResumeCrash.Updates) `
+            ('stop|{0}|True · 0 · 0/0 · 1 || stop|{0}|True · 0 · 0/0 · 1 · 0/0 || stop|{0}|True · retry-clicked/done/0 · 1 · 0/1' -f ($C1_STOP_PLAIN_FORMAT -f -1))
     } finally {
         $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG
     }
@@ -5014,14 +5088,15 @@ function Test-CaseCode1Legacy {
     Assert-Case 'A10″ 비커스텀 클리어 기록 + 코드 1 → 오류 정지(예전 글자) · 빨강 · 기동 0 · 클리어 기록 미소비 · 읽기 1·저장 0' `
         ('{0} · {1} · {2} · {3} · {4}/{5}' -f $row.Flow, $row.Color, $row.Launches, (Get-EntryText $row.Journal $NONCE_C), $row.Reads, $row.Updates) `
         ('stop|{0}|True · Firebrick · 0 · cleared/pending/0 · 1/0' -f ($C1_STOP_PLAIN_FORMAT -f 1))
-    # 단계 우선(여럿이면 앞선 단계): 같은 실행의 reentered(NA) + cleared(NC) → 재입장 실행부(다음 판 기동 NA) || retry-clicked(NB) + cleared(NC) → 재입장 요청(꺼진 빌드 = 정지)
+    # 단계 우선(여럿이면 앞선 단계): 같은 실행의 reentered(NA) + cleared(NC) → 재입장 실행부(다음 판 기동 NA) || retry-clicked(NB) + cleared(NC) → 재입장 요청(켜진 빌드 = 재개 기동 resume/NB - 꺼진 빌드면 꺼짐 정지)
     Initialize-HandoffRow -Entries @((New-FixtureEntry -Stage 'reentered' -Owner $runOwner -Nonce $NONCE_A), $plainCleared)
     $rowFirst = Invoke-HandoffTick -ExitCode 1
     Initialize-HandoffRow -Entries @((New-FixtureEntry -Stage 'retry-clicked' -Owner $runOwner -Nonce $NONCE_B), $plainCleared)
     $rowSecond = Invoke-HandoffTick -ExitCode 1
-    Assert-Case '단계 우선: reentered + cleared → 재입장 실행부(next/NA · 기동 1) || retry-clicked + cleared → 재개 기능 꺼짐 정지' `
-        ('{0}/{1} · {2} || {3}' -f $rowFirst.Kind, $rowFirst.Nonce, $rowFirst.Launches, $rowSecond.Flow) ('next/NA · 1 || stop|{0}|True' -f $C1_RETRY_OFF)
-    # 단계 우선′ 같은 실행의 reentered(NA) + retry-clicked(NB) → reentered 가 이김(재입장 실행부 · 다음 판 next/NA · 기동 1 - 재개 기능 꺼짐 정지가 아님) (단계 2.7~2.9 구현
+    Assert-Case '단계 우선: reentered + cleared → 재입장 실행부(next/NA · 기동 1) || retry-clicked + cleared → 재개 기동(resume/NB · 기동 1)' `
+        ('{0}/{1} · {2} || {3}/{4} · {5} · {6}' -f $rowFirst.Kind, $rowFirst.Nonce, $rowFirst.Launches, $rowSecond.Kind, $rowSecond.Nonce, $rowSecond.Launches, $rowSecond.Flow) `
+        ('next/NA · 1 || resume/NB · 1 · gui|{0} / launch|powershell.exe / gui|=== 1회차 시작 ===' -f $C1_RESUME_NOTICE)
+    # 단계 우선′ 같은 실행의 reentered(NA) + retry-clicked(NB) → reentered 가 이김(재입장 실행부 · 다음 판 next/NA · 기동 1 - 재개 기동 resume/NB 가 아님, 꺼진 빌드면 꺼짐 정지가 아님) (단계 2.7~2.9 구현
     #        검증 - 생존 변이 '재입장 요청이 reentered 보다 먼저' 를 가름: 위 행은 클리어 기록 조합만 봄)
     Initialize-HandoffRow -Entries @((New-FixtureEntry -Stage 'reentered' -Owner $runOwner -Nonce $NONCE_A), (New-FixtureEntry -Stage 'retry-clicked' -Owner $runOwner -Nonce $NONCE_B))
     $row = Invoke-HandoffTick -ExitCode 1
@@ -5187,7 +5262,7 @@ function Test-CaseCode1StopNonce {
     $streakStop = 'stop|{0}{1}|True' -f $C1_STREAK_STOP, $STOP_TAIL
 
     # NC1 비커스텀 재입장 오류 상한(3회째 - H48 정지) · 다른 nonce(next NB) → NB done · 라우팅한 NA 그대로(reentered/pending/미적용) · 읽기 1·저장 1 · 정지 문구 그대로 ||
-    #     같은 nonce(재개 워커가 쓴 reentered NA - H40 모양. 비커스텀 재개 기동은 켜진 빌드의 코드 1 라우팅만 띄워 이 빌드에서는 진리표) → NA launched 유지 · 저장 0 ·
+    #     같은 nonce(재개 워커가 쓴 reentered NA - H40 모양. 비커스텀 재개 기동은 코드 1 라우팅만 띄움 - 구현 단계 ⑤c 부터 켬) → NA launched 유지 · 저장 0 ·
     #     파일 그대로 || 넘긴 nonce 없음 → 저장 0 · 파일 그대로.
     #     정지 뒤 후보 고르기(실제 Resolve): 같은 실행 id → next/NA 둘 다(같은 nonce 를 닫았다면 none - 열어 둔 효과) · 새 실행 id(다음 수동 시작 - 시작 버튼마다 새 id) →
     #     none(비커스텀은 다음 시작이 이어받지 않음 - C8 과 같은 수용 창, 닫든 열든 같음)
@@ -5222,32 +5297,32 @@ function Test-CaseCode1StopNonce {
             $rowNone.Flow, $rowNone.Reads, $rowNone.Updates, $rowNone.StateUnchanged) `
         ('stop|{0}|True · retry-clicked/launched/0 · 1/0 · 1 || stop|{0}|True · reentered/done/1 · retry-clicked/launched/0 · 1 · 1/1 || stop|{0}|True · 1/0 · 1' -f $C1_RESUMED_AGAIN)
 
-    # NC3 재개 기능 꺼짐(이 빌드의 실제 경로 - GUI 원문 값) · 다른 nonce(next NB) → NB done · NA 그대로(retry-clicked/pending) · 저장 1 || 같은 nonce(NA - 재개 기동은 재개 횟수를
+    # NC3 스위치를 끈 빌드(행 안 거짓 - Invoke-HandoffTickSwitchOff · 구현 명세 ⑤c 3.2 (라)-1) · 다른 nonce(next NB) → NB done · NA 그대로(retry-clicked/pending) · 저장 1 || 같은 nonce(NA - 재개 기동은 재개 횟수를
     #     먼저 올려 실제로는 NC2 로 가는 조합이라 진리표) → 저장 0 · 파일 그대로 ||
     #     없음 → 저장 0 · 파일 그대로 || 커스텀(진행 i = 2번 칸 · 앞 판의 재입장 NB(nextOwner = i) 를 받아 기동 · 이 판의 재입장 요청 NA · 마커 있음) → NB done · NA 그대로 ·
     #     전진·마커 정리 0 · 마커 그대로 (다음 수동 시작 S3 의 이어받기는 test_abyss_pending_advance C11)
     Initialize-HandoffRow -Entries @($launchedB, $clickedA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
-    $rowOther = Invoke-HandoffTick -ExitCode 1
+    $rowOther = Invoke-HandoffTickSwitchOff
     $clickedLaunchedA = New-FixtureEntry -Stage 'retry-clicked' -Owner $runOwner -LaunchState 'launched' -Nonce $NONCE_A
     Initialize-HandoffRow -Entries @($clickedLaunchedA) -LaunchKind 'resume' -LaunchNonce $NONCE_A
-    $rowSame = Invoke-HandoffTick -ExitCode 1
+    $rowSame = Invoke-HandoffTickSwitchOff
     Initialize-HandoffRow -Entries @($clickedA)
-    $rowNone = Invoke-HandoffTick -ExitCode 1
+    $rowNone = Invoke-HandoffTickSwitchOff
     $customB = New-FixtureEntry -Stage 'reentered' -Owner $fixture.FiveNow -NextOwner $fixture.FiveNext -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_B
     $customA = New-FixtureEntry -Stage 'retry-attempt' -Owner $fixture.FiveNext -Generation $H_GENERATION -Section $ABYSS_SECTION -Nonce $NONCE_A
     Initialize-HandoffRow -Custom $true -DiskContext $fixture.Next -Entries @($customB, $customA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
     Write-ContextMarker -Context $fixture.Next
     $markerBefore = [IO.File]::ReadAllText($script:customMarkerFile)
-    $rowCustom = Invoke-HandoffTick -ExitCode 1
+    $rowCustom = Invoke-HandoffTickSwitchOff
     $markerSame = [int]([IO.File]::ReadAllText($script:customMarkerFile) -ceq $markerBefore)
-    Assert-Case ('NC3 재개 기능 꺼짐(GUI 원문 값 {0}) · 다른 nonce → NB done · NA 그대로 · 저장 1 || 같은 nonce → 저장 0 · 파일 그대로 || 없음 → 저장 0 · 파일 그대로 || 커스텀 다른 nonce → NB done · NA 그대로 · 전진·마커 정리 0 · 마커 그대로' -f $GUI_RETRY_FLAG) `
+    Assert-Case 'NC3 재개 기능 꺼짐(스위치를 끈 빌드) · 다른 nonce → NB done · NA 그대로 · 저장 1 || 같은 nonce → 저장 0 · 파일 그대로 || 없음 → 저장 0 · 파일 그대로 || 커스텀 다른 nonce → NB done · NA 그대로 · 전진·마커 정리 0 · 마커 그대로' `
         ('{0} · {1} · {2} · {3}/{4} || {5} · {6}/{7} · {8} || {9} · {10}/{11} · {12} || {13} · {14} · {15} · {16}/{17} · {18}' -f $rowOther.Flow, (Get-EntryText $rowOther.Journal $NONCE_B),
             (Get-EntryText $rowOther.Journal $NONCE_A), $rowOther.Reads, $rowOther.Updates, $rowSame.Flow, $rowSame.Reads, $rowSame.Updates, $rowSame.StateUnchanged,
             $rowNone.Flow, $rowNone.Reads, $rowNone.Updates, $rowNone.StateUnchanged, $rowCustom.Flow, (Get-EntryText $rowCustom.Journal $NONCE_B), (Get-EntryText $rowCustom.Journal $NONCE_A),
             $rowCustom.Steps, $rowCustom.MarkerClears, $markerSame) `
         ('stop|{0}|True · reentered/done/1 · retry-clicked/pending/0 · 1/1 || stop|{0}|True · 1/0 · 1 || stop|{0}|True · 1/0 · 1 || stop|{0}|True · reentered/done/1 · retry-attempt/pending/0 · 0/0 · 1' -f $C1_RETRY_OFF)
 
-    # NC4 켜진 빌드 · 안전 중지(dev:888) · 다른 nonce(next NB) → [안내] → NB done → '안전 중지' 정상 정지 · NA 그대로 · 재개 0 · 저장 1 || 같은 nonce(NC3 과 같은 진리표 조합) → 저장 0 ·
+    # NC4 켜진 빌드 · 안전 중지 · 비커스텀(안내 끝말 '화면을 확인하고 다시 시작' - 사용자 결정 U-⑤c-2) · 다른 nonce(next NB) → [안내] → NB done → '안전 중지' 정상 정지 · NA 그대로 · 재개 0 · 저장 1 || 같은 nonce(NC3 과 같은 진리표 조합) → 저장 0 ·
     #     파일 그대로 ||
     #     없음 → 저장 0 · 파일 그대로
     try {
@@ -5266,13 +5341,13 @@ function Test-CaseCode1StopNonce {
     Assert-Case 'NC4 켜진 빌드 · 안전 중지 · 다른 nonce → [안내] → 안전 중지 · NB done · NA 그대로 · 기동 0 · 저장 1 || 같은 nonce → 저장 0 · 파일 그대로 || 없음 → 저장 0 · 파일 그대로' `
         ('{0} · {1} · {2} · {3} · {4}/{5} || {6} · {7}/{8} · {9} || {10} · {11}/{12} · {13}' -f $rowOther.Flow, (Get-EntryText $rowOther.Journal $NONCE_B), (Get-EntryText $rowOther.Journal $NONCE_A),
             $rowOther.Launches, $rowOther.Reads, $rowOther.Updates, $rowSame.Flow, $rowSame.Reads, $rowSame.Updates, $rowSame.StateUnchanged, $rowNone.Flow, $rowNone.Reads, $rowNone.Updates, $rowNone.StateUnchanged) `
-        ('gui|{0} / stop|안전 중지|False · reentered/done/1 · retry-clicked/pending/0 · 0 · 1/1 || gui|{0} / stop|안전 중지|False · 1/0 · 1 || gui|{0} / stop|안전 중지|False · 1/0 · 1' -f $C1_SAFE_NOTICE)
+        ('gui|{0} / stop|안전 중지|False · reentered/done/1 · retry-clicked/pending/0 · 0 · 1/1 || gui|{0} / stop|안전 중지|False · 1/0 · 1 || gui|{0} / stop|안전 중지|False · 1/0 · 1' -f $C1_SAFE_NOTICE_PLAIN)
 
     # NC5 이번 기동 항목이 이미 done(워커가 닫으며 reason 을 남김) → 저장 호출 1 · 바꿀 것 없음(본 파일 바이트 그대로 - 직전본 생성 0) · reason 보존 (끝 처리 ② 와 같은 mutation 모양 - G4)
     $doneB = New-FixtureEntry -Stage 'reentered' -Owner $runOwner -NextOwner $runOwner -LaunchState 'done' -Nonce $NONCE_B
     $doneB.reason = 'abandoned-pre-entry-start'
     Initialize-HandoffRow -Entries @($doneB, $clickedA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
-    $row = Invoke-HandoffTick -ExitCode 1
+    $row = Invoke-HandoffTickSwitchOff
     $reasonKept = @(@($row.Journal.entries) | Where-Object { [string]$_.nonce -eq $NONCE_B } | ForEach-Object { [string]$_.reason }) -join ','
     Assert-Case 'NC5 이번 기동 항목이 이미 done → 저장 1 · 파일 그대로 · NB done · reason 보존 · 정지 문구 그대로' `
         ('{0} · {1} · {2} · {3} · {4}' -f $row.Flow, $row.Updates, $row.StateUnchanged, (Get-EntryText $row.Journal $NONCE_B), $reasonKept) `
@@ -5281,9 +5356,9 @@ function Test-CaseCode1StopNonce {
     # NC6 닫기 실패 → [경고] 1줄 뒤 원래 정지 1번(정지 사유 그대로 · 두 번 정지 없음) · 빨강 · NB launched 그대로 · 예외 0: 재개 기능 꺼짐 + 저장 직전 다른 주체가 잠금(실제 '사용 중') ||
     #     재개 기능 꺼짐 + 저장 예외 || 재입장 오류 상한 + 실제 잠금(재입장 꼬리도 그대로)
     Initialize-HandoffRow -Entries @($launchedB, $clickedA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
-    $rowLocked = Invoke-HandoffTick -ExitCode 1 -PreUpdateAt 1 -PreUpdateHook { Lock-JournalLock }
+    $rowLocked = Invoke-HandoffTickSwitchOff -Tick @{ PreUpdateAt = 1; PreUpdateHook = { Lock-JournalLock } }
     Initialize-HandoffRow -Entries @($launchedB, $clickedA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
-    $rowThrow = Invoke-HandoffTick -ExitCode 1 -UpdateThrowAt 1
+    $rowThrow = Invoke-HandoffTickSwitchOff -Tick @{ UpdateThrowAt = 1 }
     Initialize-HandoffRow -Entries @($launchedB, $reenteredA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B -AbyssErrorStreak 2
     $rowStreak = Invoke-HandoffTick -ExitCode 1 -PreUpdateAt 1 -PreUpdateHook { Lock-JournalLock }
     $failTexts = foreach ($failRow in @($rowLocked, $rowThrow, $rowStreak)) {
@@ -5295,11 +5370,13 @@ function Test-CaseCode1StopNonce {
 
     # NC7 라우팅 반환은 정지 경로에서 닫기(저장 1)·닫기 실패([경고])를 거쳐도 'handled' 하나(닫기 함수의 출력이 반환에 섞이지 않음 - 타이머는 반환을 -eq 로 봄)
     Initialize-HandoffRow -Entries @($launchedB, $clickedA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
-    $closedOut = @(Invoke-Code1JournalRouting -ExitCode 1)
+    $script:abyssPartyRetryEnabled = $false
+    try { $closedOut = @(Invoke-Code1JournalRouting -ExitCode 1) } finally { $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
     $closedState = Get-EntryText (Read-FixtureJournal -Path $script:abyssJournalPath) $NONCE_B
     Initialize-HandoffRow -Entries @($launchedB, $clickedA) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
     $script:updateThrowAt = 1
-    try { $failedOut = @(Invoke-Code1JournalRouting -ExitCode 1) } finally { $script:updateThrowAt = 0 }
+    $script:abyssPartyRetryEnabled = $false
+    try { $failedOut = @(Invoke-Code1JournalRouting -ExitCode 1) } finally { $script:updateThrowAt = 0; $script:abyssPartyRetryEnabled = $GUI_RETRY_FLAG }
     Assert-Case "NC7 라우팅 반환: 닫기 성공 → 'handled' 하나 · NB done || 닫기 실패 → 'handled' 하나" ('{0}:{1} · {2} || {3}:{4}' -f $closedOut.Count, ($closedOut -join ','), $closedState, $failedOut.Count, ($failedOut -join ',')) `
         '1:handled · reentered/done/1 || 1:handled'
 
@@ -5465,6 +5542,85 @@ function Test-CaseCode1Static {
             $closeClosures.Count, $closeScriptReads, $closeCatches, $closeStops, $closeThrows) `
         ('String $RoutedNonce · 5|(함수 밖),Invoke-Code1JournalRouting,Invoke-Code1JournalRouting,Invoke-Code1JournalRouting,Invoke-Code1JournalRouting · ' +
             '-RoutedNonce ([string]$reenteredEntry.nonce) | -RoutedNonce $retryNonce | -RoutedNonce $retryNonce | -RoutedNonce $retryNonce · 4 · 1/0 · 1 · 0 · 0')
+    # SW1 켠 빌드에 재개 꺼짐 정지(워커 S19 '재입장 재개 기능이 꺼져' 문구)가 남지 않음(구현 명세 ⑤c 1.11 - 켠 채 S19 가 있는 트리는 빌드하지 않음). 꺼진 빌드에서는 늘 참(G-M2 로만 효력)
+    $retryOffNodes = @($workerAst.FindAll({ param($node) (($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) -or
+                ($node -is [System.Management.Automation.Language.ExpandableStringExpressionAst])) -and ([string]$node.Value).Contains('재입장 재개 기능이 꺼져') }, $true))
+    Assert-Case ('SW1 스위치 {0} · 워커의 재개 꺼짐 정지 문자열 {1}개 → (스위치 꺼짐) 또는 (문자열 0)' -f $GUI_RETRY_FLAG, $retryOffNodes.Count) ([bool]((-not $GUI_RETRY_FLAG) -or ($retryOffNodes.Count -eq 0))) $true
+    # SW2 스위치 변수를 쓰는 곳 = GUI 셋(최상위 대입 · 시작 게이트 S3 판정 · 코드 1 라우팅) · 워커 0(사본 없음 - 파티장 관문은 ⑥d 가 따로). 정렬은 Get-GuiCallOwners 와 같은 서수.
+    #     이름은 범위 접두 무관(UserPath 에서 script · global · local · private 접두를 뗀 이름 · 대소문자 무관 - 한정자 없는 꼴도 셈: 워커 최상위 사본은 한정자 없는 대입이 자연스러운 꼴.
+    #     VariablePath.UnqualifiedPath 는 공개 속성이 아니라 스크립트에서 빈 값 - 구현 사전 대조 반영 · 기준 실행으로 확인)
+    $switchOwners = foreach ($switchAst in @($guiAst, $workerAst)) {
+        $switchNodes = @($switchAst.FindAll({ param($node) ($node -is [System.Management.Automation.Language.VariableExpressionAst]) -and ($node.VariablePath.UserPath -match '^((script|global|local|private):)?abyssPartyRetryEnabled$') }, $true))
+        [string[]]$switchNames = @($switchNodes | ForEach-Object {
+                $parent = $_.Parent
+                $ownerName = '(함수 밖)'
+                while ($null -ne $parent) {
+                    if ($parent -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $ownerName = $parent.Name; break }
+                    $parent = $parent.Parent
+                }
+                $ownerName
+            })
+        [Array]::Sort($switchNames, [StringComparer]::Ordinal)
+        '{0}|{1}' -f $switchNodes.Count, ($switchNames -join ',')
+    }
+    Assert-Case 'SW2 스위치 변수 소유자(GUI · 워커)' ($switchOwners -join ' · ') '3|(함수 밖),Get-AbyssStartJournalAction,Invoke-Code1JournalRouting · 0|'
+}
+
+# ===== RZ 행동 - 재개(resume) 기동의 끝: 코드 0 · 4 · 11 (구현 명세 ⑤c 3.6 ⑯ - 스위치를 읽지 않는 갈래라 행 안 대입 없음) =====
+function Test-CaseResumeExit {
+    $runOwner = [pscustomobject]@{ runId = 'run-H' }
+    $fixture = Get-CustomFixture
+    $reasonA = $IH_REASON + ($IH_TAIL_FORMAT -f $NONCE_A)
+    $plainResume = New-FixtureEntry -Stage 'retry-clicked' -Owner $runOwner -LaunchState 'launched' -Nonce $NONCE_A
+    $customResume = New-FixtureEntry -Stage 'retry-clicked' -Owner $fixture.FiveNow -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_A
+    # RZ1 재개 기동 N(NA) + 코드 0(선택 화면 복귀) → 판별 none(재입장 표지 · reentered 없음) → +1 · NA 소비 · done → 비커스텀 다음 회차 판단 || 커스텀 전진 1 · 다음 기동
+    #     (넘길 후보 없음 - NA 는 적용 · done)
+    $judge = Invoke-JudgeRow -Setup @{ Entries = @($plainResume); LaunchKind = 'resume'; LaunchNonce = $NONCE_A } -ExitCode 0 -Reason $READY_REASON
+    Initialize-HandoffRow -Entries @($plainResume) -LaunchKind 'resume' -LaunchNonce $NONCE_A
+    $rowPlain = Invoke-HandoffTick -ExitCode 0 -Reason $READY_REASON
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($customResume) -LaunchKind 'resume' -LaunchNonce $NONCE_A
+    $rowCustom = Invoke-HandoffTick -ExitCode 0 -Reason $READY_REASON
+    Assert-Case 'RZ1 재개 기동 + 코드 0(선택 화면 복귀) → 판별 none → +1 · NA 소비 · done → 비커스텀 판단 || 커스텀 전진 1 · 다음 기동(후보 없음)' `
+        ('판별 {0} · {1} · {2} · {3} · {4}/{5} || {6} · {7} · {8} · {9} · {10}/{11}' -f $judge.Text, $rowPlain.Flow, $rowPlain.Completed, (Get-EntryText $rowPlain.Journal $NONCE_A), $rowPlain.Reads,
+            $rowPlain.Updates, $rowCustom.Flow, $rowCustom.Completed, $rowCustom.Steps, (Get-EntryText $rowCustom.Journal $NONCE_A), $rowCustom.Launches, $rowCustom.Kind) `
+        ('판별 none// · gui|=== 1회차 완료 === / decision|0 · 1 · retry-clicked/done/1 · 1/1 || gui|[커스텀] {0} 항목 완료 / step / launch|powershell.exe / gui|=== 2회차 시작(2/3) === · 1 · 1 · retry-clicked/done/1 · 1/none' -f
+            $fixture.Now.Position)
+    # RZ2 재개 기동 + 표지 없는 코드 4(워커 원문 넷 - 끝-필드 · 끝-none(우연한 만남 예산) · 끝-필드취소 · 끝-취소) → 기록 규칙 +1 · NA 소비 · done · 정상 정지 ||
+    #     커스텀 · 마커 없음 → 기록 규칙 +1 · 전진 1 · 소비 · done (정지 사유는 80자로 잘려 원문 대조는 수집한 사유로 - SS7 과 같은 이유)
+    $rzReasons = @(
+        @{ N = '끝-필드'; Reason = (Get-WorkerDoneReason -Fragment '시작 화면을 재입장 상태로 확인하지 못해 정지합니다 (필드)' -InFunction 'Invoke-AbyssHandoffStart') }
+        @{ N = '끝-none'; Reason = (Get-WorkerDoneReason -Fragment '매칭 취소·나가기 없이 정지합니다' -Values @{ timeoutPartyMatch = $GUI_TICK_TPM } -InFunction 'Stop-AbyssReentryTimeout') }
+        @{ N = '끝-필드취소'; Reason = (Get-WorkerDoneReason -Fragment '재매칭이 취소돼 필드로' -InFunction 'Stop-AbyssReentryFieldCancelled') }
+        @{ N = '끝-취소'; Reason = (Get-WorkerDistinctDoneReason -Fragment '재매칭이 취소돼' -InFunction 'Complete-AbyssOtherSelection') }
+    )
+    $rzTexts = @(foreach ($rzReason in $rzReasons) {
+            Initialize-HandoffRow -Entries @($plainResume) -LaunchKind 'resume' -LaunchNonce $NONCE_A
+            $rzRow = Invoke-HandoffTick -ExitCode 4 -Reason $rzReason.Reason
+            '{0}: 계상 {1} · {2} · 정지 [{3}] · 기동 {4} · 사유 원문 {5}' -f $rzReason.N, $rzRow.Completed, (Get-EntryText $rzRow.Journal $NONCE_A), (Get-StopFlags $rzRow), $rzRow.Launches,
+                [int]([string]$script:lastWorkerDoneReason -ceq $rzReason.Reason)
+        })
+    Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($customResume) -LaunchKind 'resume' -LaunchNonce $NONCE_A
+    $rzRow = Invoke-HandoffTick -ExitCode 4 -Reason $rzReasons[2].Reason
+    $rzTexts += ('커스텀(마커 없음): 계상 {0} · 전진 {1} · 마커 정리 {2} · {3} · 정지 [{4}]' -f $rzRow.Completed, $rzRow.Steps, $rzRow.MarkerClears, (Get-EntryText $rzRow.Journal $NONCE_A), (Get-StopFlags $rzRow))
+    $rzWant = @($rzReasons | ForEach-Object { '{0}: 계상 1 · retry-clicked/done/1 · 정지 [False] · 기동 0 · 사유 원문 1' -f $_.N }) + '커스텀(마커 없음): 계상 1 · 전진 1 · 마커 정리 0 · retry-clicked/done/1 · 정지 [False]'
+    Assert-Case 'RZ2 재개 기동 + 표지 없는 코드 4(워커 원문 넷) → 기록 규칙 +1 · NA 소비 · done · 정상 정지 || 커스텀 마커 없음 → +1 · 전진 1 · 소비 · done' ($rzTexts -join ' || ') ($rzWant -join ' || ')
+    # RZ3 재개 기동 + 재입장 표지 코드 0 · 항목은 retry-clicked(워커의 reentered 기록 실패 - log 출처) → [경고] 1줄 · 단계 보정 → 다음 판 기동 next/NA · launched(이번 기동 nonce 가
+    #     이 항목이라 필수 기록이 닫지 않음 - H10 + H38)
+    Initialize-HandoffRow -Entries @($plainResume) -LaunchKind 'resume' -LaunchNonce $NONCE_A
+    $row = Invoke-HandoffTick -ExitCode 0 -Reason $reasonA
+    Assert-Case 'RZ3 재개 기동 + log 출처 재입장(코드 0) → [경고] 1줄 → 다음 판 기동 · 항목 reentered/launched/적용 · next/NA' `
+        ('{0} · {1} · {2}/{3}' -f $row.Flow, (Get-EntryText $row.Journal $NONCE_A), $row.Kind, $row.Nonce) `
+        ('gui|=== 1회차 완료 === / gui|{0} / launch|powershell.exe / gui|=== 2회차 시작 === · reentered/launched/1 · next/NA' -f $IH_LOG_WARNING)
+    # RZ4 재개 기동 + 코드 11 · 지정 시각 지남 → 시간 칸 건너뜀(코드 11 은 시각을 안 봄) · (다음 판으로 이어 감) 완료 줄 · 안내 1줄 → next/NA · HANDOFF_NONCE = 같은 항목 ·
+    #     launched 유지 (H4 + H38)
+    $pastTarget = [datetime]::Now.AddHours(-1)
+    $resumedReentered = New-FixtureEntry -Stage 'reentered' -Owner $runOwner -NextOwner $runOwner -LaunchState 'launched' -Nonce $NONCE_A
+    Initialize-HandoffRow -Entries @($resumedReentered) -LaunchKind 'resume' -LaunchNonce $NONCE_A -TargetTime $pastTarget
+    $row = Invoke-HandoffTick -ExitCode 11 -Reason $reasonA
+    Assert-Case 'RZ4 재개 기동 + 코드 11 · 지정 시각 뒤 → (다음 판으로 이어 감) 완료 줄 → 안내 1줄 → next/NA · HANDOFF_NONCE = 같은 항목 · launched 유지' `
+        ('{0} · {1}/{2} · {3} · {4}' -f $row.Flow, $row.Kind, $row.Nonce, $row.LaunchEnv['HONEYNOGI_HANDOFF_NONCE'], (Get-EntryText $row.Journal $NONCE_A)) `
+        ('gui|=== 1회차 완료 (다음 판으로 이어 감) === / gui|{0} / launch|powershell.exe / gui|=== 2회차 시작 === · next/NA · {1} · reentered/launched/1' -f
+            ($CARRY_NOTICE_FORMAT -f $pastTarget.ToString('HH:mm')), $NONCE_A)
 }
 
 # ===== ST 앱 기동 때 stale 정리 (단계 2.9 - 명세 5절 A7 · 설계 v10 6.1 'GUI 시작 시 정리') =====
@@ -5679,7 +5835,7 @@ function Test-CaseStaleCleanup {
 # ===== KP 클리어 전 정지의 넘긴 nonce (구현 명세 ② 2.7 G5 · 3.3 KP 표 · 0.6 J22 · 5절 A-2 R-6 (나) · C16) =====
 # own·next 기동이 클리어 전에 멈추면(코드 4 가 계상하지 않음 · 코드 1 정지 두 자리의 클리어 근거 없음) GUI 는 넘긴 nonce 를 done 으로 닫지 않고 열어 둡니다 - 다음
 # 시작이 같은 항목을 다시 받아 그 판을 이어받습니다(같은 판 B 2회 방지 - 명세 리뷰 2 P1-2). 워커가 그 항목의 판이 끝났다고 스스로 정한 선분기 정지 셋(next 3버튼·S ·
-# B2 마감 · ownFreshEntry 생성 실패)은 사유 끝 놓아줌 표지 ' (release)' 로 지금처럼 닫습니다. resume·none 기동은 술어 밖(resume 은 ⑤c - 명세 5절 C2) · 마무리 실행은
+# B2 마감 · ownFreshEntry 생성 실패)은 사유 끝 놓아줌 표지 ' (release)' 로 지금처럼 닫습니다. resume·none 기동은 술어 밖(resume 은 구현 단계 ⑤c G6 - 코드 변경 0 으로 닫힘) · 마무리 실행은
 # 구현 명세 ⑤b5 G3 로 술어 안(KP0 · KP8 · H32e - 내부 검토 반영). 입력은 워커 쪽
 # 결과(워커 원문 [완료] 문구 · 종료 코드 · journal 파일)이고 실제 타이머 틱을 지납니다(Resolve·끝 처리 두 함수만 직접 부르는 모양 금지 - 설계 v11 R4 6.1 ③).
 # 워커 쪽 사슬(같은 nonce 이어받기 · 키 ≤ 1)은 ⑳ OK11~OK13, 워커의 놓아줌 정지 문구는 ⑱′ LG·P22 가 봅니다
@@ -5693,7 +5849,7 @@ function Test-CaseKeepLaunchOnStop {
     $nextEntry = New-FixtureEntry -Stage 'reentered' -Owner $fixture.FiveNext -NextOwner $fixture.FiveNow -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_B
 
     # KP0 Test-AbyssKeepLaunchOnStop 진리표(순수 · [bool] 인자) - 기동 종류 {none · own · next · resume · finish-only} × 클리어 근거 × 놓아줌 = 20칸 → 참 = own·next·finish-only
-    #     의 '클리어 근거 없음 · 놓아줌 아님' 세 칸뿐(구현 명세 ⑤b5 G3 · B-8 (가) - 마무리 실행 기동은 같은 항목을 next 로 받은 기동이라 클리어 전 정지면 열어 둠, resume 은 ⑤c) ·
+    #     의 '클리어 근거 없음 · 놓아줌 아님' 세 칸뿐(구현 명세 ⑤b5 G3 · B-8 (가) - 마무리 실행 기동은 같은 항목을 next 로 받은 기동이라 클리어 전 정지면 열어 둠, resume 은 술어 밖 - 구현 단계 ⑤c G6, 코드 변경 0 으로 닫힘) ·
     #     반환은 [bool] 하나(인자는 콜론 꼴로 넘겨 [bool]·[switch] 어느 선언이든 같은 칸)
     $kpCells = foreach ($kpKind in @('none', 'own', 'next', 'resume', 'finish-only')) {
         foreach ($kpAfterClear in @($false, $true)) {
@@ -5797,7 +5953,7 @@ function Test-CaseKeepLaunchOnStop {
     Assert-Case 'KP7 Role none + 표지 없는 코드 4 + 열린 자기 항목 → 계상 0 · 폴더 그대로 · NA launched → 다음 시작 own/NA' `
         ('{0} · {1} · {2} → {3}/{4}' -f $row.Completed, $row.StateUnchanged, (Get-EntryText $row.Journal $NONCE_A), $nextStart.Kind, $nextStart.HandoffNonce) '0 · 1 · entered/launched/0 → own/NA'
 
-    # KP8 재개 resume(술어 밖 - ⑤c 몫) · 마무리 실행 finish-only(구현 명세 ⑤b5 G3 · B-8 (가) 로 술어 안) + 표지 없는 코드 4 · 클리어 근거 0 → 재개는 지금 그대로 넘긴 nonce
+    # KP8 재개 resume(술어 밖 - 구현 단계 ⑤c G6, 코드 변경 0 으로 닫힘) · 마무리 실행 finish-only(구현 명세 ⑤b5 G3 · B-8 (가) 로 술어 안) + 표지 없는 코드 4 · 클리어 근거 0 → 재개는 지금 그대로 넘긴 nonce
     #     done / 마무리 실행은 launched(열어 둠 - 다음 수동 시작이 같은 판을 이어받음, 옛 기대 done). 재개 행의 재입장 요청 기록은 이미 계상된(적용됨) 모형입니다 - 미적용이면
     #     그 기록 자체가 클리어 근거(기록 경로 계상)라 술어의 기동 종류 칸에 닿지 않습니다(그 갈래는 C4-13′). 마무리 실행 행은 H32e 와 같은 모양(비커스텀 · 안전 중지 보류)
     $resumeEntry = New-FixtureEntry -Stage 'retry-clicked' -Owner $fixture.FiveNow -Generation $H_GENERATION -LaunchState 'launched' -Section $ABYSS_SECTION -Nonce $NONCE_D
@@ -5988,6 +6144,8 @@ $caseFunctions = @('Test-CaseHarness', 'Test-CaseCollectOrder', 'Test-CaseSource
     # 단계 2.8 코드 1
     'Test-CaseCode1Reentered', 'Test-CaseCode1FinishOnly', 'Test-CaseCode1Retry', 'Test-CaseCode1Legacy', 'Test-CaseCode1Failure', 'Test-CaseCode1StopNonce',
     'Test-CaseCode1LegacySafeStopNonce', 'Test-CaseCode1Static',
+    # 구현 단계 ⑤c - 재개(resume) 기동의 끝(RZ - 코드 0 · 4 · 11)
+    'Test-CaseResumeExit',
     # 단계 2.9 앱 기동 때 stale 정리
     'Test-CaseStaleCleanup',
     # 구현 명세 ② 2.7 GUI - 클리어 전 정지 술어(KP) · 이어받기 시작 경로의 (GUI 틱)

@@ -2890,8 +2890,9 @@ function Test-CaseStageWriters {
     #   (X12~X14 바뀜 행은 '바꾸는 필드 밖은 그대로' 를 JSON 으로 함께 봅니다 - 대상 항목 = 앞 원문 + 바꾸는 필드만 · 다른 항목 = 앞 원문 전체)
     #   (출력은 개수까지 봅니다 - X12 는 태그 1개, X13·X14 는 모든 결과에서 0개(반환값 없음). 막힘 행에는 다른 nonce 의 허용 단계 항목을 함께 둡니다 -
     #    -Expect 가 nonce 를 안 보면 그 항목 때문에 참이 되어 대상 항목을 바꾸게 되는 꼴을 이 행이 잡습니다(명세 리뷰 2 P3))
-    #   X12 retry-attempt: cleared → retry-attempt · attempts 1 · at.retryAttempt(이 호출) · 다른 필드·순서·다른 항목 그대로 / 같은 워커 두 번째 · 항목 없음 · retry-clicked
-    #      (재개 갱신은 ⑤c 몫) · reentered · entered → expect-failed · 파일 그대로 / 저장 실패 3종 → 태그 · 파일 그대로 · 줄 0(실패 줄은 부르는 쪽 몫) /
+    #   X12 retry-attempt: cleared → retry-attempt · attempts 1 · at.retryAttempt(이 호출) / retry-attempt · retry-clicked(재개 워커의 이어받은 항목 - 구현 명세 ⑤c 2.2) →
+    #      단계 그대로(retry-clicked 를 내리지 않음) · attempts +1 · at.retryAttempt(이 호출) · 다른 필드·순서·다른 항목 그대로 / 항목 없음 · reentered · entered →
+    #      expect-failed · 파일 그대로(워커당 한 번은 부르는 쪽 표식) / 저장 실패 3종 → 태그 · 파일 그대로 · 줄 0(실패 줄은 부르는 쪽 몫) /
     #      본 파일 손상·직전본 유효 → 복구 경고 전달 1줄 · changed
     #   X13 retry-clicked: retry-attempt → retry-clicked · retryClicks 1 · at.retryClicked / 두 번째 전송 → retryClicks 2 · at.retryClicked 이번 시각(마지막 전송 기준) /
     #      cleared · reentered · entered → [경고] 기록 실패 · 파일 그대로 / 저장 실패 3종 → [경고](설계 R2 3.6 낱말) / 복구 → 복구 경고 1줄 · 반환값 없음
@@ -2904,11 +2905,14 @@ function Test-CaseStageWriters {
     $defaultNames = (@((New-AbyssJournalEntry -Stage 'cleared').PSObject.Properties | ForEach-Object { $_.Name }) -join ',')
     $atNames = (@((New-AbyssJournalEntry -Stage 'cleared').at.PSObject.Properties | ForEach-Object { $_.Name }) -join ',')
     $writerSpecs = @(
-        @{ Name = 'Set-AbyssJournalRetryAttempt'; Key = 'X12'; Ok = @('cleared'); Bad = @('retry-attempt', 'retry-clicked', 'reentered', 'entered'); Warn = ''; Fields = @('stage', 'attempts', 'at.retryAttempt') },
+        @{ Name = 'Set-AbyssJournalRetryAttempt'; Key = 'X12'; Ok = @('cleared', 'retry-attempt', 'retry-clicked'); Bad = @('reentered', 'entered'); Warn = ''; Fields = @('stage', 'attempts', 'at.retryAttempt') },
         @{ Name = 'Set-AbyssJournalRetryClicked'; Key = 'X13'; Ok = @('retry-attempt', 'retry-clicked'); Bad = @('cleared', 'reentered', 'entered'); Warn = $RETRY_CLICKED_FAIL_FORMAT; Fields = @('stage', 'retryClicks', 'at.retryClicked') },
         @{ Name = 'Set-AbyssJournalReentered'; Key = 'X14'; Ok = @('retry-attempt', 'retry-clicked'); Bad = @('cleared', 'reentered', 'entered'); Warn = $REENTERED_FAIL_FORMAT; Fields = @('stage', 'at.reentered') })
     $okExpect = @{
         'Set-AbyssJournalRetryAttempt|cleared'       = 'retry-attempt/1/0/retry/pending/old/call/null/null'
+        # 재개 워커의 갱신(구현 명세 ⑤c 2.2) - 픽스처 attempts 1 이라 '+1'(2) 과 '= 1' 이 갈림 · retry-clicked 는 단계 · retryClicks · at.retryClicked 그대로
+        'Set-AbyssJournalRetryAttempt|retry-attempt' = 'retry-attempt/2/0/retry/pending/old/call/null/null'
+        'Set-AbyssJournalRetryAttempt|retry-clicked' = 'retry-clicked/2/1/retry/pending/old/call/old/null'
         'Set-AbyssJournalRetryClicked|retry-attempt' = 'retry-clicked/1/1/retry/pending/old/old/call/null'
         'Set-AbyssJournalRetryClicked|retry-clicked' = 'retry-clicked/1/2/retry/pending/old/old/call/null'
         'Set-AbyssJournalReentered|retry-attempt'    = 'reentered/1/0/retry/pending/old/old/null/call'
