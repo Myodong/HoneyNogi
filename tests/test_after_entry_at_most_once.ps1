@@ -8,7 +8,7 @@
 #   [SE] 자기 항목 entered · cleared 의 열쇠 닫기(2.2 표 · 0.6 J2·J4 · dev:874·875·930): SE1~SE12
 #   [R2] 코드 10 출구의 열쇠 닫기(2.3 표 · 설계 R2 3.2~3.6·5.2): R2-L1~L4 · C1~C3 · F1·F2 · E1·E2·E5~E9 · N1·N2
 #        + 단계 2.5·2.6(정리 전용 표지를 받은 own · own 이어받기 뒤 닫기 - 설계 R2 5.2 · 3.3a): R2-C4~C8 · E3 · E4 · L2·C2 의 다음 기동(own · 선택 화면 → 1회 정지)
-#   [OK] 이어받기 시작 경로의 키 사슬(명세 3.3 OK 표 · 단계 2.5·2.6 - 선분기 Invoke-AbyssHandoffStart · 본류 결론 대입 · own 시작 분기 cleared): OK1~OK12 ·
+#   [OK] 이어받기 시작 경로의 키 사슬(명세 3.3 OK 표 · 단계 2.5·2.6 - 선분기 Invoke-AbyssHandoffStart · 본류 결론 대입 · 시작 분기 cleared(보상 own · 클리어 화면 own·next - ⑤d)): OK1~OK12 ·
 #        단계 2.7(5절 A-2 R-6 (나) - own 기동의 클리어 전 정지는 넘긴 nonce 를 열어 둠): OK13. OK2~OK7 은 설계 R4 6.2 의 키 변형(O2 · O3 · O4·O4″ · O7′·O7″ ·
 #        O11 · O14 - 앞의 둘은 수용 고정), OK11~OK13 의 GUI 끝 처리는 ⑯ (GUI 틱) KP1~KP3 이 단언하는 결과(넘긴 nonce launched 유지)를 같은 journal 모양으로
 #        둡니다(명세 3.3 - GUI 판정 자체는 ⑯ 몫. OK13 의 재시도·정지 갈래는 GUI 원문 Get-CustomErrorAction 으로 고릅니다)
@@ -54,6 +54,11 @@
 # 구현 명세 ⑤c 에서 더한 것(3.6 ⑳): RK1 - 재개 기동(GUI 원문 Set-HandoffLaunchEnv -ResumeNonce · Invoke-GuiLaunch 에 -ResumeNonce 를 더함) → 재개 워커(실제 선분기 재개 열 -
 #   던전 안 2연속 → 승계 → 재입장 완료 끝 exit 0 · 키 0 - 승계 판단은 test_abyss_resume_reentry 몫) → GUI 틱 모양(applied · 전진 - 틱 판정은 test_abyss_handoff_gui RZ3 · H38 · H39) → next 워커 Space · B 1회씩 → 끊김 →
 #   재기동 next 키 0 · 판 합계 Space 1 · B 1. 재개 시계의 혼자하기 예산 $timeoutEntry 를 상수 목록에 더함(행 안 $script:dungeonMode = 'solo' 일 때만 읽힘).
+# 구현 단위 ⑤d 에서 더한 것(구현 명세 ⑤d 8절 ⑳ · 사용자 결정 U-⑤d-1 · U-⑤d-2): OK-S · OK-S′ - 재입장 기록(next)을 넘겨받은 워커가 클리어 화면(S)에서 시작 → 선분기
+#   결론 'prompt' → 본류 클리어 화면 시작 분기(own 과 같은 '나가기' 마무리 - 완료 마커 · cleared · 같은 저장에서 넘겨받은 항목 done) → 코드 0(OK-S) / '나가기' 미발견 코드 4
+#   (OK-S′) → GUI 끝 처리 · 코드 4 계상 판정(GUI 원문 Get-Code4JournalPlan · Test-AbyssKeepLaunchOnStop · Get-WorkerDoneMarkers · 마커 유효 판정 - 계상 실행은 ⑯) · 시작 게이트
+#   S3 로 같은 판을 한 번만 세는지(명세 6절 표 - 이 GUI 끝 처리와 같은 실행의 자동 후속 선택 안에서. 새 실행 id 의 수동 [시작] → Role none 이 같은 보상 화면을 다시 세는
+#   기존 수용 경로는 ⑯ PC8 · 명세 ⑤d 10절 R5 몫 - 구현 리뷰 P3). 소스 캡처 둘(S17 원문 · 클리어 화면 시작 분기의 [완료] 줄)
 # 다른 파일이 지키는 것: 새 워커 journal 함수의 자리·모양(묶음 끝 표지 뒤 · exit·try 0 · 클로저 수 · 'Changed' 모양 - S9) = test_abyss_journal_store W-ONLY ·
 #   Invoke-AfterEntryKeys 원문 제약(함수 이름 두 개 · 첫 숫자 대기 1200) = test_after_entry_popup · test_guard_constants · 고정 단언 갱신(명세 3.4) = 각 파일.
 using namespace System.Management.Automation.Language
@@ -116,7 +121,11 @@ $GUI_FUNCTION_NAMES = @(
     # 수동 시작의 시작 게이트 S3(OK1·OK11·OK13 - 이어받을 클리어·재개 기록이 없으면 none: 마무리 복구·재개 예약 없이 일반 기동으로)
     'Get-AbyssStartJournalAction', 'Read-AbyssStartJournal', 'Get-AbyssStartJournalRefusal',
     # 커스텀 코드 1 의 오류 대응 판정(OK13 - 마커 없으면 같은 항목 재시도 2회 → 3회째 정지, gui:11161~11211 의 Get-CustomErrorAction)
-    'Get-CustomErrorAction')
+    'Get-CustomErrorAction',
+    # 코드 4 계상의 판정(구현 단위 ⑤d OK-S′ - gui Invoke-Code4Accounting 이 부르는 판정: 사유 표지 · 지금 항목의 소유자 마커 유효 · 마커 규칙 · 기록 규칙 · 넘긴 nonce 열어 둠).
+    #   계상 실행(+1 · 전진 · 마커 정리)은 ⑯ 몫이라 이 파일은 판정과 끝 처리의 journal 모양만 봅니다
+    'Get-WorkerDoneMarkers', 'Test-CustomMarkerValidForCurrent', 'Read-CustomMarkerOwner', 'Test-CustomMarkerOwnerMatchesContext', 'Get-Code4JournalPlan',
+    'Test-AbyssKeepLaunchOnStop')
 $GUI_SPY_NAMES = @('Resolve-HandoffEnvForContext')
 $GUI_MOCK_NAMES = @('Add-GuiLog', 'Stop-AllRun', 'Get-CustomCurrentContext')
 
@@ -1162,13 +1171,15 @@ function Invoke-ClickUntil {
     $script:events.Add('click-until')
     if ($script:screen -eq 'prompt') { $script:screen = 'reward' }
 }
+# 나가기 헬퍼 모의 'missing' 이 내는 줄 - 아래 모의와 OK-S′ 의 마지막 [완료] 줄 기대값이 이 변수 하나를 함께 씁니다(같은 글자를 두 곳에 적지 않게 - 2026-11-15 테스트 감사 P3)
+$MOCK_EXIT_MISSING_LINE = "[완료] (모의) 보상 화면 '나가기' 위치 미발견 - 정지"
 function Invoke-AbyssExitClick {
     # 보상 화면 '나가기' 헬퍼 - 기본은 나가기 → 필드. 'missing' 은 헬퍼 안의 '나가기 위치 미발견' 코드 4(run:6164)를 같은 종료 흉내로
     param([System.Diagnostics.Process]$Game, [string]$LogPrefix = '[어비스]', [string]$Context = '나가기 클릭', $ParentDeadline = $null)
     $script:exitClickCalls++
     $script:events.Add('exit-click')
     if ($script:exitClickMode -eq 'missing') {
-        Write-RunLog "[완료] (모의) 보상 화면 '나가기' 위치 미발견 - 정지"
+        Write-RunLog $MOCK_EXIT_MISSING_LINE
         Stop-WorkerTailExit 4
     }
     if ($script:screen -eq 'reward') { $script:screen = 'field' }
@@ -3750,6 +3761,269 @@ function Test-RowRK1 {
                 'next', 'NA', 'next', '2', 'Space 0 · B 0', 2, 'True', 'Space 1 · B 1'))
 }
 
+# ===== 구현 단위 ⑤d - next 의 클리어 화면(S) 시작 마무리 (OK-S · OK-S′ - 구현 명세 ⑤d 2.1 · 4 · 6 · 8) =====
+# 사용자 결정 U-⑤d-1 · U-⑤d-2: 넘겨받은 재입장 기록(next)의 판이 멈춘 사이 끝나 클리어 화면(S · '화면을 터치해 주세요')에서 다시 시작하면 그 판의 클리어로 보고 own 과
+#   같은 '나가기' 마무리로 1회 셉니다 - 선분기 결론 'prompt' → 본류 클리어 화면 시작 분기(터치 → '나가기' 감지 → 완료 마커(커스텀) → cleared(같은 저장에서 넘겨받은 항목
+#   done) → 나가기 → 복귀 → 코드 0). 3버튼 시작은 그대로 놓아줌 정지입니다(test_abyss_handoff_start R4-N9 · V18). 두 행은 그 끝이 같은 판을 한 번만 세는지(명세 6절 표 - 같은 실행의 GUI 끝 처리 · 다시 판정 · 다음 기동 안에서. 새 실행 id 의 수동 재시작은 ⑯ PC8 · 명세 10절 R5)를
+#   이 파일의 키 사슬과 함께 봅니다 - 코드 0(OK-S) · '나가기' 미발견 코드 4(OK-S′), 커스텀 · 비커스텀 두 변형
+# 소스 캡처: ① next × 3버튼 정지 줄 S17(선분기 원문 문자열 - 커스텀 · 비커스텀 두 변형. 'S17 줄 0' 단언이 글자를 잘못 적어 거저 통과하지 않게 원문 수 2 를 함께 봅니다)
+#   ② 본류 클리어 화면 시작 분기의 [완료] 줄(그 분기 원문의 '[완료]' 문자열 하나 - OK-S 의 마지막 [완료] 줄)
+$S17_PREFIX = '[완료] 이어받은 판의 시작 화면이 보상 화면입니다'
+$S17_SOURCE_LINES = @()
+if ($workerTopFunctions.ContainsKey('Invoke-AbyssHandoffStart')) {
+    $S17_SOURCE_LINES = @($workerTopFunctions['Invoke-AbyssHandoffStart'].FindAll({ param($node)
+                ($node -is [StringConstantExpressionAst]) -and ([string]$node.Value).StartsWith($S17_PREFIX, [StringComparison]::Ordinal) }, $true) | ForEach-Object { [string]$_.Value })
+}
+$promptStartIfs = @($mainStatements | Where-Object { ($_ -is [IfStatementAst]) -and ($_.Clauses[0].Item1.Extent.Text -eq '$startClearDetected') })
+$promptDoneStrings = @()
+if ($promptStartIfs.Count -eq 1) {
+    $promptDoneStrings = @($promptStartIfs[0].Clauses[0].Item2.FindAll({ param($node)
+                ($node -is [StringConstantExpressionAst]) -and ([string]$node.Value).StartsWith('[완료]', [StringComparison]::Ordinal) }, $true))
+}
+$S_START_DONE_LINE = '(소스에서 찾지 못함)'
+if ($promptDoneStrings.Count -eq 1) { $S_START_DONE_LINE = [string]$promptDoneStrings[0].Value }
+else { $extractionProblems.Add("본류 클리어 화면 시작 분기의 [완료] 문자열이 $($promptDoneStrings.Count)개입니다(그 분기 if $($promptStartIfs.Count)개 - 둘 다 1개여야 함)") }
+# OK-S′ 의 마지막 [완료] 줄 기대값 = $MOCK_EXIT_MISSING_LINE (나가기 헬퍼 모의 Invoke-AbyssExitClick 바로 앞에서 정의 - 모의와 같은 변수)
+
+function New-RowNextEntry {
+    # 이 행 owner 가 nextOwner 인 재입장 기록(넘겨받은 항목 - 앞 판이 '다시 하기' 로 들어간 이 판 · 픽스처 NB). 앞 판은 GUI 재입장 실행부가 이미 셌고(applied - 명세 6절
+    #   '앞 판 i') 그 실행부가 띄운 기동이 넘겼습니다(launched). 이 판의 입장 직후 키는 기록 전입니다(index 0 · total · keys null - 클리어 화면 시작이 키 지점에 닿으면
+    #   Space·B 가 나가는 모양). 커스텀 = 앞 판 owner 는 다른 칸(OK10 과 같은 2번) · 세대 · 섹션 / 비커스텀 = owner · nextOwner 모두 이 실행 id
+    param([string]$Nonce)
+    if ($script:rowCustom) {
+        $nextEntry = New-FixtureEntry -Stage 'reentered' -Nonce $Nonce -Owner (ConvertTo-FiveFieldOwner (Get-RowCanonicalOwner -OwnerIndex 2)) `
+            -NextOwner (ConvertTo-FiveFieldOwner (Get-RowCanonicalOwner -OwnerIndex 0)) -Generation $CONTEXT_GENERATION -Section $ABYSS_SECTION -RunId 'run-before' `
+            -LaunchState 'launched' -AfterIndex 0 -AfterTotal $null -AfterKeys $null
+    } else {
+        $nextEntry = New-FixtureEntry -Stage 'reentered' -Nonce $Nonce -Owner ([pscustomobject]@{ runId = [string]$script:rowRunId }) `
+            -NextOwner ([pscustomobject]@{ runId = [string]$script:rowRunId }) -RunId ([string]$script:rowRunId) -LaunchState 'launched' -AfterIndex 0 -AfterTotal $null -AfterKeys $null
+    }
+    return $nextEntry
+}
+
+function Set-ClearedOrderHook {
+    # 클리어 완료 기록 저장 순간을 사건 열에 'cleared:marker=<그 순간 완료 마커 파일 유무>' 로 남깁니다 - 마커 → cleared → 나가기 순서(명세 ⑤d 4 ⑤·⑥. 6절 'N 뒤 코드 4'
+    #   의 전제: 마커가 cleared 보다 먼저 써지고 둘 다 나가기 헬퍼 앞이라 그 헬퍼의 코드 4 를 커스텀은 마커 규칙, 비커스텀은 기록 규칙으로 셉니다)
+    $script:spyPre['Add-AbyssJournalClearedEntry'] = { param($Bound) $script:events.Add(('cleared:marker={0}' -f [IO.File]::Exists($script:markerFilePath))) }
+}
+
+function Get-StartFinishOrderText {
+    # 사건 열에서 터치 · cleared(마커 유무) · 나가기 클릭 · 종료만 → 'click-until > cleared:marker=… > exit-click > exit:N'
+    param([string]$Events)
+    return ((@($Events -split ' > ') | Where-Object { ($_ -eq 'click-until') -or $_.StartsWith('cleared:') -or ($_ -eq 'exit-click') -or $_.StartsWith('exit:') }) -join ' > ')
+}
+
+function Get-DiskClearedText {
+    # 디스크의 cleared 항목 → '<nonce 표시>/<decision>/<launchState>/<nextOwner 없음·있음>/<owner = 이 행 owner>' (하나가 아니면 '(cleared n개)')
+    $journal = Read-DiskJournal
+    if (($null -eq $journal) -or ($journal -is [string])) { return '(journal 없음)' }
+    $clearedEntries = @(@($journal.entries) | Where-Object { [string]$_.stage -eq 'cleared' })
+    if ($clearedEntries.Count -ne 1) { return ('(cleared {0}개)' -f $clearedEntries.Count) }
+    $clearedEntry = $clearedEntries[0]
+    $nextOwnerText = $(if ($null -eq $clearedEntry.nextOwner) { '(없음)' } else { '있음' })
+    return ('{0}/{1}/{2}/{3}/{4}' -f (Get-NonceLabel ([string]$clearedEntry.nonce)), [string]$clearedEntry.decision, [string]$clearedEntry.launchState, $nextOwnerText,
+        (Test-EntryOwnerEquals -Entry $clearedEntry))
+}
+
+function Invoke-GuiCode4Plan {
+    # 코드 4 계상의 판정 - gui Invoke-Code4Accounting 의 판정 입력 문장과 같은 식으로 GUI 원문 판정을 부릅니다(재개 기동 보류 갈래는 resume 전용이라 뺌): 사유 표지
+    #   (Get-WorkerDoneMarkers - 원문 사유) · 지금 항목의 유효한 소유자 마커(커스텀 - Test-CustomMarkerValidForCurrent, 지금 항목 = 행 컨텍스트) · 범위 · 잠금 읽기 1번 · 기록
+    #   대조 owner(커스텀 = 진입 컨텍스트 / 비커스텀 = 실행 id) → Get-Code4JournalPlan(① 마커 규칙 · ②③ 기록 규칙 · ④ 표지 · ⑤ none) → 넘긴 nonce 열어 둠(재전달 표지 ∨
+    #   Test-AbyssKeepLaunchOnStop - 클리어 근거 = 규칙이 none 이 아님). 계상 실행(+1 · 전진 · 마커 정리)은 ⑯ 몫이라 판정만 돌려줍니다 → @{ Plan = '<규칙>/<고른 기록>'; Keep }
+    param([string]$WorkerReason)
+    $script:lastWorkerDoneReason = $WorkerReason
+    $script:customMarkerFile = $script:markerFilePath
+    $script:diskContext = $script:rowContext
+    $doneMarkers = Get-WorkerDoneMarkers -Reason ([string]$script:lastWorkerDoneReason)
+    $relayMarker = [bool]($doneMarkers.Locked -or $doneMarkers.SelectionOverlay -or $doneMarkers.MenuOverlay -or $doneMarkers.StartUnknown)
+    $finishedContext = $null
+    if ($script:customActive) { $finishedContext = Get-CustomCurrentContext }
+    $stepFailedFinishOnly = [bool](([string]$script:lastLaunchKind -eq 'finish-only') -and ([string]$script:finishOnlyHold.Kind -eq 'step-failed'))
+    $markerValid = [bool]((-not $stepFailedFinishOnly) -and $script:customActive -and -not $script:customMarkerIgnore -and (Test-CustomMarkerValidForCurrent))
+    $inRange = [bool](Test-AbyssHandoffRunActive)
+    $planRead = Read-AbyssJournal -Path $script:abyssJournalPath
+    $journalOwner = $null
+    $journalGeneration = 0
+    if (-not $script:customActive) {
+        $journalOwner = @{ runId = [string]$script:runId }
+    } elseif ($null -ne $finishedContext) {
+        $journalOwner = Get-CustomCanonicalOwner -Context $finishedContext
+        $journalGeneration = [int]$finishedContext.Generation
+    }
+    $plan = Get-Code4JournalPlan -MarkerValid $markerValid -InRange $inRange -ReadStatus ([string]$planRead.Status) -Journal $planRead.Journal -Owner $journalOwner `
+        -Generation $journalGeneration -PostClear ([bool]$doneMarkers.PostClear)
+    $keepLaunched = [bool]($relayMarker -or (Test-AbyssKeepLaunchOnStop -LaunchKind ([string]$script:lastLaunchKind) -AfterClear ([string]$plan.Rule -ne 'none') -Release ([bool]$doneMarkers.Release)))
+    return [pscustomobject]@{ Plan = ('{0}/{1}' -f [string]$plan.Rule, (Get-NonceLabel ([string]$plan.Nonce))); Keep = $keepLaunched }
+}
+
+function Get-CommentFreeText {
+    # 글자 → 주석 토큰을 뺀 뒤 공백 정규화한 한 줄. GUI · 이 파일의 노드용입니다(Get-NormalizedCode 는 워커 사본의 위치를 쓰므로 다른 파일 노드에 쓰지 못함)
+    param([string]$Text)
+    $snippetTokens = $null
+    $snippetErrors = $null
+    [void][Parser]::ParseInput($Text, [ref]$snippetTokens, [ref]$snippetErrors)
+    $builder = New-Object System.Text.StringBuilder
+    $cursor = 0
+    foreach ($snippetToken in @($snippetTokens)) {
+        if ($snippetToken.Kind -ne [TokenKind]::Comment) { continue }
+        [void]$builder.Append($Text.Substring($cursor, $snippetToken.Extent.StartOffset - $cursor))
+        $cursor = $snippetToken.Extent.EndOffset
+    }
+    [void]$builder.Append($Text.Substring($cursor))
+    return (($builder.ToString() -replace '\s+', ' ').Trim())
+}
+
+function Get-Code4PlanInputParts {
+    # 함수 노드의 코드 4 판정 입력 → @{ Assigns; Ifs; PlanArgs; Counts } (Test-RowOKSPlanSource 가 GUI 원문과 OK-S′ 판정 도우미를 같은 자로 잽니다)
+    #   Assigns = 이름 아홉의 대입 문장(나온 순서) · Ifs = 그 가운데 $finishedContext · $journalOwner 대입을 바로 품은 if · PlanArgs = Get-Code4JournalPlan 인자(이름=값 -
+    #   읽기 결과 둘 ReadStatus · Journal 은 도우미가 잠금 읽기 1번의 결과로 따로 받아 뺌). 모두 주석 뺀 공백 정규화 글자입니다
+    param($FunctionNode)
+    $assignNames = @('$doneMarkers', '$relayMarker', '$finishedContext', '$stepFailedFinishOnly', '$markerValid', '$inRange', '$journalOwner', '$journalGeneration', '$keepLaunched')
+    $ownerAssignNames = @('$finishedContext', '$journalOwner')
+    $assignNodes = @($FunctionNode.FindAll({ param($node) ($node -is [AssignmentStatementAst]) -and ($assignNames -contains $node.Left.Extent.Text) }, $true))
+    $ifNodes = @($FunctionNode.FindAll({ param($node)
+                ($node -is [IfStatementAst]) -and (@($node.Clauses | Where-Object {
+                            @($_.Item2.Statements | Where-Object { ($_ -is [AssignmentStatementAst]) -and ($ownerAssignNames -contains $_.Left.Extent.Text) }).Count -gt 0 }).Count -gt 0) }, $true))
+    $planCommands = @($FunctionNode.FindAll({ param($node) ($node -is [CommandAst]) -and ($node.GetCommandName() -eq 'Get-Code4JournalPlan') }, $true))
+    $planArgs = @()
+    if ($planCommands.Count -eq 1) {
+        $elements = @($planCommands[0].CommandElements)
+        for ($elementIndex = 1; $elementIndex -lt $elements.Count; $elementIndex++) {
+            $element = $elements[$elementIndex]
+            if (-not ($element -is [CommandParameterAst])) { continue }
+            $argumentText = ''
+            if ($null -ne $element.Argument) { $argumentText = $element.Argument.Extent.Text }
+            elseif ((($elementIndex + 1) -lt $elements.Count) -and -not ($elements[$elementIndex + 1] -is [CommandParameterAst])) { $argumentText = $elements[$elementIndex + 1].Extent.Text }
+            if (@('ReadStatus', 'Journal') -contains $element.ParameterName) { continue }
+            $planArgs += ('{0}={1}' -f $element.ParameterName, (Get-CommentFreeText -Text $argumentText))
+        }
+    }
+    return @{
+        Assigns  = (@($assignNodes | ForEach-Object { Get-CommentFreeText -Text $_.Extent.Text }) -join ' ;; ')
+        Ifs      = (@($ifNodes | ForEach-Object { Get-CommentFreeText -Text $_.Extent.Text }) -join ' ;; ')
+        PlanArgs = ($planArgs -join ' ')
+        Counts   = ('대입 {0} · if {1} · 판정 인자 {2} · 판정 호출 {3}' -f $assignNodes.Count, $ifNodes.Count, $planArgs.Count, $planCommands.Count)
+    }
+}
+
+function Test-RowOKSPlanSource {
+    # OK-S′ 판정 도우미(Invoke-GuiCode4Plan)의 판정 입력 문장 = GUI Invoke-Code4Accounting 원문 (2026-11-15 테스트 감사 P3 - 도우미는 그 문장을 손으로 옮긴 사본이라 GUI 가
+    #   그 문장을 바꿔도 OK-S′ 가 옛 식으로 계속 통과했습니다. '진리표는 사본이 아니라 소스에서' 의 빈틈을 이 대조로 닫습니다). 견주는 것: 이름 아홉의 대입 문장 열 · 그 가운데
+    #   소유자·컨텍스트 대입을 품은 if · 판정 호출 인자(읽기 결과 둘은 도우미가 따로 받아 뺌). 도우미가 일부러 뺀 둘(재개 기동 보류 갈래 · 읽기의 if ($inRange) 가드 - OK-S′
+    #   에서는 결과가 같음)은 이름 목록 밖이라 견주지 않습니다. 실제 계상 실행은 ⑯ HG KP6(비커스텀 next + 이 실행 cleared) · H32g(마무리 실행 next + 마커 + cleared(i+1))가
+    #   실제 틱으로 봅니다
+    $selfTokens = $null
+    $selfErrors = $null
+    $selfAst = [Parser]::ParseFile($PSCommandPath, [ref]$selfTokens, [ref]$selfErrors)
+    $guiNodes = @($guiAst.FindAll({ param($node) ($node -is [FunctionDefinitionAst]) -and ($node.Name -eq 'Invoke-Code4Accounting') }, $true))
+    $helperNodes = @($selfAst.FindAll({ param($node) ($node -is [FunctionDefinitionAst]) -and ($node.Name -eq 'Invoke-GuiCode4Plan') }, $true))
+    if (($guiNodes.Count -ne 1) -or ($helperNodes.Count -ne 1)) {
+        Assert-Case 'OK-S′ 판정 도우미 원문 대조 - 함수 찾기(GUI Invoke-Code4Accounting · 도우미 Invoke-GuiCode4Plan 각 1개)' ('{0} · {1}' -f $guiNodes.Count, $helperNodes.Count) '1 · 1'
+        return
+    }
+    $guiParts = Get-Code4PlanInputParts -FunctionNode $guiNodes[0]
+    $helperParts = Get-Code4PlanInputParts -FunctionNode $helperNodes[0]
+    Assert-Case 'OK-S′ 판정 도우미 원문 대조 - GUI 쪽 대조 대상 수(대입 · if · 판정 인자 · 판정 호출 - 0 이면 아래 셋이 빈 글자끼리 통과하므로 수를 고정)' $guiParts.Counts '대입 13 · if 2 · 판정 인자 5 · 판정 호출 1'
+    Assert-Case 'OK-S′ 판정 도우미 = GUI Invoke-Code4Accounting 원문 - 대입 문장 열(이름 아홉 · 나온 순서)' $helperParts.Assigns $guiParts.Assigns
+    Assert-Case 'OK-S′ 판정 도우미 = GUI Invoke-Code4Accounting 원문 - 소유자·컨텍스트 대입을 품은 if' $helperParts.Ifs $guiParts.Ifs
+    Assert-Case 'OK-S′ 판정 도우미 = GUI Invoke-Code4Accounting 원문 - 판정 호출 인자(읽기 결과 ReadStatus · Journal 뺌)' $helperParts.PlanArgs $guiParts.PlanArgs
+}
+
+function Test-RowOKS {
+    # OK-S [본류+루프 층] (명세 ⑤d 4 · 6절 '코드 0' · '앞 판 i' 행) - next + 클리어 화면(S) 시작 → 선분기 결론 'prompt'(클릭·기록 0) → 본류 클리어 화면 시작 분기: 터치 →
+    #   '나가기' 감지 → 완료 마커(커스텀) → cleared 1(decision exit · nextOwner 없음 · 이 행 owner - 같은 저장에서 NB done, applied 는 이미 있어 덧붙이지 않음) → 나가기 → 실제
+    #   복귀 루프(안전 중지 코드 0) → exit 0 · 진단 0 · S17 줄 0 · 키 0(키 지점에 닿지 않음 - NB 는 index 0 이라 닿으면 Space·B 가 나감) → GUI 코드 0 끝 처리(커스텀은 전진
+    #   뒤 소비 -ConsumeOnly 까지 - 계상 +1 · 전진 자체는 ⑯) → cleared 소비 · NB 그대로 → 다시 판정(코드 4 규칙 - 커스텀 마커는 GUI 가 전진 뒤 정리) none · 시작 게이트 S3
+    #   none(같은 실행 안에서 같은 판을 두 번 세지 않음) → 다음 기동 none → 새 판 키 1회씩. 고치기 전 워커는 선분기가 진단 + S17 + 놓아줌 코드 4 로 끝나 여기서 갈립니다.
+    #   변이 M1(next × S 를 옛 정지로) · M3(S 분기 기록에서 next 를 뺌 - cleared 0) · M5(next 를 정리 전용에 - 커스텀 exit 10 · 마커 0) · M6(StartScreen 을 엉뚱한 값으로) 가 드러남
+    $variants = @('커스텀', '비커스텀')
+    $actual = foreach ($variant in $variants) {
+        Initialize-Row -Custom ($variant -eq '커스텀')
+        Set-AfterEntryConfig
+        Write-FixtureJournal -Entries @((New-RowNextEntry -Nonce $NONCE_B)) -Applied @($NONCE_B)
+        $launch = Invoke-GuiLaunch -LaunchRestart $false
+        $second = Invoke-Worker -WorkerStart 'prompt' -WorkerClear 'halt' -KeepHandoffEnv -Configure { Set-ClearedOrderHook }
+        $clearedText = Get-DiskClearedText
+        $keyEntryAfterWorker = Format-DiskEntry (Get-DiskEntry -Nonce $NONCE_B)
+        $appliedAfterWorker = Get-DiskAppliedText
+        # 워커 끝 직후 · GUI 끝 처리 전의 시작 게이트 S3 (명세 ⑤d 6절 'N 뒤 즉시 중지' - GUI 가 이 판을 처리하기 전에 멈춘 뒤의 다음 [시작]이 이 판의 N 을 어떻게 보는지,
+        #   2026-11-15 테스트 감사 P3): 커스텀 = N 을 마무리 복구로 / 비커스텀 = 구조상 none(S3 는 어비스 커스텀 시작에서만 기록을 읽음 - 비커스텀의 다음 시작은 새 실행 id).
+        #   읽기만 합니다(쓰기 0 - Invoke-GuiStartGate)
+        $gateBeforeGui = Invoke-GuiStartGate
+        $exitJournal = Invoke-GuiExitJournal -ExitCode 0 -WorkerReason $second.LastDone
+        # 커스텀 사슬의 전진 뒤 소비(gui 코드 0 갈래 - 진행 전진에 성공한 뒤 끝난 판의 컨텍스트로 -ConsumeOnly). 비커스텀은 위 끝 처리가 소비합니다
+        $consumeOk = '(비커스텀 - 끝 처리가 소비)'
+        if ($script:rowCustom) { $consumeOk = [string](Complete-AbyssExitJournal -ExitCode 0 -Context $script:rowContext -ConsumeOnly) }
+        $appliedAfterGui = Get-DiskAppliedText
+        $keyEntryAfterGui = Format-DiskEntry (Get-DiskEntry -Nonce $NONCE_B)
+        # GUI 는 전진 뒤 완료 마커를 정리합니다(코드 0 갈래의 Clear-CustomMarkerFile - 실행은 ⑯). 그 모양으로 지운 뒤 같은 판을 다시 셀 근거가 남았는지 판정합니다
+        if ([IO.File]::Exists($script:markerFilePath)) { [IO.File]::Delete($script:markerFilePath) }
+        $replan = Invoke-GuiCode4Plan -WorkerReason $second.LastDone
+        $gate = Invoke-GuiStartGate
+        $nextLaunch = Invoke-GuiLaunch -LaunchRestart $false
+        $third = Invoke-Worker -WorkerStart 'selection' -WorkerClear 'halt' -KeepHandoffEnv
+        '{0}: {1}' -f $variant, (J @($launch.Kind, $launch.NonceEnv, $second.Role, $second.NonceLabel, $second.StartScreen, $second.CleanupOnly, (Get-RunEndText $second),
+                (Get-StartFinishOrderText -Events $second.Events), $second.ReturnCalls, $second.LastDone, (Get-LineCount -Lines $second.Logs -Prefix $S17_PREFIX), $S17_SOURCE_LINES.Count,
+                $second.DiagCalls, (Format-KeyCounts -Keys $second.PressList), $second.KeyCalls, $second.EnteredCalls, $clearedText, $keyEntryAfterWorker, $appliedAfterWorker,
+                $gateBeforeGui, $exitJournal.Ok, $consumeOk, $appliedAfterGui, $keyEntryAfterGui, $replan.Plan, $gate, $nextLaunch.Kind, $nextLaunch.NonceEnv, $third.Role,
+                $third.EnteredTags, (Format-KeyCounts -Keys $third.PressList), (Get-RowKeyTotals)))
+    }
+    $expected = foreach ($variant in $variants) {
+        $custom = ($variant -eq '커스텀')
+        '{0}: {1}' -f $variant, (J @('next', 'NB', 'next', 'NB', 'prompt', 'False', ('exit 0 · 마커 {0} · cleared 1' -f $custom),
+                ('click-until > cleared:marker={0} > exit-click > exit:0' -f $custom), '0|', $S_START_DONE_LINE, 0, 2,
+                0, 'Space 0 · B 0', '', 0, 'W1/exit/pending/(없음)/True', 'reentered/done/0/null/null/False//', 'NB',
+                $(if ($custom) { 'recover/W1' } else { 'none/(빈 값)' }),
+                'True', $(if ($custom) { 'True' } else { '(비커스텀 - 끝 처리가 소비)' }), 'NB,W1', 'reentered/done/0/null/null/False//', 'none/(빈 값)', 'none/(빈 값)', 'none', '(빈 값)',
+                'none', 'changed', 'Space 1 · B 1', 'Space 1 · B 1'))
+    }
+    Assert-Case 'OK-S [본류+루프 층] next + 클리어 화면(S) 시작(커스텀 · 비커스텀) → 기동 종류·nonce env · Role · 같은 nonce · 선분기 결론 · 정리 전용 · 판 끝 · 터치·cleared(마커)·나가기·종료 순서 · 복귀 호출 · 마지막 [완료](소스) · S17 줄 · S17 원문 수 · 진단 · 이 기동 키 · 키 호출 · 생성 · cleared 항목 · 넘겨받은 항목 · applied · 워커 끝 직후 S3(GUI 끝 처리 전 - 6절 N 뒤 즉시 중지 · 비커스텀은 구조상 none) → GUI 끝 처리 · 전진 뒤 소비 · applied · 넘겨받은 항목 · 다시 판정 · S3(비커스텀은 구조상 none) · 다음 기동 종류·nonce env → 셋째 Role · 생성 · 새 판 키 · 행 합계' `
+        (@($actual) -join ' || ') (@($expected) -join ' || ')
+}
+
+function Test-RowOKSPrime {
+    # OK-S′ [본류 층] (명세 ⑤d 6절 'N 뒤 코드 4' · '앞 판 i' 행) - OK-S 와 같은 시작 → 터치 → '나가기' 감지 → 완료 마커(커스텀) → cleared 1(같은 저장에서 NB done) → 나가기
+    #   헬퍼가 '나가기' 를 찾지 못해 코드 4(모의 'missing' - 헬퍼 안 미검출 정지와 같은 종료 · 복귀 루프 0) → GUI 코드 4 계상 판정(GUI 원문 - Invoke-GuiCode4Plan): 커스텀 = 마커
+    #   규칙(마커가 cleared 보다 먼저 써짐) · 비커스텀 = 기록 규칙(그 cleared) - 어느 쪽이든 1회 · 클리어 근거가 있어 넘긴 nonce 를 열어 두지 않음 → 끝 처리(코드 4 - 그 cleared
+    #   소비 · NB 는 이미 done) → 다시 판정(커스텀 마커는 GUI 마커 경로가 정리) none · S3 none · 다음 기동 none(같은 실행 안에서 같은 판을 두 번 세지 않음 - 새 실행 id 의 수동 재시작이 같은 보상 화면을 다시 세는 길은 ⑯ PC8 · 명세 10절
+    #   R5 의 수용 경로). 고치기 전 워커는 선분기 놓아줌 코드 4
+    #   (마커·cleared 0 → 판정 none = 계상 0). 변이 M1 · M3(비커스텀은 판정 none · 열어 둠 · 다음 기동이 NB 를 다시 받음 / 커스텀은 판정이 마커 규칙 그대로지만 cleared 칸이
+    #   갈림) 이 여기서 드러남
+    $variants = @('커스텀', '비커스텀')
+    $actual = foreach ($variant in $variants) {
+        Initialize-Row -Custom ($variant -eq '커스텀')
+        Set-AfterEntryConfig
+        Write-FixtureJournal -Entries @((New-RowNextEntry -Nonce $NONCE_B)) -Applied @($NONCE_B)
+        $launch = Invoke-GuiLaunch -LaunchRestart $false
+        $second = Invoke-Worker -WorkerStart 'prompt' -WorkerClear 'halt' -KeepHandoffEnv -Configure { Set-ClearedOrderHook; $script:exitClickMode = 'missing' }
+        $clearedText = Get-DiskClearedText
+        $keyEntryAfterWorker = Format-DiskEntry (Get-DiskEntry -Nonce $NONCE_B)
+        $appliedAfterWorker = Get-DiskAppliedText
+        $decision = Invoke-GuiCode4Plan -WorkerReason $second.LastDone
+        $exitJournal = Invoke-GuiExitJournal -ExitCode 4 -WorkerReason $second.LastDone -KeepLaunched:([bool]$decision.Keep)
+        $appliedAfterGui = Get-DiskAppliedText
+        $keyEntryAfterGui = Format-DiskEntry (Get-DiskEntry -Nonce $NONCE_B)
+        # GUI 마커 경로는 계상 · 전진 뒤 완료 마커를 정리합니다(Invoke-Code4Accounting 'marker' 갈래의 Clear-CustomMarkerFile - 실행은 ⑯). 그 모양으로 지운 뒤 다시 판정합니다
+        if ([IO.File]::Exists($script:markerFilePath)) { [IO.File]::Delete($script:markerFilePath) }
+        $replan = Invoke-GuiCode4Plan -WorkerReason $second.LastDone
+        $gate = Invoke-GuiStartGate
+        $relaunch = Invoke-GuiLaunch -LaunchRestart $false
+        '{0}: {1}' -f $variant, (J @($launch.Kind, $launch.NonceEnv, $second.Role, $second.NonceLabel, $second.StartScreen, (Get-RunEndText $second),
+                (Get-StartFinishOrderText -Events $second.Events), $second.ReturnCalls, $second.LastDone, (Get-LineCount -Lines $second.Logs -Prefix $S17_PREFIX), $second.DiagCalls,
+                (Format-KeyCounts -Keys $second.PressList), $clearedText, $keyEntryAfterWorker, $appliedAfterWorker, $decision.Plan, $decision.Keep, $exitJournal.Ok,
+                $appliedAfterGui, $keyEntryAfterGui, $replan.Plan, $gate, $relaunch.Kind, $relaunch.NonceEnv, (Get-RowKeyTotals)))
+    }
+    $expected = foreach ($variant in $variants) {
+        $custom = ($variant -eq '커스텀')
+        '{0}: {1}' -f $variant, (J @('next', 'NB', 'next', 'NB', 'prompt', ('exit 4 · 마커 {0} · cleared 1' -f $custom),
+                ('click-until > cleared:marker={0} > exit-click > exit:4' -f $custom), '', $MOCK_EXIT_MISSING_LINE, 0, 0,
+                'Space 0 · B 0', 'W1/exit/pending/(없음)/True', 'reentered/done/0/null/null/False//', 'NB', $(if ($custom) { 'marker/(빈 값)' } else { 'journal/W1' }), 'False', 'True',
+                'NB,W1', 'reentered/done/0/null/null/False//', 'none/(빈 값)', 'none/(빈 값)', 'none', '(빈 값)', 'Space 0 · B 0'))
+    }
+    Assert-Case "OK-S′ [본류 층] next + 클리어 화면(S) 시작 + '나가기' 미발견 코드 4(커스텀 · 비커스텀) → 기동 종류·nonce env · Role · 같은 nonce · 선분기 결론 · 판 끝 · 터치·cleared(마커)·나가기·종료 순서 · 복귀 호출 · 마지막 [완료] · S17 줄 · 진단 · 이 기동 키 · cleared 항목 · 넘겨받은 항목 · applied → GUI 코드 4 계상 판정(규칙/고른 기록) · 열어 둠 · 끝 처리 · applied · 넘겨받은 항목 · 다시 판정 · S3(비커스텀은 구조상 none) · 다음 기동 종류·nonce env · 행 합계" `
+        (@($actual) -join ' || ') (@($expected) -join ' || ')
+}
+
 # ===== 실행 =====
 try {
     # ① 추출 확인 · exit 치환(동작 행보다 먼저 - 명세 2.0-8) · 서명 대조
@@ -3806,6 +4080,7 @@ try {
         @{ Name = 'OK13'; Needs = $handoffReady },
         @{ Name = 'R2C4'; Needs = $handoffReady }, @{ Name = 'R2C6'; Needs = $handoffReady }, @{ Name = 'R2C8'; Needs = $handoffReady },
         @{ Name = 'R2E3'; Needs = $handoffReady }, @{ Name = 'R2E4'; Needs = $handoffReady }, @{ Name = 'RK1'; Needs = $handoffReady },
+        @{ Name = 'OKS'; Needs = $handoffReady }, @{ Name = 'OKSPrime'; Needs = $handoffReady }, @{ Name = 'OKSPlanSource'; Needs = $guiAvailable },
         @{ Name = 'R2LeftFinish'; Needs = $mainReady }, @{ Name = 'R6RC1'; Needs = $mainReady },
         @{ Name = 'TC'; Needs = $combinedReady })
     foreach ($rowGroup in $ROW_GROUPS) {

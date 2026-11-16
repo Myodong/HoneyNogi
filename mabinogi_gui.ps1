@@ -10545,7 +10545,7 @@ function Get-WorkerDoneMarkers {
   #                      기동 - 같은 재전달, 커스텀 재개(resume) 기동이면 계상 자체를 보류
   #  - StartUnknown      ' (start-unknown)'     : 이어받기 시작 화면을 매칭 대기 한도 안에 확인하지 못해 조작 없이 멈춘 기동 - 같은 재전달·보류
   #                      (구현 명세 ② 2.7 G2 · 설계 v11 R4 3.3 - 안·밖 불명이면 판 소유권을 바꾸는 기록 없이 넘긴 기록을 보존)
-  #  - Release           ' (release)'           : 놓아줌 - 워커가 그 항목의 판이 끝났다고 스스로 정한 정지(next 의 보상·클리어 화면 시작 · 이어받기 입장 대기 마감 ·
+  #  - Release           ' (release)'           : 놓아줌 - 워커가 그 항목의 판이 끝났다고 스스로 정한 정지(next 의 3버튼 보상 화면 시작(S 는 ⑤d 부터 마무리) · 이어받기 입장 대기 마감 ·
   #                      새 판 기록 실패). 재전달 집합에 넣지 않고 지금처럼 닫습니다 - Test-AbyssKeepLaunchOnStop 의 열어 둠도 이 표지로 끕니다(구현 명세 ② J22)
   #  - PostClear         ' (post-clear)'        : 클리어 뒤 조건 정지 - 유효한 클리어 기록이 없을 때 이 표지로 1회 계상(설계 v10 6.1 ④) - 지금 워커는 이 표지를 내지 않습니다(설계 R6 4절 - 판별 자리만 남겨 진리표로 지킵니다)
   #  - InsideHandoffNonce : 재입장 완료 줄 꼬리 '[terminal=InsideHandoff nonce=<guid>]' 의 nonce(없으면 빈 값)

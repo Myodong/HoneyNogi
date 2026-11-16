@@ -9730,7 +9730,8 @@ function ConvertTo-AbyssJournalOwner {
 
 function Add-AbyssJournalClearedEntry {
   # 어비스 본류의 클리어 완료 기록 - journal 항목 1건(stage 'cleared'). 부르는 곳은 본류의 결과 화면 도달 직후(완료 마커 블록 뒤 · 나가기 헬퍼 앞)와
-  # 보상·클리어 화면 시작 분기의 같은 자리(이어받은 own 만 - 구현 명세 ② 2.6)이고, 정리 전용 판은 부르는 쪽 조건이 뺍니다 (구현 명세 ① 2.10 W3 ·
+  # 보상·클리어 화면 시작 분기의 같은 자리(보상 화면은 이어받은 own 만 - 구현 명세 ② 2.6 · 클리어 화면은 own·next - 구현 단위 ⑤d)이고, 정리 전용 판은 부르는
+  # 쪽 조건이 뺍니다 (구현 명세 ① 2.10 W3 ·
   # 설계 v10 6.1 기록 시점 표 'cleared').
   # 항목 = 기본값(New-AbyssJournalEntry - 새 nonce · launchState pending · afterEntry { index 0 }) 위에
   #  - 공통: runId = 이번 실행 id($script:abyssRunId) · stage cleared · decision = -Decision · nextOwner = -NextOwner · at.cleared
@@ -13215,7 +13216,7 @@ function Resolve-AbyssHandoffStartScreen {
   # 위 조건이 이깁니다 - 순서가 곧 계약입니다. 순위 1(팝업 스윕 참)은 부르는 루프가 판독 전에 처리합니다:
   #  ② 권장 인원 팝업 하단문 → 'popup'
   #  ③ 준비 패널 → 'ready' / 재매칭 패널 → 'matching' / 패널 없음 + HUD 없음 + 하단 접힌 패널 서명 → 'entry-waiting'
-  #  ④ S('화면을 터치') → 'prompt' - 던전 안 표본보다 먼저 (S 면 own 은 마무리·next 는 재입장 확인 정지, 던전 안이면 이어받기 - 순서가 곧 결과)
+  #  ④ S('화면을 터치') → 'prompt' - 던전 안 표본보다 먼저 (S 면 own·next 모두 마무리 - next 는 재입장한 판의 클리어(구현 단위 ⑤d), 던전 안이면 이어받기 - 순서가 곧 결과)
   #  ⑤ HUD + 추적기 던전명 → 'inside' (표본 - 2연속은 부르는 루프가 셈)
   #  ⑥ 3버튼 보상 서명 + HUD 없음 → 'reward3' - 선택 화면보다 먼저 (3버튼이면 그 기록을 닫는 갈래(own 마무리·next 놓아줌), 선택 화면이면 기록을 보존하는 정지)
   #  ⑦ 선택 화면 → 'selection' / ESC 메뉴 → 'menu' / 등록 던전의 상세 화면(제목) + HUD 없음 → 'detail' - 필드 모양보다 먼저 (1회 즉시 정지).
@@ -15584,7 +15585,7 @@ function Invoke-AbyssHandoffStart {
 
   # 이어받기 시작 선분기 (구현 명세 ② 2.5 · 설계 v11 R4 3절·4.2·4.4 · v10 6.1 next·own 규격). 본류 시작의 이어받기 역할 블록(2.1)이 Consume-Handoff 뒤
   # Role 이 none 이 아닐 때만 부릅니다. GUI 가 넘긴 항목의 판이 지금 어디에 있는지 끊김 없는 관측으로 정하고, 결론 넷('inside' 던전 안 2연속 · 'field' 필드
-  # 확정 · 'reward3' 3버튼 보상 · 'prompt' 클리어 S - 뒤 둘은 own 만)을 $script:handoff.StartScreen 에 남기고 돌아갑니다. 본류는 이 결론을 1회 판독으로 다시
+  # 확정 · 'reward3' 3버튼 보상(own 만) · 'prompt' 클리어 S(own·next - 구현 단위 ⑤d))을 $script:handoff.StartScreen 에 남기고 돌아갑니다. 본류는 이 결론을 1회 판독으로 다시
   # 묻지 않고 시작 판정 변수에 대입합니다 - 끊김 없는 관측으로 확인한 사실이 1회 판독보다 강한 증거입니다(구현 명세 ② 2.6 · 설계 v10 V6-P3-4 를 결론 넷 전부로
   # 넓힘). 그 밖의 출구는 전부 이 함수 안 exit 4 입니다(누르지 않은 정지 - 문구·사유 끝 표지는 구현 명세 ② 2.5 선분기 로그 줄 표). Role resume 은 돌아오지 않습니다 - 모든 갈래가 이 함수나 끝 함수 안 exit 입니다(코드 0 · 11 · 4)
   #  - Role resume(구현 명세 ⑤c · 설계 v11 R5 4.3 · R4 3.2 resume 열): 넘긴 항목의 판이 지금 어디 있는지 같은 회전 골격으로 다시 정합니다. 결론은 전부 exit 이고 본류로 돌아가지 않습니다 - 던전 안 2연속 →
@@ -15607,7 +15608,7 @@ function Invoke-AbyssHandoffStart {
   #    정리 전용 표지를 비움). B2 단계 = 재입장 대기 Wait-AbyssReentry(보고 끔 - 결론은 입장 2연속뿐, 그 밖의 화면은 누르지 않고 관측. own 은 새 자기 항목 =
   #    ownFreshEntry, next 는 같은 항목). 마감은 첫 패널류 표본부터 조정 $timeoutPartyMatch 이고, 미결 마감·이벤트 정리는 보지 않습니다(시작 패널 입장 대기와 같은 결론 집합)
   #    Role resume 은 패널류·3버튼 첫 표본에서 같은 대기를 재개 시계 · 보고 켬 · 유예 켬으로 부릅니다(호출 C - 구현 단계 ⑤c · 설계 v11 R5 3.1)
-  #  - 정지 출구: 선택 화면·ESC 메뉴·상세 화면 1회 → Stop-AbyssHandoffOverlay(재전달 표지) / next 3버튼·S · B2 마감 · ownFreshEntry 생성 실패 → 사유 끝
+  #  - 정지 출구: 선택 화면·ESC 메뉴·상세 화면 1회 → Stop-AbyssHandoffOverlay(재전달 표지) / next 3버튼(S 는 ⑤d 부터 결론 'prompt') · B2 마감 · ownFreshEntry 생성 실패 → 사유 끝
   #    ' (release)'(그 항목의 판이 끝났다고 워커가 정한 정지 - GUI 가 넘긴 기록을 닫아 다음 시작이 같은 항목을 받지 않음)
   # 회전 순서 (구현 명세 ② 2.5 회전 골격 = 시작 패널 입장 대기 + 파티원 관측 루프의 스윕 굶김·분류): 서두(메타 비움·필드 연속 이어받기) → ① 동결 → ② 조작
   # 양보 → ③ 탐침 복구 뒤 회전 → ④ 팝업 스윕 → ⑤ 판독 → ⑥ 간접 양보 리셋 → ⑦ 유효성 → ⑧ 분류·연속 수·필드 확정·계측·알 수 없음 시계 → ⑨ 결론·출구 →
@@ -15821,12 +15822,17 @@ function Invoke-AbyssHandoffStart {
           $script:handoff.StartScreen = 'inside'
           return
         } elseif (($screen -eq 'prompt') -or ($screen -eq 'reward3')) {
-          if ($ownRole) {
-            # own 3버튼 보상·S → 본류 보상·S 분기가 그 판을 마무리합니다 (마커 + 클리어 완료 기록 + 코드 0 - 구현 명세 ② 2.6)
+          if ($ownRole -or ($screen -eq 'prompt')) {
+            # own 3버튼 보상·S · next S → 본류 보상·S 분기가 그 판을 마무리합니다 (마커 + 클리어 완료 기록 + 코드 0 - 구현 명세 ② 2.6). next 의 S 는 재입장한
+            # 판의 클리어입니다 - next 는 재입장 기록(reentered)으로만 생기고 앞 판의 보상(3버튼)은 S 뒤에만 나오므로, 넘겨받은 판에서 S 가 보이면 그 판은 재입장한
+            # 판입니다(구현 단위 ⑤d · 사용자 결정 U-⑤d-1 · 2026-11-15 출시 게이트 관측). 마무리는 늘 '나가기' 입니다(U-⑤d-2 - 보상 결정을 거치지 않음).
+            # 창에서는 next 의 S 마무리와 Role none 정리 전용 S 시작이 같은 줄('시작: 클리어 화면 감지')로 시작해 안내 한 줄로 가릅니다 - 이 if 에 오는 own 아닌 역할은
+            # next × S 뿐입니다(resume 의 3버튼·S 는 앞 갈래가 받음). own 에는 적지 않습니다(설계 리뷰 - own × S 를 '이어받은 판' 이라고 잘못 적지 않게)
+            if (-not $ownRole) { Write-RunLog '[어비스] 이어받기 시작: 클리어 화면(화면을 터치) 감지 - 이어받은 판의 클리어로 보고 마무리합니다' }
             $script:handoff.StartScreen = $screen
             return
           }
-          # next 3버튼 보상·S → 재입장 확인이 틀렸을 수 있어(재입장한 판이 아닌 앞 판의 보상일 수 있음) 마무리·기록 없이 정지합니다. 그 항목의 판은 끝났다고
+          # next 3버튼 보상 → 재입장 확인이 틀렸을 수 있어(재입장한 판이 아닌 앞 판의 보상일 수 있음) 마무리·기록 없이 정지합니다. 그 항목의 판은 끝났다고
           # 보고 놓아줌 표지로 GUI 가 넘긴 기록을 닫게 합니다 - 다음 시작은 Role none (커스텀 = 정리 전용 뒤 같은 항목 / 비커스텀 = 이 보상 화면 마무리)
           Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 보상 화면' -CaptureOnly
           if ($script:customMode) {
@@ -15908,7 +15914,8 @@ function Stop-AbyssHandoffOverlay {
   # 누르지도(닫기·ESC·카드·입장) 기록하지도(닫기·새 항목·키) 않고 진단 캡처 + 역할별 안내 뒤 코드 4 로 한 번 멈춥니다(선택 화면 복귀도 하지 않음). 사유 끝
   # ' (selection-overlay)'(상세 화면도 같은 표지)·' (menu-overlay)' 는 GUI 가 넘긴 기록을 열어 두는 재전달 표지라 다음 시작이 같은 항목을 다시 받습니다.
   # 부르는 곳 = 선분기 결론(그 화면 1회)과 본류 ESC 메뉴 판정(결론 던전 안·S 뒤에 열린 메뉴 - 구현 명세 ② 2.6). 반환하지 않습니다(출구는 exit 4 하나)
-  # next·resume 은 손으로 마치면 그 클리어가 계상되지 않아 '판을 수동으로 마치지 말고' 로 안내하고, own 은 3버튼·S 시작이 계상 경로라 '그 판을 마친 뒤' 로 안내합니다(설계 v10 R6-P1-2)
+  # next·resume 은 손으로 마치면 그 클리어가 계상되지 않아 '판을 수동으로 마치지 말고' 로 안내하고, own 은 3버튼·S 시작이 계상 경로라 '그 판을 마친 뒤' 로 안내합니다(설계 v10 R6-P1-2).
+  # next 의 S 시작도 ⑤d 부터 계상 경로지만, 손으로 S 를 넘겨 끝까지 마친 판은 다음 시작이 S 를 보지 못해 여전히 계상되지 않습니다 - 안내는 그대로입니다
   $noManualFinishRole = (@('next', 'resume') -contains [string]$script:handoff.Role)
   if ($Kind -eq 'menu') {
     Write-LifeDiagnostics -Game $Game -Context '이어받기 시작 ESC 메뉴' -CaptureOnly
@@ -20902,8 +20909,9 @@ try {
       -SourceCondition { Test-DungeonClearPrompt -Game $game }
     Write-RunLog '[어비스] 나가기 버튼 감지'
     if ($script:customMode -and -not $script:customCleanupOnly) { [void](Write-CustomClearMarker) }
-    # 이어받은 own 항목의 판을 이 클리어 화면에서 마무리합니다 - 위 보상 화면 시작과 같은 조건·자리('마커 → 클리어 완료 기록 → 나가기 헬퍼', 구현 명세 ② 2.6)
-    if (($script:handoff.Role -eq 'own') -and -not ($script:customMode -and $script:customCleanupOnly)) { [void](Add-AbyssJournalClearedEntry) }
+    # 이어받은 own·next 항목의 판을 이 클리어 화면에서 마무리합니다 - 위 보상 화면 시작과 같은 자리('마커 → 클리어 완료 기록 → 나가기 헬퍼', 구현 명세 ② 2.6).
+    # next 는 재입장한 판의 S 를 이어받은 경우입니다(구현 단위 ⑤d). 보상 화면 시작의 조건은 own 만 그대로입니다 - next 의 3버튼은 선분기가 이미 정지합니다
+    if ((@('own', 'next') -contains $script:handoff.Role) -and -not ($script:customMode -and $script:customCleanupOnly)) { [void](Add-AbyssJournalClearedEntry) }
     # 2026-09-18 3버튼 개편: 글자 위치 클릭 (고정 좌표 (636,655) 는 '다시 하기' 자리 - 재입장 오클릭)
     # 부모 마감 = 뒤이어 부를 복귀 루프와 같은 예산 (⑥e 설계 2.13 - 반영본 검증, 09-30 리뷰4): 헬퍼 안 복구 회전(같은 회전 복구·탐침 복구 뒤)만 이어지면
     # 'expired' 로 돌아오고, 'selection'(워커가 연 화면인지 모르는 선택 화면)과 함께 버려진 뒤 곧바로 복귀 루프가 새 예산으로 이어받습니다 (새 한도 값 아님)

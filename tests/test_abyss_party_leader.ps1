@@ -1832,14 +1832,14 @@ $NEW_5B2_NAMES = @('Resolve-AbyssRewardBranch', 'Set-AbyssJournalRetryAttempt', 
 $p5c3Sites = @(foreach ($newName5b2 in $NEW_5B2_NAMES) { $siteNodes5b2 = @(Get-CommandNodes -Node $workerAst -Name $newName5b2); '{0}={1}[{2}]' -f $newName5b2, $siteNodes5b2.Count, ((@($siteNodes5b2 | ForEach-Object { Get-EnclosingFunctionName $_ })) -join ',') }) -join ' · '
 Check-Equal 'P5c-3 자리 수 - 기록 확인 본류 1(⑤b5) · 단계 기록 셋의 워커 안 호출과 자리 (retry-attempt · retry-clicked = 클릭 루프 · reentered = 재입장 완료 끝)' $p5c3Sites `
     'Resolve-AbyssRewardBranch=1[] · Set-AbyssJournalRetryAttempt=1[Invoke-AbyssRetryClick] · Set-AbyssJournalRetryClicked=1[Invoke-AbyssRetryClick] · Set-AbyssJournalReentered=1[Complete-AbyssInsideHandoff]'
-# P5c-4 (⑤b5 3.4 · 명세 B-2 '한 자리') - 클리어 기록 3곳 = own 시작 분기 둘([void] · 인자 0 - 소스 앞쪽) + 본류 보상 화면 1(결정 · 다음 판 owner 를 실은 호출의 결과를 $clearedRecord 로
-#   받음). 문장 = 호출을 품은 첫 블록 직속 문장(파이프라인 또는 대입)
+# P5c-4 (⑤b5 3.4 · 명세 B-2 '한 자리') - 클리어 기록 3곳 = 시작 분기 둘([void] · 인자 0 - 소스 앞쪽. 보상 화면 분기는 own, 클리어 화면 분기는 own·next - ⑤d) + 본류 보상
+#   화면 1(결정 · 다음 판 owner 를 실은 호출의 결과를 $clearedRecord 로 받음). 문장 = 호출을 품은 첫 블록 직속 문장(파이프라인 또는 대입)
 $clearedShapes5b2 = @(Get-CommandNodes -Node $workerAst -Name 'Add-AbyssJournalClearedEntry' | ForEach-Object {
         $clearedStatement = $_.Parent
         while (($null -ne $clearedStatement) -and -not ((($clearedStatement -is [PipelineAst]) -or ($clearedStatement -is [AssignmentStatementAst])) -and ($clearedStatement.Parent -is [StatementBlockAst]))) { $clearedStatement = $clearedStatement.Parent }
         if ($null -eq $clearedStatement) { '(문장 없음)' } else { Get-NodeCode $clearedStatement }
     })
-Check-Equal 'P5c-4 클리어 기록 호출 3곳 = own 시작 분기 둘 [void](Add-AbyssJournalClearedEntry) 인자 0 + 본류 1 $clearedRecord = … -Decision $clearedDecision -NextOwner $nextOwnerValue (⑤b5)' ($clearedShapes5b2 -join ' / ') `
+Check-Equal 'P5c-4 클리어 기록 호출 3곳 = 시작 분기 둘 [void](Add-AbyssJournalClearedEntry) 인자 0 + 본류 1 $clearedRecord = … -Decision $clearedDecision -NextOwner $nextOwnerValue (⑤b5)' ($clearedShapes5b2 -join ' / ') `
     ('[void](Add-AbyssJournalClearedEntry) / [void](Add-AbyssJournalClearedEntry) / $clearedRecord = Add-AbyssJournalClearedEntry -Decision $clearedDecision -NextOwner $nextOwnerValue')
 # P5c-5 (구현 명세 ⑤b6 3.2 · 1.4) - 기록 확인 첫 문장 = 결정 exit 0순위(멈출 때 · 다음 판 입장 방식이 다르거나 모를 때는 마커 · 클리어 기록 결과와 무관하게 옛 나가기)
 $branchFirst5b6 = @((Get-WorkerFunction 'Resolve-AbyssRewardBranch').Body.EndBlock.Statements) | Select-Object -First 1

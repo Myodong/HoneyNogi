@@ -35,7 +35,7 @@
 #   [F]  필드 확정 - 실제 Step-AbyssFieldSettle(명세 2.4 의 이름 -State -IsFieldSample -TurnStart -SettleSeconds)을 표본 순서대로(R4-F1~F6 · F8 W 범위).
 #        R4-F7(같은 회전 선택 화면)은 분류가 끼어 루프 행으로 돕니다.
 #   [FL·N·O·RS0·EV1·V18] 층 ① = 본류 형제 문장 '2.1 블록 ~ $roleNone 대입'(실제 Consume-Handoff → 실제 선분기 Invoke-AbyssHandoffStart) / 층 ② = '2.1 블록 ~
-#        run:18527 의 $startInsideDetected if 앞' (결론 대입·run:18244 가드·run:18382 인자·run:18409 메뉴 갈래·own 시작 분기 cleared). 화면은 판독 스텁이
+#        run:18527 의 $startInsideDetected if 앞' (결론 대입·run:18244 가드·run:18382 인자·run:18409 메뉴 갈래·시작 분기 cleared(보상 own · 클리어 화면 own·next - ⑤d)). 화면은 판독 스텁이
 #        가상 시각의 시각표(또는 판독 회전 순환)로 답하고, 가상 시계(Get-Date·Start-Sleep 덮기 - test_abyss_return_loop 방식)에 양보·캡처 실패·스윕 참·
 #        판독 도중 실패(일련번호 변화)를 시각 창으로 주입합니다(test_abyss_party_member 방식). 선분기 단계와 본류 단계의 판독 수는 선분기 반환 직후
 #        스냅숏으로 가릅니다(명세 3.2 층 ② - '(본류) 판독 … 0' 은 스냅숏 뒤 증가분). 문구는 명세 2.5 의 S1~S20 글자 그대로, 회전 박자(700ms)에 기대는
@@ -68,6 +68,14 @@
 #   [⑤c] 구현 단계 ⑤c 5c-2(구현 명세 ⑤c 3.2 (나) · 3.6 · 3.7): RS0(재개 → 선분기 던전 안 2연속 → 승계 → 재입장 완료 끝 - 옛 S19 정지 행) · RS0c(손상) ·
 #        RS0l(사용 중) · 정적 R5c-P1~P5(Role resume 열의 선분기 형상 - 전용 이름 자리 · $fieldAt · ⑨ · ⑩ · ④ 차례). own·next 행은 기대 그대로입니다.
 #        재개 워커가 끝 exit 까지 가는 나머지 행은 ⑲ test_abyss_resume_reentry.ps1 몫입니다
+#   [⑤d] 구현 단위 ⑤d 'S 와 3버튼의 분리'(구현 명세 ⑤d 2.1 · 4절 · 6절 · 8절 · 사용자 결정 U-⑤d-1 · U-⑤d-2): next 가 S(클리어 '화면을 터치')에서 시작하면 선분기가
+#        결론 'prompt' 로 돌아가고(R4-N9s 커스텀·비커스텀 · R4-N9s′ 던전 안 1표본 뒤 S - 층 ①: 클릭·기록·진단·S17 0) 본류 S 분기가 그 판(재입장한 판)을 '나가기' 로
+#        마무리합니다(V18 next × S 커스텀·비커스텀 · V18-F 마무리 실행 · V18-R 재시작 - 층 ②: 터치 → 마커(커스텀) → cleared(decision exit · 같은 저장에서 열쇠 NB
+#        done·applied) → 나가기 헬퍼 → 복귀 0 → exit 0 · 마지막 [완료] 줄 = 본류 S 분기 원문 캡처). 3버튼은 그대로 놓아줌 정지입니다(V18 next × 3버튼 · R4-N9 · LG 의
+#        S17 두 키 - 앞 판의 3버튼일 수 있음). 정적 R4-P16(기록 조건 - 보상 분기 own / S 분기 own·next) · R5d-P1(⑨ 'prompt'·'reward3' 절 안쪽 if 글자 · 그 절의 exit 4
+#        1) · 분류 R5d-K1(S + 3버튼 하단문 → prompt - 지금 순서 기록, 관측 0). 선분기 안내 줄(명세 ⑤d 2.3 - 설계 리뷰 1 확정: next × S 에서만)은 행동 행의 '안내 줄'
+#        칸(R4-N9s · R4-N9s′ · V18 next × S = 1 / R4-O9 own = 0 - 글자는 선분기 원문에서 캡처)과 정적 R5d-P2(자리 = 안쪽 if 몸통의 '-not $ownRole' if · StartScreen
+#        대입 앞)가 봅니다. V18 next × S 의 저장 태그 칸(main#1:changed)은 N 전 쓰기 0 을, owner 실행 id 칸은 비커스텀 N 의 owner 를 고정합니다(테스트 감사 반영)
 # 방법:
 #   - 하니스 세 층(명세 ② 3.2): ① 함수 층 - Consume-Handoff 와 그 의존(저장소 워커 사본 묶음 · 소유자 해석 · 그 밖에 부르는 워커 최상위 함수)을 이 파일
 #     최상위에서 정의(체크리스트 6 - 클로저 mutator 가 부르는 함수는 최상위 정의만 보임) ② 본류 시작 구간 - 워커 최상위 try 의 형제 문장(이 단계 = 2.1 블록 ~
@@ -225,7 +233,7 @@ $MAIN_FIELD_FRAGMENT = '필드 상태 감지 - ESC → 어비스로 선택 화�
 $MAIN_PANEL_WAIT_FRAGMENT = '감지 - 취소·나가기 없이 입장을 기다립니다'
 $MAIN_REWARD_FRAGMENT = '보상 화면(나가기) 감지 - 마무리부터 진행'               # 본류 보상 분기 시작 줄(run:18421 원문 그대로)
 $MAIN_MENU_DONE_LINE = '[완료] 어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)'   # 본류 메뉴 복귀 완료 줄(run:18412 원문 그대로)
-$V18_FORBIDDEN_FRAGMENT = '이전 보상 화면을 새 항목 완료로 기록'                 # V18 next × 3버튼·S - 이 기록 문장 0
+$V18_FORBIDDEN_FRAGMENT = '이전 보상 화면을 새 항목 완료로 기록'                 # V18 next × 3버튼 - 이 기록 문장 0 (next × S 는 ⑤d 부터 그 판의 클리어 기록 - V18 next × S)
 # run:18409 메뉴 분기의 Role none·결론 필드 갈래 = HEAD 원문 run:18410~18417 의 문장 다섯 (주석 뺀 사본 · 공백 정규화 한 줄씩 - R4-P14 가 문장 목록 전체를 견줌)
 $MENU_HEAD_STATEMENTS = @(
     "Write-RunLog '[어비스] 시작: ESC 메뉴 감지 - 선택 화면으로 복귀부터 진행'",
@@ -960,7 +968,7 @@ function Test-CustomCleanupOnly {
 }
 function Add-AbyssJournalClearedEntry {
     # 감시(워커 실제 서명 param([string]$Decision = 'exit', $NextOwner = $null) - 구현 명세 ⑤b2 1.2) - 부른 순서를 사건 기록에 남기고 실제 기록 함수로(임시 폴더의
-    # 실제 완료 기록 파일). 받은 인자를 그대로 넘기고 실제 반환(@{ Tag; Nonce })을 돌려줍니다 - 워커의 세 호출(본류 1 · own 시작 분기 2)은 [void] 로 버립니다
+    # 실제 완료 기록 파일). 받은 인자를 그대로 넘기고 실제 반환(@{ Tag; Nonce })을 돌려줍니다 - 워커의 세 호출(본류 1 · 시작 분기 2 - 보상 화면 own · 클리어 화면 own·next(⑤d))은 [void] 로 버립니다
     param([string]$Decision = 'exit', $NextOwner = $null)
     $script:clearedCalls++
     Add-StubEvent 'cleared'
@@ -2409,7 +2417,7 @@ function Test-RowK {
         @{ Name = 'R4-K3 패널 ready + S → ready (패널 > S - 파티원 §1(a) 경합 ready + prompt 와 같음)'; In = @{ Panel = 'ready'; Prompt = $true; Bottom = $BOTTOM_TEXTS.prompt }; Expect = 'ready' },
         @{ Name = 'R4-K4 패널 matching + HUD + 추적기 던전명 → matching (matching > inside)'; In = @{ Panel = 'matching'; Bottom = $BOTTOM_TEXTS.matching; Hud = $true; Quest = $true }; Expect = 'matching' },
         @{ Name = "R4-K5 접힌 패널 하단문 + HUD + 추적기 없음 → field ('entry-waiting' 의 HUD 없음 조건)"; In = @{ Bottom = $BOTTOM_TEXTS.entry; Hud = $true }; Expect = 'field' },
-        @{ Name = 'R4-K6 S + HUD + 추적기 던전명 → prompt (prompt > inside - next 의 pre-clear 코드 4 ↔ 이어받기 뒤 계상)'; In = @{ Prompt = $true; Bottom = $BOTTOM_TEXTS.prompt; Hud = $true; Quest = $true }; Expect = 'prompt' },
+        @{ Name = 'R4-K6 S + HUD + 추적기 던전명 → prompt (prompt > inside - next 는 S 마무리(나가기 · 1회 계상 - ⑤d) ↔ 이어받기 뒤 클리어 대기)'; In = @{ Prompt = $true; Bottom = $BOTTOM_TEXTS.prompt; Hud = $true; Quest = $true }; Expect = 'prompt' },
         @{ Name = "R4-K7 HUD + 추적기 던전명 + 3버튼 하단문 → inside (inside > reward3 - reward3 는 'HUD 없음' 조건)"; In = @{ Hud = $true; Quest = $true; Bottom = $BOTTOM_TEXTS.reward3 }; Expect = 'inside' },
         @{ Name = 'R4-K8 3버튼 하단문 + HUD 없음 + 선택 화면 → reward3 (reward3 > selection - nonce done ↔ 보존)'; In = @{ Bottom = $BOTTOM_TEXTS.reward3; Selection = $true }; Expect = 'reward3' },
         @{ Name = "R4-K9 3버튼 하단문 + HUD + 추적기 없음 → field ('reward3' 의 HUD 없음 조건)"; In = @{ Bottom = $BOTTOM_TEXTS.reward3; Hud = $true }; Expect = 'field' },
@@ -2419,7 +2427,11 @@ function Test-RowK {
         @{ Name = 'K13 상세 신호 ∧ HUD 없음 → detail'; In = @{ Detail = $true }; Expect = 'detail' },
         @{ Name = 'K13′ 상세 ∧ 선택 화면 → selection (순위 7 안 선택 화면 먼저)'; In = @{ Detail = $true; Selection = $true }; Expect = 'selection' },
         @{ Name = 'K13″ 상세 ∧ HUD ∧ 추적기 던전명 → inside'; In = @{ Detail = $true; Hud = $true; Quest = $true }; Expect = 'inside' },
-        @{ Name = "K13 대조 - 상세 ∧ HUD ∧ 추적기 없음 → field (상세 신호는 'HUD 없음' 일 때만 - 명세 2.4 순위 7 · 5절 A-2 R-3 (가))"; In = @{ Detail = $true; Hud = $true }; Expect = 'field' })
+        @{ Name = "K13 대조 - 상세 ∧ HUD ∧ 추적기 없음 → field (상세 신호는 'HUD 없음' 일 때만 - 명세 2.4 순위 7 · 5절 A-2 R-3 (가))"; In = @{ Detail = $true; Hud = $true }; Expect = 'field' },
+        # R5d-K1 (구현 단위 ⑤d - 조사 7절 선택 행 · 명세 ⑤d 10절 R1): S 와 3버튼 하단문이 한 표본에 함께 참이면 'prompt'(순위 ④ S 가 ⑥ 3버튼보다 먼저) - 지금 순서를
+        #   기록할 뿐입니다(관측 0 · 순서 변경은 규칙 8 로 하지 않음). ⑤d 부터 이 갈림이 next 의 계상을 가르므로(S → 마무리 1회 계상 / 3버튼 → 놓아줌 정지) 순서를
+        #   바꾸려면 이 행과 사용자 결정 U-⑤d-1 을 함께 다시 봅니다. 하단문은 3버튼 그대로라 S 참은 점수표 보조 신호에서만 옵니다 - 그 오탐이면 대가는 계상 쪽
+        @{ Name = 'R5d-K1 S + 3버튼 하단문 + HUD 없음 → prompt (prompt > reward3 - 지금 순서 기록 · 관측 0 · 3버튼 위 점수표 오탐이면 계상 쪽: next 는 S 마무리로 1회 계상)'; In = @{ Prompt = $true; Bottom = $BOTTOM_TEXTS.reward3 }; Expect = 'prompt' })
     foreach ($case in $cases) { Assert-Case $case.Name (Invoke-ClassifierCase -Inputs $case.In) $case.Expect }
 }
 
@@ -2637,6 +2649,27 @@ function Test-RowNextSelector {
     Assert-Case 'R4-N9 next(커스텀) + 3버튼 → exit 4 · S17(커스텀 꼬리 + (release)) · 진단 1 · 마커 0 · cleared 0 · 기록 0 · 입력 0 · 예외 0' `
         (J @($result.ExitCode, (Get-StopLines $result), @($result.Diags).Count, $result.Markers, $result.ClearedCalls, $result.Unchanged, $result.Inputs, $result.Thrown)) `
         (J @('4', ($S17_BASE + $S17_CUSTOM_TAIL + $RELEASE_TAIL), 1, 0, 0, 'True', 0, ''))
+
+    # R4-N9s (구현 단위 ⑤d · 사용자 결정 U-⑤d-1 - 명세 ⑤d 2.1 run:15824 · 4절 ①) - next + S(클리어 '화면을 터치') → 선분기는 결론 'prompt' 만 남기고 돌아갑니다(그 판의
+    #   마무리는 본류 S 분기 - V18 next × S). 선분기는 누르지도 기록하지도 않고 진단·S17·놓아줌도 0 입니다. next 의 S 는 재입장한 판의 S 입니다 - '다시 하기' 를 누를 때
+    #   앞 판의 S 는 이미 지났습니다(3버튼은 앞 판의 화면과 가를 수 없어 R4-N9 그대로). 고치기 전 워커는 진단 + S17 + (release) exit 4 라 이 행이 FAIL 합니다
+    $nextSGuideLine = Get-NextSGuideLine
+    foreach ($custom in @($true, $false)) {
+        $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'R4-N9s' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'S')) } -Custom $custom) -FlowLayer 'selector'
+        Assert-Case ('R4-N9s next(' + $(if ($custom) { '커스텀' } else { '비커스텀' }) + ') + S@0 → 결론 prompt · 선분기 반환 · $roleNone 거짓 · exit 0건 · 진단 0 · S17 줄 0 · 안내 줄 1(⑤d 2.3) · 입력 0 · 기록 0(파일 불변) · Role next · 열쇠 NB · 예외 0') `
+            (J @($result.StartScreen, $result.SelectorReturned, $result.RoleNone, $result.ExitCode, (Get-DiagText $result), @(@($result.Lines) | Where-Object { $_.Contains($S17_BASE) }).Count,
+                @(@($result.Lines) | Where-Object { $_.Contains($nextSGuideLine) }).Count, $result.Inputs, $result.Unchanged, $result.Role, $result.Nonce, $result.Thrown)) `
+            (J @('prompt', 'True', 'False', '', '', 0, 1, 0, 'True', 'next', 'NB', ''))
+    }
+
+    # R4-N9s′ (⑤d) - next + I@0 → S@0.7: 던전 안 1표본 뒤(2연속 전)에 S → 결론 'prompt'. 결론은 그 회전의 분류라 앞선 던전 안 표본이 S 결론을 막지 않습니다
+    #   (유효 I 1 · 유효 S 1 - 하니스 자기 검사: 이 행이 정말 'I 다음 S' 를 지났는지)
+    $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'R4-N9s′' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'I', 0.7, 'S')) }) -FlowLayer 'selector'
+    Assert-Case 'R4-N9s′ next(커스텀) + I@0 → S@0.7 (던전 안 2연속 전의 S) → 유효 I 표본 1 · 유효 S 표본 1 · 결론 prompt · 선분기 반환 · exit 0건 · 시작 직후 계측 줄 0 · 진단 0 · S17 줄 0 · 안내 줄 1 · 입력 0 · 기록 0 · 예외 0' `
+        (J @(@(Get-ValidTurns -Result $result -Key 'I').Count, @(Get-ValidTurns -Result $result -Key 'S').Count, $result.StartScreen, $result.SelectorReturned, $result.ExitCode,
+            @(Get-PatternLines -Result $result -Pattern $S1_PATTERN).Count, (Get-DiagText $result), @(@($result.Lines) | Where-Object { $_.Contains($S17_BASE) }).Count,
+            @(@($result.Lines) | Where-Object { $_.Contains($nextSGuideLine) }).Count, $result.Inputs, $result.Unchanged, $result.Thrown)) `
+        (J @(1, 1, 'prompt', 'True', '', 0, '', 0, 1, 0, 'True', ''))
 
     # R4-N10 - next + ready → B2 단계 'entered' → 결론 inside(같은 항목 열쇠 · 새 항목 0 · 닫기 0)
     $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'R4-N10' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'ready', 2.5, 'I')) }) -FlowLayer 'selector'
@@ -2885,7 +2918,7 @@ function Test-RowLoopSkeleton {
         (J @($insideText, $fieldText, $insideResult.StartScreen, $fieldResult.StartScreen)) (J @('0/0/0', ('{0}/{0}' -f $fieldTurnCount), 'inside', 'field'))
 }
 
-# ===== 단계 2.6 - 본류 시작 구간 행 (층 ② - 결론 대입 · run:18244 가드 · run:18382 인자 · run:18409 메뉴 갈래 · own 시작 분기 cleared) =====
+# ===== 단계 2.6 - 본류 시작 구간 행 (층 ② - 결론 대입 · run:18244 가드 · run:18382 인자 · run:18409 메뉴 갈래 · 시작 분기 cleared(보상 own · 클리어 화면 own·next)) =====
 function Test-RowNextMain {
     # next 의 본류 행 - 선분기 결론 뒤 본류는 시작 판독을 다시 하지 않습니다((본류) 판독 = 선분기 반환 뒤 증가분 · 메뉴 run:18409 만 모든 Role - R4 4.3)
     $W = [double]$memberFieldSettleSeconds
@@ -3047,7 +3080,9 @@ function Test-RowOwnMain {
         (J @((Format-JournalEntry (Find-JournalEntry $result.Journal 'NA')), $result.CleanupOnly, $result.CustomCleanupOnly, $result.StartScreen, (Get-ReturnText $result), $result.ExitCode, $result.Thrown)) `
         (J @("NA:entered/done/$CLOSE_REASON/field", 'False', 'False', 'field', '10/', '10', ''))
 
-    # R4-O9 - 3버튼(수동·RESTART 같음) · S → 본류 보상·S 분기: 마커 → cleared(own 항목 applied·done - J4) → 헬퍼 → exit 0 (P16 · Q-R4-17 (가) '마커 → 기록 → 헬퍼')
+    # R4-O9 - 3버튼(수동·RESTART 같음) · S → 본류 보상·S 분기: 마커 → cleared(own 항목 applied·done - J4) → 헬퍼 → exit 0 (P16 · Q-R4-17 (가) '마커 → 기록 → 헬퍼').
+    #   선분기 안내 줄(⑤d 2.3)은 own 에 적지 않습니다 - '안내 줄 0'(설계 리뷰 1 - own × S 를 '이어받은 판' 이라고 잘못 적지 않게. next 의 1 은 R4-N9s · V18 next × S)
+    $ownGuideLine = Get-NextSGuideLine
     foreach ($variant in @(
             @{ Name = 'R4-O9 own + 3버튼(수동)'; Timeline = @(New-Timeline -Pairs @(0, 'R3')); Extra = @{}; Screen = 'reward3'; First = 'marker' },
             @{ Name = 'R4-O9 own + 3버튼(RESTART)'; Timeline = @(New-Timeline -Pairs @(0, 'R3')); Extra = @{ Restart = $true }; Screen = 'reward3'; First = 'marker' },
@@ -3058,10 +3093,11 @@ function Test-RowOwnMain {
         $orderIndexes = @($orderNames | ForEach-Object { Get-EventPosition -Result $result -Name $_ })
         $ordered = ($orderIndexes[0] -ge 0) -and (@(0..($orderIndexes.Count - 2) | Where-Object { $orderIndexes[$_] -ge $orderIndexes[$_ + 1] }).Count -eq 0)
         $clearedEntries = @(@($result.Journal.Entries) | Where-Object { $_.Stage -eq 'cleared' })
-        Assert-Case ($variant.Name + ' → 결론 ' + $variant.Screen + ' · 마커 1 · cleared 1(decision exit) · 순서 마커 → 기록 → 나가기 헬퍼 → 복귀 · NA done · applied 에 NA · Return 0/ · exit 0 · 정리 전용 거짓 · 예외 0') `
+        Assert-Case ($variant.Name + ' → 결론 ' + $variant.Screen + ' · 마커 1 · cleared 1(decision exit) · 순서 마커 → 기록 → 나가기 헬퍼 → 복귀 · NA done · applied 에 NA · Return 0/ · exit 0 · 정리 전용 거짓 · 안내 줄 0 · 예외 0') `
             (J @($result.StartScreen, $result.Markers, $result.ClearedCalls, @($clearedEntries | Where-Object { $_.Decision -eq 'exit' }).Count, $ordered,
-                (Find-JournalEntry $result.Journal 'NA').LaunchState, (@($result.Journal.Applied) -contains 'NA'), (Get-ReturnText $result), $result.ExitCode, $result.CustomCleanupOnly, $result.Thrown)) `
-            (J @($variant.Screen, 1, 1, 1, 'True', 'done', 'True', '0/', '0', 'False', ''))
+                (Find-JournalEntry $result.Journal 'NA').LaunchState, (@($result.Journal.Applied) -contains 'NA'), (Get-ReturnText $result), $result.ExitCode, $result.CustomCleanupOnly,
+                @(@($result.Lines) | Where-Object { $_.Contains($ownGuideLine) }).Count, $result.Thrown)) `
+            (J @($variant.Screen, 1, 1, 1, 'True', 'done', 'True', '0/', '0', 'False', 0, ''))
     }
 
     # R4-O11 - W 를 넘는 던전 안 필드 모양 오독(수용 경로): 닫기 1 → 필드 분기 → (복귀 루프 스텁) 던전 안 2연속 + 20초 → 코드 4 → 다음 수동 시작(GUI 가 nonce 를
@@ -3096,7 +3132,8 @@ function Test-RowV18 {
     $insideTimeline = @(New-Timeline -Pairs @(0, 'I'))
     foreach ($screen in @(@{ Key = 'R3'; Label = '3버튼' }, @{ Key = 'S'; Label = 'S' })) {
         $timeline = @(New-Timeline -Pairs @(0, $screen.Key))
-        # Role none × 3버튼·S - HEAD 그대로(정리 전용 exit 10 / 재시작 마커 + exit 0 / 비커스텀 exit 0) · cleared 0(P16 - 시작 분기 기록은 own 만)
+        # Role none × 3버튼·S - HEAD 그대로(정리 전용 exit 10 / 재시작 마커 + exit 0 / 비커스텀 exit 0) · cleared 0(P16 - 시작 분기 기록은 이어받은 역할만: 보상 분기 own · S 분기
+        #   own·next(⑤d) - Role none 은 0)
         $cases = @(
             @{ Name = ('V18 Role none(커스텀 수동) × ' + $screen.Label); Row = @{ Name = 'V18 none 수동'; Custom = $true; Nonce = ''; Entries = @(); Scenario = @{ Timeline = $timeline } }; Expect = @('10', 0, 0, '10/cleanup-only', 'True') },
             @{ Name = ('V18 Role none(커스텀 RESTART) × ' + $screen.Label); Row = @{ Name = 'V18 none 재시작'; Custom = $true; Restart = $true; Nonce = ''; Entries = @(); Scenario = @{ Timeline = $timeline } }; Expect = @('0', 1, 0, '0/', 'False') },
@@ -3107,15 +3144,70 @@ function Test-RowV18 {
                 (J @($result.ExitCode, $result.Markers, $result.ClearedCalls, (Get-ReturnText $result), $result.CustomCleanupOnly, $result.SelectorCalls, $result.Thrown)) `
                 (J @($case.Expect + @(0, '')))
         }
-        # next × 3버튼·S - 마커 0 · cleared 0 · 코드 4 · S17 + 꼬리 2변형(+ (release)) · '이전 보상 화면을 새 항목 완료로 기록' 0
-        foreach ($custom in @($true, $false)) {
-            $tail = $(if ($custom) { $S17_CUSTOM_TAIL } else { $S17_PLAIN_TAIL })
-            $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name ('V18 next × ' + $screen.Label) -Scenario @{ Timeline = $timeline } -Custom $custom) -FlowLayer 'main'
-            Save-ObservedStop -Key $(if ($custom) { 'S17-custom' } else { 'S17-plain' }) -Result $result
-            Assert-Case ('V18 next(' + $(if ($custom) { '커스텀' } else { '비커스텀' }) + ') × ' + $screen.Label + ' → exit 4 · S17 + 꼬리 + (release) · 마커 0 · cleared 0 · 기록 문장 0 · 기록 0(파일 불변) · 예외 0') `
-                (J @($result.ExitCode, (Get-StopLines $result), $result.Markers, $result.ClearedCalls, @(Get-PatternLines -Result $result -Pattern ([regex]::Escape($V18_FORBIDDEN_FRAGMENT))).Count, $result.Unchanged, $result.Thrown)) `
-                (J @('4', ($S17_BASE + $tail + $RELEASE_TAIL), 0, 0, 0, 'True', ''))
+        # next × 3버튼 - 마커 0 · cleared 0 · 코드 4 · S17 + 꼬리 2변형(+ (release)) · '이전 보상 화면을 새 항목 완료로 기록' 0. 앞 판의 3버튼(재입장 실패 · 오판)과 가를 수
+        #   없어 계상 없이 정지합니다(사용자 결정 U-⑤d-1 - 그대로). next × S 는 아래 묶음(구현 단위 ⑤d - 그 판의 클리어로 마무리)
+        if ($screen.Key -eq 'R3') {
+            foreach ($custom in @($true, $false)) {
+                $tail = $(if ($custom) { $S17_CUSTOM_TAIL } else { $S17_PLAIN_TAIL })
+                $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name ('V18 next × ' + $screen.Label) -Scenario @{ Timeline = $timeline } -Custom $custom) -FlowLayer 'main'
+                Save-ObservedStop -Key $(if ($custom) { 'S17-custom' } else { 'S17-plain' }) -Result $result
+                Assert-Case ('V18 next(' + $(if ($custom) { '커스텀' } else { '비커스텀' }) + ') × ' + $screen.Label + ' → exit 4 · S17 + 꼬리 + (release) · 마커 0 · cleared 0 · 기록 문장 0 · 기록 0(파일 불변) · 예외 0') `
+                    (J @($result.ExitCode, (Get-StopLines $result), $result.Markers, $result.ClearedCalls, @(Get-PatternLines -Result $result -Pattern ([regex]::Escape($V18_FORBIDDEN_FRAGMENT))).Count, $result.Unchanged, $result.Thrown)) `
+                    (J @('4', ($S17_BASE + $tail + $RELEASE_TAIL), 0, 0, 0, 'True', ''))
+            }
         }
+    }
+    # next × S (구현 단위 ⑤d · 사용자 결정 U-⑤d-1 · U-⑤d-2 - 명세 ⑤d 2.1 · 4절 · 6절 · 8절): 선분기 결론 'prompt' 로 돌아온 판(재입장한 판)을 본류 S 분기가 own 과 같은
+    #   '나가기' 로 마무리합니다 - 터치 → 나가기 버튼 감지 → 마커(커스텀) → 클리어 완료 기록 cleared(decision exit · owner = 이번 기동의 소유자 · 같은 저장에서 열쇠 NB 를
+    #   done·applied - NB 의 stage 는 그대로) → 나가기 헬퍼 → 복귀(-SafeStopExitCode 0) → exit 0. 마무리 실행 기동(FINISH_ONLY=1)과 오류 재시작(RESTART)도 Role next
+    #   그대로 같은 끝입니다(V18-F · V18-R). 마지막 [완료] 줄은 본류 S 분기 원문에서 캡처합니다(보상 분기에도 같은 글자가 있어 그 if 안에서만 찾음). 정지 문구 모음
+    #   (Save-ObservedStop)은 부르지 않습니다 - 부르면 그 [완료] 줄이 S17 키를 덮어 LG 의 S17 꼬리 성질이 FAIL 합니다(S17 두 키는 위 3버튼 행 · R4-N9 가 채움).
+    #   선분기 안내 줄(명세 ⑤d 2.3 - 선택)이 있든 없든 통과하게 순서는 사건 기록의 상대 순서로만 봅니다. 고치기 전 워커는 선분기 exit 4(S17 + (release))라 네 행 모두 FAIL
+    $promptBranchIfs = @($mainStatements | Where-Object { ($_ -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $_.Clauses[0].Item1) -eq '$startClearDetected') -and $_.Extent.Text.Contains('클리어 화면 감지 - 마무리부터 진행') })
+    $promptDoneValues = @(if ($promptBranchIfs.Count -eq 1) {
+            @(Get-StringNodes -Node $promptBranchIfs[0].Clauses[0].Item2) | Where-Object { ([string]$_.Value).StartsWith('[완료] ', [StringComparison]::Ordinal) } | ForEach-Object { [string]$_.Value }
+        })
+    $promptDoneLine = $(if ($promptDoneValues.Count -eq 1) { [string]$promptDoneValues[0] } else { '(본류 S 분기 if {0}개 · 그 안 [완료] 문자열 {1}개)' -f $promptBranchIfs.Count, $promptDoneValues.Count })
+    $nextSGuideLine = Get-NextSGuideLine
+    foreach ($variant in @(
+            @{ Name = 'V18 next(커스텀) × S'; Custom = $true; Extra = @{} },
+            @{ Name = 'V18 next(비커스텀) × S'; Custom = $false; Extra = @{} },
+            @{ Name = 'V18-F next(커스텀 · FINISH_ONLY=1 마무리 실행) × S'; Custom = $true; Extra = @{ FinishOnly = '1' } },
+            @{ Name = 'V18-R next(커스텀 · RESTART 오류 재시작) × S'; Custom = $true; Extra = @{ Restart = $true } })) {
+        $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name $variant.Name -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'S')) } -Custom $variant.Custom -Extra $variant.Extra) -FlowLayer 'main'
+        # 순서 = 사건 이름의 첫 자리 - 비커스텀은 마커가 없어 목록에서 뺍니다(R4-O9 가 변형별 목록을 따로 둔 꼴)
+        $orderNames = @('clickuntil', 'marker', 'cleared', 'exitclick', 'return:')
+        if (-not $variant.Custom) { $orderNames = @('clickuntil', 'cleared', 'exitclick', 'return:') }
+        $orderIndexes = @($orderNames | ForEach-Object { Get-EventPosition -Result $result -Name $_ })
+        $ordered = ($orderIndexes[0] -ge 0) -and (@(0..($orderIndexes.Count - 2) | Where-Object { $orderIndexes[$_] -ge $orderIndexes[$_ + 1] }).Count -eq 0)
+        # 새 cleared 항목 N - launchState · decision · owner index · 섹션 · 세대 · 실행 id (명세 ⑤d 6절 'N 의 내용': 커스텀 owner = 넘겨받은 OWNER(index 0 · 세대 3) - 받은 항목 NB 의
+        #   owner(index 2)가 아님 / 비커스텀 owner = { runId })
+        $clearedEntries = @(@($result.Journal.Entries) | Where-Object { $_.Stage -eq 'cleared' })
+        $clearedText = $(if ($clearedEntries.Count -eq 1) {
+                '{0}/{1}/owner{2}/{3}/gen{4}/{5}' -f $clearedEntries[0].LaunchState, $clearedEntries[0].Decision, $clearedEntries[0].OwnerIndex, $clearedEntries[0].Section, $clearedEntries[0].Generation, $clearedEntries[0].RunId
+            } else { '(cleared 항목 {0}개)' -f $clearedEntries.Count })
+        $clearedWant = $(if ($variant.Custom) { 'pending/exit/owner0/{0}/gen{1}/{2}' -f $ABYSS_SECTION, $CH_GENERATION, $CH_RUN_ID } else { 'pending/exit/owner//gen0/{0}' -f $CH_RUN_ID })
+        # N 의 owner 실행 id - 위 칸의 실행 id 는 항목 최상위 runId 라 owner 쪽은 원본 파일에서 따로 읽습니다(기록 보기 Get-JournalView 는 HS0 대조 대상이라 넓히지
+        #   않음). 비커스텀 owner = { runId = 이번 실행 id } / 커스텀 owner 는 5필드라 runId 가 없습니다(빈 값) - 2026-11-15 테스트 감사 P3(이름은 'owner' 인데 index 만 보던 칸)
+        $clearedOwnerRunId = '(읽지 못함)'
+        try {
+            $rawCleared = @(@(([IO.File]::ReadAllText($script:abyssJournalPath) | ConvertFrom-Json -ErrorAction Stop).entries) | Where-Object { ($null -ne $_) -and ([string]$_.stage -eq 'cleared') })
+            if ($rawCleared.Count -ne 1) { $clearedOwnerRunId = '(cleared 항목 {0}개)' -f $rawCleared.Count }
+            elseif (($null -ne $rawCleared[0].owner) -and ($null -ne $rawCleared[0].owner.PSObject.Properties['runId'])) { $clearedOwnerRunId = [string]$rawCleared[0].owner.runId }
+            else { $clearedOwnerRunId = '' }
+        } catch { $clearedOwnerRunId = '(읽기 실패)' }
+        $doneLines = @(@($result.Lines) | Where-Object { $_.StartsWith('[완료]') })
+        $lastDone = $(if ($doneLines.Count -gt 0) { [string]$doneLines[$doneLines.Count - 1] } else { '(없음)' })
+        # 저장 태그 = 이 판의 기록 쓰기 전부(단계#순번:태그). 클리어 기록 한 번뿐이어야 합니다 - 터치 앞에 열쇠 NB 를 따로 닫는 쓰기가 생기면 끝 모양(NB done · N 1)이
+        #   같아도 이 칸이 갈립니다(명세 ⑤d 6절 '터치 도중(N 전) 즉시 중지' 의 전제 = N 전에는 NB launched 그대로 → 다음 [시작]이 같은 nonce 를 next 로 재전달 - 감사 P3)
+        Assert-Case ($variant.Name + " → Role next · 결론 prompt · exit 0 · 마커(커스텀 1 / 비커스텀 0) · cleared 호출 1 · cleared 항목 1(pending · decision exit · owner = 이번 기동 · 섹션·세대·실행 id) · owner 실행 id(비커스텀 = 이번 실행 id / 커스텀 빈 값) · 새 항목 NEW1 · 순서 터치 → 마커 → 기록 → 나가기 헬퍼 → 복귀 · 저장은 클리어 기록 1번(터치 앞 쓰기 0) · NB reentered·done · applied 에 NB · Return 0/ · 정리 전용 거짓 · 정리 전용 판정 인자 둘 다 거짓 · (본류) 판독 0(메뉴 1) · S17 줄 0 · 안내 줄 1(⑤d 2.3) · 진단 0('이어받기 시작 보상 화면' 포함) · 마지막 [완료] 줄 = 본류 S 분기 원문 · 예외 0") `
+            (J @($result.Role, $result.StartScreen, $result.ExitCode, $result.Markers, $result.ClearedCalls, $clearedText, $clearedOwnerRunId, (Get-NewEntryLabels $result.Journal), $ordered,
+                $result.UpdateTags, (Format-JournalEntry (Find-JournalEntry $result.Journal 'NB')), (@($result.Journal.Applied) -contains 'NB'), (Get-ReturnText $result), $result.CustomCleanupOnly,
+                $result.CleanupCalls, $result.PostReads, @(@($result.Lines) | Where-Object { $_.Contains($S17_BASE) }).Count, @(@($result.Lines) | Where-Object { $_.Contains($nextSGuideLine) }).Count,
+                (Get-DiagText $result), $lastDone, $result.Thrown)) `
+            (J @('next', 'prompt', '0', $(if ($variant.Custom) { 1 } else { 0 }), 1, $clearedWant, $(if ($variant.Custom) { '' } else { $CH_RUN_ID }), 'NEW1', 'True',
+                'main#1:changed', 'NB:reentered/done//', 'True', '0/', 'False',
+                $(if ($variant.Custom) { 'Inside=False Result=False' } else { '' }), (Get-PostReadsExpected -Menu 1), 0, 1, '', $promptDoneLine, ''))
     }
     # FINISH_ONLY=1 + stale nonce + 첫 판독 던전 안 → 정리 전용 거짓 · exit 10 0 (재판독 갈래는 5절 C2) / 대조: FINISH_ONLY 없으면 정리 전용 참(Role none 수동)
     foreach ($finishOnly in @('1', '')) {
@@ -3292,6 +3384,14 @@ function Get-CommandNodes {
     return @($Node.FindAll({ param($node) ($node -is [CommandAst]) -and ($node.GetCommandName() -eq $Name) }, $true))
 }
 
+function Get-NextSGuideLine {
+    # 선분기 next × S 안내 줄(구현 명세 ⑤d 2.3 - 설계 리뷰 1 확정: 넓힌 if 몸통 안 'if (-not $ownRole)') - 선분기 원문의 문자열 노드에서 캡처합니다(사본 0).
+    #   하나가 아니면 설명 글자를 돌려줍니다 - 그 글자는 로그에 없어 '안내 줄 1' 을 기대하는 next 행이 FAIL 합니다(own 행의 '0' 은 R5d-P2 가 원문 1개를 따로 단언)
+    $guideNodes = @(Get-StringNodes -Node (Get-FlowFunctionNode 'Invoke-AbyssHandoffStart') | Where-Object { ([string]$_.Value).StartsWith('[어비스] 이어받기 시작: 클리어 화면', [StringComparison]::Ordinal) })
+    if ($guideNodes.Count -eq 1) { return [string]$guideNodes[0].Value }
+    return ('(선분기 안내 줄 {0}개 - 1개여야 함)' -f $guideNodes.Count)
+}
+
 function Get-OwningStatement {
     # 노드를 품은 문장(부모가 문장 블록·이름 블록인 자리)
     param($Node)
@@ -3377,8 +3477,8 @@ function Test-RowLG {
         @{ Name = "next·상세(next)·미결(next) 문구에 '수동으로 마치지 말고'"; Keys = @('S9', 'S11', 'S13', 'S15'); Fragment = '수동으로 마치지 말고'; Want = $true },
         @{ Name = "own 문구(선택 화면·메뉴·미결)에 '그 판을 마친 뒤'"; Keys = @('S10', 'S12', 'S16'); Fragment = '그 판을 마친 뒤'; Want = $true },
         @{ Name = "상세 own 문구에 '그 자리에서 다시 시작해도'"; Keys = @('S14'); Fragment = '그 자리에서 다시 시작해도'; Want = $true },
-        @{ Name = "next 3버튼·S 커스텀 꼬리에 '정리 전용(코드 10)'"; Keys = @('S17-custom'); Fragment = '정리 전용(코드 10)'; Want = $true },
-        @{ Name = "next 3버튼·S 비커스텀 꼬리에 '1회 계상'"; Keys = @('S17-plain'); Fragment = '1회 계상'; Want = $true },
+        @{ Name = "next 3버튼 커스텀 꼬리에 '정리 전용(코드 10)' (next × S 는 ⑤d 부터 정지 아님 - V18 next × S)"; Keys = @('S17-custom'); Fragment = '정리 전용(코드 10)'; Want = $true },
+        @{ Name = "next 3버튼 비커스텀 꼬리에 '1회 계상'"; Keys = @('S17-plain'); Fragment = '1회 계상'; Want = $true },
         @{ Name = "상세 두 문구에 '화면을 닫고 필드'"; Keys = @('S13', 'S14'); Fragment = '화면을 닫고 필드'; Want = $true },
         @{ Name = "미결 마감 초 = `${timeoutPartyMatch}(캡처값 $Tpm)"; Keys = @('S15', 'S16'); Fragment = ('{0}초 안에 확인하지 못해' -f $Tpm); Want = $true },
         @{ Name = '미결 마감 초 = ${timeoutPartyMatch}(Tpm 20 행)'; Keys = @('S15-20'); Fragment = '20초 안에 확인하지 못해'; Want = $true },
@@ -3389,7 +3489,7 @@ function Test-RowLG {
     }
     $releaseKeys = @('S17-custom', 'S17-plain', 'S18', 'S20')
     $badRelease = @($releaseKeys | Where-Object { $stops.ContainsKey($_) -and (-not ([string]$stops[$_]).EndsWith($RELEASE_TAIL)) })
-    Assert-True 'LG 실행 쪽 - next 3버튼·S 두 변형 · B2 마감 · 선분기 생성 실패(S20) 문구 끝 (release)' ($badRelease.Count -eq 0) ('어긋난 문구: ' + ($badRelease -join ','))
+    Assert-True 'LG 실행 쪽 - next 3버튼 두 변형 · B2 마감 · 선분기 생성 실패(S20) 문구 끝 (release)' ($badRelease.Count -eq 0) ('어긋난 문구: ' + ($badRelease -join ','))
     # 정적 쪽 - 선분기·정지 함수의 문자열에 각 성질의 조각이 있고, 미결 마감 문구 틀의 초는 변수, 본류 키 지점의 생성 실패 줄은 꼬리 0
     $flowNodes = @((Get-FlowFunctionNode 'Invoke-AbyssHandoffStart'), (Get-FlowFunctionNode 'Stop-AbyssHandoffOverlay'))
     $flowStrings = @(foreach ($flowNode in $flowNodes) { foreach ($stringNode in (Get-StringNodes -Node $flowNode)) { [string]$stringNode.Value } })
@@ -3715,7 +3815,9 @@ function Test-StaticFlow {
     Assert-Case 'R4-P15 $roleNoneOrOwn 0 · 카드 클릭 줄 1 · 그 자리 Role 조건 0 · 보상 분기 if ($startExitDetected) 1 · S 분기 if ($startClearDetected) 1 (next 가드 0)' `
         (J @([regex]::Matches($workerCode, [regex]::Escape('$roleNoneOrOwn')).Count, $cardLogs.Count, $cardRoleConditions.Count, $rewardIfs.Count, $promptIfs.Count)) (J @(0, 1, 0, 1, 1))
 
-    # R4-P16 - 클리어 기록 호출 = 본류 1 + own 시작 분기(보상 · S) 2 - 시작 분기 호출은 own 조건 안 · 마커 문장 뒤 · 나가기 헬퍼 앞 (Role none·next 갈래 0)
+    # R4-P16 - 클리어 기록 호출 = 본류 1 + 시작 분기(보상 · S) 2 - 시작 분기 호출은 역할 조건 안 · 마커 문장 뒤 · 나가기 헬퍼 앞. 역할 조건은 분기마다 다릅니다(구현 단위 ⑤d -
+    #   명세 ⑤d 2.1 run:20906): 보상(3버튼) 분기 = own 만(next 의 3버튼 시작은 선분기가 놓아줌 정지 - 본류에 닿지 않음) / S 분기 = own · next(next 의 S 시작은 그 판의
+    #   클리어로 마무리 - 사용자 결정 U-⑤d-1). 두 분기 모두 정리 전용 판은 뺍니다 · Role none 갈래 0
     $clearedCalls = @(Get-CommandNodes -Node $workerAst -Name 'Add-AbyssJournalClearedEntry')
     $branchRows = @()
     foreach ($branchIf in @($rewardIfs + $promptIfs)) {
@@ -3733,8 +3835,51 @@ function Test-StaticFlow {
         $branchRows += ('{0}<{1}<{2}:{3}' -f [int]($markerAt -ge 0), [int](($clearedAt -gt $markerAt) -and ($markerAt -ge 0)), [int](($helperAt -gt $clearedAt) -and ($clearedAt -ge 0)), $clearedCondition)
     }
     $ownCondition = "(`$script:handoff.Role -eq 'own') -and -not (`$script:customMode -and `$script:customCleanupOnly)"
-    Assert-Case 'R4-P16 클리어 기록 호출 = 워커 3(본류 1 + 시작 분기 2) · 보상·S 분기 각각 마커 < 기록 < 나가기 헬퍼 · 기록 조건 = own ∧ 정리 전용 아님' `
-        (J @($clearedCalls.Count, ($branchRows -join ' / '))) (J @(3, ((@(1, 2) | ForEach-Object { '1<1<1:' + $ownCondition }) -join ' / ')))
+    $ownNextCondition = "(@('own', 'next') -contains `$script:handoff.Role) -and -not (`$script:customMode -and `$script:customCleanupOnly)"   # 명세 ⑤d 2.1 run:20906 글자
+    Assert-Case 'R4-P16 클리어 기록 호출 = 워커 3(본류 1 + 시작 분기 2) · 보상·S 분기 각각 마커 < 기록 < 나가기 헬퍼 · 기록 조건 = 보상 분기 own ∧ 정리 전용 아님 / S 분기 (own ∨ next) ∧ 정리 전용 아님(⑤d)' `
+        (J @($clearedCalls.Count, ($branchRows -join ' / '))) (J @(3, ((@($ownCondition, $ownNextCondition) | ForEach-Object { '1<1<1:' + $_ }) -join ' / ')))
+
+    # R5d-P1 (구현 단위 ⑤d - 명세 ⑤d 2.1 run:15824 · 8절 정적 신설) - 선분기 ⑨ 의 'prompt'·'reward3' 절(1개) 바로 안쪽 if 조건 글자 = 정확히 아래 글자 1개 · 그 절의
+    #   exit 4 문장 1개(주석 뺀 사본 · 공백 정규화). own 은 두 화면 모두, next 는 S 만 결론으로 돌아가고 next × 3버튼은 같은 절의 exit 4(S17 + (release))로 멈춥니다.
+    #   resume 의 S 는 앞 갈래('$resumeRole -and ($screen -eq ''prompt'')' - R5c-P3)가 먼저 받습니다(그 갈래를 지우는 변이는 ⑲ ST4 · R5c-P3 몫). 안쪽 if 의 몸통은 보지
+    #   않습니다 - 그 몸통의 안내 줄(명세 ⑤d 2.3 - 설계 리뷰 1 확정)은 바로 아래 R5d-P2 가 봅니다
+    $r5dClauseCondition = "(`$screen -eq 'prompt') -or (`$screen -eq 'reward3')"
+    $r5dInnerCondition = "`$ownRole -or (`$screen -eq 'prompt')"
+    $r5dClauses = @(foreach ($r5dIf in @($selectorNode.FindAll({ param($node) $node -is [IfStatementAst] }, $true))) {
+            foreach ($r5dClause in $r5dIf.Clauses) { if ((Get-NormalizedCode -Node $r5dClause.Item1) -ceq $r5dClauseCondition) { $r5dClause } }
+        })
+    $r5dInner = -1
+    $r5dExit4 = -1
+    if ($r5dClauses.Count -eq 1) {
+        $r5dBody = $r5dClauses[0].Item2
+        $r5dInner = @(@($r5dBody.Statements) | Where-Object { ($_ -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $_.Clauses[0].Item1) -ceq $r5dInnerCondition) }).Count
+        $r5dExit4 = @($r5dBody.FindAll({ param($node) ($node -is [ExitStatementAst]) -and ($null -ne $node.Pipeline) -and ((Get-NormalizedCode -Node $node.Pipeline) -ceq '4') }, $true)).Count
+    }
+    Assert-Case "R5d-P1 선분기 ⑨ 'prompt'·'reward3' 절 1 · 그 절 바로 안쪽 if 조건 글자 [$r5dInnerCondition] 1 · 그 절의 exit 4 문장 1" (J @($r5dClauses.Count, $r5dInner, $r5dExit4)) (J @(1, 1, 1))
+
+    # R5d-P2 (구현 단위 ⑤d - 명세 ⑤d 2.3 · 설계 리뷰 1 확정) - 안내 줄의 자리: 위 안쪽 if 몸통의 문장 가운데 조건 글자가 정확히 '-not $ownRole' 인 if 1개 · 그 if 가
+    #   StartScreen 대입(같은 몸통)보다 앞 · 선분기 원문의 안내 줄 문자열 1개(행동 행 R4-N9s · R4-N9s′ · V18 next × S 의 '안내 줄 1' 과 R4-O9 own 의 '0' 이 같은 글자를
+    #   Get-NextSGuideLine 으로 캡처합니다 - 이 행이 원문 1개를 따로 단언해 own 의 0 이 캡처 실패로 빈 통과가 되지 않게). 조건 없이 넣으면 own × S 에도 적힙니다(리뷰 P3)
+    $r5dGuideIfs = -1
+    $r5dGuideBeforeStart = $false
+    if ($r5dClauses.Count -eq 1) {
+        $r5dInnerIfs = @(@($r5dClauses[0].Item2.Statements) | Where-Object { ($_ -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $_.Clauses[0].Item1) -ceq $r5dInnerCondition) })
+        if ($r5dInnerIfs.Count -eq 1) {
+            $r5dInnerStatements = @($r5dInnerIfs[0].Clauses[0].Item2.Statements)
+            $r5dGuideIndexes = @(for ($statementIndex = 0; $statementIndex -lt $r5dInnerStatements.Count; $statementIndex++) {
+                    $innerStatement = $r5dInnerStatements[$statementIndex]
+                    if (($innerStatement -is [IfStatementAst]) -and ((Get-NormalizedCode -Node $innerStatement.Clauses[0].Item1) -ceq '-not $ownRole')) { $statementIndex }
+                })
+            $r5dStartIndexes = @(for ($statementIndex = 0; $statementIndex -lt $r5dInnerStatements.Count; $statementIndex++) {
+                    if ((Get-NormalizedCode -Node $r5dInnerStatements[$statementIndex]) -ceq '$script:handoff.StartScreen = $screen') { $statementIndex }
+                })
+            $r5dGuideIfs = $r5dGuideIndexes.Count
+            $r5dGuideBeforeStart = ($r5dGuideIndexes.Count -eq 1) -and ($r5dStartIndexes.Count -eq 1) -and ($r5dGuideIndexes[0] -lt $r5dStartIndexes[0])
+        }
+    }
+    $r5dGuideStrings = @(Get-StringNodes -Node $selectorNode | Where-Object { ([string]$_.Value).StartsWith('[어비스] 이어받기 시작: 클리어 화면', [StringComparison]::Ordinal) }).Count
+    Assert-Case "R5d-P2 선분기 안내 줄(⑤d 2.3) - 안쪽 if 몸통의 '-not `$ownRole' if 1 · StartScreen 대입보다 앞 · 선분기 원문의 안내 줄 문자열 1" `
+        (J @($r5dGuideIfs, $r5dGuideBeforeStart, $r5dGuideStrings)) (J @(1, 'True', 1))
 
     # R4-P17 (정적 몫) - 선분기의 클릭·키 명령 0 (B2 단계의 미결 마감 0 · 이벤트 정리 0 은 행동 행 R4-O4′ · V18 팝업×next 가 실행으로 봄)
     $clickNames = @('Click-GamePoint', 'Click-ScreenPoint', 'Press-KeyVerified', 'Press-KeyOnce', 'Invoke-ClickUntil', 'Invoke-AbyssExitClick')

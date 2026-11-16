@@ -167,7 +167,7 @@ $MAIN_FIELD_FRAGMENT = '필드 상태 감지 - ESC → 어비스로 선택 화�
 $MAIN_PANEL_WAIT_FRAGMENT = '감지 - 취소·나가기 없이 입장을 기다립니다'
 $MAIN_REWARD_FRAGMENT = '보상 화면(나가기) 감지 - 마무리부터 진행'               # 본류 보상 분기 시작 줄(run:18421 원문 그대로)
 $MAIN_MENU_DONE_LINE = '[완료] 어비스 선택 화면 복귀 완료 (준비 실행 - 회차로 세지 않음)'   # 본류 메뉴 복귀 완료 줄(run:18412 원문 그대로)
-$V18_FORBIDDEN_FRAGMENT = '이전 보상 화면을 새 항목 완료로 기록'                 # V18 next × 3버튼·S - 이 기록 문장 0
+$V18_FORBIDDEN_FRAGMENT = '이전 보상 화면을 새 항목 완료로 기록'                 # V18 next × 3버튼 - 이 기록 문장 0 (next × S 는 ⑤d 부터 그 판의 클리어 기록 - V18 next × S)
 # run:18409 메뉴 분기의 Role none·결론 필드 갈래 = HEAD 원문 run:18410~18417 의 문장 다섯 (주석 뺀 사본 · 공백 정규화 한 줄씩 - R4-P14 가 문장 목록 전체를 견줌)
 $MENU_HEAD_STATEMENTS = @(
     "Write-RunLog '[어비스] 시작: ESC 메뉴 감지 - 선택 화면으로 복귀부터 진행'",
@@ -837,7 +837,7 @@ function Test-CustomCleanupOnly {
 }
 function Add-AbyssJournalClearedEntry {
     # 감시(워커 실제 서명 param([string]$Decision = 'exit', $NextOwner = $null) - 구현 명세 ⑤b2 1.2) - 부른 순서를 사건 기록에 남기고 실제 기록 함수로(임시 폴더의
-    # 실제 완료 기록 파일). 받은 인자를 그대로 넘기고 실제 반환(@{ Tag; Nonce })을 돌려줍니다 - 워커의 세 호출(본류 1 · own 시작 분기 2)은 [void] 로 버립니다
+    # 실제 완료 기록 파일). 받은 인자를 그대로 넘기고 실제 반환(@{ Tag; Nonce })을 돌려줍니다 - 워커의 세 호출(본류 1 · 시작 분기 2 - 보상 화면 own · 클리어 화면 own·next(⑤d))은 [void] 로 버립니다
     param([string]$Decision = 'exit', $NextOwner = $null)
     $script:clearedCalls++
     Add-StubEvent 'cleared'
