@@ -158,11 +158,11 @@ Assert-Case '가드: 회차 시작 시 섞인 순서 표시 배선' `
 $configJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 # 스키마는 **새 설정 키를 추가할 때마다** 올려야 합니다. 안 올리면 기존 사용자는 이전 게이트에
 # 걸려 새 키를 영영 못 받습니다 (2026-08-10 실기에서 repeat.mode/untilTime 으로 적발).
-Assert-Case 'config: schema 11' ([int]$configJson.configSchemaVersion) 11   # 10-08 커스텀 진행 세대 progressGeneration 신설(11) ← 09-25 revive.maxPerCycle 제거·checkpointReviveLimit 신설(10) ← life 신설(5) → '채집 대기' 의미 변경(6) → 가방/도구 옵션 제거(7) → 반복 모드 저장(8) → etc(기타) 신설(9)
+Assert-Case 'config: schema 12' ([int]$configJson.configSchemaVersion) 12   # ui.theme 신설(12) ← 10-08 커스텀 진행 세대 progressGeneration 신설(11) ← 09-25 revive.maxPerCycle 제거·checkpointReviveLimit 신설(10) ← life 신설(5) → '채집 대기' 의미 변경(6) → 가방/도구 옵션 제거(7) → 반복 모드 저장(8) → etc(기타) 신설(9)
 Assert-Case 'config: randomOrder 기본 false 4섹션' `
   (($configJson.customRepeat.randomOrder -eq $false) -and ($configJson.deepCustomRepeat.randomOrder -eq $false) -and ($configJson.abyssCustomRepeat.randomOrder -eq $false) -and ($configJson.lifeCustomRepeat.randomOrder -eq $false)) $true
 
-# ── 비랜덤 현재 행 표시 (2026-08-15 사용자 요청 - 헤드리스 ListView 실물 검증, Codex 조건) ──
+# ── 비랜덤 현재 행 표시 (2026-08-15 사용자 요청 - 헤드리스 ListView 실물 검증, 리뷰 조건) ──
 # 계약: 재배열·번호 표기·열 폭 불변 / 현재 행만 크림색 / 생활은 등록 순번 행 / 정지 후 전체 복원
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -185,6 +185,12 @@ foreach ($rowNo in 1..3) {
 }
 $lvAcrList = $lvCrList; $lvDcrList = $lvCrList; $lvLcrList = $lvCrList
 $creamArgb = [System.Drawing.Color]::FromArgb(245, 231, 201).ToArgb()
+# 행 색은 팔레트 변수(themeListRow · themeListCurrent - 2026-11-12 다크 모드)라 팔레트 함수를 소스에서 꺼내 라이트로 정합니다. 위 크림 리터럴은
+# 그대로 둡니다 - 기대값을 소스에서 캡처하면 라이트 값이 바뀌어도 기대가 따라가 '라이트는 지금과 같다' 를 지키지 못합니다(다크 모드 설계 v3 H11)
+foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectRoot 'mabinogi_gui.ps1') -Names @('Get-HoneyPaletteTable', 'Set-HoneyPalette')) {
+  Invoke-Expression $definition
+}
+Set-HoneyPalette -Theme 'light'
 Set-CustomListRandomView -Context @{ RandomOrder = $false; RegisteredTotal = 3; Index = 1; SectionName = 'customRepeat' }
 Assert-Case '비랜덤 표시: 현재(2번) 행만 크림색' `
   (($lvCrList.Items[1].BackColor.ToArgb() -eq $creamArgb) -and ($lvCrList.Items[0].BackColor.ToArgb() -ne $creamArgb) -and ($lvCrList.Items[2].BackColor.ToArgb() -ne $creamArgb)) $true

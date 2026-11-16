@@ -268,6 +268,49 @@ try {
     Assert-Case "스키마 11 키 유입(사용자 스키마 $fixedUserSchema 고정): 전투 3섹션 세대 0 + 설명 키 · 생활은 키 없음" `
       (Get-TestGenerationText -Config $resultGen) 'customRepeat=0/True abyssCustomRepeat=0/True deepCustomRepeat=0/True lifeCustomRepeat=없음/False'
   }
+  # ★ 스키마 12(11-12 다크 모드 - ui.theme · ui._theme 신설, 설계 v3 1.5): 사용자 스키마를 11 로 **고정**한 픽스처로 새 키 유입을 봅니다.
+  #   위 '$realSchema - 1' 행은 config.json 의 번호를 안 올리고 키만 넣으면 함께 내려가 그 실수를 못 잡습니다(11 = 개발 PC 의 지금 스키마).
+  #   (가) theme 이 없는 11 → 이전 · 'light' · 설명 키 · 다른 ui 값 보존 (나) 11 + 'dark' → 'dark' (다) 12 + 좌표만 낮음 + 'dark' → 'dark' (라) ui 없음 → 'light'
+  function Set-TestUiTheme {
+    # 픽스처의 ui.theme 을 정합니다 - 기본 config 에 키가 없으면(그런 변이) 대입이 예외로 테스트 전체를 끊으므로 Add-Member 로 보태 그 행의 실패로 남깁니다
+    param($Config, [string]$Theme)
+    if ($Config.ui.PSObject.Properties['theme']) { $Config.ui.theme = $Theme }
+    else { $Config.ui | Add-Member -NotePropertyName 'theme' -NotePropertyValue $Theme }
+  }
+  $themeUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $themeUser.configSchemaVersion = 11
+  $themeUser.ui.PSObject.Properties.Remove('theme')
+  $themeUser.ui.PSObject.Properties.Remove('_theme')
+  $themeUser.ui.logFontSize = 17
+  $themeUser.ui.settingsOpen = $true
+  [System.IO.File]::WriteAllText($configPath, ($themeUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedTheme = Update-ConfigToLatest
+  $resultTheme = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case '스키마 12 키 유입(가 - 사용자 스키마 11 고정 · theme 없음): 이전 실행 · 최신 스키마 · theme light(문자열) · 설명 키 · 다른 ui 값 보존' `
+    ('{0}/{1}/{2}/{3}/{4}/{5}/{6}' -f $migratedTheme, ([int]$resultTheme.configSchemaVersion -eq $realSchema), [string]$resultTheme.ui.theme, ($resultTheme.ui.theme -is [string]),
+      [bool]$resultTheme.ui.PSObject.Properties['_theme'], $resultTheme.ui.logFontSize, $resultTheme.ui.settingsOpen) 'True/True/light/True/True/17/True'
+  $themeDarkUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $themeDarkUser.configSchemaVersion = 11
+  Set-TestUiTheme -Config $themeDarkUser -Theme 'dark'
+  [System.IO.File]::WriteAllText($configPath, ($themeDarkUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedThemeDark = Update-ConfigToLatest
+  $resultThemeDark = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case "스키마 12 키 유입(나 - 사용자 스키마 11 고정 · 'dark'): 이전 실행 · 'dark' 보존" ('{0}/{1}' -f $migratedThemeDark, [string]$resultThemeDark.ui.theme) 'True/dark'
+  $themeCoordsUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $themeCoordsUser.configSchemaVersion = 12
+  $themeCoordsUser.coordsVersion = $realCoords - 1
+  Set-TestUiTheme -Config $themeCoordsUser -Theme 'dark'
+  [System.IO.File]::WriteAllText($configPath, ($themeCoordsUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedThemeCoords = Update-ConfigToLatest
+  $resultThemeCoords = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case "스키마 12 키 유입(다 - 스키마 12 · 좌표만 낮음 · 'dark'): 이전 실행 · 'dark' 보존" ('{0}/{1}' -f $migratedThemeCoords, [string]$resultThemeCoords.ui.theme) 'True/dark'
+  $themeNoUiUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+  $themeNoUiUser.configSchemaVersion = 11
+  $themeNoUiUser.PSObject.Properties.Remove('ui')
+  [System.IO.File]::WriteAllText($configPath, ($themeNoUiUser | ConvertTo-Json -Depth 20), $utf8Bom)
+  $migratedThemeNoUi = Update-ConfigToLatest
+  $resultThemeNoUi = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Assert-Case "스키마 12 키 유입(라 - 사용자 스키마 11 고정 · ui 없음): 이전 실행 · 기본 'light'" ('{0}/{1}' -f $migratedThemeNoUi, [string]$resultThemeNoUi.ui.theme) 'True/light'
   # 이전이 진행을 지운 섹션만 세대 +1 (같은 저장 - 설계 v10 1.3). ① 스키마 10 사용자(키 없음): 진행 있던 던전·심층 = 0+1, 진행 없던 어비스 = 0,
   #   생활은 진행이 있어도 키를 만들지 않음 ② 좌표만 낮은 스키마 11 사용자(세대 3·5·7): 사용자 값 이월 + 진행 있던 어비스만 +1
   $bumpUser = $realDefault | ConvertTo-Json -Depth 20 | ConvertFrom-Json

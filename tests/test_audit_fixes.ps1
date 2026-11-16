@@ -429,9 +429,9 @@ Assert-Case 'GUI: 마이그레이션 - mainCategory 이전 + life/etc allowlist'
   (($guiSource -match "if \(\`$usr\.PSObject\.Properties\['mainCategory'\]\) \{ \`$def\.mainCategory = \`$usr\.mainCategory \}") -and
    ($guiSource -match "'deepCustomRepeat', 'lifeCustomRepeat', 'assist', 'life', 'etc'\)")) $true
 $auditConfigJson = Get-Content (Join-Path $projectRoot 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-# 스키마 9 (2026-08-15): etc(기타 - 고양이 상인) 섹션 신설 → 10 (09-25 거점 부활 상한) → 11 (10-08 커스텀 진행 세대 progressGeneration)
-Assert-Case 'config: 스키마 11 + mainCategory 기본 battle + life/etc 섹션' `
-  (([int]$auditConfigJson.configSchemaVersion -eq 11) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
+# 스키마 9 (2026-08-15): etc(기타 - 고양이 상인) 섹션 신설 → 10 (09-25 거점 부활 상한) → 11 (10-08 커스텀 진행 세대 progressGeneration) → 12 (ui.theme)
+Assert-Case 'config: 스키마 12 + mainCategory 기본 battle + life/etc 섹션' `
+  (([int]$auditConfigJson.configSchemaVersion -eq 12) -and ([string]$auditConfigJson.mainCategory -eq 'battle') -and
    ($null -ne $auditConfigJson.life) -and ([string]$auditConfigJson.life.skill -eq 'daily') -and
    ($null -ne $auditConfigJson.etc) -and ([string]$auditConfigJson.etc.content -eq 'catMerchant')) $true
 # 버전 번호를 고정값으로 박으면 올릴 때마다 이 테스트가 깨집니다 (2026-08-09 v2.0.1 에서 발생).

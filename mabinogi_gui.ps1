@@ -72,12 +72,15 @@ public static extern short GetAsyncKeyState(int vKey);
 # 게임 창 물리 크기 추정용 API (권장 창 모드 메뉴의 현재 크기 체크 표시 - 2026-08-13):
 # 비 DPI 인식 GUI 의 GetWindowRect 는 가상(축소) 좌표를 주므로, 물리 데스크톱 해상도
 # (GetDeviceCaps DESKTOPHORZRES=118/VERTRES=117)와 가상 화면 크기의 비율로 환산합니다.
+# 마지막 줄은 컨트롤 패널 제목줄 다크 모드용 DWM 속성 대입 선언입니다 (2026-11-12 다크 모드 - 새 Add-Type 을 늘리지 않으려고
+# 조건문 밖에 이미 있는 이 블록에 붙였습니다. 부르는 곳은 Invoke-DwmTitleBarAttribute 하나뿐)
 Add-Type -Namespace Win32 -Name WindowProbe -MemberDefinition @'
 [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
 [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
 [DllImport("gdi32.dll")] public static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 '@
 
 function Get-RecommendedSizeMatch {
@@ -2488,10 +2491,12 @@ function Complete-ApprovalCheck {
 function Set-StartButtonPending {
   # [시작]을 누른 뒤 승인 조회가 끝날 때까지 글자와 색으로 눌렸음을 보여 줍니다 (2026-11-04 사용자 요청 - 조회가 최대 25초 걸리는데
   # 버튼이 꺼지기만 해서 눌렸는지 알 수 없었음). 되돌리는 자리는 Complete-ApprovalCheck 하나입니다 - 조회가 끝나면 시작하든 못 하든 그 자리를
-  # 지나고, Invoke-StartAutomation 의 시작 불가 갈래는 전부 그 뒤라 따로 되돌리지 않아도 됩니다. 색은 팔레트 값이라 호출 때 읽습니다
+  # 지나고, Invoke-StartAutomation 의 시작 불가 갈래는 전부 그 뒤라 따로 되돌리지 않아도 됩니다. 색은 팔레트 값이라 호출 때 읽습니다.
+  # 조회 중 바탕은 전용 팔레트 색(themePendingBack - 라이트는 예전 Border 값 그대로, 다크는 회색)입니다: 잠긴 평면 버튼의 글자는 바탕을
+  # 어둡게 만든 색이라 다크 Border 바탕에서는 안 보였습니다(2026-11-13 D7 시안 실측 대비 1.73:1 → 사용자 결정 회색 4.50:1)
   param([bool]$Pending)
   $btnStart.Text = $(if ($Pending) { '시작 중…' } else { $startButtonText })
-  $btnStart.BackColor = $(if ($Pending) { $script:themeBorder } else { $script:themeHoney })
+  $btnStart.BackColor = $(if ($Pending) { $script:themePendingBack } else { $script:themeHoney })
 }
 
 function Update-ApprovalUi {
@@ -2521,22 +2526,117 @@ function Update-ApprovalUi {
 #  UI 구성
 # ============================================================
 $form = New-Object System.Windows.Forms.Form
-# 허니 테마 팔레트 (컨트롤 생성 코드가 참조하므로 폼 생성보다 먼저 정의 - 테마 일괄 적용
-# 함수(Apply-HoneyTheme)는 기존대로 모든 컨트롤 생성 뒤에 실행됩니다)
-$script:themeBack     = [System.Drawing.Color]::FromArgb(253, 248, 238)  # 창 배경 (크림)
-$script:themeControl  = [System.Drawing.Color]::FromArgb(255, 253, 247)  # 일반 버튼 (밝은 크림)
-$script:themeInput    = [System.Drawing.Color]::FromArgb(255, 255, 255)  # 입력 배경 (흰색)
-$script:themeLogBack  = [System.Drawing.Color]::FromArgb(40, 34, 24)     # 로그 배경 (진한 갈색 콘솔풍)
-$script:themeText     = [System.Drawing.Color]::FromArgb(66, 50, 22)     # 기본 글자 (진한 갈색)
-$script:themeMuted    = [System.Drawing.Color]::FromArgb(158, 138, 104)  # 흐린 글자
-$script:themeBorder   = [System.Drawing.Color]::FromArgb(226, 205, 160)  # 버튼 테두리 (연한 꿀색)
-$script:themeTitle    = [System.Drawing.Color]::FromArgb(191, 128, 7)    # 섹션 제목 (꿀 갈색)
-$script:themeHoney    = [System.Drawing.Color]::FromArgb(247, 181, 0)    # 꿀색 (강조)
-$script:themeHoneyInk = [System.Drawing.Color]::FromArgb(66, 45, 0)      # 꿀색 위 글자
-$script:themeDanger   = [System.Drawing.Color]::FromArgb(222, 105, 92)   # 위험(중지)
+# 허니 테마 팔레트 두 벌 - 라이트(기본 · 지금 화면 그대로)와 다크(2026-11-12 다크 모드 - 설계 v3 2.1 · 사용자 결정 ①⑦).
+# 컨트롤 생성 코드가 참조하므로 폼 생성보다 먼저 정합니다 - 테마 일괄 적용 함수(Apply-HoneyTheme)는 기존대로 모든 컨트롤 생성 뒤에 실행됩니다.
+# 시작은 늘 라이트로 만들고, 저장값이 다크면 창을 띄우기 전에 아이콘 클릭과 같은 전환(Invoke-ThemeSwitch)을 1회 탑니다 - 처음부터 다크로
+# 만들면 시작 · 전환 경로가 갈라져, 생성 때 한 번만 칠하는 색(토글 테두리 · 선택 카드 등)을 경로마다 따로 챙겨야 합니다
+function Get-HoneyPaletteTable {
+  # 팔레트 표 = hashtable 1개 @{ light = @{ 19키 }; dark = @{ 19키 } }. hashtable 은 배열과 달리 파이프라인에서 풀리지 않아
+  # 호출부가 감싸지 않아도 한 덩이로 받습니다(규칙 3). 라이트 열은 지금 화면의 리터럴 그대로입니다 - 라이트는 픽셀까지 같아야 합니다(계약 L)
+  return @{
+    light = @{
+      themeBack            = [System.Drawing.Color]::FromArgb(253, 248, 238)   # 창 배경 (크림)
+      themeControl         = [System.Drawing.Color]::FromArgb(255, 253, 247)   # 일반 버튼 (밝은 크림)
+      themeInput           = [System.Drawing.Color]::FromArgb(255, 255, 255)   # 입력 배경 (흰색)
+      themeLogBack         = [System.Drawing.Color]::FromArgb(40, 34, 24)      # 로그 배경 (진한 갈색 콘솔풍)
+      themeText            = [System.Drawing.Color]::FromArgb(66, 50, 22)      # 기본 글자 (진한 갈색)
+      themeMuted           = [System.Drawing.Color]::FromArgb(158, 138, 104)   # 흐린 글자
+      themeBorder          = [System.Drawing.Color]::FromArgb(226, 205, 160)   # 버튼 테두리 (연한 꿀색)
+      themeTitle           = [System.Drawing.Color]::FromArgb(191, 128, 7)     # 섹션 제목 (꿀 갈색)
+      themeHoney           = [System.Drawing.Color]::FromArgb(247, 181, 0)     # 꿀색 (강조)
+      themeHoneyInk        = [System.Drawing.Color]::FromArgb(66, 45, 0)       # 꿀색 위 글자
+      themeDanger          = [System.Drawing.Color]::FromArgb(222, 105, 92)    # 위험(중지)
+      themeSafeStop        = [System.Drawing.Color]::FromArgb(250, 240, 218)   # 안전 중지 버튼 바탕
+      themeTabOn           = [System.Drawing.Color]::FromArgb(244, 213, 141)   # 눌린 토글 바탕 (캐러멜 - 2026-08-04 C안)
+      themeTabOnText       = [System.Drawing.Color]::FromArgb(91, 62, 6)       # 눌린 토글 글자
+      themeHover           = [System.Drawing.Color]::FromArgb(250, 240, 218)   # 해/달 아이콘 마우스 올림 · 누름 바탕 (아이콘 전용)
+      lifeCardSelectedBack = [System.Drawing.Color]::FromArgb(250, 240, 218)   # 고른 카드 바탕 (생활 · 냥코인 - 확정 시안 #FAF0DA)
+      themeListRow         = [System.Drawing.Color]::White                     # 커스텀 리스트 평소 행
+      themeListCurrent     = [System.Drawing.Color]::FromArgb(245, 231, 201)   # 커스텀 리스트 '지금 판' 행 (크림)
+      themePendingBack     = [System.Drawing.Color]::FromArgb(226, 205, 160)   # 승인 조회 중 [시작] 바탕 (지금 화면 그대로 - 라이트 Border 와 같은 값)
+    }
+    # 다크 열 = 시안 Gray 팔레트(사용자 결정 ① '나' - 검정 · 회색 + 꿀색 강조. 꿀색은 두 테마 같음) + 리스트 행 · 고른 카드 제안 값(⑦ - 시안_10)
+    dark = @{
+      themeBack            = [System.Drawing.Color]::FromArgb(30, 30, 33)
+      themeControl         = [System.Drawing.Color]::FromArgb(44, 44, 48)
+      themeInput           = [System.Drawing.Color]::FromArgb(23, 23, 26)
+      themeLogBack         = [System.Drawing.Color]::FromArgb(19, 19, 21)
+      themeText            = [System.Drawing.Color]::FromArgb(232, 230, 227)
+      themeMuted           = [System.Drawing.Color]::FromArgb(154, 154, 160)
+      themeBorder          = [System.Drawing.Color]::FromArgb(62, 62, 68)
+      themeTitle           = [System.Drawing.Color]::FromArgb(242, 179, 61)
+      themeHoney           = [System.Drawing.Color]::FromArgb(247, 181, 0)
+      themeHoneyInk        = [System.Drawing.Color]::FromArgb(42, 28, 0)
+      themeDanger          = [System.Drawing.Color]::FromArgb(224, 112, 95)
+      themeSafeStop        = [System.Drawing.Color]::FromArgb(58, 56, 50)
+      themeTabOn           = [System.Drawing.Color]::FromArgb(104, 82, 34)
+      themeTabOnText       = [System.Drawing.Color]::FromArgb(255, 240, 205)
+      themeHover           = [System.Drawing.Color]::FromArgb(58, 58, 63)
+      lifeCardSelectedBack = [System.Drawing.Color]::FromArgb(58, 56, 50)
+      themeListRow         = [System.Drawing.Color]::FromArgb(23, 23, 26)
+      themeListCurrent     = [System.Drawing.Color]::FromArgb(104, 82, 34)
+      # 승인 조회 중 [시작] 바탕 = Muted 와 같은 회색 (D7 - 2026-11-13 사용자 결정). 조회 중 버튼은 잠겨 있어 WinForms 가 글자를 바탕을 어둡게
+      # 만든 색으로 그리므로(ForeColor 를 쓰지 않음) 바탕이 어두우면 글자가 더 어두워집니다 - Border 62,62,68 은 대비 1.73:1 로 안 보였습니다(시안_11 실측)
+      themePendingBack     = [System.Drawing.Color]::FromArgb(154, 154, 160)
+    }
+  }
+}
+
+function Set-HoneyPalette {
+  # 지금 팔레트를 정합니다 - 19 변수를 이름으로 하나씩 대입합니다(동적 Set-Variable 금지: '팔레트가 폼 생성보다 먼저' 가드가
+  # themeBack 변수 글자의 첫 등장 위치로 순서를 봄 - test_gui_tab_toggle). 다시 칠하기는 호출부 몫입니다
+  # (시작 = 컨트롤 생성 · 시작 갱신, 전환 = Invoke-ThemeSwitch). uiTheme 는 아이콘 · 상태줄 층 · 대분류 아이콘이 읽는 지금 모드입니다
+  param([ValidateSet('light', 'dark')][string]$Theme)
+  $palette = (Get-HoneyPaletteTable)[$Theme]
+  $script:themeBack = $palette['themeBack']
+  $script:themeControl = $palette['themeControl']
+  $script:themeInput = $palette['themeInput']
+  $script:themeLogBack = $palette['themeLogBack']
+  $script:themeText = $palette['themeText']
+  $script:themeMuted = $palette['themeMuted']
+  $script:themeBorder = $palette['themeBorder']
+  $script:themeTitle = $palette['themeTitle']
+  $script:themeHoney = $palette['themeHoney']
+  $script:themeHoneyInk = $palette['themeHoneyInk']
+  $script:themeDanger = $palette['themeDanger']
+  $script:themeSafeStop = $palette['themeSafeStop']
+  $script:themeTabOn = $palette['themeTabOn']
+  $script:themeTabOnText = $palette['themeTabOnText']
+  $script:themeHover = $palette['themeHover']
+  $script:lifeCardSelectedBack = $palette['lifeCardSelectedBack']
+  $script:themeListRow = $palette['themeListRow']
+  $script:themeListCurrent = $palette['themeListCurrent']
+  $script:themePendingBack = $palette['themePendingBack']
+  $script:uiTheme = $Theme
+}
+
+function ConvertTo-UiTheme {
+  # 저장값(config ui.theme) → 테마 이름 (순수 - 진리표 대상). 문자열 'dark' 만 다크이고(-eq 라 대소문자 구분 없음 - 'Dark' · 'DARK' 도 다크),
+  # 그 밖(없음 · 빈 값 · 앞뒤 공백 · 숫자 · 참거짓 · 배열 · 객체)은 모두 라이트입니다. 잘못된 값은 고쳐 쓰지 않습니다 - 다음 아이콘 클릭이 덮어씁니다
+  param($Value)
+  if (($Value -is [string]) -and ($Value -eq 'dark')) { return 'dark' }
+  return 'light'
+}
+
+function Get-NextUiTheme {
+  # 아이콘을 누르면 갈 모드 (순수 - 진리표 대상): 다크면 라이트, 그 밖은 다크
+  param([string]$Theme)
+  if ($Theme -eq 'dark') { return 'light' }
+  return 'dark'
+}
+
+Set-HoneyPalette -Theme 'light'
+# 시작 모드 기본값 - 저장값 읽기(Load-SettingsToUi 의 마지막 문장)가 덮습니다. config 를 못 읽어 일찍 끝나면 라이트 그대로
+$script:uiThemeAtStart = 'light'
 
 $form.Text = "꿀비노기 컨트롤 패널 v$appVersion"
-$form.Size = New-Object System.Drawing.Size(560, 872)   # 폭 616→560 (2026-08-04 시안 확정 - 문구·배치 불변, 폭 상수만 축소)
+# 높이 881 = 설계 시점 클라이언트 842(비클라이언트 39 기준) - 하단 줄 버튼(높이 28 · Top 806) 아래에 여백 8 이 남는 크기입니다.
+# 872 였을 때는 클라이언트 833 에 버튼 자리가 27 이라 버튼 아래 테두리 1px 이 창 밖으로 잘렸습니다(2026-11-14 실기 그림 관측 - 버튼 셋
+# (Log 폴더 열기 · 로그 지우기 · 해/달 아이콘)에 아래 테두리 줄이 없음 · 2026-08-04 배치부터). 사용자 결정 '아래 여백 8'(로그 창과 하단 줄 사이 간격 8 과 같게).
+# 작업 영역 한도에 닿지 않는 상태에서는 창이 9px 길어지고, 한도에 닿으면 창 대신 로그 창이 줄어듭니다(1080p · 작업 표시줄 48 = 작업 영역 1032:
+# 생활 + 설정 · 로그 펼침은 창 1026 → 1032(+6) · 로그 창 150 → 147, 이미 한도에 닿아 있던 상태는 창 높이 그대로 · 로그 창이 9px 줄고 하단 줄이 9px 위로).
+# 하단 줄 컨트롤 좌표와 배치 계산식(Get-TabToggleLayout)은 그대로입니다 - 하단 줄은 Bottom 앵커로 따라가고, 계산은 아래의 실측 footerGap(36)을 받습니다
+$form.Size = New-Object System.Drawing.Size(560, 881)   # 폭 616→560 (2026-08-04 시안 확정 - 문구·배치 불변, 폭 상수만 축소)
 # 세로 크기 조절 가능: 로그 영역이 창 크기에 맞춰 늘어나고 줄어듭니다 (Anchor 설정 참고)
 $form.FormBorderStyle = 'Sizable'
 $form.MinimumSize = New-Object System.Drawing.Size(560, 700)
@@ -4817,9 +4917,10 @@ foreach ($lifeIconId in @($script:lifeSkillIconB64.Keys)) {
 
 # 대분류 버튼 아이콘 (Paint 로 정중앙 글자 바로 왼쪽에 직접 그림 - Invoke-MainCatButtonPaint.
 # 아이콘이 없으면 글자만).
-# 원본이 흰색(투명 배경) 아이콘이라 꿀색 활성 버튼에서만 보임 → 비활성(크림)용으로
-# themeText 진갈색 틴트 사본을 만들어 상태별로 교체 (Update-MainCategoryVisual 담당.
-# 사본도 lifeSkillIcons 에 넣어 종료 해제 계약 공유)
+# 원본이 흰색(투명 배경) 아이콘이라 라이트에서는 꿀색 활성 버튼에서만 보임 → 라이트 비활성(크림)용으로
+# 진갈색 틴트 사본(라이트 themeText 66,50,22 고정)을 만들어 상태별로 교체 (키 고르기는 Get-MainCatPaintIconKey,
+# 상태 변경 시 다시 그리기는 Update-MainCategoryVisual 담당. 사본도 lifeSkillIcons 에 넣어 종료 해제 계약 공유).
+# 다크 비활성(어두운 회색 바탕)에서는 이 틴트가 바탕과 거의 같아 흰 원본을 그대로 씁니다 (2026-11-12 다크 모드)
 foreach ($catIconId in @('catBattle', 'catLife', 'catEtc')) {
   if (-not $script:lifeSkillIcons.ContainsKey($catIconId)) { continue }
   $catSrcIcon = $script:lifeSkillIcons[$catIconId]
@@ -4832,9 +4933,21 @@ foreach ($catIconId in @('catBattle', 'catLife', 'catEtc')) {
   }
   $script:lifeSkillIcons[$catIconId + 'Dark'] = $catDarkIcon
 }
+function Get-MainCatPaintIconKey {
+  # 대분류 버튼에 그릴 아이콘 키 (순수 - 진리표 대상). 라이트 비활성만 진갈색 틴트 사본('Dark' 키)을 쓰고, 활성(꿀색 바탕)과
+  # 다크 비활성(어두운 회색 바탕)은 흰 원본을 씁니다 - 틴트는 다크 일반 버튼 바탕 위에서 ≈ 1.1:1(계산)이라 안 보입니다(2026-11-12 다크 모드).
+  # 틴트 사본이 없으면(디코드 실패 등) 원본 키 그대로 - 원본도 없으면 그리지 않는 판단은 호출부(Invoke-MainCatButtonPaint)가 합니다
+  param([string]$IconKey, [bool]$Active, [string]$Theme, [hashtable]$Icons)
+  $paintIconKey = $IconKey
+  if ((-not $Active) -and ($Theme -ne 'dark')) {
+    if ($Icons.ContainsKey($paintIconKey + 'Dark')) { $paintIconKey = $paintIconKey + 'Dark' }
+  }
+  return $paintIconKey
+}
+
 function Invoke-MainCatButtonPaint {
   # 대분류 버튼 아이콘 그리기: 글자는 버튼 기본 정렬(정중앙) 그대로 두고, 아이콘을 글자
-  # 시작점 왼쪽 6px 에 직접 그립니다 (활성 = 흰 원본 / 비활성 = 진갈색 틴트).
+  # 시작점 왼쪽 6px 에 직접 그립니다 (활성 = 흰 원본 / 비활성 = 라이트는 진갈색 틴트 · 다크는 흰 원본 - Get-MainCatPaintIconKey).
   # Button.Image 방식은 '글자 정중앙 + 아이콘 인접'을 만들 수 없음 (2026-08-05 정렬 수렴)
   param($Sender, $PaintArgs)
   try {
@@ -4844,9 +4957,7 @@ function Invoke-MainCatButtonPaint {
     $paintIconKey = $(switch ($paintCategory) {
         'battle' { 'catBattle' } 'life' { 'catLife' } default { 'catEtc' } })
     $paintActive = ($script:mainCategory -eq $paintCategory)
-    if (-not $paintActive) {
-      if ($script:lifeSkillIcons.ContainsKey($paintIconKey + 'Dark')) { $paintIconKey = $paintIconKey + 'Dark' }
-    }
+    $paintIconKey = Get-MainCatPaintIconKey -IconKey $paintIconKey -Active $paintActive -Theme $script:uiTheme -Icons $script:lifeSkillIcons
     if (-not $script:lifeSkillIcons.ContainsKey($paintIconKey)) { return }
     $paintIcon = $script:lifeSkillIcons[$paintIconKey]
     $paintTextSize = [System.Windows.Forms.TextRenderer]::MeasureText($Sender.Text, $Sender.Font)
@@ -4869,7 +4980,8 @@ $script:lifeTargetPage = 0
 $script:lifeSupportedSkillIds = @('daily', 'wood', 'mining', 'herb', 'wool', 'harvest', 'hoe', 'insect')
 $script:lifeCardFontNormal = New-Object System.Drawing.Font('Segoe UI', 9)
 $script:lifeCardFontBold = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-$script:lifeCardSelectedBack = [System.Drawing.Color]::FromArgb(250, 240, 218)   # 선택 카드 배경 (확정 시안 #FAF0DA - 안전 중지 버튼과 동일 계열)
+# 선택 카드 배경(lifeCardSelectedBack)은 폼 생성 앞의 팔레트(Set-HoneyPalette)가 같은 이름으로 정합니다
+# (라이트 = 확정 시안 #FAF0DA - 안전 중지 버튼과 동일 계열 · 다크 = 58,56,50 - 2026-11-12 다크 모드)
 
 # 콘텐츠 선택 - 생활용 라디오 줄 (전투 pnlCategory 와 교대 표시. 라디오 상태는 서로 보존)
 $pnlLifeCategory = New-Object System.Windows.Forms.Panel
@@ -5851,6 +5963,188 @@ $lnkUpdate.Visible = $false
 $lnkUpdate.Add_LinkClicked({ Start-Process 'https://github.com/Myodong/HoneyNogi/releases/latest' })
 $form.Controls.Add($lnkUpdate)
 
+# ----- 해/달 아이콘: 라이트 ↔ 다크 화면 전환 (2026-11-12 다크 모드 - 설계 v3 2.5 · 사용자 결정 ②) -----
+# 버전 글자(새 버전 링크가 뜨면 그 글자) 바로 왼쪽의 28x28 테두리 버튼('Log 폴더 열기' 와 같은 테두리). 지금 모드의 반대를 그립니다
+# (라이트 = 달 · 다크 = 해). 글꼴 · 이모지 없이 GDI+ 로 직접 그려 PC 마다 모양이 같고, 누르면 바로 다시 칠하고 저장합니다.
+# 실행 중에는 잠깁니다(Set-UiRunning). 생성 자리가 여기여야 탭 순서가 링크 다음 · '설정' 토글 앞이고, 아래쪽 앵커 거리가
+# 'Log 폴더 열기' 와 같은 폼 크기에서 잡힙니다. 처리기 · 배치 함수는 생성 호출보다 먼저 정의합니다 - 첫 배치를 생성 함수 안에서 바로 부릅니다
+$script:themeIconPaintError = $null   # 아이콘 그리기 예외 원인 - Paint 는 자주 불려 매번 쓰면 로그가 넘치므로 첫 1회만 [경고]
+
+function Get-ThemeIconSpec {
+  # 아이콘 모양 · 색 (순수 - 진리표 대상). 지금 모드의 반대 모드를 나타냅니다: 라이트 = 달(섹션 제목색) · 다크 = 해(꿀색).
+  # 잠기면(실행 중) 흐린 글자색으로 눌리지 않는다는 것을 보여 줍니다. hashtable 1개라 파이프라인에서 풀리지 않습니다
+  param([string]$Theme, [bool]$Enabled)
+  $iconShape = $(if ($Theme -eq 'dark') { 'sun' } else { 'moon' })
+  $iconColor = $(if (-not $Enabled) { $script:themeMuted } elseif ($Theme -eq 'dark') { $script:themeHoney } else { $script:themeTitle })
+  return @{ Shape = $iconShape; Color = $iconColor }
+}
+
+function Get-ThemeIconLeft {
+  # 아이콘 왼쪽 위치 (순수 - 진리표 대상) = 글자 오른쪽 끝 - 글자 폭 - 간격 2 - 아이콘 28. 버전 라벨 · 새 버전 링크는 폭 160 에
+  # 오른쪽 정렬이라 글자가 라벨 오른쪽 끝에 붙어 있고, 아이콘은 그 글자 바로 왼쪽에 둡니다(시안 하단 줄과 같은 식)
+  param([int]$LabelRight, [int]$TextWidth)
+  return ($LabelRight - $TextWidth - 2 - 28)
+}
+
+function Update-ThemeIconPlacement {
+  # 아이콘을 기준 글자(버전 라벨 또는 새 버전 링크) 바로 왼쪽으로 옮깁니다. 생성 때 1번(버전 라벨), 새 버전 링크가 뜬 틱에서
+  # 1번(링크) 부릅니다. Visible 로 기준을 고르지 않습니다 - 창이 뜨기 전에는 둘 다 거짓입니다.
+  # 안에서 예외를 받지 않습니다: 업데이트 틱에서 실패하면 그 틱의 바깥 처리기가 [오류] 로 남기고, 생성 때 첫 배치는 회귀 테스트가 실행으로 지킵니다
+  param($Button, $Label)
+  $labelTextWidth = [System.Windows.Forms.TextRenderer]::MeasureText($Label.Text, $Label.Font).Width
+  $Button.Left = Get-ThemeIconLeft -LabelRight $Label.Right -TextWidth $labelTextWidth
+}
+
+function Invoke-ThemeIconPaint {
+  # 해/달 그리기 (Paint 처리기 본체). 32px 기준 모양을 버튼 크기(28)에 맞춰 줄입니다: 해 = 반지름 5 원 + 광선 8개(반지름 8~11, 펜 2),
+  # 달 = 반지름 8 원에서 (+6, -3) 자리의 같은 원을 뺀 초승달. 달을 바탕색 원으로 덮어 깎으면 마우스 올림 · 누름 바탕에서 깎은 자국이
+  # 드러나므로, 두 원의 교점을 잇는 두 호로 초승달 테두리 자체를 만들어 칠합니다.
+  # 예외는 여기서 멈춥니다 - 처리기 밖으로 새면 모달 오류 창이 떠 메시지 루프가 멈춥니다(2026-08-10 10차 점검 - 실행으로 확인한
+  # 타이머 처리기 관측과 같은 경계). Paint 는 자주 불려 첫 1회만 [경고] 로 남기고(로그 호출도 감쌈), 원인은 themeIconPaintError 에 둡니다
+  param($Sender, $PaintArgs)
+  $iconBrush = $null
+  $rayPen = $null
+  $moonPath = $null
+  try {
+    $iconSpec = Get-ThemeIconSpec -Theme $script:uiTheme -Enabled ([bool]$Sender.Enabled)
+    $iconGraphics = $PaintArgs.Graphics
+    $iconGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $iconCenterX = $Sender.ClientSize.Width / 2.0
+    $iconCenterY = $Sender.ClientSize.Height / 2.0
+    $iconScale = [Math]::Min($Sender.ClientSize.Width, $Sender.ClientSize.Height) / 32.0
+    $iconBrush = New-Object System.Drawing.SolidBrush($iconSpec.Color)
+    if ($iconSpec.Shape -eq 'sun') {
+      $sunRadius = 5.0 * $iconScale
+      $iconGraphics.FillEllipse($iconBrush, [float]($iconCenterX - $sunRadius), [float]($iconCenterY - $sunRadius), [float](2 * $sunRadius), [float](2 * $sunRadius))
+      $rayPen = New-Object System.Drawing.Pen($iconSpec.Color, [float]2)
+      for ($rayIndex = 0; $rayIndex -lt 8; $rayIndex++) {
+        $rayAngle = $rayIndex * [Math]::PI / 4
+        $iconGraphics.DrawLine($rayPen,
+          [float]($iconCenterX + [Math]::Cos($rayAngle) * 8 * $iconScale), [float]($iconCenterY + [Math]::Sin($rayAngle) * 8 * $iconScale),
+          [float]($iconCenterX + [Math]::Cos($rayAngle) * 11 * $iconScale), [float]($iconCenterY + [Math]::Sin($rayAngle) * 11 * $iconScale))
+      }
+    } else {
+      # 초승달 테두리 = 바깥 원(중심 = 버튼 가운데)에서 깎는 원 반대쪽 호 + 깎는 원(중심 +6, -3)에서 바깥 원 안에 든 호.
+      # 두 원은 반지름 8 · 중심 거리 √45 라, 교점은 바깥 원 중심에서 깎는 원 쪽 방향 θ = atan2(-3, 6) 의 ±α (cos α = (√45 / 2) / 8) 에 있습니다.
+      # 각도는 GDI+ 화면 좌표(아래가 +y, 시계 방향이 +)라 atan2 를 그대로 씁니다. 크기를 줄여도 두 원이 닮은꼴이라 θ · α 는 그대로입니다
+      $moonRadius = 8.0 * $iconScale
+      $moonTheta = [Math]::Atan2(-3, 6) * 180 / [Math]::PI
+      $moonAlpha = [Math]::Acos([Math]::Sqrt(45) / 16) * 180 / [Math]::PI
+      $moonPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+      $moonPath.AddArc([float]($iconCenterX - $moonRadius), [float]($iconCenterY - $moonRadius), [float](2 * $moonRadius), [float](2 * $moonRadius),
+        [float]($moonTheta + $moonAlpha), [float](360 - 2 * $moonAlpha))
+      $moonPath.AddArc([float]($iconCenterX - $moonRadius + 6 * $iconScale), [float]($iconCenterY - $moonRadius - 3 * $iconScale), [float](2 * $moonRadius), [float](2 * $moonRadius),
+        [float]($moonTheta + 180 + $moonAlpha), [float](-2 * $moonAlpha))
+      $moonPath.CloseFigure()
+      $iconGraphics.FillPath($iconBrush, $moonPath)
+    }
+  } catch {
+    $isFirstPaintError = ($null -eq $script:themeIconPaintError)
+    $script:themeIconPaintError = $_.Exception.Message
+    if ($isFirstPaintError) {
+      try { Add-GuiLog "[경고] 화면 색 아이콘을 그리지 못했습니다 (이후 예외는 기록하지 않음): $($script:themeIconPaintError)" } catch { }
+    }
+  } finally {
+    if ($iconBrush) { try { $iconBrush.Dispose() } catch { } }
+    if ($rayPen) { try { $rayPen.Dispose() } catch { } }
+    if ($moonPath) { try { $moonPath.Dispose() } catch { } }
+  }
+}
+
+function Invoke-ThemeToggleClick {
+  # 해/달 아이콘 클릭 처리기 (설계 v3 1.3). 진행 중인 생활 슬라이드를 먼저 정리합니다 - 슬라이드 오버레이는 시작 때 바탕색 한 번으로 칠해
+  # 두므로 그대로 두면 옛 색이 남습니다(대분류 전환 Set-MainCategory 와 같은 순서). 실행 중에는 아이콘이 잠기지만(Set-UiRunning)
+  # running 이면 아무것도 하지 않는 이중 방어를 둡니다. 전환 트랜잭션은 상태 · 적용 · 되돌림 · 기록에서 예외를 내지 않으므로 바깥 catch 가
+  # 받는 것은 앞 두 문장과 저장 함수의 관측 밖 예외뿐입니다. 그 로그 호출도 감쌉니다 - 처리기 밖으로 새면 모달 오류 창이 뜹니다
+  try {
+    if ($script:lifeSlideActive) { Stop-LifeSlideNow }
+    if ($script:running) { return }
+    Invoke-ThemeSwitch -From $script:uiTheme -To (Get-NextUiTheme -Theme $script:uiTheme) -Save
+  } catch { try { Add-GuiLog "[경고] 화면 색 전환 처리 중 예외: $($_.Exception.Message)" } catch { } }
+}
+
+function Update-ThemeIconStyle {
+  # 아이콘 단장 - 시작 · 전환 공통(갱신 6번). 테두리 · 바탕은 테마 일괄 적용의 일반 버튼 모양을 그대로 쓰고, 이 버튼만 마우스 올림 · 누름
+  # 바탕을 팔레트 색으로 정합니다(다른 버튼의 올림 색은 범위 밖). 말풍선과 접근성 이름은 같은 문구입니다 - 글자가 없는 버튼이라 화면 낭독 ·
+  # UI 자동화가 이 이름으로 버튼을 찾습니다(실기 판정의 포커스 대상). 안에서 예외를 받지 않습니다 - 시작에서는 회귀 테스트가 시작 모드를
+  # 실행해 막고, 전환에서는 Invoke-ThemeSwitch 가 받아 되돌립니다(직접 호출이라 처리기 경계의 모달 창 관측과 다름 - 규칙 8)
+  $themeIconTip = $(if ($script:uiTheme -eq 'dark') { '라이트 모드로 바꾸기' } else { '다크 모드로 바꾸기' })
+  $btnThemeToggle.FlatAppearance.MouseOverBackColor = $script:themeHover
+  $btnThemeToggle.FlatAppearance.MouseDownBackColor = $script:themeHover
+  $btnThemeToggle.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $toolTip.SetToolTip($btnThemeToggle, $themeIconTip)
+  $btnThemeToggle.AccessibleName = $themeIconTip
+  $btnThemeToggle.Invalidate()
+}
+
+function Initialize-ThemeToggleButton {
+  # 아이콘 버튼 생성 (최상위 1문장에서만 부름 - 회귀 테스트가 그 대입문을 헤드리스 폼에서 그대로 실행합니다). 순서가 계약입니다:
+  # 이름(UI 자동화 식별자) → 글자 없음 · 크기 · 위치 · 앵커 → 처리기(명명 함수 한 줄 - 메시지 루프에서 불릴 때 스크립트 범위 함수를 찾음) →
+  # 폼에 추가 → 맨 앞으로(폭 160 버전 라벨 · 링크가 아이콘 자리를 덮음 - 시안 그림 1차 관측) → 첫 배치(버전 글자 기준)
+  param($Form, $AnchorLabel, [int]$Top)
+  $themeButton = New-Object System.Windows.Forms.Button
+  $themeButton.Name = 'btnThemeToggle'
+  $themeButton.Text = ''
+  $themeButton.Size = New-Object System.Drawing.Size(28, 28)
+  $themeButton.Top = $Top
+  $themeButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+  $themeButton.Add_Click({ Invoke-ThemeToggleClick })
+  $themeButton.Add_Paint({ Invoke-ThemeIconPaint -Sender $this -PaintArgs $_ })
+  $Form.Controls.Add($themeButton)
+  $themeButton.BringToFront()
+  Update-ThemeIconPlacement -Button $themeButton -Label $AnchorLabel
+  return $themeButton
+}
+$btnThemeToggle = Initialize-ThemeToggleButton -Form $form -AnchorLabel $lblVersion -Top $btnOpenLog.Top
+
+# ----- 대기 중 잠긴 평면 버튼의 글자 (다크) (2026-11-13 다크 모드 - 사용자 결정 '흐린 회색 글자로' · 시안_12 · 시안_13) -----
+# 잠긴(Enabled 거짓) 평면 버튼은 WinForms 가 글자를 바탕을 어둡게 만든 색으로 그립니다(ForeColor 를 쓰지 않음 - '시작 중…' 과 같은 원리).
+# 다크 일반 버튼 바탕 44,44,48 에서는 그 글자가 14,14,16 이라 대비 1.39:1 로 사라집니다(시안_12 실측 - 라이트는 3.65:1).
+# 멈춰 있을 때 잠기는 평면 버튼은 둘뿐입니다: 층이 섞인 커스텀 리스트의 '랜덤' 토글(던전 · 심층 - Update-CustomRandomMixGate)과
+# 생활 끝 페이지의 화살표(Update-LifeSliders - 저장된 스킬 · 대상이 첫 페이지에 있으면 생활 화면을 열 때부터 '◀' 가 잠겨 있음).
+# 이 여섯 컨트롤만, 다크 · 대기 중 · 잠긴 동안에만 같은 자리에 흐린 글자색으로 글자를 덧그립니다(실측 4.97:1). 라이트와 실행 중에는
+# 아무것도 그리지 않아 화소가 지금과 같습니다(계약 L · 사용자 결정 ④ '실행 중 잠긴 글자는 그대로').
+$script:lockedTextPaintError = $null   # 덧그리기 예외 원인 - Paint 는 자주 불려 매번 쓰면 로그가 넘치므로 첫 1회만 [경고]
+
+function Test-LockedTextOverdraw {
+  # 덧그릴지 판정 (순수 - 진리표 대상): 다크 + 대기 중 + 잠김일 때만 참
+  param([string]$Theme, [bool]$Running, [bool]$Enabled)
+  return (($Theme -eq 'dark') -and (-not $Running) -and (-not $Enabled))
+}
+
+function Invoke-LockedTextPaint {
+  # 잠긴 글자 덧그리기 (Paint 처리기 본체 - 컨트롤이 스스로 그린 뒤에 불립니다). 원래 글자는 바탕과 거의 같은 색이라 아래에 묻힙니다.
+  # 가운데 정렬 한 줄 = 여섯 컨트롤의 글자 배치입니다('랜덤' · '◀' · '▶'). 컨트롤이 스스로 그린 글자와 자리가 화소까지 같지는 않습니다 -
+  # 가운데 차이 가로 1 · 세로 1.5 화소 이내(회귀 T17 '자리' 행 실측: 컨트롤은 제 글자를 GDI+ 로, 덧그리기는 GDI 로 그림). '▶' 는 원래 글자
+  # 화소 5개가 덮이지 않고 남지만 바탕과 거의 같은 색(1.39:1)입니다.
+  # 예외는 여기서 멈춥니다 - 처리기 밖으로 새면 모달 오류 창이 떠 메시지 루프가 멈춥니다(해/달 아이콘 Paint 와 같은 경계).
+  # 첫 1회만 [경고] 를 남기고(로그 호출도 감쌈) 원인은 lockedTextPaintError 에 둡니다
+  param($Sender, $PaintArgs)
+  try {
+    if (-not (Test-LockedTextOverdraw -Theme $script:uiTheme -Running ([bool]$script:running) -Enabled ([bool]$Sender.Enabled))) { return }
+    $lockedTextFlags = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
+    [System.Windows.Forms.TextRenderer]::DrawText($PaintArgs.Graphics, [string]$Sender.Text, $Sender.Font, $Sender.ClientRectangle, $script:themeMuted, $lockedTextFlags)
+  } catch {
+    $isFirstLockedTextError = ($null -eq $script:lockedTextPaintError)
+    $script:lockedTextPaintError = $_.Exception.Message
+    if ($isFirstLockedTextError) {
+      try { Add-GuiLog "[경고] 잠긴 버튼 글자를 그리지 못했습니다 (이후 예외는 기록하지 않음): $($script:lockedTextPaintError)" } catch { }
+    }
+  }
+}
+
+function Update-LockedTextRepaint {
+  # 여섯 컨트롤을 다시 그리게 합니다 - 실행 시작 · 정지(Set-UiRunning 끝)에서 부릅니다. 대기 중에 이미 잠겨 있던 컨트롤은 실행이 시작돼도
+  # Enabled 가 거짓 그대로라 스스로 다시 그리지 않아, 그대로 두면 대기 중에 덧그린 글자가 실행 중에도 남습니다
+  foreach ($lockedTextControl in $script:lockedTextControls) { $lockedTextControl.Invalidate() }
+}
+
+# 등록 - 여섯 컨트롤이 모두 만들어진 뒤 한 곳에서 (처리기는 명명 함수 한 줄 - 메시지 루프에서 불릴 때 스크립트 범위 함수를 찾음)
+$script:lockedTextControls = @($chkCrRandom, $chkDcrRandom, $btnLifeSkillPrev, $btnLifeSkillNext, $btnLifeTargetPrev, $btnLifeTargetNext)
+foreach ($lockedTextControl in $script:lockedTextControls) {
+  $lockedTextControl.Add_Paint({ Invoke-LockedTextPaint -Sender $this -PaintArgs $_ })
+}
+
 # ----- 탭 토글: 설정/로그 표시 (2026-08-04 시안 확정 - 각각 독립 열림/닫힘, 설정 위·로그 아래) -----
 # CheckBox Appearance='Button' = 눌린 상태 유지 시각을 공짜로 얻음. 실행 중에도 사용해야
 # 하므로 Set-UiRunning 잠금 그룹(반복/콘텐츠/상세)에 넣지 않습니다. 배치·폼 높이는
@@ -5859,7 +6153,11 @@ $script:logViewHeight = 150      # 로그 뷰포트 기억값 - 총 폼 높이�
 $script:logLayoutOpen = $null    # 직전 레이아웃의 로그 상태 3상태 토큰 (null=최초) - 열림이었을 때만 뷰포트를 흡수
 $script:hiddenLogErrors = 0      # 로그 접힘 중 발생한 미열람 오류/경고 수 (토글 배지)
 $script:hiddenLogWarns = 0
-$script:footerGap = 28           # ClientHeight - 하단 줄 Top (아래에서 실측으로 갱신 - Bottom 앵커 지연과 무관하게 직접 계산용)
+# 배지 시작 잔상 표시 (2026-11-12 다크 모드 - K3): 창을 띄우기 전에 쌓인 [경고]/[오류] 배지 글자는 시작 테마 적용이 기본 글자색으로
+# 덮어 둡니다(라이트는 지금 화면 그대로 둠 - 계약 L). 그 상태를 표시 하나로 기록해 다크에서만 배지 글자색으로 다시 칠합니다.
+# 시작 갱신이 배지 수로 켜고, 배지를 다시 칠하거나 지우는 순간(Update-LogTabBadge · Reset-LogTabBadge) 꺼지며, 전환은 잡아 둔 값으로 되살립니다
+$script:logBadgeStartAfterimage = $false
+$script:footerGap = 36           # ClientHeight - 하단 줄 Top = 버튼 높이 28 + 아래 여백 8 (아래에서 실측으로 갱신 - Bottom 앵커 지연과 무관하게 직접 계산용. 2026-11-14 까지는 초기값 28 · 실측 27 이라 버튼 맨 아랫줄이 잘렸음)
 
 $chkTabSettings = New-Object System.Windows.Forms.CheckBox
 $chkTabSettings.Appearance = 'Button'
@@ -5896,6 +6194,8 @@ $form.Controls.Add($lblLogPreview)
 function Update-LogTabBadge {
   # 접힘 중 미열람 오류/경고 배지 (오류 우선). 리셋은 로그를 실제로 열 때/로그 지우기 때만 -
   # 배지는 '새 회차'가 아니라 '마지막으로 로그를 본 뒤'의 의미라 회차 시작에 지우지 않음 (리뷰)
+  # 배지를 지금 값으로 다시 칠하므로 시작 잔상은 여기서 끝납니다 (다크 모드 K3)
+  $script:logBadgeStartAfterimage = $false
   if ($script:hiddenLogErrors -gt 0) {
     $chkTabLog.Text = "로그 ● 오류 $($script:hiddenLogErrors)"
     $chkTabLog.BackColor = $script:themeDanger
@@ -5907,17 +6207,34 @@ function Update-LogTabBadge {
   }
 }
 
+function Get-LogBadgeTextColor {
+  # 배지 글자색 - Update-LogTabBadge 와 같은 값 · 같은 우선순위(오류 우선). 다크로 바꿀 때 시작 잔상 배지 글자를 읽히는 색으로
+  # 칠하는 데만 씁니다(Restore-ThemeState - 다크 모드 K3). 두 함수가 같은 값을 내는지는 회귀 테스트가 실행으로 대조합니다
+  if ($script:hiddenLogErrors -gt 0) { return [System.Drawing.Color]::White }
+  return $script:themeHoneyInk
+}
+
 function Update-TabToggleStyle {
-  # 토글 눌림 배경 (안전 중지 버튼과 같은 크림). 로그 배지가 활성일 때는 배지 색이 우선.
-  # 활성 = 캐러멜 (2026-08-04 C안 확정 - 연크림은 기본색과 구분이 안 됨)
-  $chkTabSettings.BackColor = $(if ($chkTabSettings.Checked) { [System.Drawing.Color]::FromArgb(244, 213, 141) } else { $script:themeControl })
-  $chkTabSettings.ForeColor = $(if ($chkTabSettings.Checked) { [System.Drawing.Color]::FromArgb(91, 62, 6) } else { $script:themeText })
+  # 토글 눌림 배경 = 팔레트의 눌린 토글 색(themeTabOn · 글자 themeTabOnText - 라이트는 캐러멜, 2026-08-04 C안 확정: 연크림은 기본색과
+  # 구분이 안 됨). 로그 배지가 활성일 때는 배지 색이 우선.
+  # 테두리와 눌린 상태 바탕(CheckedBackColor)은 테마 일괄 적용이 CheckBox 를 다루지 않아 여기서 팔레트로 다시 칠합니다(배지 return 앞 -
+  # 2026-11-12 다크 모드). 눌린 바탕은 다크만 칠합니다 - 비워 두면 BackColor 를 밝게 섞은 색이 나와 다크에서는 밝은 황토 + 밝은 글자가
+  # 되고(시안 그림 1차 관측), 라이트는 지금 화면 그대로 빈 값입니다(계약 L)
+  $tabCheckedBack = $(if ($script:uiTheme -eq 'dark') { $script:themeTabOn } else { [System.Drawing.Color]::Empty })
+  foreach ($tabToggle in @($chkTabSettings, $chkTabLog)) {
+    $tabToggle.FlatAppearance.BorderColor = $script:themeBorder
+    $tabToggle.FlatAppearance.CheckedBackColor = $tabCheckedBack
+  }
+  $chkTabSettings.BackColor = $(if ($chkTabSettings.Checked) { $script:themeTabOn } else { $script:themeControl })
+  $chkTabSettings.ForeColor = $(if ($chkTabSettings.Checked) { $script:themeTabOnText } else { $script:themeText })
   if ($script:hiddenLogErrors -gt 0 -or $script:hiddenLogWarns -gt 0) { Update-LogTabBadge; return }
-  $chkTabLog.BackColor = $(if ($chkTabLog.Checked) { [System.Drawing.Color]::FromArgb(244, 213, 141) } else { $script:themeControl })
-  $chkTabLog.ForeColor = $(if ($chkTabLog.Checked) { [System.Drawing.Color]::FromArgb(91, 62, 6) } else { $script:themeText })
+  $chkTabLog.BackColor = $(if ($chkTabLog.Checked) { $script:themeTabOn } else { $script:themeControl })
+  $chkTabLog.ForeColor = $(if ($chkTabLog.Checked) { $script:themeTabOnText } else { $script:themeText })
 }
 
 function Reset-LogTabBadge {
+  # 배지를 지우므로 시작 잔상도 여기서 끝납니다 (다크 모드 K3)
+  $script:logBadgeStartAfterimage = $false
   $script:hiddenLogErrors = 0
   $script:hiddenLogWarns = 0
   $chkTabLog.Text = '로그'
@@ -5940,6 +6257,31 @@ function Save-UiToggleState {
   }
   try { Save-Config $cfg }
   catch { Add-GuiLog "[경고] 설정/로그 표시 상태 저장 실패: $($_.Exception.Message)" }
+}
+
+function Save-UiThemeState {
+  # 화면 색(ui.theme) 즉시 저장 - 아이콘 클릭의 전환이 성공했을 때만 Invoke-ThemeSwitch 가 부릅니다(시작 경로에는 저장이 없음).
+  # Save-UiToggleState 와 같은 읽기 → 병합 → 쓰기지만, 읽기 실패도 원인을 담은 [경고] 1줄로 알립니다 - 조용히 돌아가면 다음 실행에
+  # 색이 왜 안 남았는지 알 길이 없습니다. 문구가 다음 실행을 단정하지 않는 이유: 파일이 없으면 런처가 기본 config 를 다시 꺼내고, 손상이면
+  # 설정 읽기가 일찍 끝나 둘 다 라이트로 시작합니다('이전 색' 은 일시적 읽기 실패에서만 맞음).
+  # 경고 기록도 감쌉니다 - 기록 실패가 전환 결과를 바꾸거나 처리기 밖으로 새지 않게(다크 모드 K1). ui 추가 · 값 대입의 관측 밖 예외는
+  # Save-UiToggleState 와 같은 꼴로 막지 않고(규칙 8) 클릭 처리기의 바깥 catch 가 [경고] 1줄로 받습니다
+  if (-not $script:uiReady) { return }
+  $cfg = Read-Config
+  if ($null -eq $cfg) {
+    try { Add-GuiLog "[경고] 설정 파일을 읽지 못해 화면 색을 저장하지 못했습니다 (원인: $($script:configReadError)) - 다음 실행에는 이 색이 유지되지 않을 수 있습니다" } catch { }
+    return
+  }
+  if (-not $cfg.PSObject.Properties['ui']) {
+    $cfg | Add-Member -NotePropertyName 'ui' -NotePropertyValue ([pscustomobject]@{})
+  }
+  if ($cfg.ui.PSObject.Properties['theme']) { $cfg.ui.theme = [string]$script:uiTheme }
+  else { $cfg.ui | Add-Member -NotePropertyName 'theme' -NotePropertyValue ([string]$script:uiTheme) }
+  $themeSaveError = $null
+  try { Save-Config $cfg } catch { $themeSaveError = $_.Exception.Message }
+  if ($null -ne $themeSaveError) {
+    try { Add-GuiLog "[경고] 화면 색 저장 실패: $themeSaveError" } catch { }
+  }
 }
 
 $chkTabSettings.Add_CheckedChanged({
@@ -7920,11 +8262,14 @@ function Update-AbyssInputLock {
 }
 
 function Update-CustomRandomToggleStyle {
-  # 랜덤 토글 눌림 배경 (설정/로그 탭 토글과 동일한 크림 - 활성 상태를 색으로 표시)
+  # 랜덤 토글 눌림 배경 (설정/로그 탭 토글과 같은 팔레트 색 - 활성 상태를 색으로 표시)
   param($Toggle)
-  # 활성 = 캐러멜 (설정/로그 탭 토글과 동일 - 2026-08-04 C안 확정)
-  $Toggle.BackColor = $(if ($Toggle.Checked) { [System.Drawing.Color]::FromArgb(244, 213, 141) } else { $script:themeControl })
-  $Toggle.ForeColor = $(if ($Toggle.Checked) { [System.Drawing.Color]::FromArgb(91, 62, 6) } else { $script:themeText })
+  # 활성 = 눌린 토글 색 themeTabOn · themeTabOnText (설정/로그 탭 토글과 동일 - 라이트는 캐러멜, 2026-08-04 C안 확정).
+  # 테두리 · 눌린 상태 바탕은 탭 토글(Update-TabToggleStyle)과 같은 이유로 여기서 다시 칠합니다 - 눌린 바탕은 다크만, 라이트는 빈 값 그대로
+  $Toggle.FlatAppearance.BorderColor = $script:themeBorder
+  $Toggle.FlatAppearance.CheckedBackColor = $(if ($script:uiTheme -eq 'dark') { $script:themeTabOn } else { [System.Drawing.Color]::Empty })
+  $Toggle.BackColor = $(if ($Toggle.Checked) { $script:themeTabOn } else { $script:themeControl })
+  $Toggle.ForeColor = $(if ($Toggle.Checked) { $script:themeTabOnText } else { $script:themeText })
 }
 
 function Save-CustomRandomOrder {
@@ -7996,7 +8341,8 @@ function Get-CustomActiveListView {
 
 function Set-CustomListRandomView {
   # 실행 중 표시 (확정 시안): 이번 바퀴 순열 순서로 행을 재배열하고 # 열을 '진행순서 (등록번호)'
-  # 로, 현재 항목 행을 크림색으로 표시합니다. 행 객체를 재사용(Tag=등록 인덱스)해 체크/셀
+  # 로, 현재 항목 행을 '지금 판' 색(themeListCurrent - 라이트 크림 · 다크 진한 꿀색)으로, 나머지 행은 평소 행 색(themeListRow)으로
+  # 표시합니다(색은 팔레트 값 - 2026-11-12 다크 모드). 행 객체를 재사용(Tag=등록 인덱스)해 체크/셀
   # 텍스트 손실이 없고, 저장 함수는 Tag 순 정렬로 등록 순서를 보존합니다 (실행 중 [설정 저장]
   # 이 화면 순서를 그대로 저장하는 사고 방어 - 리뷰 조건)
   param($Context)
@@ -8009,11 +8355,11 @@ function Set-CustomListRandomView {
     # 생활 = RegisteredIndex(비랜덤이면 sourceIndex = 등록 순번) - getter 계약 그대로.
     # 정지 시 색 복원은 랜덤과 같은 공용 경로(Restore-CustomListRegisteredView)를 쓰도록
     # Tag(등록 인덱스 identity)와 플래그를 동일하게 세팅합니다 - 복원의 Tag 순 정렬은
-    # 비랜덤에서 순서 불변이고, 열 폭 30/32 재설정도 원값이라 무해 (Codex 합의).
+    # 비랜덤에서 순서 불변이고, 열 폭 30/32 재설정도 원값이라 무해 (설계 합의).
     $plainTotal = [int]$Context.RegisteredTotal
     $plainIndex = $(if ([string]$Context.SectionName -eq 'lifeCustomRepeat') { [int]$Context.RegisteredIndex } else { [int]$Context.Index })
     if ($view.Items.Count -ne $plainTotal) { return }              # 화면-config 불일치면 표시만 생략 (안전)
-    if ($plainIndex -lt 0 -or $plainIndex -ge $view.Items.Count) { return }   # 인덱스 범위 확인 후에만 Tag/플래그 (Codex 조건)
+    if ($plainIndex -lt 0 -or $plainIndex -ge $view.Items.Count) { return }   # 인덱스 범위 확인 후에만 Tag/플래그 (리뷰 조건)
     $prevLoading = $script:crLoading
     $script:crLoading = $true
     $view.BeginUpdate()
@@ -8021,8 +8367,8 @@ function Set-CustomListRandomView {
       if (-not $script:customViewShuffled) {
         foreach ($viewRow in $view.Items) { $viewRow.Tag = [int]$viewRow.Index }   # 등록 인덱스 고정 (복원 경로 공용)
       }
-      foreach ($viewRow in $view.Items) { $viewRow.BackColor = [System.Drawing.Color]::White }
-      $view.Items[$plainIndex].BackColor = [System.Drawing.Color]::FromArgb(245, 231, 201)
+      foreach ($viewRow in $view.Items) { $viewRow.BackColor = $script:themeListRow }
+      $view.Items[$plainIndex].BackColor = $script:themeListCurrent
       $view.Items[$plainIndex].EnsureVisible()
       $script:customViewShuffled = $true   # '실행 중 표시/Tag 관리 상태' 플래그 (재배열 여부가 아님)
     } finally {
@@ -8063,10 +8409,10 @@ function Set-CustomListRandomView {
     for ($vi = 0; $vi -lt $orderedRows.Count; $vi++) {
       [void]$view.Items.Add($orderedRows[$vi])
       $orderedRows[$vi].SubItems[1].Text = ('{0} ({1})' -f ($vi + 1), ([int]$orderedRows[$vi].Tag + 1))
-      $orderedRows[$vi].BackColor = [System.Drawing.Color]::White
+      $orderedRows[$vi].BackColor = $script:themeListRow
     }
     if ($viewIndex -ge 0 -and $viewIndex -lt $view.Items.Count) {
-      $view.Items[$viewIndex].BackColor = [System.Drawing.Color]::FromArgb(245, 231, 201)
+      $view.Items[$viewIndex].BackColor = $script:themeListCurrent
       $view.Items[$viewIndex].EnsureVisible()
     }
     $script:customViewShuffled = $true
@@ -8093,7 +8439,7 @@ function Restore-CustomListRegisteredView {
       for ($vi = 0; $vi -lt $restoreRows.Count; $vi++) {
         [void]$view.Items.Add($restoreRows[$vi])
         $restoreRows[$vi].SubItems[1].Text = [string]($vi + 1)
-        $restoreRows[$vi].BackColor = [System.Drawing.Color]::White
+        $restoreRows[$vi].BackColor = $script:themeListRow
         $restoreRows[$vi].Tag = $null
       }
       $view.Columns[1].Width = $(if ($view -eq $lvAcrList) { 30 } else { 32 })
@@ -8103,6 +8449,26 @@ function Restore-CustomListRegisteredView {
     }
   }
   $script:customViewShuffled = $false
+}
+
+function Update-ListThemeColors {
+  # 커스텀 리스트 표 4개 + 셀 편집 콤보의 색 (화면 색 전환 때만 - 갱신 8번, 2026-11-12 다크 모드). 테마 일괄 적용은 ListView 를 다루지 않고,
+  # 셀 편집 콤보는 편집하는 동안만 표 안에 붙어 일괄 적용에 닿지 않습니다. 다크 = 입력 바탕 + 기본 글자, 라이트 = 시스템 기본으로 되돌림(Reset) -
+  # 라이트 시작은 표에 색을 칠한 적이 없어, 칠하면 표 글자가 지금과 달라집니다(계약 L).
+  # 행 바탕은 전부 평소 행 색입니다 - 아이콘은 실행 중 잠겨 있어 이 함수가 도는 동안 '지금 판' 강조 행이 없습니다
+  $listIsDark = ($script:uiTheme -eq 'dark')
+  foreach ($themeListControl in @($lvCrList, $lvAcrList, $lvDcrList, $lvLcrList, $script:cellEditCombo)) {
+    if ($listIsDark) {
+      $themeListControl.BackColor = $script:themeInput
+      $themeListControl.ForeColor = $script:themeText
+    } else {
+      $themeListControl.ResetBackColor()
+      $themeListControl.ResetForeColor()
+    }
+  }
+  foreach ($themeListView in @($lvCrList, $lvAcrList, $lvDcrList, $lvLcrList)) {
+    foreach ($themeListItem in $themeListView.Items) { $themeListItem.BackColor = $script:themeListRow }
+  }
 }
 
 function Set-CustomRepeatOnConfig {
@@ -9133,6 +9499,9 @@ function Load-SettingsToUi {
   # 프로그램적 체크 변경의 CheckedChanged 저장은 uiReady 가드가 막음)
   try { $chkTabSettings.Checked = ConvertTo-StrictBoolean $cfg.ui.settingsOpen $false } catch { }
   try { $chkTabLog.Checked = ConvertTo-StrictBoolean $cfg.ui.logOpen $false } catch { }
+  # 화면 색 저장값 (2026-11-12 다크 모드 - 이 함수의 마지막 문장). 시작 갱신 뒤 이 값이 다크면 창을 띄우기 전에 아이콘 클릭과 같은 전환을
+  # 1회 탑니다(저장 없음). 어떤 값에도 예외가 없어(ConvertTo-UiTheme) 감싸지 않습니다. config 를 못 읽어 위에서 일찍 끝나면 라이트 그대로
+  $script:uiThemeAtStart = ConvertTo-UiTheme $cfg.ui.theme
 }
 
 function Save-SettingsFromUi {
@@ -9401,6 +9770,8 @@ function Set-UiRunning {
   $btnCatBattle.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnCatLife.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
   $btnCatEtc.Enabled = (-not $IsRunning) -and (Test-ApprovalAllowsStart)
+  # 해/달 아이콘도 실행 중 잠금 - 도는 동안 화면 전체를 다시 칠하지 않게 (미승인 · 승인 조회 중은 잠그지 않음 - 2026-11-12 다크 모드)
+  $btnThemeToggle.Enabled = -not $IsRunning
   $btnSafeStop.Enabled = $IsRunning
   $btnKill.Enabled = $IsRunning
   # 대기 중에는 시작만, 실행 중에는 중지 2개만 표시 (시작 자리에 중지가 나타남 - 오클릭 방지)
@@ -9442,6 +9813,9 @@ function Set-UiRunning {
     }
     Hide-CellEditCombo
   }
+  # 대기 중에 잠겨 있던 '랜덤' 토글 · 생활 화살표는 Enabled 가 바뀌지 않아 스스로 다시 그리지 않습니다 - 덧그린 글자를 실행 상태에 맞춥니다
+  # (다크 모드 - Update-LockedTextRepaint. 함수 끝이라 위 잠금 · 복원이 모두 끝난 뒤입니다)
+  Update-LockedTextRepaint
 }
 
 function Get-CycleWaitSecondsForEstimate {
@@ -12352,6 +12726,17 @@ $form.Add_FormClosing({
     }
   })
 
+function Update-EtcNyanCardStyle {
+  # 냥코인 카드의 선택 모양 (생활 스킬 카드와 동일 - 테마 일괄 적용이 일반 버튼 모양으로 덮으므로 표시 시점마다 다시 칠함).
+  # 패널 갱신(기타가 보일 때)과 화면 색 전환(바꾸기 전 의미가 'Selected' 일 때만 - Restore-ThemeState)이 같은 모양을 쓰도록 한 곳에 둡니다
+  # (2026-11-12 다크 모드 - 색은 팔레트 값이라 지금 테마의 고른 카드 색이 됩니다)
+  $btnEtcNyanCard.FlatStyle = 'Flat'
+  $btnEtcNyanCard.BackColor = $script:lifeCardSelectedBack
+  $btnEtcNyanCard.Font = $script:lifeCardFontBold
+  $btnEtcNyanCard.FlatAppearance.BorderColor = $script:themeHoney
+  $btnEtcNyanCard.FlatAppearance.BorderSize = 2
+}
+
 # ----- 카테고리 전환: 상세 설정 패널 교체 + 그룹 높이/아래 요소 위치 재계산 -----
 $updateCategoryPanels = {
   # 대분류(전투/생활) 게이트 (v2.0.0): 생활에서는 전투 카테고리 플래그를 전부 끕니다.
@@ -12432,11 +12817,7 @@ $updateCategoryPanels = {
   if ($isEtc) {
     # 카드 선택 스타일 (생활 스킬 카드와 동일 - Apply-HoneyTheme 가 일반 버튼 스타일로
     # 덮으므로 표시 시점마다 재지정)
-    $btnEtcNyanCard.FlatStyle = 'Flat'
-    $btnEtcNyanCard.BackColor = $script:lifeCardSelectedBack
-    $btnEtcNyanCard.Font = $script:lifeCardFontBold
-    $btnEtcNyanCard.FlatAppearance.BorderColor = $script:themeHoney
-    $btnEtcNyanCard.FlatAppearance.BorderSize = 2
+    Update-EtcNyanCardStyle
   }
   $lblLifeSkillCaption.Visible = $isLifeGather
   $btnLifeSkillPrev.Visible = $isLifeGather
@@ -12916,11 +13297,12 @@ if ($script:configMigrationError) {
 }
 $timer.Start()
 $hotkeyTimer.Start()
-# ===== 꿀비노기 허니 테마 (밝은 크림 + 꿀색) =====
+# ===== 꿀비노기 허니 테마 (라이트 = 밝은 크림 + 꿀색 / 다크 = 검정·회색 + 꿀색) =====
 # 모든 컨트롤 생성이 끝난 뒤 한 번에 입힙니다 (컨트롤 생성/로직 코드는 손대지 않음).
-# 색 철학: 따뜻한 크림 배경 + 꿀색 강조 + 갈색 글자. 로그만 콘솔풍으로 어둡게.
-# 실행 중 색을 바꾸는 곳은 상태 라벨뿐이며(초록/빨강/파랑/주황) 밝은 배경에서 모두 잘 보입니다.
-# ($script:theme* 색 변수 정의는 폼 생성 앞으로 이동 - 탭 토글 생성/초기 배지가 팔레트를
+# 색 철학: 라이트는 따뜻한 크림 배경 + 꿀색 강조 + 갈색 글자, 다크(2026-11-12)는 검정·회색 배경 + 같은 꿀색 강조 + 밝은 글자.
+# 로그는 두 테마 모두 콘솔풍으로 어둡게. 실행 중 색을 바꾸는 곳은 상태 라벨뿐이며(초록/빨강/파랑/주황) 밝은 배경에서는 그대로
+# 잘 보이고, 다크 바탕에서는 상태줄 층(Invoke-StatusColorChanged)이 밝은 짝으로 칠합니다(대입문 글자는 그대로).
+# ($script:theme* 색 변수는 폼 생성 앞의 Set-HoneyPalette 가 정합니다 - 탭 토글 생성/초기 배지가 팔레트를
 #  먼저 쓰기 때문. 2026-08-04 리뷰 지적)
 
 function Apply-HoneyTheme {
@@ -12947,24 +13329,713 @@ function Apply-HoneyTheme {
   }
 }
 
-$form.BackColor = $script:themeBack
-Apply-HoneyTheme -Root $form
-# 강조색 지정 (일괄 적용 뒤 개별 덮어쓰기)
-$btnStart.BackColor = $script:themeHoney
-$btnStart.ForeColor = $script:themeHoneyInk
-$btnStart.FlatAppearance.BorderSize = 0
-$btnKill.BackColor = $script:themeDanger
-$btnKill.ForeColor = [System.Drawing.Color]::White
-$btnKill.FlatAppearance.BorderSize = 0
-$btnSafeStop.BackColor = [System.Drawing.Color]::FromArgb(250, 240, 218)
-$btnClearHelp.BackColor = $script:themeHoney
-$btnClearHelp.ForeColor = $script:themeHoneyInk
-$lblStatus.ForeColor = $script:themeTitle
-$lnkUpdate.LinkColor = $script:themeTitle          # 새 버전 링크도 꿀 갈색으로
-# 대분류 버튼·생활 슬라이더 카드의 상태 스타일 재적용 (Apply-HoneyTheme 가 모든 버튼을
-# 일반 스타일로 덮으므로 테마 '후'에 반드시 다시 그림 - 리뷰 조건 E)
-Update-MainCategoryVisual
-Update-LifeSliders
+# ----- 상태줄 색 층 (2026-11-12 다크 모드 - 설계 v3 2.4 · 사용자 결정 ⑤ '나') -----
+# 상태줄('대기 중' · 정지 사유 줄)의 색 대입문(런타임 38줄 + 생성 1 + 시작 1)은 글자를 그대로 두고, ForeColorChanged 처리기 하나가
+# ① 대입된 색을 '의미'로 기록하고(전환 때 되살리는 근거 - 테마 일괄 적용이 Label 을 기본 글자색으로 덮어도 의미는 남음) ② 다크일 때만
+# 어두운 바탕에서 읽히는 밝은 짝으로 다시 칠합니다. 라이트는 기록만 해서 화소가 지금과 같습니다(계약 L).
+# 상태줄 색을 읽는 코드는 0건이라(대입뿐) 층이 판정을 바꾸지 않고, 대입문 원문 단언 · 이름 비교 · 스텁 테스트도 그대로입니다
+$script:statusColorMeaning = 'Title'   # 층이 기록한 의미 - 'Title'(섹션 제목색 = '대기 중') 또는 대입된 색 그대로
+$script:statusLayerBusy = $false       # 재진입 가드 - 다크에서 처리기가 다시 칠하면 같은 이벤트가 한 번 더 옵니다
+$script:statusLayerError = $null       # 처리기 예외 원인 - 상태 색 대입마다 불려 매번 쓰면 로그가 넘치므로 첫 1회만 [경고]
+
+function Get-StatusDisplayColor {
+  # 상태줄 의미 색 → 칠할 색 (순수 - 진리표 대상). 라이트는 그대로(항등), 다크는 어두운 바탕에서 안 읽히는 이름 색 4개만 밝은 짝으로:
+  # Firebrick(오류 정지) → 로그 [오류] 줄 색 255,110,110 · ForestGreen(실행 중 · 안전 중지 취소) → LightGreen · SteelBlue(정상 정지) → SkyBlue ·
+  # DimGray(정지 공통) → 다크 흐린 글자색. DarkOrange(안전 중지 예약) · 섹션 제목색('대기 중') · 그 밖의 색은 그대로 (사용자 결정 ⑤ - 시안_8)
+  param([System.Drawing.Color]$Color, [string]$Theme)
+  if (($Theme -ne 'dark') -or (-not $Color.IsNamedColor)) { return $Color }
+  if ($Color.Name -eq 'Firebrick') { return [System.Drawing.Color]::FromArgb(255, 110, 110) }
+  if ($Color.Name -eq 'ForestGreen') { return [System.Drawing.Color]::LightGreen }
+  if ($Color.Name -eq 'SteelBlue') { return [System.Drawing.Color]::SkyBlue }
+  if ($Color.Name -eq 'DimGray') { return $script:themeMuted }
+  return $Color
+}
+
+function Invoke-StatusColorChanged {
+  # 상태줄 ForeColorChanged 처리기 (등록은 시작 갱신 직전 최상위 1곳). 들어온 색을 의미로 기록하고 다크일 때만 밝은 짝을 다시 칠합니다.
+  # 기록 규칙: 이름 색 5개(Firebrick · ForestGreen · SteelBlue · DimGray · DarkOrange) → 그 색(이름 유지), 지금 섹션 제목색과 같은 값 → 'Title',
+  # 그 밖(일괄 적용의 기본 글자색 등) → 그 색. 다시 칠하면 같은 이벤트가 또 오므로 재진입 가드부터 둡니다(try/finally 로 반드시 풂).
+  # 예외는 여기서 멈춥니다 - 처리기 밖으로 새면 모달 오류 창이 떠 메시지 루프가 멈춥니다(타이머 처리기 관측과 같은 경로).
+  # 첫 1회만 [경고] 를 남기고(로그 호출도 감쌈) 원인은 statusLayerError 에 둡니다 - 빈 catch 는 유일한 신호를 숨깁니다
+  try {
+    if ($script:statusLayerBusy) { return }
+    $script:statusLayerBusy = $true
+    try {
+      $incomingColor = $lblStatus.ForeColor
+      if ($incomingColor.IsNamedColor -and (@('Firebrick', 'ForestGreen', 'SteelBlue', 'DimGray', 'DarkOrange') -contains $incomingColor.Name)) {
+        $script:statusColorMeaning = $incomingColor
+      } elseif ($incomingColor.ToArgb() -eq $script:themeTitle.ToArgb()) {
+        $script:statusColorMeaning = 'Title'
+      } else {
+        $script:statusColorMeaning = $incomingColor
+      }
+      if ($script:uiTheme -eq 'dark') {
+        $displayColor = Get-StatusDisplayColor -Color $incomingColor -Theme 'dark'
+        if ($displayColor.ToArgb() -ne $incomingColor.ToArgb()) { $lblStatus.ForeColor = $displayColor }
+      }
+    } finally { $script:statusLayerBusy = $false }
+  } catch {
+    $isFirstLayerError = ($null -eq $script:statusLayerError)
+    $script:statusLayerError = $_.Exception.Message
+    if ($isFirstLayerError) {
+      try { Add-GuiLog "[경고] 상태줄 색 표시 층 처리 중 예외 (이후 예외는 기록하지 않음): $($script:statusLayerError)" } catch { }
+    }
+  }
+}
+
+function Get-StatusColorMeaning {
+  # 상태줄의 지금 의미('Title' 또는 색) - 층 처리기가 기록한 값 그대로입니다. 전환 트랜잭션이 바꾸기 전에 한 번만 읽습니다
+  return $script:statusColorMeaning
+}
+
+function Restore-StatusColorMeaning {
+  # 잡아 둔 의미를 지금 팔레트로 되살립니다: 'Title' → 지금 섹션 제목색, 색 → 그 색 그대로(이름 색이면 이름 유지).
+  # 대입이 층 처리기를 지나므로 다크면 처리기가 밝은 짝으로 칠하고 의미도 다시 기록합니다
+  param($Meaning)
+  if (($Meaning -is [string]) -and ($Meaning -eq 'Title')) {
+    $lblStatus.ForeColor = $script:themeTitle
+    return
+  }
+  $lblStatus.ForeColor = $Meaning
+}
+
+function Get-ToggleColorMeaning {
+  # 토글 글자색 → 의미 (지금 팔레트 기준 값 비교): 기본 글자 'Text' · 눌린 토글 글자 'TabOnText' · 꿀색 위 글자 'HoneyInk'(경고 배지),
+  # 그 밖(오류 배지 흰색 등 팔레트 밖 색)은 그 색 그대로. 시작 때 테마 일괄 적용이 눌린 토글 글자를 기본 글자색으로 덮은 잔상('Text')과
+  # 누른 뒤의 눌린 글자('TabOnText')를 구분해 두어야 왕복한 라이트 화면이 전환 전과 같게 돌아옵니다
+  param([System.Drawing.Color]$Color)
+  $toggleArgb = $Color.ToArgb()
+  if ($toggleArgb -eq $script:themeText.ToArgb()) { return 'Text' }
+  if ($toggleArgb -eq $script:themeTabOnText.ToArgb()) { return 'TabOnText' }
+  if ($toggleArgb -eq $script:themeHoneyInk.ToArgb()) { return 'HoneyInk' }
+  return $Color
+}
+
+function Resolve-ToggleColorMeaning {
+  # 토글 의미 → 지금 팔레트의 색 (Get-ToggleColorMeaning 의 짝). 색이면 그 색 그대로
+  param($Meaning)
+  if ($Meaning -is [string]) {
+    if ($Meaning -eq 'TabOnText') { return $script:themeTabOnText }
+    if ($Meaning -eq 'HoneyInk') { return $script:themeHoneyInk }
+    return $script:themeText
+  }
+  return $Meaning
+}
+
+function Get-ThemeRestoreState {
+  # 전환 직전(지금 팔레트 기준)의 의미를 hashtable 1개로 잡습니다 - 배열이면 파이프라인에서 풀려 받는 모양이 달라집니다(규칙 3).
+  # 상태줄(층 기록) · 토글 6개 글자 · 냥코인 카드 모양 · 배지 시작 잔상 표시. 테마 일괄 적용이 이 넷을 덮고, 지금은 시작 때만 다시
+  # 칠해 안 드러날 뿐이라 전환하면 왕복해도 원래대로 안 돌아옵니다. 잡는 곳은 Invoke-ThemeSwitch (1) 한 곳뿐입니다 - 갱신 도중에 다시 잡으면
+  # 일괄 적용이 덮은 부분 도색을 의미로 오인합니다
+  return @{
+    Status          = (Get-StatusColorMeaning)
+    Toggles         = @{
+      chkTabSettings = (Get-ToggleColorMeaning -Color $chkTabSettings.ForeColor)
+      chkTabLog      = (Get-ToggleColorMeaning -Color $chkTabLog.ForeColor)
+      chkCrRandom    = (Get-ToggleColorMeaning -Color $chkCrRandom.ForeColor)
+      chkAcrRandom   = (Get-ToggleColorMeaning -Color $chkAcrRandom.ForeColor)
+      chkDcrRandom   = (Get-ToggleColorMeaning -Color $chkDcrRandom.ForeColor)
+      chkLcrRandom   = (Get-ToggleColorMeaning -Color $chkLcrRandom.ForeColor)
+    }
+    NyanCard        = $(if ($btnEtcNyanCard.FlatAppearance.BorderSize -eq 2) { 'Selected' } else { 'General' })
+    BadgeAfterimage = [bool]$script:logBadgeStartAfterimage
+  }
+}
+
+function Restore-ThemeState {
+  # 잡아 둔 의미를 새 팔레트로 되살립니다 (갱신 10번 - 토글 스타일 · 리스트 · '시작 중…' 재칠 뒤). 순서 = 상태줄 → 토글 6 → 냥코인 카드 →
+  # 배지 잔상: 토글 · 카드는 7번이 칠한 값을 의미대로 덮어야 하고, 배지 잔상은 토글 되살리기가 칠한 로그 토글 글자를 다시 덮어야 합니다.
+  # 카드는 'Selected' 일 때만 선택 모양을 칠합니다('General' 은 일괄 적용의 일반 모양 + 굵은 글꼴 그대로 - 시작 잔상과 같은 모양).
+  # 잔상이면 다크 = 배지 글자색(오류 흰색 / 경고 꿀색 위 글자), 라이트 = 기본 글자색(시작 화면 그대로)
+  param($State)
+  Restore-StatusColorMeaning -Meaning $State.Status
+  $chkTabSettings.ForeColor = Resolve-ToggleColorMeaning -Meaning $State.Toggles['chkTabSettings']
+  $chkTabLog.ForeColor = Resolve-ToggleColorMeaning -Meaning $State.Toggles['chkTabLog']
+  $chkCrRandom.ForeColor = Resolve-ToggleColorMeaning -Meaning $State.Toggles['chkCrRandom']
+  $chkAcrRandom.ForeColor = Resolve-ToggleColorMeaning -Meaning $State.Toggles['chkAcrRandom']
+  $chkDcrRandom.ForeColor = Resolve-ToggleColorMeaning -Meaning $State.Toggles['chkDcrRandom']
+  $chkLcrRandom.ForeColor = Resolve-ToggleColorMeaning -Meaning $State.Toggles['chkLcrRandom']
+  if ($State.NyanCard -eq 'Selected') { Update-EtcNyanCardStyle }
+  $script:logBadgeStartAfterimage = [bool]$State.BadgeAfterimage
+  if ($script:logBadgeStartAfterimage) {
+    $chkTabLog.ForeColor = $(if ($script:uiTheme -eq 'dark') { Get-LogBadgeTextColor } else { $script:themeText })
+  }
+}
+
+function Invoke-DwmTitleBarAttribute {
+  # 제목줄 어두운 모드 속성(DWM 속성 20) 대입 - 운영체제 함수를 부르는 유일한 곳입니다(회귀 테스트가 이 함수를 바꿔 끼워 반환값을 넣음).
+  # 값 1 = 어둡게, 0 = 기본(밝게). 반환은 HRESULT(0 = 성공)
+  param([IntPtr]$Handle, [int]$Value)
+  $attributeValue = $Value
+  return [Win32.WindowProbe]::DwmSetWindowAttribute($Handle, 20, [ref]$attributeValue, 4)
+}
+
+function Set-TitleBarTheme {
+  # 제목줄 색을 지금 모드에 맞춥니다 (갱신 11번 - 다크 시작 · 전환 · 되돌림. 라이트 시작은 부르지 않음: 기본값 0 이 지금 화면).
+  # 반환값 0 이 아니면(HRESULT 실패) 예외가 아니므로 전환은 성공으로 치고 되돌리지 않습니다 - 나머지 화면은 이미 바뀌었고, 감싼 [경고] 1줄이
+  # 신호입니다. 떠 있는 창의 제목줄이 바로 다시 그려지는지는 실기 판정 대상입니다(D13 - 출시 조건)
+  param([bool]$Dark)
+  $titleBarResult = Invoke-DwmTitleBarAttribute -Handle $form.Handle -Value ([int]$Dark)
+  if ($titleBarResult -ne 0) { try { Add-GuiLog ('[경고] 제목줄 색을 바꾸지 못했습니다 (0x{0:X8})' -f $titleBarResult) } catch { } }
+}
+
+# ----- 다크 입력 칸 통일 (2026-11-14 다크 모드 - 사용자 요청 '숫자 · 시간 · 목록 칸을 같은 색으로, 잠겨도 같은 색' · 설계 v3 7.13) -----
+# 다크에서 숫자 칸은 어두운데 시간 칸(시간 지정)과 목록 칸(난이도처럼 고르는 칸)은 흰색으로 남고, 잠긴 숫자 칸의 글자는 어두운 회색이었습니다
+# (2026-11-14 다크 패널 그림 - 바탕 23,23,26 위 109 회색 3.4:1). 색 속성으로는 못 바꿉니다:
+#   ① 시간 칸(DateTimePicker)은 색 속성을 받지 않는 윈도우 공용 컨트롤이고 테마 일괄 적용의 대상도 아닙니다
+#   ② 목록 칸(DropDownList)은 닫힌 칸을 윈도우 테마가 그려, 바탕색이 펼친 목록에만 먹습니다
+#   ③ 잠긴 글자 칸의 글자는 윈도우가 회색(GrayText)으로 그립니다 - 바탕만 먹고 글자색 지정은 무시됩니다
+# 방법: 그 칸의 창에 장치(HoneyInputRecolor)를 하나 얹어, 컨트롤이 스스로 그린 그림을 받아 색만 바꿔 다시 그립니다(윈도우 종이색 → 입력 바탕 ·
+# 잉크색 → 기본 글자. 시간 · 목록 칸은 그 위에 숫자 칸과 같은 색의 테두리 1px). 입력 · 포커스 · 배치 · Enabled 는 건드리지 않습니다.
+# 장치는 처음 다크로 갈 때 만들고 라이트에서는 꺼 둡니다 - 꺼진 장치는 모든 메시지를 그대로 넘겨 화소가 그대로입니다(계약 L).
+# 라이트만 쓰는 실행은 장치를 만들지도 형식을 컴파일하지도 않습니다(부르는 곳이 전체 갱신의 8a 한 곳 - 시작 갱신은 부르지 않음).
+# 적용에 실패해도 다크 전환은 계속합니다 - 그 칸들만 윈도우 기본 모양으로 남고 [경고] 1줄이 신호입니다(제목줄과 같은 급의 기능 저하).
+# 그대로 두는 것: 위아래 단추(▲▼) · 리스트 머리글 · 스크롤바 · 안내 창 · 승인 코드 칸 · 펼친 목록(이미 어두움) · 라이트 모드 전부(잠긴 칸 글자의 윈도우 회색 포함).
+# 목록 칸은 한 창 전체를 다시 칠해 그 안의 ▼ 도 함께 바뀝니다(사용자가 고른 시험 창 그림의 모양)
+$script:inputRecolorPainters = $null         # 처음 다크로 갈 때 만든 장치 목록(@{ Kind; Painter }) - 스크립트 범위에 잡아 두어 수거되지 않게. $null = 만든 적 없음
+$script:inputRecolorError = $null            # 첫 실패 원인 - [경고] 는 첫 1회만
+$script:inputRecolorPendingWarning = $null   # 갱신 도중 생긴 경고 글자 - 갱신 맨 끝(12)에서 기록 (8a 에서 바로 쓰면 10번이 배지를 덮음)
+
+function Get-InputRecolorTypeSource {
+  # 장치의 C# 원문 (작은따옴표 here-string - 글자 그대로). 형식을 올리는 곳(Initialize-InputRecolor)과 회귀 테스트가 같은 원문을 씁니다 -
+  # 테스트는 이 글자를 그대로 컴파일하고, 그리는 자리에 예외를 넣은 사본도 이 글자에서 만듭니다.
+  # Add-Type 의 컴파일러(C# 5) 문법까지만 씁니다 - ?. · 문자열 보간 · 식 본문 멤버 · out var 는 컴파일되지 않습니다
+  return @'
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+// 컨트롤이 스스로 그린 그림을 받아 색만 바꿔 다시 그리는 장치 (다크 입력 칸 통일 - 설계 v3 7.13).
+// 붙는 컨트롤의 창 핸들에 창 프로시저를 하나 더 얹어 WM_PAINT · WM_PRINTCLIENT 만 가로챕니다. 원래 프로시저에는 WM_PRINTCLIENT 를 보내
+// 메모리 비트맵에 그리게 하고, 그 비트맵을 채널별 1차식(ColorMatrix)으로 색을 바꿔 그립니다. 입력 · 포커스 · 배치 · Enabled 는 건드리지 않습니다.
+// 꺼져 있거나(Active 거짓) 지금 상태의 색 대응이 없으면 모든 메시지를 그대로 넘깁니다 - 라이트 화면은 화소가 그대로입니다(계약 L).
+// 넘길 때는 붙기 직전의 창 프로시저로 직접 넘깁니다(Pass) - 사이에 얹힌 서브클래스(숫자 칸 글자 자리의 말풍선 중계 등)를 건너뛰지 않게(설계 v3 7.14).
+// 예외는 어느 경로에서도 밖으로 내지 않습니다(창 프로시저 · 핸들 생성 처리기 · 알림 예약 · 알림 본문). 핸들 생성 처리기 · 알림 본문에서 새면 그 컨트롤의
+// 창 프로시저가 받아 모달 오류 창을 띄워 무인 운용이 멈추고, 이 장치의 창 프로시저에서 새면 조용히 삼켜져(NativeWindow 의 기본 처리는 비어 있음) 그 칸이
+// 못 그려진 채 남습니다. 고장은 Fault 한 곳으로 모읍니다: 첫 오류를 적고 장치를 끄고 알림을 한 번만 예약합니다
+public sealed class HoneyInputRecolor : NativeWindow {
+    [StructLayout(LayoutKind.Sequential)]
+    struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PAINTSTRUCT {
+        public IntPtr hdc; public int fErase; public RECT rcPaint; public int fRestore; public int fIncUpdate;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] rgbReserved;
+    }
+    [DllImport("user32.dll")] static extern IntPtr BeginPaint(IntPtr hwnd, out PAINTSTRUCT ps);
+    [DllImport("user32.dll")] static extern bool EndPaint(IntPtr hwnd, ref PAINTSTRUCT ps);
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern int MapWindowPoints(IntPtr from, IntPtr to, ref RECT rect, int count);
+    [DllImport("user32.dll")] static extern bool InvalidateRect(IntPtr hwnd, IntPtr rect, bool erase);
+    [DllImport("gdi32.dll")] static extern int ExcludeClipRect(IntPtr hdc, int left, int top, int right, int bottom);
+    // 창 프로시저 읽기 · 바꾸기 · 부르기 - 64비트 이름만 씁니다(exe 는 AnyCPU 라 64비트 윈도우에서 64비트로 돕니다. 32비트로 돌면 붙이기 전의 읽기가
+    // 실패해 그 칸만 윈도우 기본 모양으로 남습니다 - 관측 없는 분기는 넣지 않음)
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)] static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+    [DllImport("user32.dll", EntryPoint = "CallWindowProcW")] static extern IntPtr CallWindowProc(IntPtr proc, IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+
+    const int WM_PAINT = 0x000F, WM_PRINTCLIENT = 0x0318, PRF_CLIENT = 4, PRF_ERASEBKGND = 8;
+    const uint GW_CHILD = 5, GW_HWNDNEXT = 2;
+    const int GWLP_WNDPROC = -4;
+
+    // 떼지 못하고 꺼진 채 붙어 남은 장치(Detach 가 거짓) - 수거되면 창 프로시저에 걸린 대리자가 사라지므로 붙잡아 둡니다. 목록에서 빼는 곳은 없습니다 -
+    // 창이 없어진 뒤에도 프로세스가 끝날 때까지 남고, 그 장치의 주인 · 붙는 컨트롤도 함께 붙잡힙니다(그 컨트롤들은 어차피 패널 수명 동안 살아 있음)
+    static readonly List<HoneyInputRecolor> retained = new List<HoneyInputRecolor>();
+
+    readonly Control owner;    // Enabled 를 읽는 컨트롤 (숫자 칸은 NumericUpDown 자신)
+    readonly Control target;   // 창 핸들을 가로채는 컨트롤 (시간 · 목록 칸은 자신, 숫자 칸은 안쪽 글자 칸)
+    bool busy;                 // 그리는 동안(Render) 참 - 그사이 이 창에 다시 들어오는 그리기 메시지(컨트롤이 자기 창에 다시 보내는 것 - 창 프로시저 사슬의
+                               // 맨 위로 들어옴)는 맡지 않고 넘깁니다. 우리가 보내는 그림 받기는 넘기기(Pass)로 붙기 직전의 창 프로시저에 바로 가 이 장치를 지나지 않습니다
+    bool faultNotified;
+    IntPtr chainProc;          // 이 장치가 붙기 직전의 창 프로시저 - 맡지 않는 메시지와 그림 받기는 모두 이리로 넘깁니다(Pass)
+    IntPtr selfProc;           // 이 장치의 창 프로시저(붙은 직후 읽음) - 떼기 전에 이 장치가 맨 위인지 볼 때 씁니다
+
+    public bool Active;                      // 다크일 때만 참
+    public ColorMatrix EnabledMatrix;        // 안 잠긴 동안의 색 대응 (null = 그대로 통과)
+    public ColorMatrix DisabledMatrix;       // 잠긴 동안의 색 대응 (null = 그대로 통과)
+    public Color BorderColor = Color.Empty;  // 비어 있지 않으면 결과 위에 1px 테두리를 덧그립니다
+    public int PaintCount;                   // 화면 그리기(WM_PAINT)를 다시 칠한 횟수
+    public int PrintCount;                   // 그림 받기(WM_PRINTCLIENT)를 다시 칠한 횟수
+    public string LastError = "";            // 첫 오류 (형식 이름: 메시지)
+    public Action FaultCallback;             // 첫 고장 때 주인 컨트롤의 메시지 루프에서 한 번 부를 알림
+
+    public HoneyInputRecolor(Control owner, Control target) {
+        this.owner = owner;
+        this.target = target;
+        // 핸들을 억지로 만들지 않습니다 - 아직 안 보인 화면의 컨트롤은 핸들이 생길 때 붙습니다. 다시 만들어질 때도 같은 처리기가 다시 붙입니다
+        target.HandleCreated += OnTargetHandleCreated;
+        if (target.IsHandleCreated) { Attach(); }
+    }
+
+    public Control Owner { get { return owner; } }
+    public Control Target { get { return target; } }
+    public bool IsAttached { get { return Handle != IntPtr.Zero; } }
+    public IntPtr ChainProc { get { return chainProc; } }   // 테스트 · 진단용
+    public IntPtr SelfProc { get { return selfProc; } }     // 테스트 · 진단용
+
+    void OnTargetHandleCreated(object sender, EventArgs e) { Attach(); }
+
+    void Attach() {
+        try {
+            // 앞 핸들에 아직 붙어 있으면 먼저 풉니다(ReleaseIfTop): 그 창이 없어졌으면(WM_NCDESTROY 를 못 받은 경우) 맨 위 확인 없이 표에서만 빼고,
+            // 아직 살아 있는 창에서 이 장치가 맨 위가 아니면 건드리지 않고 이번 붙이기를 그만둡니다(고장 처리)
+            if (!ReleaseIfTop()) { throw new InvalidOperationException("앞 창에서 떼지 못해 새 창에 붙지 않았습니다(그 창의 맨 위가 아님)"); }
+            // 붙기 직전의 창 프로시저를 먼저 읽습니다 - AssignHandle 뒤에 읽으면 이 장치 자신이라 넘기기가 끝없이 자신을 부릅니다. 못 읽으면 붙지 않습니다
+            IntPtr handle = target.Handle;
+            IntPtr below = GetWindowLongPtr(handle, GWLP_WNDPROC);
+            if (below == IntPtr.Zero) { throw new InvalidOperationException("창 프로시저를 읽지 못했습니다 (오류 " + Marshal.GetLastWin32Error() + ")"); }
+            chainProc = below;
+            AssignHandle(handle);
+            selfProc = GetWindowLongPtr(handle, GWLP_WNDPROC);
+        } catch (Exception ex) { Fault(ex); }
+    }
+
+    // 맡지 않는 메시지를 넘깁니다 - 붙기 직전의 창 프로시저로 직접. NativeWindow 의 기본 넘기기(base.WndProc → DefWndProc)는 같은 핸들에 먼저 붙은
+    // 관리 창(컨트롤 자신)이 있으면 그 창을 바로 불러 그 사이에 얹힌 서브클래스를 건너뜁니다 - 숫자 칸에 건 말풍선은 안쪽 글자 칸을 서브클래스해
+    // 마우스를 중계받으므로, 핸들이 있는 칸에 나중에 붙으면 그 칸의 말풍선이 끊겼습니다(2026-11-14 헤드리스 탐침 - 설계 v3 7.14)
+    void Pass(ref Message m) {
+        if (chainProc == IntPtr.Zero) { base.WndProc(ref m); return; }
+        m.Result = CallWindowProc(chainProc, m.HWnd, m.Msg, m.WParam, m.LParam);
+    }
+
+    // 이 장치가 맨 위일 때만 창 프로시저에서 빠지고 붙기 전 창 프로시저로 다시 잇습니다. NativeWindow 의 되돌림(ReleaseHandle)은 맨 위일 때 컨트롤
+    // 자신의 프로시저로 돌려 사이의 서브클래스(말풍선 중계)를 잘라 내고, 맨 위가 아닐 때는 창 프로시저를 DefWindowProc 로 끊습니다 - 그래서 맨 위가 아니면
+    // 건드리지 않습니다. 창이 이미 없어진 핸들은 되돌릴 것이 없어 표에서만 뺍니다. 반환: 붙어 있지 않게 됐으면 참, 맨 위가 아니라 그대로 두었으면 거짓
+    bool ReleaseIfTop() {
+        IntPtr handle = Handle;
+        if (handle == IntPtr.Zero) { return true; }
+        bool alive = IsWindow(handle);
+        if (alive && GetWindowLongPtr(handle, GWLP_WNDPROC) != selfProc) { return false; }
+        IntPtr below = chainProc;
+        ReleaseHandle();
+        chainProc = IntPtr.Zero;
+        selfProc = IntPtr.Zero;
+        if (alive && below != IntPtr.Zero && GetWindowLongPtr(handle, GWLP_WNDPROC) != below) {
+            SetWindowLongPtr(handle, GWLP_WNDPROC, below);
+            if (GetWindowLongPtr(handle, GWLP_WNDPROC) != below) { throw new InvalidOperationException("붙기 전 창 프로시저로 되돌리지 못했습니다 (오류 " + Marshal.GetLastWin32Error() + ")"); }
+        }
+        return true;
+    }
+
+    // 장치를 뗍니다 (만들다 만 장치의 뒷정리용 - 제품에서 부르는 곳은 Initialize-InputRecolor 의 실패 정리 한 곳). 핸들 생성 구독을 끊고, 맨 위일 때만
+    // 창 프로시저에서 빠집니다(ReleaseIfTop). 맨 위가 아니면 꺼진 채 붙어 남고(넘기기는 Pass 라 사이의 서브클래스를 건너뛰지 않음), 이 객체를 정적 목록
+    // (retained)에 넣어 프로세스가 끝날 때까지 붙잡아 둡니다(빼는 곳 없음). 반환: 떼었으면 참, 붙은 채 남았으면 거짓. 예외를 내지 않습니다
+    public bool Detach() {
+        Active = false;
+        try { target.HandleCreated -= OnTargetHandleCreated; } catch (Exception) { }
+        try {
+            if (ReleaseIfTop()) { return true; }
+        } catch (Exception ex) {
+            if (LastError.Length == 0) { LastError = ex.GetType().Name + ": " + ex.Message; }
+            if (Handle == IntPtr.Zero) { return true; }
+        }
+        lock (retained) { if (!retained.Contains(this)) { retained.Add(this); } }
+        return false;
+    }
+
+    // 고장 처리(한 곳): 첫 오류를 적고 이 장치를 끕니다(이후 모든 메시지를 그대로 넘김). 알림은 그리는 도중에 부르지 않고 주인 컨트롤의
+    // 메시지 루프에 한 번만 예약합니다 - 예약이 실패해도(핸들 없음 등) 예외를 내지 않고, 오류 글자는 LastError 에 남습니다
+    void Fault(Exception ex) {
+        if (LastError.Length == 0) { LastError = ex.GetType().Name + ": " + ex.Message; }
+        Active = false;
+        if (faultNotified || FaultCallback == null) { return; }
+        faultNotified = true;
+        try {
+            if (owner.IsHandleCreated) { owner.BeginInvoke(new Action(NotifyFault)); }
+        } catch (Exception) { }
+    }
+
+    // 예약된 알림 본문 - 알림 대리자 안의 예외도 여기서 멈춥니다
+    void NotifyFault() {
+        try {
+            Action callback = FaultCallback;
+            if (callback != null) { callback(); }
+        } catch (Exception) { }
+    }
+
+    // 두 점 대응: 원본 A → 목표 A, 원본 B → 목표 B 가 되는 채널별 1차식. 두 원본의 채널 값이 같으면 그 채널은 평행 이동만 합니다
+    public static ColorMatrix TwoPoint(Color sourceA, Color targetA, Color sourceB, Color targetB) {
+        int[] sa = { sourceA.R, sourceA.G, sourceA.B }, ta = { targetA.R, targetA.G, targetA.B };
+        int[] sb = { sourceB.R, sourceB.G, sourceB.B }, tb = { targetB.R, targetB.G, targetB.B };
+        float[] scale = new float[3];
+        float[] offset = new float[3];
+        for (int i = 0; i < 3; i++) {
+            scale[i] = (sb[i] == sa[i]) ? 1f : (float)(tb[i] - ta[i]) / (float)(sb[i] - sa[i]);
+            offset[i] = (ta[i] - scale[i] * sa[i]) / 255f;
+        }
+        ColorMatrix matrix = new ColorMatrix();
+        matrix.Matrix00 = scale[0]; matrix.Matrix11 = scale[1]; matrix.Matrix22 = scale[2];
+        matrix.Matrix40 = offset[0]; matrix.Matrix41 = offset[1]; matrix.Matrix42 = offset[2];
+        return matrix;
+    }
+
+    protected override void WndProc(ref Message m) {
+        // WM_PAINT 는 그릴 대상(DC)을 인자로 받지 않은 보통의 것만 맡습니다 - DC 를 받아 오는 호출은 그 DC 에 그려야 하므로 그대로 넘깁니다
+        bool screenPaint = (m.Msg == WM_PAINT && m.WParam == IntPtr.Zero);
+        bool printPaint = (m.Msg == WM_PRINTCLIENT);
+        if (Active && !busy && (screenPaint || printPaint)) {
+            ColorMatrix matrix = null;
+            try { matrix = owner.Enabled ? EnabledMatrix : DisabledMatrix; } catch (Exception ex) { Fault(ex); }
+            if (matrix != null) {
+                if (screenPaint) {
+                    // 화면 그리기: BeginPaint 가 갱신 영역을 소비하므로, 실패하면 원래 프로시저에 넘겨도 그릴 영역이 남지 않습니다.
+                    // 그래서 장치를 끄고 이 메시지는 여기서 끝낸 뒤 다시 그리기를 요청합니다 - 다음 WM_PAINT 는 (꺼졌으므로) 원래 프로시저가 그립니다
+                    bool painted = false;
+                    busy = true;
+                    try {
+                        PAINTSTRUCT ps;
+                        IntPtr hdc = BeginPaint(Handle, out ps);
+                        try { Render(hdc, matrix, true); painted = true; }
+                        finally { EndPaint(Handle, ref ps); }
+                    } catch (Exception ex) {
+                        Fault(ex);
+                    } finally { busy = false; }
+                    if (painted) { PaintCount++; }
+                    else { try { InvalidateRect(Handle, IntPtr.Zero, true); } catch (Exception) { } }
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+                // 그림 받기: 실패하면 받은 DC 그대로 원래 프로시저에 넘깁니다
+                bool printed = false;
+                busy = true;
+                try { Render(m.WParam, matrix, false); printed = true; }
+                catch (Exception ex) { Fault(ex); }
+                finally { busy = false; }
+                if (printed) {
+                    PrintCount++;
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+            }
+        }
+        Pass(ref m);
+    }
+
+    void Render(IntPtr targetDc, ColorMatrix matrix, bool excludeChildren) {
+        RECT client;
+        GetClientRect(Handle, out client);
+        int width = client.Right - client.Left, height = client.Bottom - client.Top;
+        if (width <= 0 || height <= 0) { return; }
+        using (Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format32bppRgb)) {
+            using (Graphics graphics = Graphics.FromImage(bitmap)) {
+                IntPtr memoryDc = graphics.GetHdc();
+                try {
+                    // 컨트롤이 제 모양을 메모리 비트맵에 그립니다 (붙기 직전의 창 프로시저로 - 이 장치를 거치지 않으므로 다시 가로채지 않음)
+                    Message print = Message.Create(Handle, WM_PRINTCLIENT, memoryDc, (IntPtr)(PRF_CLIENT | PRF_ERASEBKGND));
+                    Pass(ref print);
+                } finally { graphics.ReleaseHdc(memoryDc); }
+            }
+            if (excludeChildren) {
+                // 자식 창(시간 칸의 위아래 단추)은 제 그림 그대로 둡니다 - 그 자리는 우리가 덮지 않습니다
+                IntPtr child = GetWindow(Handle, GW_CHILD);
+                while (child != IntPtr.Zero) {
+                    if (IsWindowVisible(child)) {
+                        RECT childRect;
+                        GetWindowRect(child, out childRect);
+                        MapWindowPoints(IntPtr.Zero, Handle, ref childRect, 2);
+                        ExcludeClipRect(targetDc, childRect.Left, childRect.Top, childRect.Right, childRect.Bottom);
+                    }
+                    child = GetWindow(child, GW_HWNDNEXT);
+                }
+            }
+            using (Graphics canvas = Graphics.FromHdc(targetDc))
+            using (ImageAttributes attributes = new ImageAttributes()) {
+                attributes.SetColorMatrix(matrix);
+                canvas.DrawImage(bitmap, new Rectangle(0, 0, width, height), 0, 0, width, height, GraphicsUnit.Pixel, attributes);
+                if (!BorderColor.IsEmpty) {
+                    using (Pen pen = new Pen(BorderColor)) { canvas.DrawRectangle(pen, 0, 0, width - 1, height - 1); }
+                }
+            }
+        }
+    }
+}
+'@
+}
+
+function Get-InputRecolorTargets {
+  # 다시 칠할 칸 찾기 - 컨트롤 나무를 읽기만 해서 대상 목록을 냅니다 (열거용 반환 - 호출부가 @() 로 받음 · 규칙 3). 대상 1개 = @{ Kind; Owner; Target }:
+  # 시간 칸(DateTimePicker) · 닫힌 채 고르는 목록 칸(ComboBox 가운데 DropDownList 만) = 자신이 주인이자 대상. 숫자 칸(NumericUpDown) = 주인은 자신
+  # (Enabled 를 읽는 곳), 대상은 안쪽 글자 칸(잠긴 글자를 그리는 창 - 위아래 단추는 대상이 아니고, 숫자 칸 안으로 더 내려가지 않음).
+  # 그 밖의 컨트롤은 자식이 있으면 내려갑니다. 핸들을 만들지 않습니다(Handle 을 읽지 않음) - 다크 시작은 창을 띄우기 전에 이 함수를 타고,
+  # 아직 안 보인 화면의 컨트롤은 핸들이 생길 때 장치가 스스로 붙습니다
+  param([System.Windows.Forms.Control]$Root)
+  $recolorTargets = New-Object System.Collections.ArrayList
+  foreach ($recolorControl in @($Root.Controls)) {
+    if ($recolorControl -is [System.Windows.Forms.DateTimePicker]) {
+      [void]$recolorTargets.Add(@{ Kind = 'picker'; Owner = $recolorControl; Target = $recolorControl })
+    } elseif ($recolorControl -is [System.Windows.Forms.ComboBox]) {
+      if ($recolorControl.DropDownStyle -eq [System.Windows.Forms.ComboBoxStyle]::DropDownList) {
+        [void]$recolorTargets.Add(@{ Kind = 'combo'; Owner = $recolorControl; Target = $recolorControl })
+      }
+    } elseif ($recolorControl -is [System.Windows.Forms.NumericUpDown]) {
+      foreach ($recolorInner in @($recolorControl.Controls)) {
+        if ($recolorInner -is [System.Windows.Forms.TextBox]) {
+          [void]$recolorTargets.Add(@{ Kind = 'numeric'; Owner = $recolorControl; Target = $recolorInner })
+          break
+        }
+      }
+    } elseif ($recolorControl.Controls.Count -gt 0) {
+      foreach ($nestedTarget in @(Get-InputRecolorTargets -Root $recolorControl)) { [void]$recolorTargets.Add($nestedTarget) }
+    }
+  }
+  return $recolorTargets.ToArray()
+}
+
+function Get-InputRecolorBorderColor {
+  # 시간 · 목록 칸에 덧그릴 테두리색 = 윈도우 테마가 글자 칸 테두리에 쓰는 색 (이 PC 171,173,179 - 숫자 칸 테두리 실측과 같음 · 2026-11-14 시험 창).
+  # 숫자 칸은 윈도우가 그린 테두리를 그대로 두므로, 같은 값을 읽어 와야 세 칸의 테두리가 같아집니다
+  return [System.Windows.Forms.VisualStyles.VisualStyleInformation]::TextControlBorder
+}
+
+function Get-InputRecolorPlan {
+  # 칸 종류 → 지금 팔레트의 색 대응 (hashtable 1개: 안 잠긴 동안의 대응 · 잠긴 동안의 대응 · 덧그릴 테두리색 - 설계 v3 7.13 의 표).
+  # 대응은 장치의 두 점 대응(TwoPoint)입니다: 윈도우가 그 칸에 쓰는 종이색 → 입력 바탕 · 잉크색 → 기본 글자. 잠긴 칸은 잉크가 윈도우 회색(GrayText)이라
+  # 그 색을 기본 글자로 보내 안 잠긴 칸과 같은 색이 됩니다(사용자 결정 '잠겨도 같은 색').
+  # 종이색 254(잠긴 시간 칸) · 253(목록 칸) · 250(잠긴 목록 칸)은 윈도우 11 테마 실측입니다(2026-11-14 시험 창 - 흰색 255 · 253 기준으로 잠긴 칸을 대응하면
+  # 바탕이 24,24,27 · 27,27,30 으로 어긋났음). 다른 테마에서는 바탕이 몇 단계 어긋날 수 있습니다 - 관측이 없어 방어는 넣지 않았습니다(규칙 8).
+  # 시간 칸의 종이색은 지금 잠금이 아니라 그 칸의 핸들이 만들어질 때의 잠금을 따릅니다(2026-11-14 헤드리스 그림 - 안 잠긴 채 만들어진 칸은 뒤에 잠겨도 255,
+  # 잠긴 채 만들어진 칸은 뒤에 풀려도 254 이고 글자만 지금 잠금을 따름. 2026-11-13 실기의 '시작 화면에 따라 255 또는 254 · 잠금과 무관' 관측과 같은 현상).
+  # 장치는 그릴 때의 잠금으로 대응을 고르므로, 만들어진 뒤에 잠금이 바뀐 시간 칸(실행 중 잠금 · 커스텀 반복 선택)은 바탕이 한 단계 어긋납니다
+  # (22,22,25 또는 24,24,27 - 글자는 정확히 기본 글자). 눈으로 구분되지 않는 차이라 그대로 둡니다(규칙 8). 목록 칸의 종이색은 지금 잠금을 따릅니다.
+  # 숫자 칸은 안 잠긴 동안 대응이 없습니다($null = 장치가 그대로 통과 - 테마 일괄 적용이 이미 입력 바탕 · 기본 글자로 칠함). 잠기면 바탕은 제자리, 글자만 바꿉니다.
+  # 테두리는 시간 · 목록 칸만 덧그립니다(숫자 칸은 빈 색 = 안 그림 - 윈도우가 그린 테두리 그대로).
+  # 형식은 이름으로 찾습니다 - 형식 리터럴로 적으면 형식을 올리지 않는 실행(라이트만 쓰는 실행 · 스크립트의 형식 풀이 검사)에서 풀리지 않는 이름이 됩니다
+  param([ValidateSet('picker', 'combo', 'numeric')][string]$Kind)
+  $recolorType = 'HoneyInputRecolor' -as [type]
+  $inkColor = [System.Drawing.SystemColors]::WindowText
+  $lockedInkColor = [System.Drawing.SystemColors]::GrayText
+  if ($Kind -eq 'picker') {
+    return @{
+      EnabledMatrix  = $recolorType::TwoPoint([System.Drawing.SystemColors]::Window, $script:themeInput, $inkColor, $script:themeText)
+      DisabledMatrix = $recolorType::TwoPoint([System.Drawing.Color]::FromArgb(254, 254, 254), $script:themeInput, $lockedInkColor, $script:themeText)
+      BorderColor    = (Get-InputRecolorBorderColor)
+    }
+  }
+  if ($Kind -eq 'combo') {
+    return @{
+      EnabledMatrix  = $recolorType::TwoPoint([System.Drawing.Color]::FromArgb(253, 253, 253), $script:themeInput, $inkColor, $script:themeText)
+      DisabledMatrix = $recolorType::TwoPoint([System.Drawing.Color]::FromArgb(250, 250, 250), $script:themeInput, $lockedInkColor, $script:themeText)
+      BorderColor    = (Get-InputRecolorBorderColor)
+    }
+  }
+  return @{
+    EnabledMatrix  = $null
+    DisabledMatrix = $recolorType::TwoPoint($script:themeInput, $script:themeInput, $lockedInkColor, $script:themeText)
+    BorderColor    = [System.Drawing.Color]::Empty
+  }
+}
+
+function Initialize-InputRecolor {
+  # 장치 만들기 - 처음 다크로 갈 때 한 번입니다(Update-InputRecolor 가 목록이 없을 때만 부름). 형식 올리기(없을 때만 - 컴파일 약 130ms · 2026-11-14 시험 창)
+  # → 대상 찾기 → 대상마다 장치를 만들고 고장 알림을 잇습니다. 셀 편집 콤보는 편집하는 동안만 표 안에 붙어 폼 아래에서 안 잡히므로 따로 더합니다
+  # (편집 중이라 이미 잡혔으면 더하지 않음 - 같은 컨트롤에 장치가 둘 붙지 않게).
+  # 목록은 전부 만든 뒤 한 번에 대입합니다. 도중에 실패하면 그때까지 만든 장치를 모두 뗀 뒤 다시 던집니다 - 목록이 $null 그대로라 다음 다크 전환이
+  # 처음부터 다시 만들고, 떼어 두었으므로 같은 컨트롤에 두 번 붙지 않습니다. 떼기는 그 장치가 창 프로시저의 맨 위일 때만 됩니다 - 만든 직후라 늘 맨 위여서
+  # 지금은 타지 않는 길이지만, 맨 위가 아니라 떼지 못하면(거짓) 그 장치는 꺼진 채 붙어 남아 넘기기만 하고 다음 다크 전환이 그 위에 장치를 하나 더 붙입니다.
+  # 핸들을 억지로 만들지 않습니다 - 핸들이 아직 없는 컨트롤은 핸들이 생길 때 장치가 붙습니다(다크 시작은 창을 띄우기 전이라 전부 이 길).
+  # 알려 둘 것: 핸들이 이미 있는 칸(아이콘으로 처음 다크로 갈 때)은 장치가 생성자 안에서 바로 붙습니다. 그때 붙이기가 실패하면 알림 대리자를 달기 전이라
+  # [경고] 없이 그 칸만 윈도우 기본 모양으로 남습니다(오류 글자는 그 장치의 LastError 에 남음). 붙이기 실패는 관측된 적이 없어 따로 받지 않았습니다(규칙 8)
+  if (-not ('HoneyInputRecolor' -as [type])) {
+    Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition (Get-InputRecolorTypeSource)
+  }
+  $recolorTargets = @(Get-InputRecolorTargets -Root $form)
+  $cellComboFound = $false
+  foreach ($recolorTarget in $recolorTargets) {
+    if ([object]::ReferenceEquals($recolorTarget.Target, $script:cellEditCombo)) { $cellComboFound = $true }
+  }
+  if (-not $cellComboFound) { $recolorTargets += @{ Kind = 'combo'; Owner = $script:cellEditCombo; Target = $script:cellEditCombo } }
+  $createdPainters = New-Object System.Collections.ArrayList
+  try {
+    foreach ($recolorTarget in $recolorTargets) {
+      $recolorPainter = New-Object HoneyInputRecolor($recolorTarget.Owner, $recolorTarget.Target)
+      [void]$createdPainters.Add(@{ Kind = $recolorTarget.Kind; Painter = $recolorPainter })
+      $recolorPainter.FaultCallback = [Action] { Invoke-InputRecolorFaultNotice }
+    }
+  } catch {
+    # Detach 는 참/거짓을 돌려줍니다(맨 위가 아니라 붙은 채 남으면 거짓 - 그 장치는 장치 형식이 프로세스가 끝날 때까지 붙잡아 둠). 값이 출력으로 새지 않게 [void]
+    foreach ($createdPainter in $createdPainters) { [void]$createdPainter.Painter.Detach() }
+    throw
+  }
+  $script:inputRecolorPainters = $createdPainters.ToArray()
+}
+
+function Invoke-InputRecolorFaultNotice {
+  # 장치가 그리다 고장 났을 때의 알림 - 장치가 주인 컨트롤의 메시지 루프에 예약해 부릅니다(그리는 도중에는 부르지 않음 · 장치마다 한 번).
+  # 고장 난 장치는 스스로 꺼져 그 칸은 윈도우 기본 모양으로 그려집니다. 여기서는 첫 고장 장치의 원인(LastError)만 [경고] 1줄로 남깁니다 -
+  # 적용 실패(Update-InputRecolor)와 원인 변수를 함께 써서, 어느 쪽이든 먼저 난 하나만 기록합니다(Paint 마다 쓰면 로그가 넘침).
+  # 예외는 여기서 멈춥니다(전체를 감싸고 로그 호출도 따로 감쌈) - 메시지 루프에서 불리므로 밖으로 새면 모달 오류 창이 떠 무인 운용이 멈춥니다
+  try {
+    if ($null -ne $script:inputRecolorError) { return }
+    $recolorFaultText = '원인을 읽지 못함'
+    foreach ($recolorEntry in @($script:inputRecolorPainters)) {
+      if ($recolorEntry.Painter.LastError.Length -gt 0) { $recolorFaultText = $recolorEntry.Painter.LastError; break }
+    }
+    $script:inputRecolorError = $recolorFaultText
+    try { Add-GuiLog "[경고] 다크 입력 칸을 다시 칠하지 못했습니다 - 그 칸은 윈도우 기본 모양으로 둡니다 (이후 예외는 기록하지 않음): $recolorFaultText" } catch { }
+  } catch {
+    if ($null -eq $script:inputRecolorError) { $script:inputRecolorError = $_.Exception.Message }
+  }
+}
+
+function Update-InputRecolor {
+  # 다크 입력 칸 통일 켜고 끄기 (갱신 8a - 전체 모드에서만: 다크 시작 · 전환 · 되돌림).
+  # 다크: 장치가 없으면 만들고(Initialize-InputRecolor) → 장치마다 지금 팔레트의 색 대응 · 테두리를 넣고 켠 뒤 → 대상마다 다시 그리기를 요청합니다.
+  # 라이트: 장치를 만든 적이 있을 때만 끕니다(없으면 아무 일도 안 함 - 형식 컴파일도 없음). 끄기는 두 번에 나눕니다 - 먼저 모든 장치를 끄고(장치마다 따로 받음),
+  # 그다음에 다시 그리기를 요청합니다(하나가 실패해도 나머지가 켜진 채 남지 않게). 다크 쪽이 도중에 실패하면 같은 끄기로 모든 장치를 끈 상태에 맞춥니다.
+  # 실패는 밖으로 내지 않습니다 - 전환은 계속하고 그 칸들만 윈도우 기본 모양으로 남습니다(장치가 안 만들어진다고 다크 자체를 되돌리지 않음).
+  # 여기서 로그를 쓰지 않습니다 - 첫 실패의 원인을 담고 경고 글자를 보관만 하면 갱신 맨 끝(12 - Write-InputRecolorWarning)이 기록합니다.
+  # 여기서 바로 쓰면 로그를 접은 화면에서 생긴 배지를 10번(잡아 둔 의미 되살리기)이 덮습니다
+  $recolorFailure = $null
+  $recolorTurnOff = ($script:uiTheme -ne 'dark')
+  if (-not $recolorTurnOff) {
+    try {
+      if ($null -eq $script:inputRecolorPainters) { Initialize-InputRecolor }
+      foreach ($recolorEntry in $script:inputRecolorPainters) {
+        $recolorPlan = Get-InputRecolorPlan -Kind $recolorEntry.Kind
+        $recolorEntry.Painter.EnabledMatrix = $recolorPlan.EnabledMatrix
+        $recolorEntry.Painter.DisabledMatrix = $recolorPlan.DisabledMatrix
+        $recolorEntry.Painter.BorderColor = $recolorPlan.BorderColor
+        $recolorEntry.Painter.Active = $true
+      }
+      foreach ($recolorEntry in $script:inputRecolorPainters) { $recolorEntry.Painter.Target.Invalidate() }
+    } catch {
+      $recolorFailure = $_.Exception.Message
+      $recolorTurnOff = $true
+    }
+  }
+  if ($recolorTurnOff -and ($null -ne $script:inputRecolorPainters)) {
+    foreach ($recolorEntry in $script:inputRecolorPainters) {
+      try { $recolorEntry.Painter.Active = $false } catch { if ($null -eq $recolorFailure) { $recolorFailure = $_.Exception.Message } }
+    }
+    foreach ($recolorEntry in $script:inputRecolorPainters) {
+      try { $recolorEntry.Painter.Target.Invalidate() } catch { if ($null -eq $recolorFailure) { $recolorFailure = $_.Exception.Message } }
+    }
+  }
+  if (($null -ne $recolorFailure) -and ($null -eq $script:inputRecolorError)) {
+    $script:inputRecolorError = $recolorFailure
+    $script:inputRecolorPendingWarning = "[경고] 다크 입력 칸 통일을 적용하지 못했습니다 - 시간 · 목록 칸은 윈도우 기본 모양으로 둡니다 (이후 예외는 기록하지 않음): $recolorFailure"
+  }
+}
+
+function Write-InputRecolorWarning {
+  # 보관된 경고 기록 (갱신 12 - 맨 끝). Update-InputRecolor(8a)가 보관한 글자가 있으면 감싼 1줄로 남기고 비웁니다. 기록보다 먼저 비워,
+  # 기록이 실패해도 다음 갱신이 같은 줄을 다시 쓰려 하지 않습니다(첫 1회). 예외를 내지 않습니다 - 갱신 함수는 안에서 예외를 받지 않아,
+  # 여기서 새면 이미 끝난 전환이 되돌려집니다
+  if ($null -eq $script:inputRecolorPendingWarning) { return }
+  $recolorWarningText = [string]$script:inputRecolorPendingWarning
+  $script:inputRecolorPendingWarning = $null
+  try { Add-GuiLog $recolorWarningText } catch { }
+}
+
+function Invoke-HoneyThemeRefresh {
+  # 화면 색 다시 칠하기 - 시작(인자 없음)과 전환(-Full)이 같은 함수를 탑니다 (설계 v3 2.3). 시작 모드는 예전 시작 문장 그대로에
+  # 아이콘 단장(6)과 배지 시작 잔상 표시(6a)만 더했습니다 - 라이트 시작 화면이 지금과 픽셀까지 같아야 합니다(계약 L).
+  # 전체 모드는 시작 때 한 번만 칠하던 색(토글 · 리스트 · 승인 조회 중 '시작 중…')을 다시 칠하고, 다크 입력 칸 통일 장치를 켜거나 끄고(8a),
+  # 바꾸기 전에 잡아 둔 의미(-RestoreState - 상태줄 · 토글 6 · 냥코인 카드 · 배지 잔상)를 새 팔레트로 되살린 뒤 제목줄을 맞추고,
+  # 8a 가 보관한 경고를 맨 끝에서 기록합니다(12 - 8a 의 실패는 그 함수가 안에서 받아 전환을 되돌리지 않습니다). 이 함수 안에서는 의미를 다시 잡지 않습니다 -
+  # 일괄 적용이 덮은 뒤에 잡으면 부분 도색을 의미로 오인합니다. 안에서 예외를 받지 않습니다 - 전체 모드의 예외는 Invoke-ThemeSwitch 가 받아 되돌립니다.
+  # 일괄 적용(1)과 대분류 · 슬라이더 재적용(5) 사이에는 줄을 늘리지 않습니다 - 둘이 1200자 안에 있어야 한다는 회귀 가드(리뷰 조건 E)가 있습니다
+  param([switch]$Full, $RestoreState = $null)
+  $form.BackColor = $script:themeBack
+  Apply-HoneyTheme -Root $form
+  # 강조색 지정 (일괄 적용 뒤 개별 덮어쓰기)
+  $btnStart.BackColor = $script:themeHoney
+  $btnStart.ForeColor = $script:themeHoneyInk
+  $btnStart.FlatAppearance.BorderSize = 0
+  $btnKill.BackColor = $script:themeDanger
+  $btnKill.ForeColor = [System.Drawing.Color]::White
+  $btnKill.FlatAppearance.BorderSize = 0
+  $btnSafeStop.BackColor = $script:themeSafeStop
+  $btnClearHelp.BackColor = $script:themeHoney
+  $btnClearHelp.ForeColor = $script:themeHoneyInk
+  if (-not $Full) { $lblStatus.ForeColor = $script:themeTitle }
+  $lnkUpdate.LinkColor = $script:themeTitle          # 새 버전 링크도 꿀 갈색으로
+  # 대분류 버튼·생활 슬라이더 카드의 상태 스타일 재적용 (Apply-HoneyTheme 가 모든 버튼을
+  # 일반 스타일로 덮으므로 테마 '후'에 반드시 다시 그림 - 리뷰 조건 E)
+  Update-MainCategoryVisual
+  Update-LifeSliders
+  # 6) 해/달 아이콘 단장 (직접 호출 - 감싸지 않음)
+  Update-ThemeIconStyle
+  if (-not $Full) {
+    # 6a) 배지 시작 잔상 표시 - 창을 띄우기 전에 쌓인 배지 글자를 방금 일괄 적용이 기본 글자색으로 덮었으므로 그 사실만 기록합니다
+    #     (대입 1문장이라 라이트 화소는 그대로. 다크로 바꿀 때 Restore-ThemeState 가 읽히는 색으로 칠합니다)
+    $script:logBadgeStartAfterimage = (($script:hiddenLogErrors -gt 0) -or ($script:hiddenLogWarns -gt 0))
+    return
+  }
+  # 7) 생성 때 한 번만 칠한 토글(테두리 · 눌린 바탕) - 설정/로그 탭 + 랜덤 4개
+  Update-TabToggleStyle
+  Update-CustomRandomToggleStyle -Toggle $chkCrRandom
+  Update-CustomRandomToggleStyle -Toggle $chkAcrRandom
+  Update-CustomRandomToggleStyle -Toggle $chkDcrRandom
+  Update-CustomRandomToggleStyle -Toggle $chkLcrRandom
+  # 8) 커스텀 리스트 표 4개 + 셀 편집 콤보
+  Update-ListThemeColors
+  # 8a) 다크 입력 칸 통일 - 시간 · 목록 칸과 잠긴 숫자 칸을 다시 칠하는 장치를 다크면 켜고 라이트면 끕니다 (실패는 안에서 받아 전환은 계속 · 경고는 보관만 → 12)
+  Update-InputRecolor
+  # 9) 승인 조회 중이면 '시작 중…' 표시를 되살립니다 - 위 강조색 지정이 시작 버튼을 꿀색으로 덮었기 때문입니다(그래서 그 뒤)
+  if ($script:approvalPendingStart) { Set-StartButtonPending -Pending $true }
+  # 10) 바꾸기 전에 잡아 둔 의미를 새 팔레트로 (7 · 8 · 9 뒤 - 그 단계들이 칠한 값을 의미대로 덮어야 함)
+  Restore-ThemeState -State $RestoreState
+  # 11) 제목줄 (DWM 속성 20 - 실패해도 전환은 성공으로 치고 [경고] 1줄)
+  Set-TitleBarTheme -Dark ($script:uiTheme -eq 'dark')
+  # 12) 8a 가 보관한 경고 기록 (맨 끝 - 8a 에서 바로 쓰면 로그를 접은 화면에서 생긴 배지를 10번이 덮음. 예외를 내지 않음)
+  Write-InputRecolorWarning
+}
+
+function Invoke-ThemeSwitch {
+  # 화면 색 전환 트랜잭션 - 다크 시작과 아이콘 클릭이 같은 함수를 탑니다 (설계 v3 1.2).
+  # (1) 바꾸기 '전'(지금 팔레트 기준)에 복원 상태를 한 번만 잡고 → (2) 적용 → (3) 성공 + 클릭이면 저장 → 실패면 (4) 같은 상태로 되돌림 →
+  # (5) 결과 1줄 기록. 세 try 에는 상태 변경과 원인 대입만 둡니다 - 기록을 try 안에 두면 기록 실패가 '되돌리지도 못함' 으로 잘못 분류되고,
+  # 그 기록마저 실패하면 예외가 밖으로 샙니다. 기록은 try 가 다 끝난 뒤 감싼 1줄이라 기록 실패가 판정을 바꾸지 않습니다.
+  # 저장(-Save · 클릭 경로뿐)이 아니면 이 함수 밖으로 예외가 나가지 않습니다. 실패 · 되돌림이면 저장하지 않아 다음 실행은 저장값(옛 모드)으로 뜹니다
+  param([ValidateSet('light', 'dark')][string]$From, [ValidateSet('light', 'dark')][string]$To, [switch]$Save)
+  # (1) 상태 잡기 - 팔레트를 바꾸기 전
+  $restoreState = $null
+  $stateError = $null
+  try { $restoreState = Get-ThemeRestoreState } catch { $stateError = $_.Exception.Message }
+  if ($null -ne $stateError) {
+    try { Add-GuiLog "[경고] 화면 색 상태를 읽지 못해 바꾸지 않았습니다: $stateError" } catch { }
+    return
+  }
+  # (2) 적용 - try 안에는 상태 변경만
+  $applyError = $null
+  try {
+    Set-HoneyPalette -Theme $To
+    Invoke-HoneyThemeRefresh -Full -RestoreState $restoreState
+  } catch { $applyError = $_.Exception.Message }
+  # (3) 성공 + 클릭일 때만 저장
+  if ($null -eq $applyError) {
+    if ($Save) { Save-UiThemeState }
+    return
+  }
+  # (4) 되돌림 - (1) 의 같은 상태로
+  $restoreError = $null
+  try {
+    Set-HoneyPalette -Theme $From
+    Invoke-HoneyThemeRefresh -Full -RestoreState $restoreState
+  } catch { $restoreError = $_.Exception.Message }
+  # (5) 기록 - try 가 다 끝난 뒤 결과 1줄 (기록 실패는 되돌림 판정을 바꾸지 않음)
+  $toName = $(if ($To -eq 'dark') { '다크' } else { '라이트' })
+  $resultLine = $(if ($null -eq $restoreError) { "[경고] $toName 화면을 적용하지 못해 되돌렸습니다: $applyError" } else { "[경고] 화면 색을 되돌리지도 못했습니다: $applyError / $restoreError" })
+  try { Add-GuiLog $resultLine } catch { }
+}
+
+# 상태줄 층 등록 - 처리기 정의 뒤 · 시작 갱신 직전 최상위 1곳입니다. 정의보다 먼저 대입이 일어나면 '명령 없음' 예외가 그 대입문으로 올라옵니다.
+# 이보다 앞의 상태 색 대입은 기록되지 않지만 시작 갱신이 의미를 다시 정합니다(일괄 적용 → 섹션 제목색 = 'Title'). 처리기는 명명 함수 한 줄
+$lblStatus.Add_ForeColorChanged({ Invoke-StatusColorChanged })
+# 시작 갱신 - 늘 라이트로 칠합니다(예전 시작 문장 그대로 + 아이콘 단장 + 배지 잔상 표시)
+Invoke-HoneyThemeRefresh
+# 다크 시작 - 저장값이 다크면 창을 띄우기 전에 아이콘 클릭과 같은 전환을 1회 탑니다(저장 없음 - 시작 경로는 쓰지 않음).
+# 실패는 전환 함수 안에서 받아 [경고] 1줄 + 라이트로 시작하고(저장이 없는 호출은 밖으로 예외를 내지 않음), 저장하지 않으므로 다음 실행도
+# 다크를 다시 시도합니다 - 같은 경고가 신호입니다. 예외가 샜다면 창이 뜨기 전에 끝나 '실행 중 오류' 창 + 코드 1 이 되고 저장값이 남아
+# 다음 실행도 같아 아이콘으로 되돌릴 기회가 없습니다
+if ($script:uiThemeAtStart -eq 'dark') { Invoke-ThemeSwitch -From 'light' -To 'dark' }
 
 # ============================================================
 #  최신 버전 확인 (GitHub 릴리스, 시작 시 1회)
@@ -13001,8 +14072,11 @@ $script:updateTimer.Add_Tick({
     if (-not [System.Version]::TryParse(($tag -replace '^[vV]', ''), [ref]$remoteVersion)) { return }
     if ($remoteVersion -le [System.Version]$appVersion) { return }
     $lblVersion.Visible = $false
-    $lnkUpdate.Text = "새 버전 v$remoteVersion 다운로드"
+    # 링크 글자는 'v<번호> 다운로드' (2026-11-12 사용자 결정 '가' - 해/달 아이콘이 글자 왼쪽에 붙으므로 '로그 지우기' 버튼과 겹치지 않게 줄임)
+    $lnkUpdate.Text = "v$remoteVersion 다운로드"
     $lnkUpdate.Visible = $true
+    # 아이콘을 링크 글자 바로 왼쪽으로 - 글자가 들어간 뒤에 재야 하고, 팝업 조건 밖이라 실행 중 · 승인 대기로 팝업을 건너뛰어도 돕니다
+    Update-ThemeIconPlacement -Button $btnThemeToggle -Label $lnkUpdate
     # 구버전 실행 시 새 버전 안내 팝업 (확인 1번 = 안내만, 자동 동작 없음).
     # 자동화가 이미 실행 중이면 팝업으로 방해하지 않고 우하단 링크만 보여줍니다.
     # 시작 승인 조회 대기 중에도 생략 (2026-08-01 전수 점검: 조회 중에는 running 이 아직
@@ -13012,7 +14086,7 @@ $script:updateTimer.Add_Tick({
       [System.Windows.Forms.MessageBox]::Show(
         $form,
         ("새 버전 v$remoteVersion 이 나왔습니다!" + [Environment]::NewLine + [Environment]::NewLine +
-          "우측 하단의 '새 버전 다운로드' 링크를 누르면" + [Environment]::NewLine +
+          "우측 하단의 'v$remoteVersion 다운로드' 링크를 누르면" + [Environment]::NewLine +
           "다운로드 페이지가 열립니다."),
         '꿀비노기 업데이트 안내',
         [System.Windows.Forms.MessageBoxButtons]::OK,

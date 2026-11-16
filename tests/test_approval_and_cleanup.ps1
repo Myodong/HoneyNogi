@@ -241,7 +241,8 @@ foreach ($definition in Get-SourceFunctionDefinitions -Path (Join-Path $projectR
 }
 $startButtonText = '시작(F9)'
 $script:themeHoney = 'honey'
-$script:themeBorder = 'border'
+$script:themeBorder = 'border'           # 대조용 - 조회 중 바탕은 전용 팔레트 색이라 이 값이 나오면 안 됩니다(다크 모드 D7)
+$script:themePendingBack = 'pending'
 $script:deviceCode = ''
 $script:approvalDeniedSeen = $false
 $approvalGraceDays = 7
@@ -257,7 +258,7 @@ function Invoke-StartAutomation { $script:startCalls++; $script:textAtStart = $b
 
 Set-StartButtonPending -Pending $true
 Assert-Case '시작 표시: 누르면 글자가 바뀜' $btnStart.Text '시작 중…'
-Assert-Case '시작 표시: 누르면 색이 바뀜' $btnStart.BackColor 'border'
+Assert-Case '시작 표시: 누르면 색이 바뀜(조회 중 전용 바탕)' $btnStart.BackColor 'pending'
 foreach ($startCase in @(
     @{ N = '승인되면 시작'; Allowed = $true; Starts = 1 }
     @{ N = '승인 안 되면 시작 안 함'; Allowed = $false; Starts = 0 }
