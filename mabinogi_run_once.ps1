@@ -643,6 +643,10 @@ $noticeCloseTopRatio    = 0.1567   # 클라이언트 위 → X 세로 거리 ÷ 
 $noticeCloseTryLimit    = 2        # 복귀 1번에 공지 X 를 누르는 횟수 - 그래도 남으면 X 후보로 넘깁니다 (사용자 결정 U-R-10)
 $rgAbyssSelect = @(Get-ConfigValue $config @('ocrRegions', 'abyssSelectionTitle') @(0, 25, 240, 95))
 $rgDetailTitle = @(Get-ConfigValue $config @('ocrRegions', 'detailTitle') @(30, 100, 350, 65))
+# 주간 전리품 정산 전 '입장 불가' 팝업의 제목·본문 영역(기준 좌표) - 카드 클릭 뒤 상세 화면 대신 화면 가운데에 뜨는 팝업(2026-11-16 월요일 06:02 1272x717 100% ·
+# 09:01 1914x1079 150% 관측). 두 캡처 모두 배율 2·3 한국어로 '입장불가주간전리품을먼저정산하세요.' 로 읽히고, 선택 화면 왼쪽 아래 '주간 전리품' 이름표와
+# [전리품 정산] 버튼은 영역 밖입니다. 설정 키가 아닌 스크립트 상수라 좌표·설정 스키마 버전과 무관합니다(Test-AbyssWeeklyLootPopup)
+$rgAbyssWeeklyLootPopup = @(440, 440, 392, 135)
 $ptDetailBack  = @(Get-ConfigValue $config @('clickPoints', 'detailBack') @(43, 67))
 $ptSoloTab     = @(Get-ConfigValue $config @('clickPoints', 'soloTab') @(533, 76))
 $ptPartyTab    = @(Get-ConfigValue $config @('clickPoints', 'partyTab') @(760, 76))
@@ -5982,6 +5986,39 @@ function Format-AbyssTouchDiagSummary {
   $kindText = (@($kindNames.Keys | ForEach-Object { '{0} {1}' -f $kindNames[$_], [int]$KindCounts[$_] }) -join ' · ')
   $bottomShown = $(if ($BottomText.Length -gt 60) { $BottomText.Substring(0, 60) } else { $BottomText })
   return "[진단] 추론 재입장 클리어 화면 터치 $Result 집계 - 유효 회전 $validTotal ($kindText) · 터치 전송 $Sends · 클릭 조작 생략 $ClickYields · 커서 미확인 전송 전 $CursorMissesBefore · 전송 뒤 $CursorMissesAfter / 판독 없는 회전: 양보 $YieldTurns · 스윕 $SweepTurns · 탐침 복구 $RecoveredTurns · 판독 실패 $ReadFailTurns / 마지막 하단 '$bottomShown'"
+}
+
+function Test-AbyssWeeklyLootPopupText {
+  param([string]$Text)
+
+  # 주간 전리품 정산 전 '입장 불가' 팝업 판독문 판정 (순수 - 진리표 대상). 월요일 06시 주간 리셋 뒤 주간 전리품을 받기 전에만, 어비스 카드를 누르면 상세 화면 대신
+  # '입장 불가 / 주간 전리품을 먼저 정산하세요. / [확인](Space)' 이 뜹니다(2026-11-16 관측 둘 - 밤샘 무한 반복이 06시에 오류 정지). 실측 판독(제목·본문 영역 ·
+  # 배율 2·3) = '입장불가주간전리품을먼저정산하세요.'. 조각 조합: ('전리품' ∧ '정산') ∨ ('입장불가' ∧ '전리품') - 한쪽이 깨져도 다른 쪽이 받습니다
+  $normalized = ([string]$Text) -replace '\s', ''
+  if (-not $normalized.Contains('전리품')) { return $false }
+  return ($normalized.Contains('정산') -or $normalized.Contains('입장불가'))
+}
+
+function Test-AbyssWeeklyLootPopup {
+  param([System.Diagnostics.Process]$Game)
+
+  # 주간 전리품 정산 전 '입장 불가' 팝업이 지금 보이는가 - 영역($rgAbyssWeeklyLootPopup) 1회 판독(한국어 · 배율 2). 카드 클릭의 상세 화면 대기가 시간 초과로
+  # 끝난 뒤에만 부릅니다(정상 카드 클릭 경로의 판독 수 불변). 캡처 실패로 빈 문자열이면 거짓 → 부르는 쪽이 원래 시간 초과를 다시 던지고(지금과 같은 코드 1),
+  # 창 좌표를 못 읽으면 공용 판독의 예외가 그대로 올라가 최상위 코드 1 입니다(규칙 15 - 나빠지지 않음)
+  $popupText = Get-GameRegionOcrText -Game $Game -ReferenceX $rgAbyssWeeklyLootPopup[0] -ReferenceY $rgAbyssWeeklyLootPopup[1] `
+    -RegionWidth $rgAbyssWeeklyLootPopup[2] -RegionHeight $rgAbyssWeeklyLootPopup[3] -Scale 2 -Engine $ocrKoreanEngine
+  return (Test-AbyssWeeklyLootPopupText -Text $popupText)
+}
+
+function Stop-AbyssWeeklyLootPopup {
+  param([System.Diagnostics.Process]$Game)
+
+  # 주간 전리품 정산 전 '입장 불가' 팝업 안내 정지 (사용자 결정 (가) 2026-11-17 · 설계 합의). 팝업은 누르지 않고 그대로 둡니다 - 사람이 와서 [확인] 뒤 왼쪽 아래
+  # [전리품 정산]을 받으면 됩니다(자동 정산은 정산 화면 관측이 없어 하지 않음 - 규칙 8). 입장 전이라 계상 0 - 컨트롤 패널의 코드 4 는 이 판의 완료 마커·클리어 기록이
+  # 없어 계상·커스텀 전진 없이 정지합니다(커스텀은 다음 [시작]이 같은 항목부터). 코드 1 이 아니라 커스텀의 같은 항목 자동 재시작 두 번도 없습니다
+  Write-LifeDiagnostics -Game $Game -Context '어비스 입장 불가 - 주간 전리품 정산 전' -CaptureOnly
+  Write-RunLog "[완료] 어비스 입장 불가 - 주간 전리품을 먼저 정산해야 합니다. 어비스 화면 왼쪽 아래 '주간 전리품' 의 [전리품 정산]을 받은 뒤 다시 시작해 주세요 (이 판은 계상하지 않습니다)"
+  exit 4
 }
 
 function Test-NoticeBoardPopup {
@@ -21483,9 +21520,19 @@ try {
     }
     if ($needCardClick) {
       Write-RunLog "[어비스] $selectedDungeon 카드 클릭"
-      Invoke-ClickUntil -Game $game -Point $dungeonCard -Description "$selectedDungeon 상세 화면" `
-        -TimeoutSeconds $timeoutDetail -Condition { Test-DetailTitleMatches -Game $game } `
-        -SourceCondition { Test-AbyssSelectionScreen -Game $game }
+      try {
+        Invoke-ClickUntil -Game $game -Point $dungeonCard -Description "$selectedDungeon 상세 화면" `
+          -TimeoutSeconds $timeoutDetail -Condition { Test-DetailTitleMatches -Game $game } `
+          -SourceCondition { Test-AbyssSelectionScreen -Game $game }
+      } catch {
+        # 주간 전리품 정산 전 '입장 불가' 팝업(2026-11-16 월요일 관측 둘 - 상세 화면 대신 그 팝업이 떠 이 대기가 시간 초과 → 코드 1 · 밤샘 무한 반복이 06시에 멈춤).
+        # 정확히 이 대기의 시간 초과 문구일 때만 팝업을 한 번 읽어, 맞으면 계상 없이 안내 정지(코드 4 - Stop-AbyssWeeklyLootPopup), 그 밖의 예외·팝업 아님은
+        # 그대로 다시 던집니다(지금의 코드 1 그대로). 대기 중 판독은 늘리지 않습니다(정상 카드 클릭 경로 불변 - 사용자 결정 (가) · 설계 합의 2026-11-17)
+        if (([string]$_.Exception.Message -ceq "$selectedDungeon 상세 화면 대기 시간이 초과됐습니다.") -and (Test-AbyssWeeklyLootPopup -Game $game)) {
+          Stop-AbyssWeeklyLootPopup -Game $game
+        }
+        throw
+      }
     }
     Write-RunLog "[어비스] $selectedDungeon 상세 화면 확인"
 
