@@ -415,6 +415,7 @@ function Get-SourceAssignmentValue {
 }
 try {
     $abyssReclickQuietSeconds = Get-SourceAssignmentValue 'abyssReclickQuietSeconds'
+    $abyssReentryDiagSeconds = Get-SourceAssignmentValue 'abyssReentryDiagSeconds'   # 재입장 대기 중간 진단 시각(재입장대기_클리어화면 A3) - 빠지면 0초 시계라 첫 회전에 진단이 찍힘
     $memberSweepStreakLimit = Get-SourceAssignmentValue 'memberSweepStreakLimit'
     $memberFieldSettleSeconds = Get-SourceAssignmentValue 'memberFieldSettleSeconds'
     $allDungeonKeywords = @(Get-SourceAssignmentValue 'allDungeonKeywords')       # 첫 대입(내장 목록) - 추적기 판독문을 원문 Test-InDungeonQuest 로 판정
@@ -505,7 +506,9 @@ $ORIGINAL_FUNCTION_NAMES = @(
     'Resume-AbyssMemberClock', 'Test-AbyssMemberClockExpired', 'Get-FreezeAdjustedDeadline', 'Get-YieldAdjustedDeadline',
     'Invoke-UserYieldWithDeadline', 'Register-CaptureSuccess', 'Get-CaptureFailTotalMs', 'Test-AbyssReadyPanelText', 'Test-AbyssMatchingPanelText',
     'Step-AbyssFieldSettle',   # 필드 확정 걸음 - 대기 함수의 필드 결과 켬이 부름(구현 단위 5b-8 - 그 전에는 선분기만 불러 의존 추출이 묵시로 올림)
-    'Resolve-AbyssResumeGrace')   # 재개 유예 판정 - 대기 함수 ⑩ 의 resume 유예 갈래가 부름 · §6a 진리표 RG 가 원문으로 돌림(구현 명세 ⑤c 2.4 · 2.5 · 3.4)
+    'Resolve-AbyssResumeGrace',   # 재개 유예 판정 - 대기 함수 ⑩ 의 resume 유예 갈래가 부름 · §6a 진리표 RG 가 원문으로 돌림(구현 명세 ⑤c 2.4 · 2.5 · 3.4)
+    # 재입장대기_클리어화면(2026-11-16) - 대기 함수 ⑤ 의 클리어 화면 확신 단계 · ⑧ 의 점수표 서명 · ⑩ 의 진단 집계 줄 (순수 - 원문 그대로)
+    'Get-AbyssClearPromptTextLevel', 'Test-AbyssClearScoreText', 'Format-AbyssReentryDiagSummary')
 # 이름 바꿔 올리는 원문 (같은 이름은 아래 감시·모의가 차지). 앞 둘은 exit 센티널 치환 · 가운데 셋은 선단언 전용 · 끝은 스윕 생략 사유 분류 감시용
 #   (명세 3.2.1 은 분류를 '원문 그대로' 로 적었습니다 - 이 파일은 같은 원문을 감시 뒤에 두어 회전마다 분류 결과를 기록합니다(WA-L13 'counted' 수 · WA-L14
 #   '굶김 예산 미소모'). 감시는 받은 인자를 그대로 넘기고 결과를 그대로 돌려줘 동작이 같습니다)
@@ -523,7 +526,7 @@ $STUB_MOCK_BODIES = [ordered]@{
     'Test-DungeonClearPrompt'    = 'return (Invoke-PromptStub -Game $Game)'
     'Get-AbyssPanelKind'         = 'return (Invoke-PanelStub -Game $Game)'
     'Test-HomeEndEscHud'         = 'return (Invoke-FlagStub -Game $Game -Name ''hud'' -Field ''Hud'')'
-    'Test-InDungeonQuest'        = 'return (Invoke-FlagStub -Game $Game -Name ''quest'' -Field ''Quest'')'
+    'Test-InDungeonQuest'        = 'return (Invoke-QuestStub -Game $Game)'   # 판독문을 진단 전역에 남김 - 운영과 같음(재입장대기_클리어화면 A2 · 행 TS1·TS2)
     'Test-AbyssSelectionScreen'  = 'return (Invoke-FlagStub -Game $Game -Name ''selection'' -Field ''Selection'')'   # 구현 단위 5b-8 2.2-4a - 필드 결과 켬의 필드 모양 회전만 부름
     'Test-AbyssMenu'             = 'return (Invoke-FlagStub -Game $Game -Name ''menu'' -Field ''Menu'')'
     'Invoke-PurchasePopupSweep'  = 'return (Invoke-SweepStub -Game $Game)'
@@ -534,6 +537,8 @@ $STUB_MOCK_BODIES = [ordered]@{
     'Test-GameRestartPopup'      = 'return [bool]$script:restartPopupMock'
     'Get-CaptureRecoveryMessage' = 'return ''[안내] 화면 캡처 복구 (모의)'''
     'Get-SessionStationName'     = 'return ''Console'''
+    'Read-AbyssClearScoreText'   = 'return (Invoke-ScoreStub -Game $Game)'                                       # 재입장대기_클리어화면 7.4 - 하단 weak 일 때만 부름
+    'Write-LifeDiagnostics'      = '$script:diagCaptures.Add((''{0}@{1}'' -f $Context, (Get-VirtualElapsed)))'   # 재입장대기_클리어화면 A3 - 중간 진단 캡처(문맥 @ 가상 초)
 }
 # 선단언 전용 판독 둘 (영역 기준점별 지정 판독문 / 지정 하단 판독문) - 선단언 뒤 '닿으면 안 됨' 꼴로 다시 정의합니다
 $PRE_ASSERT_MOCK_BODIES = [ordered]@{
@@ -672,8 +677,13 @@ $SCREEN_TABLE = [ordered]@{
     'S'  = @{ Bottom = '화면을터치해주세요'; Prompt = $true; Panel = 'none'; Hud = $false; Quest = $false }
     'Mn' = @{ Bottom = ''; Prompt = $false; Panel = 'none'; Hud = $true; Quest = $false; Menu = $true }
     'Sl' = @{ Bottom = ''; Prompt = $false; Panel = 'none'; Hud = $true; Quest = $false; Selection = $true }
+    # 재입장대기_클리어화면 7.4(2026-11-16) - 골격이 끊긴 실측 파손 클리어 문구(07-19 캐릭터 겹침 '면百치해' - 워커 Test-DungeonClearPrompt 주석) · 확신 단계 weak:
+    #   Sw = 점수표 없음(엄격 아님) / Sws = 점수표 '처치'+'완벽'(엄격). Score = 점수표 판독 스텁 값
+    'Sw'  = @{ Bottom = '면百치해'; Prompt = $true; Panel = 'none'; Hud = $false; Quest = $false; Score = '' }
+    'Sws' = @{ Bottom = '면百치해'; Prompt = $true; Panel = 'none'; Hud = $false; Quest = $false; Score = '빠른처치완벽한전투' }
 }
-$SCREEN_KINDS = [ordered]@{ 'I' = 'inside'; 'F' = 'field'; 'U' = 'unknown'; 'R' = 'reward3'; 'M' = 'matching'; 'Rd' = 'ready'; 'E' = 'entry-waiting'; 'P' = 'popup'; 'S' = 'prompt'; 'Mn' = 'menu'; 'Sl' = 'selection' }
+$SCREEN_KINDS = [ordered]@{ 'I' = 'inside'; 'F' = 'field'; 'U' = 'unknown'; 'R' = 'reward3'; 'M' = 'matching'; 'Rd' = 'ready'; 'E' = 'entry-waiting'; 'P' = 'popup'; 'S' = 'prompt'; 'Mn' = 'menu'; 'Sl' = 'selection'
+    'Sw' = 'prompt'; 'Sws' = 'prompt' }
 # 선단언 원료 - 패널 영역(abyssMenu 850,180,350,520 배율 4) 실측 판독문 · 추적기 영역 실측 판독문
 $PANEL_TEXT_MATCHING = '빻지/입문근든플레이어가모이면자동입장합니다.00:00'                                             # 09-18 재매칭 1/4 (test_abyss_screen_signatures.ps1:70 $panelMenu1)
 $PANEL_TEXT_READY = '박지/입문파티홍보패널100요동•X104,4385044화염술klülEl원이준비완료되면바로입장합니다.준비취소'      # 실기 -1 L1 (test_abyss_party_signatures.ps1:42 $menuLeaderL1)
@@ -988,6 +998,14 @@ function Invoke-PromptStub {
     $script:lastClearPromptText = ([string]$SCREEN_TABLE[$screenKey].Bottom) -replace '\s', ''
     return [bool]$SCREEN_TABLE[$screenKey].Prompt
 }
+function Invoke-ScoreStub {
+    # 점수표 (재입장대기_클리어화면 7.4 - 대기 함수가 하단 확신 단계 weak 일 때만 부름) - 화면표의 Score(없으면 '') · 실패면 '' (그 회전은 ⑦ 이 버림)
+    param($Game)
+    Add-GameSeen -Kind 'score' -Game $Game
+    $script:scoreReads++
+    if (-not (Invoke-CaptureAttempt -Name 'score')) { return '' }
+    return ([string]$SCREEN_TABLE[(Get-ScreenNow)].Score) -replace '\s', ''
+}
 function Invoke-PanelStub {
     param($Game)
     Add-GameSeen -Kind 'panel' -Game $Game
@@ -999,6 +1017,17 @@ function Invoke-FlagStub {
     Add-GameSeen -Kind $Name -Game $Game
     if (-not (Invoke-CaptureAttempt -Name $Name)) { return $false }
     return [bool]$SCREEN_TABLE[(Get-ScreenNow)][$Field]
+}
+function Invoke-QuestStub {
+    # 추적기 - 운영 Test-InDungeonQuest 처럼 판독할 때마다 정규화 판독문을 진단 전역 $script:lastQuestTrackerText 에 남깁니다(캡처 실패면 운영과 같이 '' -
+    #   공용 판독이 빈 문자열을 돌려줌). 판독문 = 'Q<이 행의 추적기 판독 차례>' - 요약 줄의 추적기가 이 대기 안 마지막 유효 HUD 회전의 판독인지 차례로 가립니다
+    #   (재입장대기_클리어화면 A2 · 행 TS1·TS2). 판정값은 화면표 Quest 그대로(Invoke-FlagStub 와 같은 사건 기록·캡처 시도)
+    param($Game)
+    Add-GameSeen -Kind 'quest' -Game $Game
+    $script:questReads++
+    if (-not (Invoke-CaptureAttempt -Name 'quest')) { $script:lastQuestTrackerText = ''; return $false }
+    $script:lastQuestTrackerText = ('Q{0}' -f $script:questReads)
+    return [bool]$SCREEN_TABLE[(Get-ScreenNow)]['Quest']
 }
 function Invoke-ProbeStub {
     # 탐침 - 캡처 한 번 · 결과를 사건 기록에 (원문 Test-CaptureRecovered 는 성공이면 플래그의 부정)
@@ -1061,6 +1090,10 @@ function Reset-ReentryRow {
     $script:yieldCalls = 0
     $script:yieldsWhileFailing = 0
     $script:recordMockCalls = @{}
+    $script:diagCaptures = New-Object System.Collections.Generic.List[string]   # 재입장대기_클리어화면 A3 - 중간 진단 캡처(문맥 @ 가상 초)
+    $script:scoreReads = 0                                                      # 재입장대기_클리어화면 7.4 - 점수표 판독 수
+    $script:questReads = 0                                                      # 재입장대기_클리어화면 A2 - 추적기 판독 차례(Invoke-QuestStub)
+    $script:lastQuestTrackerText = 'STALE-TRACKER'                             # 대기 밖의 옛 판독(직전 판 클리어 대기 꼴) - 요약 줄에 새면 TS1 이 잡음
     $script:lastClickSkipReason = 'user-active'
     $script:lastClickPerformed = $false
     $script:lastClearPromptText = 'STALE'
@@ -1090,15 +1123,18 @@ function Invoke-ReentryRow {
     $rowResult = ''
     $rowLastKind = ''
     $rowPanelSeen = $null
+    $rowPromptStreak = $null
     if ($firstOutput -is [hashtable]) {
         $rowKeys = (@($firstOutput.Keys | ForEach-Object { [string]$_ } | Sort-Object) -join ',')
         $rowResult = [string]$firstOutput['Result']
         $rowLastKind = [string]$firstOutput['LastKind']
         $rowPanelSeen = $firstOutput['PanelSeen']
+        $rowPromptStreak = $firstOutput['PromptStreak']
     }
     $logLines = $script:rowLogs.ToArray()
     return [pscustomobject]@{
         Result = $rowResult; LastKind = $rowLastKind; PanelSeen = $rowPanelSeen; Keys = $rowKeys; Count = $rowCount; Error = $rowError
+        PromptStreak = $rowPromptStreak; DiagCaptures = $script:diagCaptures.ToArray(); ScoreReads = $script:scoreReads   # 재입장대기_클리어화면
         T = (Get-VirtualElapsed); Logs = $logLines
         S2 = @($logLines | Where-Object { $_.StartsWith($S2_LINE_PREFIX) })
         NoticeCount = @($logLines | Where-Object { $_.StartsWith($NOTICE_LINE_PREFIX) }).Count
@@ -1267,9 +1303,9 @@ function Check-RowCommon {
     # 모의 스윕이 쓴 값 (묵은 'user-active' 로 시작 - 서두 비움의 행동 감시)
     param([string]$Name, $Row)
     $recordHits = @($RECORD_MOCK_NAMES | Where-Object { [int]$Row.RecordCalls[$_] -gt 0 } | ForEach-Object { '{0}={1}' -f $_, $Row.RecordCalls[$_] })
-    $keysOk = ($Row.Count -eq 0) -or (($Row.Count -eq 1) -and ($Row.Keys -ceq 'LastKind,PanelSeen,Result'))
+    $keysOk = ($Row.Count -eq 0) -or (($Row.Count -eq 1) -and ($Row.Keys -ceq 'LastKind,PanelSeen,PromptStreak,Result'))   # 재입장대기_클리어화면(2026-11-16) +PromptStreak
     $skipOk = ($Row.SkipEnd -ceq '') -or (@($Row.SkipWritten) -ccontains $Row.SkipEnd)
-    Check-True "$Name 공통 단언 (기록 모의 호출 0 · 반환 키 정확히 셋 · 행 끝 클릭 메타 = '' 또는 모의 스윕이 쓴 값)" (($recordHits.Count -eq 0) -and $keysOk -and $skipOk) `
+    Check-True "$Name 공통 단언 (기록 모의 호출 0 · 반환 키 정확히 넷 · 행 끝 클릭 메타 = '' 또는 모의 스윕이 쓴 값)" (($recordHits.Count -eq 0) -and $keysOk -and $skipOk) `
         ('기록 모의=[{0}] 반환 수={1} 키=[{2}] 메타 끝=[{3}] 모의 스윕이 쓴 메타=[{4}]' -f ($recordHits -join ','), $Row.Count, $Row.Keys, $Row.SkipEnd, (@($Row.SkipWritten) -join ','))
 }
 
@@ -1314,14 +1350,14 @@ $signatureMismatches = @($signatureNames | Where-Object { (Get-LiveParamSignatur
 Check-True "서명 대조: 모의·감시 $($signatureNames.Count)개의 매개변수 서명 = 워커 원문" ($signatureMismatches.Count -eq 0) ($signatureMismatches -join ' · ')
 
 # ── §5 선단언 (명세 3.2.6 ①~④ · N4-P7 - 하나라도 어긋나면 FAIL) ─────────────────────────────────────────────────────────
-# ① 열한 약어 각각 원문 분류기가 대응표의 분류를 냄 (Mn · Sl 은 선택 화면 · 메뉴 판정값을 함께 넘김 - 구현 단위 5b-8)
+# ① 열세 약어 각각 원문 분류기가 대응표의 분류를 냄 (Mn · Sl 은 선택 화면 · 메뉴 판정값을 함께 넘김 - 구현 단위 5b-8 · Sw · Sws 는 재입장대기_클리어화면 7.4)
 $classifyActual = @(foreach ($screenKey in $SCREEN_TABLE.Keys) {
         $screenEntry = $SCREEN_TABLE[$screenKey]
         '{0}={1}' -f $screenKey, (Resolve-AbyssHandoffStartScreen -PromptVisible $screenEntry.Prompt -BottomText $screenEntry.Bottom -PanelKind $screenEntry.Panel -HudVisible $screenEntry.Hud -InDungeonQuest $screenEntry.Quest `
             -SelectionVisible ([bool]$screenEntry.Selection) -MenuVisible ([bool]$screenEntry.Menu))
     }) -join ' '
 $classifyExpected = @(foreach ($screenKey in $SCREEN_KINDS.Keys) { '{0}={1}' -f $screenKey, $SCREEN_KINDS[$screenKey] }) -join ' '
-Check-Equal '선단언 ① 열한 약어의 원문 분류 (Resolve-AbyssHandoffStartScreen - 판정값·실측 하단 판독문)' $classifyActual $classifyExpected
+Check-Equal '선단언 ① 열세 약어의 원문 분류 (Resolve-AbyssHandoffStartScreen - 판정값·실측 하단 판독문)' $classifyActual $classifyExpected
 # ② 패널 - 원문 패널 종류 판정(서명 둘을 지남)이 실측 패널 판독문에 M 'matching' · Rd 'ready'
 $panelRegionKey = '{0},{1}' -f $rgAbyssMenu[0], $rgAbyssMenu[1]
 $script:preRegionTexts = @{ $panelRegionKey = $PANEL_TEXT_MATCHING }
@@ -1329,14 +1365,14 @@ $panelMatchingActual = Invoke-RealGetAbyssPanelKind -Game $null
 $script:preRegionTexts = @{ $panelRegionKey = $PANEL_TEXT_READY }
 $panelReadyActual = Invoke-RealGetAbyssPanelKind -Game $null
 Check-Equal '선단언 ② 패널 - 원문 Get-AbyssPanelKind: 09-18 재매칭 판독문 → M 의 판정값 · 실기 -1 L1 준비 패널 판독문 → Rd 의 판정값' "M=$panelMatchingActual Rd=$panelReadyActual" ('M={0} Rd={1}' -f $SCREEN_TABLE['M'].Panel, $SCREEN_TABLE['Rd'].Panel)
-# ③ 프롬프트 - 원문 하단 판정이 열한 하단 판독문 중 S 만 참 (점수 영역 판독은 '')
+# ③ 프롬프트 - 원문 하단 판정이 열세 하단 판독문 중 S · Sw · Sws 만 참 (점수 영역 판독은 '' - Sw · Sws 의 '면百치해' 는 하단 조합 '치해'+'면' 으로 점수표 전에 참)
 $promptActual = @(foreach ($screenKey in $SCREEN_TABLE.Keys) {
         $script:preBottomText = [string]$SCREEN_TABLE[$screenKey].Bottom
         $script:preRegionTexts = @{}
         '{0}={1}' -f $screenKey, [int][bool](Invoke-RealTestDungeonClearPrompt -Game $null)
     }) -join ' '
 $promptExpected = @(foreach ($screenKey in $SCREEN_TABLE.Keys) { '{0}={1}' -f $screenKey, [int][bool]$SCREEN_TABLE[$screenKey].Prompt }) -join ' '
-Check-Equal '선단언 ③ 프롬프트 - 원문 Test-DungeonClearPrompt: 열한 하단 판독문 중 S 만 참 (대응표 판정값과 같음)' $promptActual $promptExpected
+Check-Equal '선단언 ③ 프롬프트 - 원문 Test-DungeonClearPrompt: 열세 하단 판독문 중 S · Sw · Sws 만 참 (대응표 판정값과 같음)' $promptActual $promptExpected
 # ④ 추적기 둘 - 원문 추적기 판정(내장 던전 키워드)이 던전 안 판독문 참 · 필드 판독문 거짓
 $trackerRegionKey = '{0},{1}' -f $rgQuestTracker[0], $rgQuestTracker[1]
 $script:preRegionTexts = @{ $trackerRegionKey = $TRACKER_INSIDE_TEXT }
@@ -2787,7 +2823,10 @@ Check-True '(보고·필드 결과) FC-L13 (다) U@0 · P@1.05 · R@3.05 → can
 Check-RowCommon 'FC-L13 (다)' $row
 Reset-ReentryRow; Set-ScreenPlan @('M', 0); $rowLimit = 30
 $row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = $rowLimit }
-Check-True 'FC-L13 (라) 보고 끔 · M 지속 → timeout · 패널 확인 0 · 줄 0' (($row.Result -ceq 'timeout') -and ((Get-PanelNoticeCount $row) -eq 0) -and (@($row.Logs).Count -eq 0)) (Format-RowDetail $row)
+# 재입장대기_클리어화면 A2(2026-11-16): 시간 초과 때 '[진단] … 시간 초과 분류 집계' 1줄이 남습니다(로그 전용 - 30초라 중간 진단 0)
+$fcL13dDiagLines = @($row.Logs | Where-Object { $_.StartsWith('[진단] ', [StringComparison]::Ordinal) -and $_.Contains(' 시간 초과 분류 집계 - matching ') })
+Check-True 'FC-L13 (라) 보고 끔 · M 지속 → timeout · 패널 확인 0 · 줄 = 시간 초과 집계 1줄뿐(matching 집계) · 중간 진단 캡처 0' `
+    (($row.Result -ceq 'timeout') -and ((Get-PanelNoticeCount $row) -eq 0) -and (@($row.Logs).Count -eq 1) -and ($fcL13dDiagLines.Count -eq 1) -and (@($row.DiagCaptures).Count -eq 0)) (Format-RowDetail $row)
 Check-RowCommon 'FC-L13 (라)' $row
 Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'F', 3.05)
 $row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 60; ReportFieldReturn = $true }
@@ -2857,6 +2896,134 @@ Check-True '(보고·필드 결과) FC-L19 M@0 · U@2.05 · I@4.05 → entered �
     (($row.Result -ceq 'entered') -and (@(Get-RecordTimes $row -Screen 'U' -Clean).Count -ge 1) -and ((Get-OverlayReadCount $row 'selection') -eq 0) -and ((Get-OverlayReadCount $row 'menu') -eq 0)) `
     ((Format-RowDetail $row) + (' 판독 selection={0} menu={1}' -f (Get-OverlayReadCount $row 'selection'), (Get-OverlayReadCount $row 'menu')))
 Check-RowCommon 'FC-L19' $row
+
+# ── §7c 재입장대기_클리어화면(2026-11-16) - 끝의 엄격 클리어 화면 연속(결과 PromptStreak) · 중간 진단 · 시간 초과 집계 줄 ──
+# PromptStreak 은 결론에 쓰지 않고(원 워커 호출 B 의 시간 초과 갈래가 추론 재입장 조건으로만 읽음) 끊김 = ② 양보 · ③ 탐침 복구 뒤 · ④ 스윕 · ⑥ 간접 양보 · ⑦ 판독 실패 ·
+#   prompt 아닌 유효 분류 · 엄격 아닌 prompt. 기대값은 판독 회전 기록에서 셉니다(숫자 재기입 없음). 중간 진단 = 결론 없이 조정 $abyssReentryDiagSeconds 초(양보·캡처 실패 제외) 뒤 1회
+$diagArguments = @{ Game = $null; LimitSeconds = 20; ReportRewardReturn = $true; ReportFieldReturn = $true }   # 원 워커 호출 B 꼴(보고 · 필드 결과 켬)
+function Get-DiagLines { param($Row, [string]$Stage) return @($Row.Logs | Where-Object { $_.StartsWith('[진단] ', [StringComparison]::Ordinal) -and $_.Contains(" $Stage 분류 집계 - ") }) }
+# PS1 - M@0 · S@5 지속 → timeout · 끝 분류 prompt · 연속 = 깨끗한 S 판독 수(전부 끝에 이어짐) ≥ 2 · 시간 초과 집계 1줄(엄격 n연속) · 중간 진단 0
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'S', 5)
+$row = Invoke-ReentryRow $diagArguments
+$ps1Count = @(Get-RecordTimes $row -Screen 'S' -Clean).Count
+$ps1Lines = @(Get-DiagLines $row '시간 초과')   # 줄 하나면 반환이 풀려 문자열이 되므로 호출부에서 @() (규칙 3)
+Check-True 'PS1 M@0 · S@5 지속 → timeout · prompt · PromptStreak = S 판독 수(≥ 2) · 시간 초과 집계 1줄(끝 분류 prompt · 엄격 n연속) · 중간 진단 0' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'prompt') -and ($ps1Count -ge 2) -and ([int]$row.PromptStreak -eq $ps1Count) -and ($ps1Lines.Count -eq 1) -and
+    $ps1Lines[0].Contains("끝 분류 'prompt' · 엄격 클리어 화면 ${ps1Count}연속") -and (@($row.DiagCaptures).Count -eq 0)) ((Format-RowDetail $row) + (' PromptStreak={0} S={1}' -f $row.PromptStreak, $ps1Count))
+Check-RowCommon 'PS1' $row
+# PS2 - S@0 · U@15 → 끝 분류 unknown · 연속 0 (prompt 아닌 유효 분류가 끊음)
+Reset-ReentryRow; Set-ScreenPlan @('S', 0, 'U', 15)
+$row = Invoke-ReentryRow $diagArguments
+Check-True 'PS2 S@0 · U@15 → timeout · unknown · PromptStreak 0' (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'unknown') -and ([int]$row.PromptStreak -eq 0)) ((Format-RowDetail $row) + (' PromptStreak={0}' -f $row.PromptStreak))
+Check-RowCommon 'PS2' $row
+# PS3 - weak 하단 · 점수표 없음 지속 → 끝 분류 prompt 지만 엄격 아님 → 연속 0 · 점수표 판독 = Sw 판독 수
+Reset-ReentryRow; Set-ScreenPlan @('Sw', 0)
+$row = Invoke-ReentryRow (@{ Game = $null; LimitSeconds = 10; ReportRewardReturn = $true; ReportFieldReturn = $true })
+$ps3Count = @(Get-RecordTimes $row -Screen 'Sw' -Clean).Count
+Check-True 'PS3 Sw(weak · 점수표 없음) 지속 → timeout · prompt · PromptStreak 0 · 점수표 판독 = Sw 판독 수(≥ 1)' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'prompt') -and ([int]$row.PromptStreak -eq 0) -and ($ps3Count -ge 1) -and ([int]$row.ScoreReads -eq $ps3Count)) ((Format-RowDetail $row) + (' PromptStreak={0} 점수표={1}' -f $row.PromptStreak, $row.ScoreReads))
+Check-RowCommon 'PS3' $row
+# PS4 - weak 하단 · 점수표 '처치'+'완벽' 지속 → 엄격 → 연속 = Sws 판독 수(≥ 2) · 점수표 판독 = 같은 수
+Reset-ReentryRow; Set-ScreenPlan @('Sws', 0)
+$row = Invoke-ReentryRow (@{ Game = $null; LimitSeconds = 10; ReportRewardReturn = $true; ReportFieldReturn = $true })
+$ps4Count = @(Get-RecordTimes $row -Screen 'Sws' -Clean).Count
+Check-True 'PS4 Sws(weak + 점수표) 지속 → timeout · PromptStreak = Sws 판독 수(≥ 2) · 점수표 판독 = 같은 수' `
+    (($row.Result -ceq 'timeout') -and ($ps4Count -ge 2) -and ([int]$row.PromptStreak -eq $ps4Count) -and ([int]$row.ScoreReads -eq $ps4Count)) ((Format-RowDetail $row) + (' PromptStreak={0} Sws={1} 점수표={2}' -f $row.PromptStreak, $ps4Count, $row.ScoreReads))
+Check-RowCommon 'PS4' $row
+# PS5 - S 지속 · 캡처 실패 [4,5) → 판독 도중 실패가 끊음 → 연속 = 실패 회전 뒤 깨끗한 S 판독 수(< 전체 S 판독 수 · ≥ 2)
+Reset-ReentryRow; Set-ScreenPlan @('S', 0); Add-FailWindow 4 5
+$row = Invoke-ReentryRow (@{ Game = $null; LimitSeconds = 12; ReportRewardReturn = $true; ReportFieldReturn = $true })
+$ps5LastFail = Get-NthTime @(Get-RecordTimes $row -Failed) @(Get-RecordTimes $row -Failed).Count
+$ps5After = @(Get-RecordTimes $row -Screen 'S' -Clean -After $ps5LastFail).Count
+$ps5All = @(Get-RecordTimes $row -Screen 'S' -Clean).Count
+Check-True 'PS5 S 지속 · 실패 [4,5) → timeout · PromptStreak = 실패 회전 뒤 S 판독 수(≥ 2) < 전체 S 판독 수' `
+    (($row.Result -ceq 'timeout') -and (-not [double]::IsNaN($ps5LastFail)) -and ($ps5After -ge 2) -and ($ps5After -lt $ps5All) -and ([int]$row.PromptStreak -eq $ps5After)) ((Format-RowDetail $row) + (' PromptStreak={0} 뒤={1} 전체={2}' -f $row.PromptStreak, $ps5After, $ps5All))
+Check-RowCommon 'PS5' $row
+# PS6 - S 지속 · 조작 [4,5) → 양보가 끊음 → 연속 = 조작 창 끝 뒤 S 판독 수(< 전체 · ≥ 2)
+Reset-ReentryRow; Set-ScreenPlan @('S', 0); Add-ActiveWindow 4 5
+$row = Invoke-ReentryRow (@{ Game = $null; LimitSeconds = 12; ReportRewardReturn = $true; ReportFieldReturn = $true })
+$ps6After = @(Get-RecordTimes $row -Screen 'S' -Clean -NotBefore 5).Count
+$ps6All = @(Get-RecordTimes $row -Screen 'S' -Clean).Count
+Check-True 'PS6 S 지속 · 조작 [4,5) → timeout · PromptStreak = 조작 창 끝 뒤 S 판독 수(≥ 2) < 전체 S 판독 수' `
+    (($row.Result -ceq 'timeout') -and ($ps6After -ge 2) -and ($ps6After -lt $ps6All) -and ([int]$row.PromptStreak -eq $ps6After)) ((Format-RowDetail $row) + (' PromptStreak={0} 뒤={1} 전체={2}' -f $row.PromptStreak, $ps6After, $ps6All))
+Check-RowCommon 'PS6' $row
+# DG1 - M 지속 · 한도 120 → 중간 진단 캡처 1(문맥 '재입장 대기 N초 경과(입장 미확정)' · 조정 N초 뒤 첫 회전) · 중간 집계 1줄이 시간 초과 집계 1줄보다 앞
+Reset-ReentryRow; Set-ScreenPlan @('M', 0)
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 120 }
+$dg1Capture = @($row.DiagCaptures)
+$dg1At = $(if ($dg1Capture.Count -eq 1) { [double]($dg1Capture[0] -replace '^.*@', '') } else { [double]::NaN })
+$dg1Mid = @(Get-DiagLines $row "중간 ${abyssReentryDiagSeconds}초")
+$dg1End = @(Get-DiagLines $row '시간 초과')
+$dg1MidIndex = $(if ($dg1Mid.Count -eq 1) { [Array]::IndexOf(@($row.Logs), $dg1Mid[0]) } else { -1 })
+$dg1EndIndex = $(if ($dg1End.Count -eq 1) { [Array]::IndexOf(@($row.Logs), $dg1End[0]) } else { -1 })
+Check-True "DG1 M 지속 · 한도 120 → timeout · 진단 캡처 1(문맥 '재입장 대기 ${abyssReentryDiagSeconds}초 경과(입장 미확정)' · ${abyssReentryDiagSeconds}초 ≤ 시각 < ${abyssReentryDiagSeconds}초 + 박자) · 중간 집계 1 < 시간 초과 집계 1" `
+    (($row.Result -ceq 'timeout') -and ($dg1Capture.Count -eq 1) -and $dg1Capture[0].StartsWith("재입장 대기 ${abyssReentryDiagSeconds}초 경과(입장 미확정)@") -and
+    ($dg1At -ge ($abyssReentryDiagSeconds - $TIME_EPSILON)) -and ($dg1At -lt ($abyssReentryDiagSeconds + 0.7 + $TIME_EPSILON)) -and ($dg1MidIndex -ge 0) -and ($dg1EndIndex -gt $dg1MidIndex)) `
+    ((Format-RowDetail $row) + (' 진단=[{0}] 중간={1}@{2} 끝={3}@{4}' -f ($dg1Capture -join ','), $dg1Mid.Count, $dg1MidIndex, $dg1End.Count, $dg1EndIndex))
+Check-RowCommon 'DG1' $row
+# DG2 - M@0 · I@30 → 90초 전에 entered → 진단 캡처 0 · 집계 줄 0
+Reset-ReentryRow; Set-ScreenPlan @('M', 0, 'I', 30)
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 300 }
+Check-True 'DG2 M@0 · I@30 → entered · 진단 캡처 0 · [진단] 줄 0' (($row.Result -ceq 'entered') -and (@($row.DiagCaptures).Count -eq 0) -and (@($row.Logs | Where-Object { $_.StartsWith('[진단] ', [StringComparison]::Ordinal) }).Count -eq 0)) (Format-RowDetail $row)
+Check-RowCommon 'DG2' $row
+# DG3 - M 지속 · 조작 [10,40) → 중간 진단은 조정 시간(양보 제외 - 규칙 4)으로 ${abyssReentryDiagSeconds}초 → 벽시계 = N초 + 양보 길이 무렵
+Reset-ReentryRow; Set-ScreenPlan @('M', 0); Add-ActiveWindow 10 40
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 200 }
+$dg3Capture = @($row.DiagCaptures)
+$dg3At = $(if ($dg3Capture.Count -eq 1) { [double]($dg3Capture[0] -replace '^.*@', '') } else { [double]::NaN })
+$dg3Yield = [double]$row.YieldTotalMs / 1000.0
+Check-True "DG3 M 지속 · 조작 [10,40) → 진단 캡처 1 · 시각 = ${abyssReentryDiagSeconds}초 + 양보 합 무렵(양보는 조정 시간에서 빠짐 - 규칙 4)" `
+    (($dg3Capture.Count -eq 1) -and ($dg3Yield -ge 29) -and ($dg3At -ge ($abyssReentryDiagSeconds + $dg3Yield - 1)) -and ($dg3At -lt ($abyssReentryDiagSeconds + $dg3Yield + 1.5))) `
+    ((Format-RowDetail $row) + (' 진단=[{0}] 양보={1}초' -f ($dg3Capture -join ','), $dg3Yield))
+Check-RowCommon 'DG3' $row
+# TS1 - 요약 줄의 추적기 = 이 대기 안 마지막 유효 HUD 회전의 판독(재입장대기_클리어화면 A2). 행 시작 전역 = 대기 밖의 옛 판독 'STALE-TRACKER' · M 지속(HUD 회전 0) ·
+#   한도 120 → 중간 · 시간 초과 집계 두 줄 모두 추적기 '' (요약 시점에 전역을 바로 읽던 구현은 옛 판독을 찍음 - 11-16 회귀 B11 이 그 읽기를 잡아 고침)
+Reset-ReentryRow; Set-ScreenPlan @('M', 0)
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 120 }
+$ts1Lines = @(@(Get-DiagLines $row "중간 ${abyssReentryDiagSeconds}초") + @(Get-DiagLines $row '시간 초과'))
+Check-True "TS1 옛 전역 판독 · M 지속(HUD 0) · 한도 120 → timeout · 중간 · 시간 초과 집계 2줄 모두 마지막 추적기 '' · 옛 판독 0 · 추적기 판독 0" `
+    (($row.Result -ceq 'timeout') -and ($ts1Lines.Count -eq 2) -and (@($ts1Lines | Where-Object { $_.Contains("마지막 추적기 '' · ") }).Count -eq 2) -and
+    (@($ts1Lines | Where-Object { $_.Contains('STALE-TRACKER') }).Count -eq 0) -and ($script:questReads -eq 0)) ((Format-RowDetail $row) + (' 줄=[{0}]' -f ($ts1Lines -join ' | ')))
+Check-RowCommon 'TS1' $row
+# TS2 - F@0 · U@6 (필드 결과 끔 - 필드 모양은 결론 없음) · 한도 20 → 시간 초과 집계의 추적기 = 마지막 F 회전의 판독 'Q<F 판독 수>' (뒤 U 회전은 HUD 가 없어 그대로 둠 -
+#   HUD 없는 회전에서 '' 로 비우는 구현이면 실패)
+Reset-ReentryRow; Set-ScreenPlan @('F', 0, 'U', 6)
+$row = Invoke-ReentryRow @{ Game = $null; LimitSeconds = 20 }
+$ts2FieldReads = @(Get-RecordTimes $row -Screen 'F' -Clean).Count
+$ts2Lines = @(Get-DiagLines $row '시간 초과')
+Check-True "TS2 F@0 · U@6 · 한도 20 → timeout · 끝 분류 unknown · 시간 초과 집계 1줄의 마지막 추적기 = 'Q<F 판독 수>'(≥ 2 · 추적기 판독 수와 같음)" `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'unknown') -and ($ts2FieldReads -ge 2) -and ($script:questReads -eq $ts2FieldReads) -and ($ts2Lines.Count -eq 1) -and
+    $ts2Lines[0].Contains("마지막 추적기 'Q${ts2FieldReads}' · ")) ((Format-RowDetail $row) + (' F={0} 추적기 판독={1} 줄=[{2}]' -f $ts2FieldReads, $script:questReads, ($ts2Lines -join ' | ')))
+Check-RowCommon 'TS2' $row
+# PS7~PS9 - '시간 초과 순간 PromptStreak ≥ 2 면 그 회전이 유효하게 읽은 엄격 S' 라는 보증(설계 6.1 · 6.6 ⓐ - 2026-11-16 다관점 리뷰 P2): 마감이 판독 없는 회전에
+#   걸리면 연속 0 → B 불성립. S 지속으로 앞에서 깨끗한 S ≥ 2(연속을 세움) 뒤, 그 뒤 모든 회전이 ⑦ 같은 회전 복구(PS7 - 하단 판독만 실패) / ④ 스윕 도중 실패→복구
+#   (PS8 - 분류 recovered)이거나, 마감 뒤 첫 판독이 캡처 실패라 ③ 탐침 복구 뒤 회전이 마감을 맞음(PS9) → timeout · 끝 분류 prompt(마지막 유효 분류) · PromptStreak 0
+$psDeadlineArguments = @{ Game = $null; LimitSeconds = 12; ReportRewardReturn = $true; ReportFieldReturn = $true }
+Reset-ReentryRow; Set-ScreenPlan @('S', 0); Set-CaptureAlternate -From 6 -Mode 'sameTurn'
+$row = Invoke-ReentryRow $psDeadlineArguments
+$ps7Before = @(Get-RecordTimes $row -Screen 'S' -Clean -Before 6).Count
+$ps7CleanAfter = @(Get-RecordTimes $row -Clean -NotBefore 6).Count
+Check-True 'PS7 S 지속 · 6초부터 매 회전 같은 회전 복구(하단 판독만 실패) → timeout · 끝 분류 prompt · PromptStreak 0 (앞 깨끗한 S ≥ 2 · 6초 뒤 깨끗한 판독 0)' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'prompt') -and ([int]$row.PromptStreak -eq 0) -and ($ps7Before -ge 2) -and ($ps7CleanAfter -eq 0)) `
+    ((Format-RowDetail $row) + (' PromptStreak={0} 앞S={1} 뒤깨끗={2}' -f $row.PromptStreak, $ps7Before, $ps7CleanAfter))
+Check-RowCommon 'PS7' $row
+Reset-ReentryRow; Set-ScreenPlan @('S', 0); Set-SweepFrom -From 6 -Kind 'recover'
+$row = Invoke-ReentryRow $psDeadlineArguments
+$ps8Before = @(Get-RecordTimes $row -Screen 'S' -Clean -Before 6).Count
+$ps8Recovers = @(@($row.SweepFired) | Where-Object { [string]$_.Kind -eq 'recover' }).Count
+$ps8ReadsAfter = @(Get-RecordTimes $row -NotBefore 6).Count
+Check-True 'PS8 S 지속 · 6초부터 매 회전 스윕 도중 실패→복구(분류 recovered) → timeout · 끝 분류 prompt · PromptStreak 0 (앞 깨끗한 S ≥ 2 · 스윕 복구 ≥ 1 · 6초 뒤 판독 0)' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'prompt') -and ([int]$row.PromptStreak -eq 0) -and ($ps8Before -ge 2) -and ($ps8Recovers -ge 1) -and ($ps8ReadsAfter -eq 0)) `
+    ((Format-RowDetail $row) + (' PromptStreak={0} 앞S={1} 스윕복구={2} 뒤판독={3}' -f $row.PromptStreak, $ps8Before, $ps8Recovers, $ps8ReadsAfter))
+Check-RowCommon 'PS8' $row
+Reset-ReentryRow; Set-ScreenPlan @('S', 0); Add-FailWindow 12.2 14.0
+$row = Invoke-ReentryRow $psDeadlineArguments
+$ps9FailStart = Get-NthTime @(Get-RecordTimes $row -Failed) 1
+$ps9CleanAfter = $(if ([double]::IsNaN($ps9FailStart)) { -1 } else { @(Get-RecordTimes $row -Clean -After $ps9FailStart).Count })
+Check-True 'PS9 S 지속 · 마감(12초) 뒤 첫 판독이 캡처 실패 → 동결 → 탐침 복구 뒤 회전이 마감을 맞음 → timeout · 끝 분류 prompt · PromptStreak 0 (실패 시작 ≥ 12초 · 그 뒤 깨끗한 판독 0)' `
+    (($row.Result -ceq 'timeout') -and ($row.LastKind -ceq 'prompt') -and ([int]$row.PromptStreak -eq 0) -and ($ps9FailStart -ge 12) -and ($ps9CleanAfter -eq 0)) `
+    ((Format-RowDetail $row) + (' PromptStreak={0} 실패시작={1} 뒤깨끗={2}' -f $row.PromptStreak, $ps9FailStart, $ps9CleanAfter))
+Check-RowCommon 'PS9' $row
 
 # ── §8 정적 (명세 3.5 - 주석 제거 사본 · AST · 뜻 판정. R5-P14 다섯 식(구현 명세 ⑤c 부터 재개 유예 판정 Resolve-AbyssResumeGrace 의 if 다섯 · 소스 차례) · R5-P2 Resume 자리 · N4-P10 생성 두 문장 · R5-P7 우변 '0' 은 구현 형상 계약 -
 #    같은 뜻의 다른 꼴을 택하면 그 단언을 구현과 함께 갱신) ───────────────────────────────────────────────────────────────────────────
@@ -3019,8 +3186,9 @@ $resumeSites = @($resumeNodes | ForEach-Object {
         }
     })
 $r5p2Actual = '생성=[{0}] while 앞 {1} · while 안 금지 명령 {2} · Add* {3} · while 안 Resume {4} · 자리=[{5}]' -f ($clockNewTargets -join ','), $clockNewBeforeWhile, $whileForbiddenCommands, $whileAddCalls, $resumeNodes.Count, ($resumeSites -join ' | ')
-$r5p2Expected = "생성=[insideGraceClock(정지),quietClock,reentryClock] while 앞 3 · while 안 금지 명령 0 · Add* 0 · while 안 Resume 1 · 자리=[Resume-AbyssMemberClock -Clock `$insideGraceClock ⇐ (`$graceWindow -eq 'inside-first') -or (`$graceWindow -eq 'reverted') · 본문 1문장 · 절 1 · 유예 갈래 안 True]"
-Check-Equal 'R5-P2 시계 - 생성 3(본 시계 식 안 · 무변화 · 정지 유예) 모두 while 앞 · while 안 Set·Suspend·마감 조정·생성·AddSeconds·AddMilliseconds 0 · while 안 Resume 1(⑩ resume 유예 갈래의 두 잎 if - inside-first ∨ reverted, 인자 -Clock $insideGraceClock - 구현 명세 ⑤c 2.5)' $r5p2Actual $r5p2Expected
+# 재입장대기_클리어화면 A3(2026-11-16): 중간 진단 시계 diagClock 이 넷째 생성(while 앞 · 진행 - 판정 무관 · 진단 캡처 1회의 조정 시간만 잼)
+$r5p2Expected = "생성=[diagClock,insideGraceClock(정지),quietClock,reentryClock] while 앞 4 · while 안 금지 명령 0 · Add* 0 · while 안 Resume 1 · 자리=[Resume-AbyssMemberClock -Clock `$insideGraceClock ⇐ (`$graceWindow -eq 'inside-first') -or (`$graceWindow -eq 'reverted') · 본문 1문장 · 절 1 · 유예 갈래 안 True]"
+Check-Equal 'R5-P2 시계 - 생성 4(본 시계 식 안 · 무변화 · 정지 유예 · 중간 진단) 모두 while 앞 · while 안 Set·Suspend·마감 조정·생성·AddSeconds·AddMilliseconds 0 · while 안 Resume 1(⑩ resume 유예 갈래의 두 잎 if - inside-first ∨ reverted, 인자 -Clock $insideGraceClock - 구현 명세 ⑤c 2.5)' $r5p2Actual $r5p2Expected
 
 # R5-P3·R5-P4 - 관찰 전용: 이벤트 정리·X 후보·키·클릭 루프·나가기·복귀·안전 중지 파일·시간 지정·journal·클릭 0 · exit 0
 $R5P3_PATTERNS = [ordered]@{
@@ -3315,7 +3483,9 @@ Check-True "N4-P5 waiter 안 `$script: 대입 = 정확히 1 (`$script:lastClickS
 $WAITER_COMMANDS_EXPECTED = @('ForEach-Object', 'Get-AbyssPanelKind', 'Get-Date', 'Invoke-PurchasePopupSweep', 'New-AbyssMemberClock', 'Resolve-AbyssHandoffStartScreen',
     'Resolve-AbyssMemberSweepTurn', 'Resolve-AbyssReentryVerdict', 'Resume-AbyssMemberClock', 'Select-Object', 'Start-Sleep', 'Test-AbyssMemberClockExpired',
     'Test-CaptureRecovered', 'Test-DungeonClearPrompt', 'Test-HomeEndEscHud', 'Test-InDungeonQuest', 'Test-SafeStopDuringCaptureFail', 'Test-UserRecentlyActive',
-    'Wait-UserYieldEnd', 'Where-Object', 'Write-RunLog', 'Step-AbyssFieldSettle', 'Test-AbyssSelectionScreen', 'Test-AbyssMenu', 'Resolve-AbyssResumeGrace')
+    'Wait-UserYieldEnd', 'Where-Object', 'Write-RunLog', 'Step-AbyssFieldSettle', 'Test-AbyssSelectionScreen', 'Test-AbyssMenu', 'Resolve-AbyssResumeGrace',
+    # 재입장대기_클리어화면(2026-11-16) +5: 클리어 화면 확신 단계 · 점수표 판독 · 점수표 서명(엄격 클리어 화면 연속 - 결과 PromptStreak) · 진단 집계 줄 · 중간 진단 캡처
+    'Get-AbyssClearPromptTextLevel', 'Read-AbyssClearScoreText', 'Test-AbyssClearScoreText', 'Format-AbyssReentryDiagSummary', 'Write-LifeDiagnostics')
 $waiterCommandSet = @($waiterNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 $expectedCommandSet = @($WAITER_COMMANDS_EXPECTED | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 Check-Equal "N4-P6 waiter 명령 이름 집합 = 정확히 $($WAITER_COMMANDS_EXPECTED.Count)개(허용 집합) · 순수 판정 명령 0" `
@@ -3336,9 +3506,10 @@ $breakProblems = @($breakNodes | Where-Object {
         }
         $blocked -or ($null -eq $breakParent)
     }).Count
-Check-Equal 'N4-P8 return 1(함수 본문 끝 문장 · 해시 키 {Result, LastKind, PanelSeen}) · break 2(while 안 · 사이 루프·switch 0) · while 1($true)' `
+# 재입장대기_클리어화면(2026-11-16): 결과 키에 PromptStreak(끝의 엄격 클리어 화면 연속 - 원 워커 호출 B 의 시간 초과 갈래가 읽음)
+Check-Equal 'N4-P8 return 1(함수 본문 끝 문장 · 해시 키 {Result, LastKind, PanelSeen, PromptStreak}) · break 2(while 안 · 사이 루프·switch 0) · while 1($true)' `
     ('return {0} · 키=[{1}] · break {2}(어긋남 {3}) · while {4}({5})' -f $waiterReturns.Count, $returnKeys, $breakNodes.Count, $breakProblems, $waiterWhiles.Count, $(if ($null -ne $waiterWhile) { Get-NodeCode $waiterWhile.Condition } else { '' })) `
-    'return 1 · 키=[LastKind,PanelSeen,Result] · break 2(어긋남 0) · while 1($true)'
+    'return 1 · 키=[LastKind,PanelSeen,PromptStreak,Result] · break 2(어긋남 0) · while 1($true)'
 
 # N4-P9 - S2 글자·채움 대응(뜻): waiter S2 를 채움 자리로 자른 고정 조각 열 = S2 고정 조각 열(-ceq · 여섯) · i 번째 채움 변수 이름 = 고정 채움 i 번째(다섯 · 대소문자
 #   무관). 구현 단위 ⑤a 부터 선분기 S2 가 없어 대조 대상이 고정 문구 상수입니다(설계 R4 3.7 - 위 '정적 전제' 의 상수)
@@ -3524,10 +3695,12 @@ $logKinds = @($waiterLogNodes | ForEach-Object {
         elseif (($logElements[1] -is [StringConstantExpressionAst]) -and ([string]$logElements[1].Value -ceq $NOTICE_FULL_TEXT)) { '안내' }
         elseif (($logElements[1] -is [StringConstantExpressionAst]) -and ([string]$logElements[1].Value -ceq $PANEL_NOTICE_TEXT)) { '패널' }
         elseif (($logElements[1] -is [ExpandableStringExpressionAst]) -and ([string]$logElements[1].Value).StartsWith($SETTLE_LINE_PREFIX, [StringComparison]::Ordinal)) { '필드 확정' }
+        elseif (($logElements[1] -is [ParenExpressionAst]) -and (@($logElements[1].FindAll({ param($candidate) ($candidate -is [CommandAst]) -and ($candidate.GetCommandName() -eq 'Format-AbyssReentryDiagSummary') }, $true)).Count -eq 1)) { '진단 집계' }
         else { '그 밖' }
     } | Sort-Object)
-Check-Equal "N4-P14 waiter 안 Write-RunLog = 정확히 4 · 인자 하나씩 - S2 확장 문자열 1 · '$NOTICE_FULL_TEXT' 1 · '$PANEL_NOTICE_TEXT' 1 · 필드 확정 줄 1 · 그 밖 0 (결과 줄은 호출부 문구)" `
-    ('Write-RunLog {0} = [{1}]' -f $waiterLogNodes.Count, ($logKinds -join ',')) ('Write-RunLog 4 = [{0}]' -f ((@('S2', '안내', '패널', '필드 확정') | Sort-Object) -join ','))
+# 재입장대기_클리어화면 A2·A3(2026-11-16) +2: 진단 집계 줄(중간 1 · 시간 초과 1 - 인자 = Format-AbyssReentryDiagSummary 괄호식, '[진단]' 머리라 컨트롤 패널 창에는 숨김)
+Check-Equal "N4-P14 waiter 안 Write-RunLog = 정확히 6 · 인자 하나씩 - S2 확장 문자열 1 · '$NOTICE_FULL_TEXT' 1 · '$PANEL_NOTICE_TEXT' 1 · 필드 확정 줄 1 · 진단 집계 2 · 그 밖 0 (결과 줄은 호출부 문구)" `
+    ('Write-RunLog {0} = [{1}]' -f $waiterLogNodes.Count, ($logKinds -join ',')) ('Write-RunLog 6 = [{0}]' -f ((@('S2', '안내', '패널', '필드 확정', '진단 집계', '진단 집계') | Sort-Object) -join ','))
 
 # ── §8b 구현 단위 5b-8 정적 FC-S (명세 5b-8 3.3 · 3.7a - 주석 뺀 사본 · AST). 행이 못 잡는 등가 변이와 배선 꼴을 고정합니다 - 같은 뜻의 다른 꼴을 택하면 구현과 함께 갱신.
 #    끝(retry) 갈래 · exit · 재생 사본은 §10 정적(FC-S15 · FC-S16 · FC-S19) ──
@@ -3627,8 +3800,9 @@ Check-Equal "FC-S6 `$fieldAt 대입 정확히 2 - 서두(`$turnStart = Get-Date 
 # FC-S7 (2.2-5 · R5 2.1 ⑥) - ⑥ 간접 양보 갈래 하나 · 본문 = 되돌림 if · 던전 안 연속 끊음 · 필드 연속 끊음 · 필드 표본 시각 = 양보 뒤 (선분기는 필드 연속을 끊지 않음 - ⑱′ WA-F7)
 $fcIndirectIfs = @($waiterNode.FindAll({ param($candidate) ($candidate -is [IfStatementAst]) -and ((Get-NodeCode $candidate.Clauses[0].Item1) -ceq '[double]$script:userYieldTotalMs -ne $turnYieldMs') }, $true))
 $fcIndirectBody = $(if ($fcIndirectIfs.Count -eq 1) { (@($fcIndirectIfs[0].Clauses[0].Item2.Statements | ForEach-Object { Get-NodeCode $_ })) -join ' ; ' } else { '(⑥ if {0}개)' -f $fcIndirectIfs.Count })
-Check-Equal 'FC-S7 ⑥ 간접 양보 본문 - 되돌림 if · 던전 안 연속 끊음 · 필드 연속 끊음 · 필드 표본 시각 = 양보 뒤 새 시각' $fcIndirectBody `
-    'if ($insideStreak -gt 0) { $insideGraceRun = 0; $insideGraceReverted = $true } ; $insideStreak = 0 ; $settleAlive = $false ; $fieldAt = Get-Date'
+# 재입장대기_클리어화면(2026-11-16): 클리어 화면 연속도 끊음($promptStreak = 0 - 던전 안 연속과 같은 끊김 규칙)
+Check-Equal 'FC-S7 ⑥ 간접 양보 본문 - 되돌림 if · 던전 안 연속 끊음 · 클리어 화면 연속 끊음 · 필드 연속 끊음 · 필드 표본 시각 = 양보 뒤 새 시각' $fcIndirectBody `
+    'if ($insideStreak -gt 0) { $insideGraceRun = 0; $insideGraceReverted = $true } ; $insideStreak = 0 ; $promptStreak = 0 ; $settleAlive = $false ; $fieldAt = Get-Date'
 
 # FC-S8 (2.2-6) - Step-AbyssFieldSettle 호출 하나 = 선분기 호출에서 -TurnStart 만 $fieldAt(소스 캡처) · 감싼 조건(필드 if · ⑦ 유효 else · ⑥~⑨ if) · 평가 차례 ⑧ 분류 < Step < ⑨ 결론
 $fcStepCalls = @(Get-CommandNodes -Node $waiterNode -Name 'Step-AbyssFieldSettle')
@@ -3745,8 +3919,9 @@ if ($fcReadIf.Count -eq 1) {
     $fcSwitchBody = $(if ($fcSwitchIf.Count -eq 1) { (@($fcSwitchIf[0].Clauses[0].Item2.Statements | ForEach-Object { Get-NodeCode $_ })) -join ' ; ' } else { '(필드 결과 if {0})' -f $fcSwitchIf.Count })
     $fcReadShape = '차례=[{0}] · 필드 결과 if=[{1}]' -f ((@($fcReadStatements | ForEach-Object { Get-StatementHead $_ })) -join ','), $fcSwitchBody
 }
+# 재입장대기_클리어화면 7.4(2026-11-16): 하단 판독 바로 뒤 클리어 화면 확신 단계 · 점수표 판독(하단이 weak 일 때만 - ⑤ 안이라 ⑦ 유효성이 덮음)
 Check-Equal "FC-S21 ⑤ 판독 if(try 안) 차례 · 필드 결과 if(앞 분류 · 'field' 일 때 선택 화면 → 메뉴 · 상세 없음)" $fcReadShape `
-    ("차례=[promptNow,bottomText,panelKind,hudNow,questNow,selectionNow,menuNow,if `$ReportFieldReturn] · 필드 결과 if=[`$earlyScreen = Resolve-AbyssHandoffStartScreen -PromptVisible `$promptNow -BottomText `$bottomText " +
+    ("차례=[promptNow,bottomText,promptLevel,promptScoreOk,if `$promptNow -and (`$promptLevel -eq 'weak'),panelKind,hudNow,questNow,selectionNow,menuNow,if `$ReportFieldReturn] · 필드 결과 if=[`$earlyScreen = Resolve-AbyssHandoffStartScreen -PromptVisible `$promptNow -BottomText `$bottomText " +
         "-PanelKind `$panelKind -HudVisible `$hudNow -InDungeonQuest `$questNow ; if (`$earlyScreen -eq 'field') { `$selectionNow = Test-AbyssSelectionScreen -Game `$Game if (-not `$selectionNow) { `$menuNow = Test-AbyssMenu -Game `$Game } }]")
 
 # ── §9 ⑤b3 '다른 던전 가기' 대기 · 끝 함수 - 행(대기 66 · 끝 33) · 정적(R6-P · R5-P · SEL · WAIT 의 other 몫 22) (구현 명세 ⑤b3 2.2 · 3.1 · 3.2 - 비교는 -ceq) ──
@@ -4971,6 +5146,15 @@ Invoke-Expression $retryFinishDefinition
 Invoke-Expression $retryInsideDefinition
 Invoke-Expression $retryNoneDefinition
 Invoke-Expression $retryFieldCancelDefinition
+# 추론 재입장 끝(재입장대기_클리어화면 7.1 - 끝(retry) 'timeout' 갈래가 부름) - exit 없음(재입장 완료 끝으로 넘기거나 표지 저장 실패면 돌아감)이라 원문 그대로 올립니다
+if (-not $workerFunctions.ContainsKey('Complete-AbyssPromptTimeoutHandoff')) { 'FAIL 준비: 워커 최상위에 Complete-AbyssPromptTimeoutHandoff 이(가) 없습니다'; exit 1 }
+if (@($workerFunctions['Complete-AbyssPromptTimeoutHandoff'].FindAll({ param($candidate) $candidate -is [ExitStatementAst] }, $true)).Count -gt 0) { 'FAIL 준비: Complete-AbyssPromptTimeoutHandoff 안에 exit - 원문 그대로 올릴 수 없습니다'; exit 1 }
+Invoke-Expression ([string]$workerFunctions['Complete-AbyssPromptTimeoutHandoff'].Extent.Text)
+# 추론 재입장 안내 줄 접두 - 원문 Complete-AbyssPromptTimeoutHandoff 안 문자열에서 정확히 1곳인지 확인(행 PT1 이 그 줄 수를 셈)
+$RETRY_LINE_PT_HANDOFF_PREFIX = '[어비스] 재입장 대기 끝에 새 판의 클리어 화면'
+$ptHandoffLineNodes = @($workerFunctions['Complete-AbyssPromptTimeoutHandoff'].FindAll({ param($candidate) (($candidate -is [StringConstantExpressionAst]) -or ($candidate -is [ExpandableStringExpressionAst])) -and
+            ([string]$candidate.Value).StartsWith($RETRY_LINE_PT_HANDOFF_PREFIX, [StringComparison]::Ordinal) }, $true))
+if ($ptHandoffLineNodes.Count -ne 1) { "FAIL 준비: 추론 재입장 안내 줄 접두가 원문에 $($ptHandoffLineNodes.Count)곳입니다 (1곳이어야 함)"; exit 1 }
 
 # 화면 약어 → 판독값 (명세 2.2). 하단 판독문은 §4 $SCREEN_TABLE 의 실측 문자열 그대로(R · M · I · U)이거나 그 문자열에서 조각 하나를 뺀 변형입니다
 #   (Rr = R 의 '다세하기' 뺌 - 3버튼 서명 참 · '다시 하기' 점 없음 · '다른 던전 가기' 점 있음). S = 선택 화면(보상 위 오버레이 - 하단 '' · §9 의 S 와 같음).
@@ -5137,6 +5321,7 @@ function Invoke-RetryStoreCall {
     if ($writerName -ceq 'Set-AbyssJournalRetryAttempt') { $storeStage = 'retry-attempt' }
     elseif ($writerName -ceq 'Set-AbyssJournalRetryClicked') { $storeStage = 'retry-clicked' }
     elseif ($writerName -ceq 'Set-AbyssJournalReentered') { $storeStage = 'reentered' }
+    elseif ($writerName -ceq 'Set-AbyssJournalReenteredBy') { $storeStage = 'reentered-by' }   # 재입장대기_클리어화면 7.1 - 단계는 안 바꾸고 reenteredBy 칸만 씀
     $nonceSeen = $null
     if (($null -ne $writerFrame.InvocationInfo) -and $writerFrame.InvocationInfo.BoundParameters.ContainsKey('Nonce')) { $nonceSeen = [string]$writerFrame.InvocationInfo.BoundParameters['Nonce'] }
     $storeRecord = [pscustomobject]@{ T = (Get-VirtualElapsed); Stage = $storeStage; Nonce = $nonceSeen; At = (Get-Date).ToString('o'); Tag = ''; Injected = $false }
@@ -5240,7 +5425,10 @@ function Get-RetryJournalProblems {
     if ($State.Leftovers -ne 0) { $problemList.Add(('잠금 · 임시본 {0}' -f $State.Leftovers)) }
     if ($State.HasBak -ne ($changedRecords.Count -gt 0)) { $problemList.Add(('직전본 {0}' -f $State.HasBak)) }
     if (($null -eq $State.Target) -or ($null -eq $Seed.Target)) { $problemList.Add('이 판 항목 없음'); return $problemList.ToArray() }
-    $wantStage = $(if ($null -ne $lastChanged) { [string]$lastChanged.Stage } else { [string]$Seed.Target.stage })
+    # 단계 = 마지막 changed 단계 쓰기(재입장대기_클리어화면 7.1 의 표지 쓰기 'reentered-by' 는 단계를 바꾸지 않아 빼고 봄)
+    $stageChanged = @($changedRecords | Where-Object { $_.Stage -ne 'reentered-by' })
+    $lastStageChanged = $(if ($stageChanged.Count -gt 0) { $stageChanged[$stageChanged.Count - 1] } else { $null })
+    $wantStage = $(if ($null -ne $lastStageChanged) { [string]$lastStageChanged.Stage } else { [string]$Seed.Target.stage })
     if ([string]$State.Target.stage -cne $wantStage) { $problemList.Add(('단계 {0} ≠ {1}' -f $State.Target.stage, $wantStage)) }
     $wantAttempts = [int]$Seed.Target.attempts + @($changedRecords | Where-Object { $_.Stage -eq 'retry-attempt' }).Count
     $wantClicks = [int]$Seed.Target.retryClicks + @($changedRecords | Where-Object { $_.Stage -eq 'retry-clicked' }).Count
@@ -5253,6 +5441,10 @@ function Get-RetryJournalProblems {
     $expectTarget = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $Seed.Target -Depth 10 -Compress)
     foreach ($copyField in @('stage', 'attempts', 'retryClicks')) { $expectTarget.$copyField = $State.Target.$copyField }
     foreach ($copyAt in @('retryAttempt', 'retryClicked', 'reentered')) { $expectTarget.at.$copyAt = $State.Target.at.$copyAt }
+    # 표지 칸 reenteredBy = changed 표지 쓰기가 있을 때만 생김(그 값을 옮겨 봄 - 값 자체는 행이 TargetReenteredBy 로 단언). 쓰기 없이 생긴 칸은 아래 비교가 '그 밖 필드 바뀜' 으로 잡음
+    if ((@($changedRecords | Where-Object { $_.Stage -eq 'reentered-by' }).Count -gt 0) -and ($null -ne $State.Target.PSObject.Properties['reenteredBy'])) {
+        Add-Member -InputObject $expectTarget -NotePropertyName 'reenteredBy' -NotePropertyValue $State.Target.reenteredBy -Force
+    }
     if ((ConvertTo-Json -InputObject $State.Target -Depth 10 -Compress) -cne (ConvertTo-Json -InputObject $expectTarget -Depth 10 -Compress)) { $problemList.Add('이 판 항목의 그 밖 필드 바뀜') }
     return $problemList.ToArray()
 }
@@ -5269,7 +5461,8 @@ function Invoke-RetryReentryCall {
         if ([bool]$reentryStub.SetF9) { $script:safeStopFlagMock = $true }
         $reentryRecord.Result = [string]$reentryStub.Result
         $reentryRecord.End = Get-VirtualElapsed
-        return @{ Result = [string]$reentryStub.Result; LastKind = [string]$reentryStub.LastKind; PanelSeen = [bool]$reentryStub.PanelSeen }
+        # PromptStreak = 끝의 엄격 클리어 화면 연속(재입장대기_클리어화면 7.1 - 스텁에 없으면 0 · 'timeout' 갈래의 추론 재입장 조건 입력)
+        return @{ Result = [string]$reentryStub.Result; LastKind = [string]$reentryStub.LastKind; PanelSeen = [bool]$reentryStub.PanelSeen; PromptStreak = [int]$reentryStub.PromptStreak }
     }
     $script:retryInWaiter++
     try {
@@ -5318,7 +5511,8 @@ function Invoke-RetryTestPathStub {
 $RETRY_JOURNAL_NAMES = @('Set-AbyssJournalRetryAttempt', 'Set-AbyssJournalRetryClicked', 'Set-AbyssJournalReentered', 'New-AbyssJournalEmpty', 'New-AbyssJournalEntry',
     'Get-AbyssJournalTimeText', 'Set-AbyssJournalProperty', 'Test-AbyssJournalShape', 'ConvertTo-AbyssJournalNormalized', 'ConvertTo-AbyssJournalText', 'New-AbyssJournalTempPath',
     'Write-AbyssJournalTempFile', 'Remove-AbyssJournalFileQuietly', 'Step-AbyssJournalBudget', 'Open-AbyssJournalLock', 'Read-AbyssJournalCandidate', 'Read-AbyssJournalUnlocked',
-    'Read-AbyssJournalHeld')
+    'Read-AbyssJournalHeld',
+    'Set-AbyssJournalReenteredBy')   # 추론 재입장 표지 쓰기(재입장대기_클리어화면 7.1 - 저장 경계 감시가 단계 'reentered-by' 로 기록)
 $retryJournalKnown = @($RETRY_JOURNAL_NAMES + @('Update-AbyssJournal', 'Write-RunLog'))
 $retryJournalOutside = @(foreach ($journalName in @($RETRY_JOURNAL_NAMES + @('Update-AbyssJournal'))) {
         if (-not $workerFunctions.ContainsKey($journalName)) { "$journalName(워커에 없음)"; continue }
@@ -5498,7 +5692,8 @@ function Invoke-RetryRow {
     $entry = $(if ($Spec.Entry) { [string]$Spec.Entry } else { 'retry' })
     try {
         if ($entry -eq 'retry') {
-            $retryOut = @(Complete-AbyssRetrySelection -Game $null -Nonce $RETRY_NONCE)
+            # -PriorSends = 재개 워커가 넘기는 그 판의 앞 전송 수(Complete-AbyssResumeWait → 호출 D - 행 PT4). 행이 주지 않으면 0 = 원 워커(기본값과 같음)
+            $retryOut = @(Complete-AbyssRetrySelection -Game $null -Nonce $RETRY_NONCE -PriorSends ([int]$Spec.PriorSends))
             $rowReturn = ($retryOut | ForEach-Object { [string]$_ }) -join ','
         } elseif ($entry -eq 'other') {
             $ending = $(if ($Spec.Ending) { [string]$Spec.Ending } else { 'ready' })
@@ -5521,6 +5716,7 @@ function Invoke-RetryRow {
     $journalRecords = $script:retryJournal.ToArray()
     return [pscustomobject]@{
         JournalText = (Format-RetryJournal -State $journalState -Records $journalRecords); JournalProblems = @(Get-RetryJournalProblems -Seed $script:retryJournalSeedState -State $journalState -Records $journalRecords)
+        TargetReenteredBy = $(if ($null -ne $journalState.Target) { [string]$journalState.Target.reenteredBy } else { '(항목 없음)' })   # 재입장대기_클리어화면 7.1 - 실제 파일의 표지 칸
         Exit = $rowExit; Error = $rowError; Return = $rowReturn; Click = $rowClickResult; ClickLast = $rowClickLast; Shape = $rowShape; T = (Get-VirtualElapsed)
         Logs = $rowLogs; Last = $lastLog
         Clicks = $script:retryClicks.ToArray(); RetrySends = @($script:retryClicks | Where-Object { $_.Kind -eq 'retry' }).Count; OtherSends = @($script:retryClicks | Where-Object { $_.Kind -eq 'other' }).Count
@@ -5716,6 +5912,26 @@ $RETRY_ROWS = [ordered]@{
         Expect = { param($Row) ($Row.Exit -ceq '__EXIT__11') -and (@($Row.Logs) -ccontains ($RETRY_LINE_CONTINUE_FORMAT -f '00:30')) } }
     'K15a'   = @{ Desc = "commit 뒤 B2 'timeout' → 'none' 행 코드 4 · 시간 줄 ③ 0 · 11 0"; Spec = @{ Timeline = @(,@(0, 'R')); Until = 1000; Verdict0 = 'continue'; ReentryStubs = @(, @{ Result = 'timeout'; LastKind = 'unknown' }) }
         Expect = { param($Row) ($Row.Exit -ceq '__EXIT__4') -and ($Row.ContinueLines -eq 0) -and ($Row.IhLines -eq 0) } }
+    # 재입장대기_클리어화면 7.1(2026-11-16) - B2 'timeout' 이지만 끝 분류 prompt ∧ 엄격 연속 2 → 추론 재입장 끝(표지 저장 → 진단 · 안내 줄 → 재입장 완료). 실제 파일에 표지 칸
+    'PT1'    = @{ Desc = "commit 뒤 B2 'timeout' · 끝 분류 prompt · 엄격 연속 2 → 표지 저장(reentered-by) → 진단 1 · 안내 줄 1 → 재입장 완료(reentered · 표지 줄 1) · 코드 11 · 정지 줄 0 · 실제 파일 표지 칸 prompt-timeout"
+        Spec = @{ Timeline = @(,@(0, 'R')); Until = 1000; Verdict0 = 'continue'; ReentryStubs = @(, @{ Result = 'timeout'; LastKind = 'prompt'; PanelSeen = $true; PromptStreak = 2 }) }
+        Expect = { param($Row) ($Row.Exit -ceq '__EXIT__11') -and ($Row.IhLines -eq 1) -and ($Row.TargetReenteredBy -ceq 'prompt-timeout') -and ($Row.Diags -eq 1) -and
+            (@($Row.Logs | Where-Object { $_.StartsWith($RETRY_LINE_PT_HANDOFF_PREFIX, [StringComparison]::Ordinal) }).Count -eq 1) -and
+            (@($Row.Logs | Where-Object { $_.StartsWith('[완료] ', [StringComparison]::Ordinal) -and (-not $_.Contains('[terminal=InsideHandoff')) }).Count -eq 0) } }
+    'PT2'    = @{ Desc = "commit 뒤 B2 'timeout' · 끝 분류 prompt · 엄격 연속 1 → 추론 없음 · 'none' 행 코드 4 · 표지 쓰기 0 · 재입장 완료 0"
+        Spec = @{ Timeline = @(,@(0, 'R')); Until = 1000; Verdict0 = 'continue'; ReentryStubs = @(, @{ Result = 'timeout'; LastKind = 'prompt'; PanelSeen = $true; PromptStreak = 1 }) }
+        Expect = { param($Row) ($Row.Exit -ceq '__EXIT__4') -and ($Row.IhLines -eq 0) -and ($Row.TargetReenteredBy -ceq '') -and (@($Row.Journal | Where-Object { $_.Stage -eq 'reentered-by' }).Count -eq 0) } }
+    'PT3'    = @{ Desc = "commit 뒤 B2 'timeout' · 끝 분류 prompt · 엄격 연속 2 · 표지 저장 'locked' → [경고](파일 사용 중) 1 · 'none' 행 코드 4 · 재입장 완료 0 · 표지 칸 없음 · 진단 1(시간 초과)"
+        Spec = @{ Timeline = @(,@(0, 'R')); Until = 1000; Verdict0 = 'continue'; ReentryStubs = @(, @{ Result = 'timeout'; LastKind = 'prompt'; PanelSeen = $true; PromptStreak = 2 }); StoreInject = @{ 'reentered-by' = @('locked') } }
+        Expect = { param($Row) ($Row.Exit -ceq '__EXIT__4') -and ($Row.IhLines -eq 0) -and ($Row.TargetReenteredBy -ceq '') -and ($Row.Diags -eq 1) -and
+            (@($Row.Logs | Where-Object { $_.StartsWith('[경고] 클리어 화면 추론 표지를 저장하지 못했습니다 (파일 사용 중)', [StringComparison]::Ordinal) }).Count -eq 1) -and
+            (@($Row.Logs | Where-Object { $_.StartsWith($RETRY_LINE_PT_HANDOFF_PREFIX, [StringComparison]::Ordinal) }).Count -eq 0) } }
+    # 재입장대기_클리어화면 8.9(2026-11-16 · 설계 합의) - 재개 워커의 재클릭 뒤 대기(호출 D)도 같은 함수라 B 가 섭니다(역할 조건 없음 - 의도). 실제 Role resume ·
+    #   씨앗 retry-attempt(그 판 항목) · 앞 전송 1(-PriorSends - 남은 클릭 1). 역할로 막는 변이(Role -ne 'resume')는 이 행이 잡습니다
+    'PT4'    = @{ Desc = "재개 워커 호출 D 꼴(Role resume · 항목 retry-attempt · 앞 전송 1) → 재클릭 전송 1 → B2 'timeout' · 끝 분류 prompt · 엄격 연속 2 → 표지 저장 → 진단 1 · 안내 줄 1 → 재입장 완료 · 코드 11 · 실제 파일 표지 칸 prompt-timeout"
+        Spec = @{ Role = 'resume'; PriorSends = 1; Timeline = @(,@(0, 'R')); Until = 1000; Verdict0 = 'continue'; ReentryStubs = @(, @{ Result = 'timeout'; LastKind = 'prompt'; PanelSeen = $true; PromptStreak = 2 }) }
+        Expect = { param($Row) ($Row.Exit -ceq '__EXIT__11') -and ($Row.RetrySends -eq 1) -and ($Row.IhLines -eq 1) -and ($Row.TargetReenteredBy -ceq 'prompt-timeout') -and ($Row.Diags -eq 1) -and
+            (@($Row.Logs | Where-Object { $_.StartsWith($RETRY_LINE_PT_HANDOFF_PREFIX, [StringComparison]::Ordinal) }).Count -eq 1) } }
     'K15b'   = @{ Desc = "commit 뒤 B2 'cancelled' → '다른 던전 가기' rematch-cancelled · 코드 4 · 시간 줄 ③ 0 · 11 0"; Spec = @{ Timeline = @(,@(0, 'R')); Until = 1000; Verdict0 = 'continue'; ReentryStubs = @(, @{ Result = 'cancelled'; LastKind = 'reward3'; PanelSeen = $true }) }
         Expect = { param($Row) ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $OTHER_DONE_CANCELLED) -and ($Row.ContinueLines -eq 0) -and ($Row.IhLines -eq 0) } }
     'K15c'   = @{ Desc = "commit 뒤 'reclick' 두 번 → 폴백 ① 복귀 완료 · 코드 0 · 시간 줄 ③ 0 · 11 0"
@@ -5885,10 +6101,10 @@ $RETRY_ROWS = [ordered]@{
         Expect = { param($Row) $reentryCall = @($Row.Reentry)[0]
             ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_DONE_FIELD_CANCELLED) -and ($Row.DoneLines -eq 1) -and ($Row.Inputs -eq 0) -and ($reentryCall.Result -ceq 'field-cancelled') -and ($Row.PanelLines -eq 0) -and ($Row.SettleLines -eq 1) -and
             ($Row.RetrySends -eq 1) -and ($Row.OtherSends -eq 0) -and ($Row.Diags -eq 0) -and (Test-RetryFieldSettleLine $Row) } }
-    'FC-X6'  = @{ Desc = "(명세 0.4 보고 끔 호출 그대로) 폴백 ② 호출 E · 우연한 만남 · 원문 대기 · 재매칭 패널(M) → 필드 모양(F) 지속 → 필드 결과 끔이라 확정이 결론 아님 → 모드 예산(`$timeoutPartyMatch) 뒤 'timeout' · 'none' 행 우연한 만남 문구 · 진단 1 · 패널 확인 줄 0(보고 끔) · 필드 확정 줄 0"
+    'FC-X6'  = @{ Desc = "(명세 0.4 보고 끔 호출 그대로) 폴백 ② 호출 E · 우연한 만남 · 원문 대기 · 재매칭 패널(M) → 필드 모양(F) 지속 → 필드 결과 끔이라 확정이 결론 아님 → 모드 예산(`$timeoutPartyMatch) 뒤 'timeout' · 'none' 행 우연한 만남 문구 · 진단 2(재입장 대기 중간 진단 1 - 재입장대기_클리어화면 A3 + 시간 초과 1) · 패널 확인 줄 0(보고 끔) · 필드 확정 줄 0"
         Spec = @{ Mode = 'party'; Entry = 'other'; Recorded0 = $true; OtherStub = $RETRY_OTHER_NOPAIR; HelperResult = 'matching'; Timeline = @(@(0, 'M'), @(5, 'F')) }
         Expect = { param($Row) $reentryCall = @($Row.Reentry)[0]
-            ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_NONE_PARTY) -and ($Row.Diags -eq 1) -and (@($Row.Reentry).Count -eq 1) -and (-not $reentryCall.Report) -and (-not $reentryCall.ReportField) -and
+            ($Row.Exit -ceq '__EXIT__4') -and ($Row.Last -ceq $RETRY_NONE_PARTY) -and ($Row.Diags -eq 2) -and (@($Row.Reentry).Count -eq 1) -and (-not $reentryCall.Report) -and (-not $reentryCall.ReportField) -and
             ($reentryCall.Result -ceq 'timeout') -and (([double]$reentryCall.End - [double]$reentryCall.T) -ge ($timeoutPartyMatch - $TIME_EPSILON)) -and ($Row.PanelLines -eq 0) -and ($Row.SettleLines -eq 0) } }
     'FC-X7'  = @{ Desc = "(1-I ② 1차 재현 - 사고 케이스 · run_20261028_h21m01s11.log:44-54) 패널 +0.3 · 로딩 +3 · 필드 모양 +8 + 그 판의 조작 양보 셋(+2~+5 · +9~+13 · +21~+36) → ② 양보가 필드 연속을 끊고 양보 끝부터 다시 W → 'field-cancelled' (양보 시간은 W 에 들지 않음 - 규칙 4). 고치기 전 워커는 300 + 양보 합 뒤 'none' 행(실기 323초 꼴)"
         Spec = @{ Mode = 'party'; Timeline = @(,@(0, 'R')); RetrySend = @{ 1 = @(@(0.3, 'M'), @(3, 'U'), @(8, 'F')) }; Active = $RETRY_FIELD_INCIDENT_ACTIVE }
@@ -5925,6 +6141,9 @@ $RETRY_JOURNAL_EXPECT = [ordered]@{
     'K4'        = 'retry-attempt:changed | retry-attempt/1/0 | seq 6'
     'K9'        = 'retry-attempt:changed retry-clicked:changed retry-clicked:changed reentered:changed | reentered/1/2 | seq 9'
     'K15b'      = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
+    'PT1'       = 'retry-attempt:changed retry-clicked:changed reentered-by:changed reentered:changed | reentered/1/1 | seq 9'   # 재입장대기_클리어화면 7.1 - 표지 먼저 · 단계 나중
+    'PT2'       = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
+    'PT3'       = 'retry-attempt:changed retry-clicked:changed reentered-by:locked* | retry-clicked/1/1 | seq 7'
     'WA-S7'     = 'retry-attempt:changed retry-clicked:changed | retry-clicked/1/1 | seq 7'
     'WA-X4'     = 'retry-attempt:changed retry-clicked:changed retry-clicked:changed reentered:changed | reentered/1/2 | seq 9'
     'WA-X5'     = 'retry-attempt:changed retry-clicked:changed retry-clicked:changed | retry-clicked/1/2 | seq 8'
@@ -6319,9 +6538,10 @@ Check-Equal 'P5d-0 클릭 루프 분류 호출 1 = -PromptVisible $false · 하�
 #   끝(other)을 부름. 5c-3 - 재개 끝이 끝(retry)(재클릭)과 'record-failed' 의 끝(other) -ExitOnly 를 부름 - 구현 명세 ⑤c 3.2 (가)~(다))
 $RETRY_SITE_NAMES = @('Get-AbyssReentryLimitSeconds', 'Invoke-AbyssRetryClick', 'Complete-AbyssInsideHandoff', 'Stop-AbyssReentryTimeout', 'Complete-AbyssOtherSelection', 'Complete-AbyssRetrySelection')
 $retrySiteReport = @(foreach ($siteName in $RETRY_SITE_NAMES) { $siteNodes = @(Get-CommandNodes -Node $workerAst -Name $siteName); '{0}={1}[{2}]' -f $siteName, $siteNodes.Count, ((@($siteNodes | ForEach-Object { $siteOwner = Get-EnclosingFunctionName $_; $(if ($siteOwner) { $siteOwner } else { '(본류)' }) } | Sort-Object)) -join ',') }) -join ' · '
-Check-Equal 'P5d-1 새 함수 · 넓힌 끝 함수의 호출 자리 (모드 예산 3(끝 둘 + 재개 시계 - ⑤c) · 클릭 루프 1 · 재입장 완료 4 · none 행 4(끝 둘 + 선분기 · 재개 끝 - ⑤c 5c-2) · 끝(other) = 끝(retry) 3 + 재개 끝 2 + 본류 1 · 끝(retry) = 재개 끝 1 + 본류 1 - ⑤b5 · ⑤c 5c-3)' $retrySiteReport `
+# 재입장대기_클리어화면 7.1(2026-11-16): 재입장 완료 +1 = 추론 재입장 끝(Complete-AbyssPromptTimeoutHandoff - 표지 저장 성공 뒤에만 부름)
+Check-Equal 'P5d-1 새 함수 · 넓힌 끝 함수의 호출 자리 (모드 예산 3(끝 둘 + 재개 시계 - ⑤c) · 클릭 루프 1 · 재입장 완료 5(+ 추론 재입장 끝) · none 행 4(끝 둘 + 선분기 · 재개 끝 - ⑤c 5c-2) · 끝(other) = 끝(retry) 3 + 재개 끝 2 + 본류 1 · 끝(retry) = 재개 끝 1 + 본류 1 - ⑤b5 · ⑤c 5c-3)' $retrySiteReport `
     ('Get-AbyssReentryLimitSeconds=3[Complete-AbyssOtherSelection,Complete-AbyssRetrySelection,New-AbyssResumeClock] · Invoke-AbyssRetryClick=1[Complete-AbyssRetrySelection] · ' +
-        'Complete-AbyssInsideHandoff=4[Complete-AbyssOtherSelection,Complete-AbyssResumeWait,Complete-AbyssRetrySelection,Invoke-AbyssHandoffStart] · ' +
+        'Complete-AbyssInsideHandoff=5[Complete-AbyssOtherSelection,Complete-AbyssPromptTimeoutHandoff,Complete-AbyssResumeWait,Complete-AbyssRetrySelection,Invoke-AbyssHandoffStart] · ' +
         'Stop-AbyssReentryTimeout=4[Complete-AbyssOtherSelection,Complete-AbyssResumeWait,Complete-AbyssRetrySelection,Invoke-AbyssHandoffStart] · ' +
         'Complete-AbyssOtherSelection=6[(본류),Complete-AbyssResumeWait,Complete-AbyssResumeWait,Complete-AbyssRetrySelection,Complete-AbyssRetrySelection,Complete-AbyssRetrySelection] · Complete-AbyssRetrySelection=2[(본류),Complete-AbyssResumeWait]')
 
@@ -6394,10 +6614,12 @@ if ($null -ne $retryFinishWhile) {
 $fcDoneWorkerCount = @($workerAst.FindAll({ param($candidate) ($candidate -is [StringConstantExpressionAst]) -and ([string]$candidate.Value -ceq $FC_FIELD_CANCEL_DONE) }, $true)).Count
 # 공유 정지 함수 몸통 - 끝 블록 직속 문장을 위 갈래 본문과 같은 렌더로(명령 이름 · exit · 그 밖 '(명령 아님)' - 커스텀 가드 if 도 '(명령 아님)' 으로 드러남)
 $fcFieldCancelBody = (@($retryFieldCancelNode.Body.EndBlock.Statements | ForEach-Object { $fcBodyCommand = Get-StatementCommand $_; $(if ($_ -is [ExitStatementAst]) { Get-NodeCode $_ } elseif ($null -ne $fcBodyCommand) { $fcBodyCommand.GetCommandName() } else { '(명령 아님)' }) })) -join ' ; '
+# 재입장대기_클리어화면 7.1(2026-11-16): 'timeout' 갈래 첫 문장 = 추론 재입장 if(끝 분류 prompt ∧ 엄격 연속 2 이상 → Complete-AbyssPromptTimeoutHandoff - 그 if 글자는
+#   tests\test_reentry_clear_screen.ps1 §8 이 고정) → 그 뒤 지금의 시간 초과 정지. 렌더에는 '(명령 아님)' 으로 드러남
 Check-Equal 'FC-S15 끝(retry) 재입장 결과 갈래 차례 · 본문 · 정지 줄 = U-5b8-2 글자(공유 정지 함수 안 1 · 워커 전체 1) · 사유 80자 안 · 표지 꼬리 0 · 공유 정지 함수 몸통' `
     ('{0} · 정지 줄 {1}/{2} · 글자 일치 {3} · 80자 안 {4} · 꼬리 {5} · 몸통 [{6}]' -f $fcResultOrder, $retryFieldDoneNodes.Count, $fcDoneWorkerCount, ($RETRY_DONE_FIELD_CANCELLED -ceq $FC_FIELD_CANCEL_DONE),
         (($RETRY_DONE_FIELD_CANCELLED.Length - '[완료] '.Length) -le 80), [int]$RETRY_DONE_FIELD_CANCELLED.Contains('[terminal='), $fcFieldCancelBody) `
-    'entered[Complete-AbyssInsideHandoff] < cancelled[Complete-AbyssOtherSelection] < field-cancelled[Stop-AbyssReentryFieldCancelled] < timeout[Stop-AbyssReentryTimeout] · 정지 줄 1/1 · 글자 일치 True · 80자 안 True · 꼬리 0 · 몸통 [Write-RunLog ; exit 4]'
+    'entered[Complete-AbyssInsideHandoff] < cancelled[Complete-AbyssOtherSelection] < field-cancelled[Stop-AbyssReentryFieldCancelled] < timeout[(명령 아님) ; Stop-AbyssReentryTimeout] · 정지 줄 1/1 · 글자 일치 True · 80자 안 True · 꼬리 0 · 몸통 [Write-RunLog ; exit 4]'
 
 # FC-S16 (2.4 · ⑤c 5c-2) - 끝(retry) exit = 정확히 1 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' 갈래 ('field-cancelled' 갈래의 exit 는 ⑤c 5c-2 에서 공유 정지 함수로 옮김) (§10 센티널 준비
 #   게이트(줄 단독)의 사실을 이름 있는 단언으로)
@@ -6405,10 +6627,11 @@ $fcRetryExits = @($retryFinishNode.FindAll({ param($candidate) $candidate -is [E
 $fcRetryExitText = (@($fcRetryExits | ForEach-Object { '{0}@{1}' -f (Get-LineCode $_), (@(Get-EnclosingIfConditions -Node $_ -Stop $retryFinishNode) | Select-Object -First 1) })) -join ' / '
 Check-Equal "FC-S16 끝(retry) exit 1 · 줄 단독 'exit 4' · 자리 = 'unconfirmed' 갈래" $fcRetryExitText "exit 4@`$retryResult -eq 'unconfirmed'"
 
-# FC-S22 (1절 4항 끝 · 구현 리뷰 2/2 의 4/5) - 끝(retry) 명령 이름 집합 = 정확히 9 (허용 집합 - N4-P6 꼴 · ⑤c 5c-2 가 공유 정지 함수를 더함 - 그 함수 몸통은 끝(retry) 노드 밖이라 FC-S15 의 렌더 칸이 봄). FC-S15 는 정확 조건 갈래만 보고 FC-X 행은 비커스텀이라
+# FC-S22 (1절 4항 끝 · 구현 리뷰 2/2 의 4/5) - 끝(retry) 명령 이름 집합 = 정확히 10 (허용 집합 - N4-P6 꼴 · ⑤c 5c-2 가 공유 정지 함수를, 재입장대기_클리어화면 7.1 이 추론 재입장 끝을 더함 - 그 함수 몸통은 끝(retry) 노드 밖이라 FC-S15 의 렌더 칸이 봄). FC-S15 는 정확 조건 갈래만 보고 FC-X 행은 비커스텀이라
 #   'field-cancelled' 갈래 밖에 다른 꼴 조건(StartsWith · -like)이나 커스텀 가드로 더한 키 · 마커 · 기록 · 예약 명령이 빠져나갔음(변이 M83 · M84). 끝(retry)에 명령을 더하면 이 행과 명세 3.3 을 함께
 $RETRY_FINISH_COMMANDS_EXPECTED = @('Complete-AbyssInsideHandoff', 'Complete-AbyssOtherSelection', 'Get-AbyssReentryLimitSeconds', 'Invoke-AbyssRetryClick', 'Stop-AbyssReentryTimeout',
-    'Stop-AbyssReentryFieldCancelled', 'Wait-AbyssReentry', 'Write-LifeDiagnostics', 'Write-RunLog')   # 공유 정지 함수 = ⑤c 5c-2 ('field-cancelled' 갈래)
+    'Stop-AbyssReentryFieldCancelled', 'Wait-AbyssReentry', 'Write-LifeDiagnostics', 'Write-RunLog',   # 공유 정지 함수 = ⑤c 5c-2 ('field-cancelled' 갈래)
+    'Complete-AbyssPromptTimeoutHandoff')   # 추론 재입장 끝 = 재입장대기_클리어화면 7.1 ('timeout' 갈래 - 2026-11-16)
 $fcRetryCommandSet = @($retryFinishNode.FindAll({ param($candidate) $candidate -is [CommandAst] }, $true) | ForEach-Object { [string]$_.GetCommandName() } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
 $fcRetryCommandUnnamed = @($retryFinishNode.FindAll({ param($candidate) ($candidate -is [CommandAst]) -and (-not $candidate.GetCommandName()) }, $true)).Count
 Check-Equal "FC-S22 끝(retry) 명령 이름 집합 = 정확히 $($RETRY_FINISH_COMMANDS_EXPECTED.Count)개(허용 집합) · 이름 없는 호출(& `$식) 0" `
@@ -7490,7 +7713,8 @@ if ($t11ReadAt -ge 0) {
 }
 $t11MemberAt = Get-T11BodyIndex { param($Statement) ($Statement -is [IfStatementAst]) -and ((Get-NodeCode $Statement.Clauses[0].Item1) -ceq '$abyssPartyMemberRun') }
 $t11HandoffAt = Get-T11BodyIndex { param($Statement) ($Statement -is [IfStatementAst]) -and (Test-HasCommand $Statement 'Consume-Handoff') }
-$t11OverlayAt = Get-T11BodyIndex { param($Statement) ($Statement -is [IfStatementAst]) -and ((Get-NodeCode $Statement.Clauses[0].Item1) -ceq 'Clear-EventOverlay -Game $game') }
+# 이벤트 정리 if 의 조건 = 추론 재입장 클리어 화면 시작 건너뜀 + 정리 호출 (2026-11-16 재입장대기_클리어화면 8.6)
+$t11OverlayAt = Get-T11BodyIndex { param($Statement) ($Statement -is [IfStatementAst]) -and ((Get-NodeCode $Statement.Clauses[0].Item1) -ceq '(-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)') }
 Check-Equal 'P5e-4 (R3 S4) 읽기 호출 워커 전체 수 · 그 호출의 본류 직속 if(조건 · 절 · 문장 · 대입) · 차례 파티원 디스패치 < 읽기 < 2.1 블록 < 이벤트 정리' `
     ('호출 {0} · {1} · 차례 {2}' -f $t11UntilCalls.Count, $t11ReadShape, (($t11MemberAt -ge 0) -and ($t11MemberAt -lt $t11ReadAt) -and ($t11ReadAt -lt $t11HandoffAt) -and ($t11HandoffAt -lt $t11OverlayAt))) `
     ("호출 1 · `$contentCategory -eq 'abyss' · 절 1 · 문장 1 · `$script:abyssUntil = Get-AbyssUntilTime · 차례 True")

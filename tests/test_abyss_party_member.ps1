@@ -3492,7 +3492,7 @@ Check-Equal "§3 START 시간 문구 5종 각 1곳(소스 원문) · 옛 '한 �
 # (§0 의 0건 단언이 먼저 쓰기 때문 - 시간 지정 '그 판까지' 설계 리뷰 1차 P3)
 Check-True '§3 디스패치: 기타 분기 뒤·이벤트 정리 앞, 조건에 -not customSpecInvalid, 호출 뒤 throw (옛 디스패치·옛 S 터치 헬퍼·시작 패널 대기의 파티원 제외 항 0건)' (
   ($workerCode.IndexOf('Invoke-NyanMerchantRun -Game $game') -lt $workerCode.IndexOf('Invoke-AbyssPartyMemberCycle -Game $game')) -and
-  ($workerCode.IndexOf('Invoke-AbyssPartyMemberCycle -Game $game') -lt $workerCode.IndexOf('if (Clear-EventOverlay -Game $game) {')) -and
+  ($workerCode.IndexOf('Invoke-AbyssPartyMemberCycle -Game $game') -lt $workerCode.IndexOf('if ((-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)) {')) -and
   ($workerCode -match '\$abyssPartyMemberRun = \(\(-not \$script:customMode\) -and \(-not \$script:customSpecInvalid\) -and[\s\S]{0,300}?\$abyssMatching -eq ''파티\(파티원\)''\)\s*if \(\$abyssPartyMemberRun\) \{\s*Invoke-AbyssPartyMemberCycle -Game \$game\s*throw ''파티원 흐름이 종료 코드 없이 반환됐습니다 - 내부 오류''\s*\}') -and
   ((Get-TextCount $workerCode 'Invoke-AbyssPartyMemberCycle -Game') -eq 1) -and ((Get-TextCount $workerCode 'Invoke-AbyssMemberClearTouch') -eq 0) -and ((Get-TextCount $workerCode '$abyssPartyMemberRun') -eq 2)) (
   J @((Get-TextCount $workerCode 'Invoke-AbyssPartyMemberCycle -Game'), (Get-TextCount $workerCode 'Invoke-AbyssMemberClearTouch'), (Get-TextCount $workerCode '$abyssPartyMemberRun')))

@@ -71,7 +71,9 @@ $FLOW_MOCK_NAMES = @(
     'Test-UserRecentlyActive', 'Wait-UserYieldEnd', 'Invoke-PurchasePopupSweep', 'Test-CaptureRecovered', 'Test-SafeStopDuringCaptureFail', 'Get-CaptureFailTotalMs',
     'Test-DungeonClearPrompt', 'Get-AbyssPanelKind', 'Test-HomeEndEscHud', 'Test-DungeonEntered', 'Test-InDungeonQuest', 'Test-AbyssSelectionScreen', 'Test-AbyssMenu',
     'Test-AbyssKnownDetailScreen', 'Test-AbyssEntryWaiting', 'Test-ExitButton', 'Get-GameOcrText', 'Get-GameRegionOcrText', 'Get-GameRegionOcrWords',
-    'Get-GameRegionCapture', 'Get-DetailTitleText', 'Invoke-AutoRefocus', 'Focus-Game', 'Click-GamePoint', 'Press-KeyOnce', 'Move-CursorOutsideGame')
+    'Get-GameRegionCapture', 'Get-DetailTitleText', 'Invoke-AutoRefocus', 'Focus-Game', 'Click-GamePoint', 'Press-KeyOnce', 'Move-CursorOutsideGame',
+    # 추론 재입장 클리어 화면 시작의 전이 확인 끝 함수 - ⑱′ 와 같은 모의(HS0 가 몸통 표를 견줌 · 재입장대기_클리어화면 7.3′)
+    'Complete-AbyssPromptTimeoutClearTouch')
 # 층 ② 구간이 원문에 품지만 어비스 행에서는 닿지 않아야 하는 함수 - 부르면 그 자리에서 예외(던전·사냥터 분기 · 복구 상세 갈래의 스크립트블록 안)
 $UNREACHABLE_NAMES = @('Invoke-NormalDungeonCycle', 'Invoke-HuntingGroundCycle', 'Invoke-AbyssBackRefocus', 'Test-DetailTitleMatches')
 # 의존 추출이 따라가지 않는 이름 - 이 파일이 직접 정의하는 모의·감시·종료 흉내·대기·설정 읽기(소스 값 캡처용)
@@ -91,7 +93,7 @@ $HANDOFF_DEFAULT_TEXT = 'Role=none · Nonce= · CleanupOnly=False(bool) · Fresh
 $BLOCK_CONDITION_TEXT = "(`$contentCategory -eq 'abyss') -and (-not `$script:customSpecInvalid)"   # P21 - 이 블록의 if 줄 = R3 S4·R4 P1 의 '선분기 첫 문장'
 $BLOCK_FIRST_STATEMENT_TEXT = "if ((Consume-Handoff) -eq 'stop') { exit 4 }"                       # P21 · 명세 2.1 표
 $MEMBER_IF_TEXT = 'if ($abyssPartyMemberRun) {'                                                     # R4-P1 앞 앵커(파티원 디스패치)
-$CLEAR_IF_TEXT = 'if (Clear-EventOverlay -Game $game) {'                                            # R4-P1·P13 뒤 앵커(run:18221 원문 그대로 - 다른 회귀의 IndexOf 앵커)
+$CLEAR_IF_TEXT = 'if ((-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)) {'   # 2026-11-16 재입장대기_클리어화면 8.6 - 추론 재입장 클리어 화면 시작은 이벤트 정리를 건너뜀                                            # R4-P1·P13 뒤 앵커(run:18221 원문 그대로 - 다른 회귀의 IndexOf 앵커)
 
 # 완료 기록 픽스처
 $ABYSS_SECTION = 'abyssCustomRepeat'
@@ -440,7 +442,7 @@ $memberIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { 
 $blockIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement)
         ($statement -is [IfStatementAst]) -and (@($statement.FindAll({ param($node) ($node -is [CommandAst]) -and ($node.GetCommandName() -eq 'Consume-Handoff') }, $true)).Count -gt 0) })
 $roleNoneIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [AssignmentStatementAst]) -and ($statement.Left.Extent.Text -eq '$roleNone') })
-$clearIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [IfStatementAst]) -and ($statement.Clauses[0].Item1.Extent.Text -eq 'Clear-EventOverlay -Game $game') })
+$clearIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [IfStatementAst]) -and ($statement.Clauses[0].Item1.Extent.Text -eq '(-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)') })
 # run:18527 '$startInsideDetected' if - 2.1 블록 뒤 첫 자리 (층 ② 의 끝 = 그 앞 형제 문장)
 $insideIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [IfStatementAst]) -and ($statement.Clauses[0].Item1.Extent.Text -eq '$startInsideDetected') })
 $flowEndIndex = -1
@@ -502,6 +504,7 @@ $FLOW_MOCK_BODIES = @{
     'Return-ToAbyssSelection'        = '$script:returnLog.Add([pscustomobject]@{ Code = [int]$SafeStopExitCode; Reason = [string]$LeaveEntryReason; Phase = $script:readPhase; T = (Get-VirtualElapsed) }); Add-StubEvent ("return:" + [string]$SafeStopExitCode + ":" + [string]$LeaveEntryReason); if ($script:returnLoopMode -eq "exit4") { Stop-WorkerTailExit 4 }'
     'Invoke-AbyssExitClick'          = '$script:exitClickCalls++; Add-StubEvent "exitclick"; return @{ Result = "clicked"; FrozenMs = 0 }'
     'Invoke-ClickUntil'              = '$script:clickUntilCalls++; Add-StubEvent ("clickuntil:" + [string]$Description)'
+    'Complete-AbyssPromptTimeoutClearTouch' = 'Add-StubEvent "prompttouch"'   # 전이를 봤다고 돌아옴 - ⑱′ 와 같은 몸통(HS0)
     'Write-CustomClearMarker'        = '$script:markerCalls++; Add-StubEvent "marker"; return $true'
     'Test-UserRecentlyActive'        = 'Enter-StubTurn; if ([int]$script:stubYieldQueue -gt 0) { return $true }; return ($null -ne (Find-StubWindow -Windows $script:scenarioActive -Time (Get-VirtualElapsed)))'
     'Wait-UserYieldEnd'              = 'Invoke-StubYieldWait -Context ([string]$Context)'
@@ -665,6 +668,8 @@ $ptDetailBack = @(Get-SourceAssignmentValue 'ptDetailBack')
 $allDungeonKeywords = @(Get-SourceAssignmentValue 'allDungeonKeywords')
 # 재입장 대기의 무변화 창(⑤a 부터 선분기 B2 단계가 그 함수를 부름) - 보고 끔 호출은 무변화 시계를 결론에 쓰지 않아 결과는 같지만 모형을 소스와 맞춥니다(구현 명세 ④ C3)
 $abyssReclickQuietSeconds = Get-SourceAssignmentValue 'abyssReclickQuietSeconds'
+# 재입장 대기의 중간 진단 시각(재입장대기_클리어화면 A3 - 호출 C · D 대기가 이 시각을 넘기면 진단 캡처 1회) - 빠지면 0초 시계라 첫 회전에 진단이 찍혀 모형이 소스와 달라집니다
+$abyssReentryDiagSeconds = Get-SourceAssignmentValue 'abyssReentryDiagSeconds'
 $capturedTimeoutPartyMatch = $timeoutPartyMatch
 
 # ===== 모의 · 감시 (실제 서명 그대로 - 아래 '서명 대조') =====
@@ -2244,9 +2249,13 @@ function Get-ResumeEndNone {
 }
 function Get-ResumeEndNoneWant {
     # -Inputs = 그 행 입력 수(재클릭 뒤 시간 초과 행 WA-D6 은 재클릭 회전의 Focus-Game · Click-GamePoint 둘 - 그 밖은 0)
-    param([string]$Mode = 'party', [int]$Inputs = 0)
+    # -MidContext · -WaitSeconds = 재입장 대기 중간 진단(재입장대기_클리어화면 A3 - 결론 없이 조정 $abyssReentryDiagSeconds 초가 지나면 진단 캡처 1회). 그 호출의 대기 길이가
+    #   그 시각 이상이면 시간 초과 진단 앞에 '<문맥> N초 경과(입장 미확정)' 가 붙습니다(호출 C = '이어받기 시작' · 호출 D = "'다시 하기' 뒤 입장 대기")
+    param([string]$Mode = 'party', [int]$Inputs = 0, [string]$MidContext = '', [double]$WaitSeconds = 0)
     $noneLine = $(if ($Mode -eq 'solo') { $script:rzNoneSolo } else { $script:rzNoneParty })
-    return ('정지 줄 [{0}] · 진단 [{1}] · 입력 {2} · exit 4' -f $noneLine, $script:rzNoneDiag, $Inputs)
+    $diagText = $script:rzNoneDiag
+    if ($MidContext -and ($WaitSeconds -ge [double]$abyssReentryDiagSeconds)) { $diagText = ('{0} {1}초 경과(입장 미확정),{2}' -f $MidContext, $abyssReentryDiagSeconds, $script:rzNoneDiag) }
+    return ('정지 줄 [{0}] · 진단 [{1}] · 입력 {2} · exit 4' -f $noneLine, $diagText, $Inputs)
 }
 
 function Get-ResumeEndField {
@@ -2382,19 +2391,19 @@ function Test-ResumeRowsA {
     Assert-ResumeCommon 'WA-D1' $r
     Assert-Case 'WA-D1 retry-clicked · 40초 전 · M 지속 → 호출 C 1(재개 시계 같은 객체) · timeout · 끝-none · 끝 = Tpm−40 무렵' `
         (J @((Get-ReentryText $r), (@($r.ReentryResults | ForEach-Object { $_.ClockResume }) -join ','), (Get-ResumeEndNone $r), (Test-NearTime $r.EndT ($Tpm - 40)))) `
-        (J @('timeout', 'True', (Get-ResumeEndNoneWant 'party'), 'True'))
+        (J @('timeout', 'True', (Get-ResumeEndNoneWant 'party' -MidContext '이어받기 시작' -WaitSeconds ($Tpm - 40)), 'True'))
 
     # WA-D2 - retryClicked 빈 값 · retryAttempt 10초 전 → 기준 = retryAttempt · @(Tpm−10)
     $r = Invoke-ResumeRow @{ Name = 'WA-D2'; Stage = 'retry-attempt'; AtAttempt = 10; Scenario = @{ Timeline = $mTimeline } }
     Assert-ResumeCommon 'WA-D2' $r
     Assert-Case 'WA-D2 retryClicked 빈 값 · retryAttempt 10초 전 · M 지속 → timeout · 끝-none · 끝 = Tpm−10 무렵' `
-        (J @((Get-ReentryText $r), (Get-ResumeEndNone $r), (Test-NearTime $r.EndT ($Tpm - 10)))) (J @('timeout', (Get-ResumeEndNoneWant 'party'), 'True'))
+        (J @((Get-ReentryText $r), (Get-ResumeEndNone $r), (Test-NearTime $r.EndT ($Tpm - 10)))) (J @('timeout', (Get-ResumeEndNoneWant 'party' -MidContext '이어받기 시작' -WaitSeconds ($Tpm - 10)), 'True'))
 
     # WA-D3 - 둘 다 빈 값 → 기준 = 지금 · @Tpm · 새 [경고] 0
     $r = Invoke-ResumeRow @{ Name = 'WA-D3'; Stage = 'retry-attempt'; Scenario = @{ Timeline = $mTimeline } }
     Assert-ResumeCommon 'WA-D3' $r
     Assert-Case 'WA-D3 at 두 칸 빈 값 · M 지속 → timeout · 끝-none · 끝 = Tpm 무렵 · [경고] 줄 0' `
-        (J @((Get-ReentryText $r), (Get-ResumeEndNone $r), (Test-NearTime $r.EndT $Tpm), @(@($r.Lines) | Where-Object { $_.StartsWith('[경고]') }).Count)) (J @('timeout', (Get-ResumeEndNoneWant 'party'), 'True', 0))
+        (J @((Get-ReentryText $r), (Get-ResumeEndNone $r), (Test-NearTime $r.EndT $Tpm), @(@($r.Lines) | Where-Object { $_.StartsWith('[경고]') }).Count)) (J @('timeout', (Get-ResumeEndNoneWant 'party' -MidContext '이어받기 시작' -WaitSeconds $Tpm), 'True', 0))
 
     # WA-D4 (가) - 지난 시계 · I 지속 → 던전 안 첫 유예로 2연속 · 끝-IH · 재입장 대기 0
     $r = Invoke-ResumeRow @{ Name = 'WA-D4 (가)'; AtClicked = $PAST; Scenario = @{ Timeline = @(New-Timeline -Pairs @(0, 'I')) } }
@@ -2424,7 +2433,7 @@ function Test-ResumeRowsA {
         $r = Invoke-ResumeRow @{ Name = "WA-D5 $d5Mode"; Mode = $d5Mode; AtClicked = 40; Scenario = @{ Timeline = $mTimeline } }
         Assert-ResumeCommon "WA-D5 $d5Mode" $r
         Assert-Case "WA-D5 $d5Mode · 40초 전 · M 지속 → 재개 시작 줄 예산 = 모드 예산($d5Budget) · 끝 = 예산−40 무렵 · 끝-none(모드 문구)" `
-            (J @((Get-StartBudget $r), (Test-NearTime $r.EndT ($d5Budget - 40)), (Get-ResumeEndNone $r))) (J @($d5Budget, 'True', (Get-ResumeEndNoneWant $d5Mode)))
+            (J @((Get-StartBudget $r), (Test-NearTime $r.EndT ($d5Budget - 40)), (Get-ResumeEndNone $r))) (J @($d5Budget, 'True', (Get-ResumeEndNoneWant $d5Mode -MidContext '이어받기 시작' -WaitSeconds ($d5Budget - 40))))
     }
 
     # WA-D7 - 조작 20 + 캡처 실패 30 → 마감 = Tpm−40 + 양보 + 실패(조정 - 재개 시계가 이 워커의 차분을 더함)
@@ -2432,7 +2441,7 @@ function Test-ResumeRowsA {
     Assert-ResumeCommon 'WA-D7' $r
     $d7Deadline = ($Tpm - 40) + ($r.YieldTotalMs / 1000) + ($r.FailTotalMs / 1000)
     Assert-True 'WA-D7 40초 전 · M · 조작 @50~70 · 캡처 실패 @100~130 → timeout · 끝-none · 끝 = Tpm−40 + 양보 + 실패 무렵 · 양보 ≥ 19초 · 실패 ≥ 29초' `
-        (((Get-ReentryText $r) -ceq 'timeout') -and ((Get-ResumeEndNone $r) -ceq (Get-ResumeEndNoneWant 'party')) -and ((Test-NearTime $r.EndT $d7Deadline 3) -eq 'True') -and
+        (((Get-ReentryText $r) -ceq 'timeout') -and ((Get-ResumeEndNone $r) -ceq (Get-ResumeEndNoneWant 'party' -MidContext '이어받기 시작' -WaitSeconds ($Tpm - 40))) -and ((Test-NearTime $r.EndT $d7Deadline 3) -eq 'True') -and
             ($r.YieldTotalMs -ge 19000) -and ($r.FailTotalMs -ge 29000)) `
         ('결과 [{0}] · 끝 {1} · 조정 마감 {2} · 양보 {3} · 실패 {4} · [{5}]' -f (Get-ReentryText $r), (Format-Seconds $r.EndT), (Format-Seconds $d7Deadline), $r.YieldTotalMs, $r.FailTotalMs, (Get-ResumeEndNone $r))
 }
@@ -2483,7 +2492,7 @@ function Test-ResumeRowsAReclick {
     Assert-Case 'WA-D6 40초 전 · 시작값 1 · reclick → 재클릭 → M 지속 → 호출 D(시계 없음 · 한도 Tpm · 유예 끔 · 패널 초기값 거짓 · 필드 켬 · 보고 켬) timeout · 재판단 0/0 · 끝-none(입력 = 재클릭 회전 둘)' `
         (J @((Get-ReentryText $r), $(if ($null -ne $d6Call) { 'HasClock={0} · Limit={1} · Grace={2} · Panel={3} · Field={4} · Report={5}' -f $d6Call.HasClock, $d6Call.LimitSeconds, $d6Call.Grace, $d6Call.PanelSeen, $d6Call.Field, $d6Call.Report } else { '(호출 D 없음)' }),
             $r.RetrySends, $r.VerdictCalls, $r.InputList, (Get-ResumeEndNone $r))) `
-        (J @('reclick,timeout', ('HasClock=False · Limit={0} · Grace=False · Panel=False · Field=True · Report=True' -f $Tpm), 1, '0/0', 'Focus-Game / Click-GamePoint 636,654', (Get-ResumeEndNoneWant 'party' 2)))
+        (J @('reclick,timeout', ('HasClock=False · Limit={0} · Grace=False · Panel=False · Field=True · Report=True' -f $Tpm), 1, '0/0', 'Focus-Game / Click-GamePoint 636,654', (Get-ResumeEndNoneWant 'party' 2 -MidContext "'다시 하기' 뒤 입장 대기" -WaitSeconds $Tpm)))
     Assert-Case 'WA-D6 → 끝 = 둘째 전송 + Tpm 무렵(재개 시계 마감 Tpm−40 이 아님) · at.retryClicked = 둘째 전송 가상 시각 · retryClicks 2' `
         (J @($(if ($null -ne $d6Send) { Test-NearTime $r.EndT ([double]$d6Send + $Tpm) } else { '(전송 없음)' }), $r.AtRetryClicked, $r.RetryClicks)) (J @('True', $d6SendText, 2))
 
@@ -2720,7 +2729,7 @@ function Test-ResumeRowsC {
     Assert-True ('ST5 · ST10 전제 - Tpm − 200 > 알 수 없음 정리 초({0})' -f $U30) (($Tpm - 200) -gt $U30) ''
     $r = Invoke-ResumeRow @{ Name = 'ST5'; AtClicked = 200; Scenario = @{ Timeline = @(New-Timeline -Pairs @(0, 'matching')) } }
     Assert-ResumeCommon 'ST5' $r
-    Assert-Case 'ST5 200초 전 · M 지속 → timeout · 끝-none · 끝 = Tpm−200 무렵' (J @((Get-ReentryText $r), (Get-ResumeEndNone $r), (Test-NearTime $r.EndT ($Tpm - 200)))) (J @('timeout', (Get-ResumeEndNoneWant 'party'), 'True'))
+    Assert-Case 'ST5 200초 전 · M 지속 → timeout · 끝-none · 끝 = Tpm−200 무렵' (J @((Get-ReentryText $r), (Get-ResumeEndNone $r), (Test-NearTime $r.EndT ($Tpm - 200)))) (J @('timeout', (Get-ResumeEndNoneWant 'party' -MidContext '이어받기 시작' -WaitSeconds ($Tpm - 200)), 'True'))
     # ST6 - 권장 인원 팝업 → I · I → 클릭 0 · 관측 안내 1 · 끝-IH
     $r = Invoke-ResumeRow @{ Name = 'ST6'; Scenario = @{ Timeline = @(New-Timeline -Pairs @(0, 'popup', 2.0, 'I')) } }
     Assert-ResumeCommon 'ST6' $r

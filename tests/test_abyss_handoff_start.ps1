@@ -137,7 +137,10 @@ $FLOW_MOCK_NAMES = @(
     'Test-UserRecentlyActive', 'Wait-UserYieldEnd', 'Invoke-PurchasePopupSweep', 'Test-CaptureRecovered', 'Test-SafeStopDuringCaptureFail', 'Get-CaptureFailTotalMs',
     'Test-DungeonClearPrompt', 'Get-AbyssPanelKind', 'Test-HomeEndEscHud', 'Test-DungeonEntered', 'Test-InDungeonQuest', 'Test-AbyssSelectionScreen', 'Test-AbyssMenu',
     'Test-AbyssKnownDetailScreen', 'Test-AbyssEntryWaiting', 'Test-ExitButton', 'Get-GameOcrText', 'Get-GameRegionOcrText', 'Get-GameRegionOcrWords',
-    'Get-GameRegionCapture', 'Get-DetailTitleText', 'Invoke-AutoRefocus', 'Focus-Game', 'Click-GamePoint', 'Press-KeyOnce', 'Move-CursorOutsideGame')
+    'Get-GameRegionCapture', 'Get-DetailTitleText', 'Invoke-AutoRefocus', 'Focus-Game', 'Click-GamePoint', 'Press-KeyOnce', 'Move-CursorOutsideGame',
+    # 추론 재입장 클리어 화면 시작의 전이 확인 끝 함수(재입장대기_클리어화면 7.3′ - 표지 next × S 의 본류 S 갈래가 부름). 여기서는 '전이를 봄' 으로 돌아오는 모의 -
+    #   루프 자체의 계약은 test_reentry_clear_screen §3 이, 이 파일은 그 앞 본류 배선(이벤트 정리 건너뜀 · 기록 순서 · V18-T)만 봅니다
+    'Complete-AbyssPromptTimeoutClearTouch')
 # 층 ② 구간이 원문에 품지만 어비스 행에서는 닿지 않아야 하는 함수 - 부르면 그 자리에서 예외(던전·사냥터 분기 · 복구 상세 갈래의 스크립트블록 안)
 $UNREACHABLE_NAMES = @('Invoke-NormalDungeonCycle', 'Invoke-HuntingGroundCycle', 'Invoke-AbyssBackRefocus', 'Test-DetailTitleMatches')
 # 의존 추출이 따라가지 않는 이름 - 이 파일이 직접 정의하는 모의·감시·종료 흉내·대기·설정 읽기(소스 값 캡처용)
@@ -157,7 +160,7 @@ $HANDOFF_DEFAULT_TEXT = 'Role=none · Nonce= · CleanupOnly=False(bool) · Fresh
 $BLOCK_CONDITION_TEXT = "(`$contentCategory -eq 'abyss') -and (-not `$script:customSpecInvalid)"   # P21 - 이 블록의 if 줄 = R3 S4·R4 P1 의 '선분기 첫 문장'
 $BLOCK_FIRST_STATEMENT_TEXT = "if ((Consume-Handoff) -eq 'stop') { exit 4 }"                       # P21 · 명세 2.1 표
 $MEMBER_IF_TEXT = 'if ($abyssPartyMemberRun) {'                                                     # R4-P1 앞 앵커(파티원 디스패치)
-$CLEAR_IF_TEXT = 'if (Clear-EventOverlay -Game $game) {'                                            # R4-P1·P13 뒤 앵커(run:18221 원문 그대로 - 다른 회귀의 IndexOf 앵커)
+$CLEAR_IF_TEXT = 'if ((-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)) {'   # 2026-11-16 재입장대기_클리어화면 8.6 - 추론 재입장 클리어 화면 시작은 이벤트 정리를 건너뜀                                            # R4-P1·P13 뒤 앵커(run:18221 원문 그대로 - 다른 회귀의 IndexOf 앵커)
 
 # 완료 기록 픽스처
 $ABYSS_SECTION = 'abyssCustomRepeat'
@@ -506,7 +509,7 @@ $memberIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { 
 $blockIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement)
         ($statement -is [IfStatementAst]) -and (@($statement.FindAll({ param($node) ($node -is [CommandAst]) -and ($node.GetCommandName() -eq 'Consume-Handoff') }, $true)).Count -gt 0) })
 $roleNoneIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [AssignmentStatementAst]) -and ($statement.Left.Extent.Text -eq '$roleNone') })
-$clearIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [IfStatementAst]) -and ($statement.Clauses[0].Item1.Extent.Text -eq 'Clear-EventOverlay -Game $game') })
+$clearIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [IfStatementAst]) -and ($statement.Clauses[0].Item1.Extent.Text -eq '(-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)') })
 # run:18527 '$startInsideDetected' if - 2.1 블록 뒤 첫 자리 (층 ② 의 끝 = 그 앞 형제 문장)
 $insideIfIndexes = @(Find-StatementIndexes -Statements $mainStatements -Match { param($statement) ($statement -is [IfStatementAst]) -and ($statement.Clauses[0].Item1.Extent.Text -eq '$startInsideDetected') })
 $flowEndIndex = -1
@@ -568,6 +571,7 @@ $FLOW_MOCK_BODIES = @{
     'Return-ToAbyssSelection'        = '$script:returnLog.Add([pscustomobject]@{ Code = [int]$SafeStopExitCode; Reason = [string]$LeaveEntryReason; Phase = $script:readPhase; T = (Get-VirtualElapsed) }); Add-StubEvent ("return:" + [string]$SafeStopExitCode + ":" + [string]$LeaveEntryReason); if ($script:returnLoopMode -eq "exit4") { Stop-WorkerTailExit 4 }'
     'Invoke-AbyssExitClick'          = '$script:exitClickCalls++; Add-StubEvent "exitclick"; return @{ Result = "clicked"; FrozenMs = 0 }'
     'Invoke-ClickUntil'              = '$script:clickUntilCalls++; Add-StubEvent ("clickuntil:" + [string]$Description)'
+    'Complete-AbyssPromptTimeoutClearTouch' = 'Add-StubEvent "prompttouch"'   # 전이를 봤다고 돌아옴(본류가 마커·기록·나가기로 마무리) - V18-T
     'Write-CustomClearMarker'        = '$script:markerCalls++; Add-StubEvent "marker"; return $true'
     'Test-UserRecentlyActive'        = 'Enter-StubTurn; if ([int]$script:stubYieldQueue -gt 0) { return $true }; return ($null -ne (Find-StubWindow -Windows $script:scenarioActive -Time (Get-VirtualElapsed)))'
     'Wait-UserYieldEnd'              = 'Invoke-StubYieldWait -Context ([string]$Context)'
@@ -731,6 +735,10 @@ $ptDetailBack = @(Get-SourceAssignmentValue 'ptDetailBack')
 $allDungeonKeywords = @(Get-SourceAssignmentValue 'allDungeonKeywords')
 # 재입장 대기의 무변화 창(⑤a 부터 선분기 B2 단계가 그 함수를 부름) - 보고 끔 호출은 무변화 시계를 결론에 쓰지 않아 결과는 같지만 모형을 소스와 맞춥니다(구현 명세 ④ C3)
 $abyssReclickQuietSeconds = Get-SourceAssignmentValue 'abyssReclickQuietSeconds'
+# 재입장 대기의 중간 진단 시각(재입장대기_클리어화면 A3 - B2 단계 대기가 이 시각을 넘기면 진단 캡처 1회) - 빠지면 0초 시계라 첫 회전에 진단이 찍혀 모형이 소스와 달라집니다
+$abyssReentryDiagSeconds = Get-SourceAssignmentValue 'abyssReentryDiagSeconds'
+# B2 단계 대기가 중간 진단 시각을 넘긴 뒤 마감하면 진단이 둘 - 중간 캡처('<문맥> N초 경과(입장 미확정)') 다음에 마감 캡처($DIAG_B2). 문맥은 B2 단계가 재입장 대기에 넘기는 '이어받기 시작'
+$DIAG_B2_WITH_MID = ('이어받기 시작 {0}초 경과(입장 미확정),{1}' -f $abyssReentryDiagSeconds, $DIAG_B2)
 $capturedTimeoutPartyMatch = $timeoutPartyMatch
 # RectThrow 스텁의 문구·원인 - 소스 캡처(주석 뺀 사본 AST · test_abyss_party_leader 의 판독 경로 문구·원인 캡처와 같은 방법 - 구현 명세 ⑤a 2.2-4): 판독 경로
 #   Get-GameRegionCapture 의 -ThrowOnWindowRectFailure 갈래 throw 문자열 · Get-CaptureFailInfo 'rect-failed' 갈래 Cause · Register-CaptureSuccess 실패 갈래의
@@ -1866,19 +1874,23 @@ function New-OwnFlowRow {
 function New-NextEntry {
     # next 픽스처 항목 - reentered NB · nextOwner = 이번 컨텍스트(커스텀: 5필드 index 0 · 세대 3 / 비커스텀: { runId }) · 첫 키 기록 전(index 0 · keys null)
     # (설계 v11 R4 5.2 머리)
-    param([bool]$Custom = $true)
+    # -ReenteredBy = 추론 재입장 표지 칸(재입장대기_클리어화면 7.1 - 원 워커가 재입장 대기 끝 클리어 화면으로 넘길 때 따로 저장. 빈 값이면 칸 없음 = 정상 재입장)
+    param([bool]$Custom = $true, [string]$ReenteredBy = '')
     if ($Custom) {
-        return (New-FixtureEntry -Stage 'reentered' -Nonce $NONCE_B -Owner (New-ChOwner -Index 2) -NextOwner (New-ChOwner -Index 0) -Generation $CH_GENERATION `
-                -Section $ABYSS_SECTION -RunId 'run-before' -LaunchState 'launched' -AfterIndex 0)
+        $nextEntry = New-FixtureEntry -Stage 'reentered' -Nonce $NONCE_B -Owner (New-ChOwner -Index 2) -NextOwner (New-ChOwner -Index 0) -Generation $CH_GENERATION `
+            -Section $ABYSS_SECTION -RunId 'run-before' -LaunchState 'launched' -AfterIndex 0
+    } else {
+        $nextEntry = New-FixtureEntry -Stage 'reentered' -Nonce $NONCE_B -Owner ([pscustomobject]@{ runId = $CH_RUN_ID }) -NextOwner ([pscustomobject]@{ runId = $CH_RUN_ID }) `
+            -RunId $CH_RUN_ID -LaunchState 'launched' -AfterIndex 0
     }
-    return (New-FixtureEntry -Stage 'reentered' -Nonce $NONCE_B -Owner ([pscustomobject]@{ runId = $CH_RUN_ID }) -NextOwner ([pscustomobject]@{ runId = $CH_RUN_ID }) `
-            -RunId $CH_RUN_ID -LaunchState 'launched' -AfterIndex 0)
+    if ($ReenteredBy) { Add-Member -InputObject $nextEntry -NotePropertyName 'reenteredBy' -NotePropertyValue $ReenteredBy }
+    return $nextEntry
 }
 
 function New-NextFlowRow {
     # next 기동 픽스처 - 위 항목 + 받은 nonce NB
-    param([string]$Name, [hashtable]$Scenario, [bool]$Custom = $true, [hashtable]$Extra = @{})
-    $flowRow = @{ Name = $Name; Custom = $Custom; Nonce = $NONCE_B; Entries = @((New-NextEntry -Custom $Custom)); Scenario = $Scenario }
+    param([string]$Name, [hashtable]$Scenario, [bool]$Custom = $true, [hashtable]$Extra = @{}, [string]$ReenteredBy = '')
+    $flowRow = @{ Name = $Name; Custom = $Custom; Nonce = $NONCE_B; Entries = @((New-NextEntry -Custom $Custom -ReenteredBy $ReenteredBy)); Scenario = $Scenario }
     foreach ($extraEntry in $Extra.GetEnumerator()) { $flowRow[$extraEntry.Key] = $extraEntry.Value }
     return $flowRow
 }
@@ -2688,9 +2700,9 @@ function Test-RowNextSelector {
     #   B2 단계(재입장 대기 호출) 동안 선분기 루프가 돌지 않아 닿지 않습니다(M5a-10: 대기 함수가 미결 시계를 쓰면 300초에 S18)
     $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name 'R4-N10b' -Scenario @{ Timeline = @(New-Timeline -Pairs @(0, 'U', 10.0, 'ready')) }) -FlowLayer 'selector'
     Save-ObservedStop -Key 'S18' -Result $result
-    Assert-Case "R4-N10 B2 마감(next) - U 10초 뒤 ready 지속 → 진단 '$DIAG_B2' · S18(준비 패널 · Tpm · 끝 (release)) · exit 4 · (start-unknown) 0 · 기록 0 · 예외 0" `
+    Assert-Case "R4-N10 B2 마감(next) - U 10초 뒤 ready 지속 → 진단 '$DIAG_B2_WITH_MID'(중간 ${abyssReentryDiagSeconds}초 + 마감) · S18(준비 패널 · Tpm · 끝 (release)) · exit 4 · (start-unknown) 0 · 기록 0 · 예외 0" `
         (J @((Get-DiagText $result 'selector'), (Get-StopLines $result), $result.ExitCode, ((Get-StopLines $result).Contains('(start-unknown)')), $result.Unchanged, $result.Thrown)) `
-        (J @($DIAG_B2, ($S18_B2_TIMEOUT_FORMAT -f $B2_LABELS.ready, $Tpm), '4', 'False', 'True', ''))
+        (J @($DIAG_B2_WITH_MID, ($S18_B2_TIMEOUT_FORMAT -f $B2_LABELS.ready, $Tpm), '4', 'False', 'True', ''))
     Assert-True 'R4-N10 B2 마감 시각 = 첫 패널 표본(10초 뒤)부터 조정 Tpm' (($result.EndT -ge (10 + $Tpm - $TIME_EPSILON)) -and ($result.EndT -lt (10 + $Tpm + 2))) ('끝 {0}초' -f (Format-Seconds $result.EndT))
 
     # R4-N14 - 던전 안 2연속은 동결 회전을 넘어 이어짐(유지)
@@ -2758,10 +2770,10 @@ function Test-RowOwnSelector {
     #   돌지 않아 미결 마감이 닿지 않음(M5a-10: 대기 함수가 미결 시계를 쓰면 300초에 S18) · B2 안 알 수 없음에도 이벤트 정리 0(P17)
     $scenario = @{ Timeline = @(New-Timeline -Pairs @(0, 'U', 20.0, 'ready', 25.0, 'U')) }
     $result = Invoke-FlowRow -FlowRow (New-OwnFlowRow -Name 'R4-O4′' -Scenario $scenario) -FlowLayer 'selector'
-    Assert-Case "R4-O4′ U@0~20 · ready · B2 안 U 지속 → 닫기 1(NA done · $CLOSE_REASON · ready) · own 닫기 성공 줄(S4) · B2 시작 줄 · 진단 '$DIAG_B2' · S18(준비 패널 · Tpm · (release)) · exit 4 · (start-unknown) 0 · 이벤트 정리 0 · 입력 0 · 예외 0" `
+    Assert-Case "R4-O4′ U@0~20 · ready · B2 안 U 지속 → 닫기 1(NA done · $CLOSE_REASON · ready) · own 닫기 성공 줄(S4) · B2 시작 줄 · 진단 '$DIAG_B2_WITH_MID'(중간 ${abyssReentryDiagSeconds}초 + 마감) · S18(준비 패널 · Tpm · (release)) · exit 4 · (start-unknown) 0 · 이벤트 정리 0 · 입력 0 · 예외 0" `
         (J @((Format-JournalEntry (Find-JournalEntry $result.Journal 'NA')), (Get-LineCount -Result $result -Line ($S4_CLOSE_FORMAT -f 'ready')), (Get-LineCount -Result $result -Line ($S7_B2_START_FORMAT -f $B2_LABELS.ready, $Tpm)),
             (Get-DiagText $result 'selector'), (Get-StopLines $result), $result.ExitCode, ((Get-StopLines $result).Contains('(start-unknown)')), @(Get-OverlayTimes -Result $result).Count, $result.Inputs, $result.Thrown)) `
-        (J @("NA:entered/done/$CLOSE_REASON/ready", 1, 1, $DIAG_B2, ($S18_B2_TIMEOUT_FORMAT -f $B2_LABELS.ready, $Tpm), '4', 'False', 0, 0, ''))
+        (J @("NA:entered/done/$CLOSE_REASON/ready", 1, 1, $DIAG_B2_WITH_MID, ($S18_B2_TIMEOUT_FORMAT -f $B2_LABELS.ready, $Tpm), '4', 'False', 0, 0, ''))
     Assert-True 'R4-O4′ B2 마감 시각 = 첫 패널 표본(20초 뒤)부터 조정 Tpm (선분기 시작부터의 미결 마감 300초가 아님)' (($result.EndT -ge (20 + $Tpm - $TIME_EPSILON)) -and ($result.EndT -lt (20 + $Tpm + 2))) ('끝 {0}초' -f (Format-Seconds $result.EndT))
 
     # O4‴ - O4′ + 닫기 저장 1회 'locked'(닫기 실패) → [경고] 1 · B2 마감 (release) 코드 4 · NA 열린 채(GUI 틱의 done 은 ⑯ 몫 - J22)
@@ -3208,6 +3220,26 @@ function Test-RowV18 {
             (J @('next', 'prompt', '0', $(if ($variant.Custom) { 1 } else { 0 }), 1, $clearedWant, $(if ($variant.Custom) { '' } else { $CH_RUN_ID }), 'NEW1', 'True',
                 'main#1:changed', 'NB:reentered/done//', 'True', '0/', 'False',
                 $(if ($variant.Custom) { 'Inside=False Result=False' } else { '' }), (Get-PostReadsExpected -Menu 1), 0, 1, '', $promptDoneLine, ''))
+    }
+    # V18-T (재입장대기_클리어화면 설계 8.6 · 다관점 리뷰 P2 - 2026-11-16): 추론 재입장 표지(reenteredBy 'prompt-timeout')가 있는 next × S 는 본류 이벤트 정리를
+    #   건너뛰고(정리 안 Test-KnownScreen 의 클리어 문구 판독이 흔들리면 클리어 중앙을 눌러 보상으로 넘겨, 뒤 전이 확인이 '누르기 전 보상' 으로 계상 없이 멈춤)
+    #   전이 확인 끝 함수(모의 = 전이를 봄)로 갑니다 - 그 뒤 마커 → 기록 → 나가기 헬퍼 → 복귀 → exit 0 은 표지 없는 next × S 와 같습니다.
+    #   대조 둘: 표지 없는 next × S = 정리 1 · 기존 Invoke-ClickUntil(전이 확인 0) / 표지 있는 next × 던전 안 = 정리 1(건너뜀은 선분기 결론 'prompt' 일 때만)
+    foreach ($tagRow in @(
+            @{ Name = 'V18-T next(커스텀 · 표지) × S'; Tag = 'prompt-timeout'; Timeline = @(New-Timeline -Pairs @(0, 'S')); Want = 'next|prompt|0|정리 0|전이 확인 1|클릭 대기 0|순서 True' },
+            @{ Name = 'V18-T 대조 next(커스텀 · 표지 없음) × S'; Tag = ''; Timeline = @(New-Timeline -Pairs @(0, 'S')); Want = 'next|prompt|0|정리 1|전이 확인 0|클릭 대기 1|순서 True' },
+            @{ Name = 'V18-T 대조 next(커스텀 · 표지) × 던전 안'; Tag = 'prompt-timeout'; Timeline = @(New-Timeline -Pairs @(0, 'I')); Want = 'next|inside||정리 1|전이 확인 0|클릭 대기 0|순서 (해당 없음)' })) {
+        $result = Invoke-FlowRow -FlowRow (New-NextFlowRow -Name $tagRow.Name -Scenario @{ Timeline = $tagRow.Timeline } -Custom $true -ReenteredBy $tagRow.Tag) -FlowLayer 'main'
+        $tagTouchAt = Get-EventPosition -Result $result -Name 'prompttouch'
+        $tagOrderText = '(해당 없음)'
+        if ([string]$result.StartScreen -eq 'prompt') {
+            $tagFirst = $(if ($tagRow.Tag) { 'prompttouch' } else { 'clickuntil' })
+            $tagOrderIndexes = @(@($tagFirst, 'marker', 'cleared', 'exitclick', 'return:') | ForEach-Object { Get-EventPosition -Result $result -Name $_ })
+            $tagOrderText = [string](($tagOrderIndexes[0] -ge 0) -and (@(0..($tagOrderIndexes.Count - 2) | Where-Object { $tagOrderIndexes[$_] -ge $tagOrderIndexes[$_ + 1] }).Count -eq 0))
+        }
+        Assert-Case ($tagRow.Name + ' → Role · 결론 · exit · 본류 이벤트 정리 수 · 전이 확인 끝 함수 · 기존 클릭 대기 · 순서(터치 → 마커 → 기록 → 나가기 헬퍼 → 복귀) · 예외 0') `
+            ('{0}|{1}|{2}|정리 {3}|전이 확인 {4}|클릭 대기 {5}|순서 {6}{7}' -f $result.Role, $result.StartScreen, $result.ExitCode, @(Get-OverlayTimes -Result $result -Phase 'main').Count,
+                [int]($tagTouchAt -ge 0), $result.ClickUntils, $tagOrderText, $(if ($result.Thrown) { ' | 예외 ' + $result.Thrown } else { '' })) $tagRow.Want
     }
     # FINISH_ONLY=1 + stale nonce + 첫 판독 던전 안 → 정리 전용 거짓 · exit 10 0 (재판독 갈래는 5절 C2) / 대조: FINISH_ONLY 없으면 정리 전용 참(Role none 수동)
     foreach ($finishOnly in @('1', '')) {
@@ -3900,10 +3932,15 @@ function Test-StaticFlow {
     Assert-Case "P20 상세 정지 문구 문자열 2 · 전부 끝 (selection-overlay) · 진단 이름 '$DIAG_DETAIL' 문자열 1" `
         (J @($detailStrings.Count, @($detailStrings | Where-Object { -not ([string]$_.Value).EndsWith('(selection-overlay)') }).Count, $detailDiagStrings.Count)) (J @(2, 0, 1))
 
-    # P22 - ' (release)' 를 담은 워커 문자열은 선분기 안에만 (그 밖 0 - 본류 키 지점의 생성 실패 줄에도 0). 갈래별 꼬리 유무는 LG 실행 쪽 · GUI 쪽(판별 항 1 ·
-    #   재전달 집합 0 · 꼬리 목록 1)은 ⑯ test_abyss_handoff_gui 의 같은 행
+    # P22 - ' (release)' 를 담은 워커 문자열은 선분기 안과 추론 재입장 터치 끝 함수(Complete-AbyssPromptTimeoutClearTouch 의 reward-before-click 커스텀·비커스텀 두 줄 -
+    #   선분기 next × 3버튼과 같은 사실이라 같은 놓아줌 표지, 재입장대기_클리어화면 설계 8.8)에만 (그 밖 0 - 본류 키 지점의 생성 실패 줄에도 0). 갈래별 꼬리 유무는 LG
+    #   실행 쪽 · GUI 쪽(판별 항 1 · 재전달 집합 0 · 꼬리 목록 1)은 ⑯ test_abyss_handoff_gui 의 같은 행
     $releaseStrings = @(@(Get-StringNodes -Node $workerAst) | Where-Object { ([string]$_.Value).Contains('(release)') })
-    Assert-Case 'P22 (release) 문자열 1 이상 · 선분기 밖 0' (J @(($releaseStrings.Count -ge 1), @($releaseStrings | Where-Object { -not (Test-AstWithin -Node $_ -Ancestor $selectorNode) }).Count)) (J @('True', 0))
+    $releaseOutsideSelector = @($releaseStrings | Where-Object { -not (Test-AstWithin -Node $_ -Ancestor $selectorNode) })
+    $touchEndNode = $(if ($workerTopFunctions.ContainsKey('Complete-AbyssPromptTimeoutClearTouch')) { $workerTopFunctions['Complete-AbyssPromptTimeoutClearTouch'] } else { $null })
+    $releaseInTouchEnd = @($releaseOutsideSelector | Where-Object { ($null -ne $touchEndNode) -and (Test-AstWithin -Node $_ -Ancestor $touchEndNode) })
+    Assert-Case 'P22 (release) 문자열 1 이상 · 선분기 밖은 추론 재입장 터치 끝 함수의 2줄뿐(reward-before-click 커스텀·비커스텀)' `
+        (J @(($releaseStrings.Count -ge 1), $releaseOutsideSelector.Count, $releaseInTouchEnd.Count)) (J @('True', 2, 2))
 }
 
 # ===== 실행 =====

@@ -686,6 +686,10 @@ $abyssPairMaxDy      = 30            # 짝 두 단어의 y 차 한도 - 실측 0
 # 바뀌지 않으면 '다시 하기' 가 먹지 않은 것으로 봅니다 - 값은 설계 v10 의 10초(실측 필요 - 다시 하기 실기에서 클릭 → 첫 변화 시간을 잼).
 # resume 유예의 상한(던전 안 연속을 잇는 동결·복구 회전과 조작 양보가 연속을 끊은 뒤 새 표본 전 회전은 던전 안 유예가 처음 미룬 회전부터 · 3버튼 무변화 · 첫 유효 회전 전은 호출부터)도 이 길이입니다. 회귀 tests\test_abyss_party_leader.ps1 이 이 대입문을 캡처하고 값 10 을 고정합니다.
 $abyssReclickQuietSeconds = 10
+# 어비스 재입장 대기의 중간 진단 시각 (재입장대기_클리어화면 A3 - 2026-11-16 14:19 정지 대응: 시간 초과 경로가 회전별 분류를 남기지 않아 원인을 확정하지 못했음).
+# 대기 시작부터 조정 시간(양보·캡처 실패 제외)으로 이만큼 지나도 결론이 없으면 화면 캡처 1장과 분류 집계 1줄을 남깁니다 - 판정·클릭에는 쓰지 않습니다.
+# 값 = 같은 날 '다시 하기' 재입장 70회의 최대 40.2초(클릭 → 재입장 확인)의 두 배 남짓. config 가 아닌 스크립트 상수라 coordsVersion·configSchemaVersion 은 그대로입니다
+$abyssReentryDiagSeconds = 90
 
 # 입장 방식: solo = 혼자하기 / party = 함께하기 (우연한 만남 매칭 자동화 지원)
 $dungeonMode = [string](Get-ConfigValue $config @('dungeons', 'mode') 'solo')
@@ -893,8 +897,9 @@ $script:abyssRunId = [string]$env:HONEYNOGI_RUN_ID
 #  Role none/own/next/resume · Nonce 열쇠 항목의 nonce(Role none 은 빈 값 - 받은 HONEYNOGI_HANDOFF_NONCE 는 판정에만 씀) · CleanupOnly own 이 받은
 #  항목의 정리 전용 표지 · FreshEntry own 이 새 입장으로 새 자기 항목을 만든 판 · StartScreen 이어받기 시작 화면의 결론 · AfterEntry 열쇠 항목의
 #  입장 직후 키 시작값 @{ Index; Keys } · JournalState 시작 읽기 'ok' / 'corrupt'(손상이면 이번 판은 자기 항목·입장 직후 키 0) · Stage · At · RetryClicks 재개 기동이 받은
-#  항목의 단계 · at 객체 · 전송 수(Role resume 만 - 재개 시계 · 승계·재평가 · 재클릭 상한의 재료)
-$script:handoff = @{ Role = 'none'; Nonce = ''; CleanupOnly = $false; FreshEntry = $false; StartScreen = ''; AfterEntry = $null; JournalState = 'ok'; Stage = ''; At = $null; RetryClicks = 0 }
+#  항목의 단계 · at 객체 · 전송 수(Role resume 만 - 재개 시계 · 승계·재평가 · 재클릭 상한의 재료) · ReenteredBy next 가 받은 항목의 추론 재입장
+#  표지(reenteredBy - '' 정상 재입장 / 'prompt-timeout' 재입장 대기가 입장을 못 본 채 클리어 화면으로 넘긴 판, 재입장대기_클리어화면 설계 7.1·7.2)
+$script:handoff = @{ Role = 'none'; Nonce = ''; CleanupOnly = $false; FreshEntry = $false; StartScreen = ''; AfterEntry = $null; JournalState = 'ok'; Stage = ''; At = $null; RetryClicks = 0; ReenteredBy = '' }
 # 마무리 실행(finish-only) 기동 표지 - GUI 가 마무리 실행 기동에만 '1' 로 넘깁니다. 이어받기 역할 판정에는 쓰지 않고(마무리 실행 기동도 next 로
 # 받음 - 설계 v10 6.1), 본류 시작의 정리 전용 판정이 읽습니다(구현 명세 ② 2.6 - 마무리 실행이면 시작 화면만으로 정리 전용을 정하지 않음).
 $script:finishOnly = ([string]$env:HONEYNOGI_FINISH_ONLY -eq '1')
@@ -5880,6 +5885,105 @@ function Test-DungeonClearPrompt {
   return ($scoreText.Contains('처치') -and ($scoreText.Contains('완벽') -or $scoreText.Contains('보너스')))
 }
 
+function Test-AbyssClearScoreText {
+  param([string]$Text)
+
+  # 클리어 화면 좌측 점수표 서명 (순수 판정 - 진리표 대상). 위 Test-DungeonClearPrompt 의 보조 신호와 같은 식입니다('처치' + ('완벽' 또는 '보너스')).
+  # 그 함수는 여러 회귀가 소스에서 그대로 뽑아 쓰므로 고치지 않고 같은 식을 여기 따로 둡니다 - 두 식의 글자 일치를 회귀(test_reentry_clear_screen)가 단언합니다.
+  # 쓰는 곳 = 클리어 화면 확신 단계 'weak' 의 승격 판정(재입장 대기 · 추론 재입장 터치 루프)뿐입니다
+  if ([string]::IsNullOrEmpty($Text)) { return $false }
+  $scoreText = $Text -replace '\s', ''
+  return ($scoreText.Contains('처치') -and ($scoreText.Contains('완벽') -or $scoreText.Contains('보너스')))
+}
+
+function Get-AbyssClearPromptTextLevel {
+  param([string]$Text)
+
+  # 클리어 화면 하단 '화면을 터치해 주세요' 판독문의 확신 단계 (순수 판정 - 진리표 대상, 재입장대기_클리어화면 설계 7.4 · 2026-11-16 14:19 정지 대응).
+  # Test-DungeonClearPrompt 는 깨진 판독까지 잡으려고 낱말 하나('터치하')·두 조각('화면'+'치') 조합도 받습니다 - 클리어 감시에는 맞지만, 입장을 못 본 채
+  # 클리어 화면만으로 '새 판이 끝났다' 고 추론하는 자리(재입장 대기 끝 · 추론 재입장 터치)에는 너무 넓습니다(로딩 팁의 '…터치하면…' 같은 단독 낱말).
+  #  'none'   - 빈 값 · '나가기' 포함(3버튼 보상 · 재매칭 패널 · 접힌 준비 패널 하단에는 모두 있고 클리어 화면 하단에는 없음) · '취소'+'도전하'(권장 인원 팝업)
+  #  'strong' - 문구 골격이 남은 판독: ('화면을' 그리고 ('터' 또는 '주세요')) / 순서 골격 '[화호]…을…치…주세요'(Test-DungeonClearPrompt 와 같은 식) /
+  #             파손 골격 '[화호]…을…치해…주…요'(폭 제한)
+  #  'weak'   - 골격이 끊긴 실측 파손형: ('치해' 그리고 '면') / ('화면' 그리고 '치') - 같은 회전의 점수표(Test-AbyssClearScoreText)가 참일 때만 엄격으로
+  #             올립니다(부르는 쪽 몫)
+  # 실측 진리표: 11-16 '화면을터치해주세요' · 07-16 '화면을터夫6주' · 07-18 '화면을치해주세요' · 08-13 '화D을1치ö주세요' · '호을4치6주세요' · '호十D을터치ö주세요'
+  #   → strong / 07-17 '화n을터치해주l요' → strong(파손 골격) / 07-19 '면百치해' · '화면치6H天서j“' → weak / '경험치고二' · '보상을확인해주세요' · 3버튼·재매칭 하단 → none
+  if ([string]::IsNullOrEmpty($Text)) { return 'none' }
+  $normalized = $Text -replace '\s', ''
+  if ($normalized.Contains('나가기')) { return 'none' }
+  if ($normalized.Contains('취소') -and $normalized.Contains('도전하')) { return 'none' }
+  if ($normalized.Contains('화면을') -and ($normalized.Contains('터') -or $normalized.Contains('주세요'))) { return 'strong' }
+  if ($normalized -match '[화호].{0,8}을.{0,8}치.{0,8}주세요') { return 'strong' }
+  if ($normalized -match '[화호].{0,3}을.{0,3}치해.{0,3}주.{0,2}요') { return 'strong' }
+  if ($normalized.Contains('치해') -and $normalized.Contains('면')) { return 'weak' }
+  if ($normalized.Contains('화면') -and $normalized.Contains('치')) { return 'weak' }
+  return 'none'
+}
+
+function Read-AbyssClearScoreText {
+  param([System.Diagnostics.Process]$Game)
+
+  # 클리어 화면 좌측 점수표 판독 - Test-DungeonClearPrompt 보조 신호와 같은 영역·배율·엔진. 캡처 실패면 '' (부르는 루프의 회전 유효성이 그 회전을 버림 - 규칙 15).
+  # 창 좌표를 못 읽으면 공용 판독이 던지고, 부르는 루프의 창 좌표 제한 catch 가 받습니다
+  return ((Get-GameRegionOcrText -Game $Game -ReferenceX $rgClearScore[0] -ReferenceY $rgClearScore[1] `
+      -RegionWidth $rgClearScore[2] -RegionHeight $rgClearScore[3] -Scale 3 -Engine $ocrKoreanEngine) -replace '\s', '')
+}
+
+function Format-AbyssReentryDiagSummary {
+  param(
+    [string]$Context,          # 재입장 대기 문맥 (Wait-AbyssReentry -Context)
+    [string]$Stage,            # '중간' / '시간 초과'
+    $KindCounts,               # 분류별 유효 표본 수 (키 = Resolve-AbyssHandoffStartScreen 분류 - 타입 없이 받음)
+    [int]$InsideMax,           # 던전 안 최장 연속
+    [string]$LastKind,         # 마지막 유효 분류
+    [int]$PromptStreak,        # 끝의 엄격 클리어 화면 연속
+    [int]$YieldTurns,          # ② 조작 양보 회전
+    [int]$SweepTurns,          # ④ 스윕 참 회전 (굶김·복구 갈래 포함)
+    [int]$RecoveredTurns,      # ③ 탐침 복구 뒤 회전
+    [int]$ReadFailTurns,       # ⑦ 판독 도중 캡처 실패 회전 (미복구·복구 모두 - 동결 구간은 늘 이 회전이나 스윕 실패로 시작하므로 동결 횟수 대신 이 값을 봅니다)
+    [string]$TrackerText,      # 이 대기 안 마지막 유효 HUD 회전의 추적기 판독 (그런 회전이 없으면 '')
+    [string]$BottomText        # 마지막 유효 회전의 하단 판독
+  )
+
+  # 재입장 대기 분류 집계 1줄 (순수 - 진리표 대상 · 로그 전용, 재입장대기_클리어화면 설계 A1·A2 · 6.5). 머리 '[진단]' 이라 컨트롤 패널 창에는 안 보이고
+  # (Convert-WorkerLogLineForGui) 로그 파일에만 남습니다. 분류는 정해진 차례로 0 아닌 것만 적고, 판독문 둘은 60자에서 자릅니다
+  $kindOrder = @('inside', 'field', 'unknown', 'prompt', 'matching', 'ready', 'entry-waiting', 'popup', 'reward3', 'selection', 'menu', 'detail')
+  $kindParts = @(foreach ($kindName in $kindOrder) {
+      $kindCount = [int]$KindCounts[$kindName]
+      if ($kindCount -gt 0) { "$kindName $kindCount" }
+    })
+  $kindText = $(if ($kindParts.Count -gt 0) { $kindParts -join ' · ' } else { '유효 표본 없음' })
+  $trackerShown = $(if ($TrackerText.Length -gt 60) { $TrackerText.Substring(0, 60) } else { $TrackerText })
+  $bottomShown = $(if ($BottomText.Length -gt 60) { $BottomText.Substring(0, 60) } else { $BottomText })
+  return "[진단] $Context $Stage 분류 집계 - $kindText (던전 안 최장 ${InsideMax}연속 · 끝 분류 '$LastKind' · 엄격 클리어 화면 ${PromptStreak}연속) / 판독 없는 회전: 양보 $YieldTurns · 스윕 $SweepTurns · 탐침 복구 $RecoveredTurns · 판독 실패 $ReadFailTurns / 마지막 추적기 '$trackerShown' · 마지막 하단 '$bottomShown'"
+}
+
+function Format-AbyssTouchDiagSummary {
+  param(
+    [string]$Result,           # 터치 루프 결과 ('reward-before-click' / 'skipped' / 'timeout' - 'transition' 은 부르지 않음)
+    $KindCounts,               # 유효 회전 분류별 수 (reward · panel · strict · loose · other - 서로 배타라 합계 = 유효 회전. 타입 없이 받음)
+    [int]$Sends,               # 전송이 확인된 터치 수
+    [int]$ClickYields,         # ⑪ 클릭이 조작으로 생략된 수 (그 회전은 유효 판독이라 위 분류에도 듦 - 판독 없는 회전과 따로 셈)
+    [int]$CursorMissesBefore,  # 첫 전송 전 커서 미확인 ('skipped' 예산)
+    [int]$CursorMissesAfter,   # 전송 뒤 재클릭의 커서 미확인 (결론을 바꾸지 않음 - 'timeout' 의 원인일 수 있어 남김)
+    [int]$YieldTurns,          # ② 조작 양보 회전 (판독 없음)
+    [int]$SweepTurns,          # ④ 스윕 참 회전 (굶김·복구 갈래 포함)
+    [int]$RecoveredTurns,      # ③ 탐침 복구 뒤 회전
+    [int]$ReadFailTurns,       # ⑦ 판독 도중 캡처 실패 회전 (미복구·복구 모두)
+    [string]$BottomText        # 마지막 유효 회전의 하단 판독
+  )
+
+  # 추론 재입장 클리어 화면 터치 루프의 비전이 끝 집계 1줄 (순수 - 진리표 대상 · 로그 전용, 재입장대기_클리어화면 설계 8.7). 머리 '[진단]' 이라 컨트롤 패널 창에는
+  # 안 보입니다. 분류는 다섯 칸을 늘 같은 차례로 적어 합계(유효 회전)를 눈으로 맞출 수 있게 하고, 판독문은 60자에서 자릅니다
+  $kindNames = [ordered]@{ reward = '보상'; panel = '패널'; strict = '엄격 클리어 화면'; loose = '느슨한 클리어 화면'; other = '그 밖' }
+  $validTotal = 0
+  foreach ($kindKey in $kindNames.Keys) { $validTotal += [int]$KindCounts[$kindKey] }
+  $kindText = (@($kindNames.Keys | ForEach-Object { '{0} {1}' -f $kindNames[$_], [int]$KindCounts[$_] }) -join ' · ')
+  $bottomShown = $(if ($BottomText.Length -gt 60) { $BottomText.Substring(0, 60) } else { $BottomText })
+  return "[진단] 추론 재입장 클리어 화면 터치 $Result 집계 - 유효 회전 $validTotal ($kindText) · 터치 전송 $Sends · 클릭 조작 생략 $ClickYields · 커서 미확인 전송 전 $CursorMissesBefore · 전송 뒤 $CursorMissesAfter / 판독 없는 회전: 양보 $YieldTurns · 스윕 $SweepTurns · 탐침 복구 $RecoveredTurns · 판독 실패 $ReadFailTurns / 마지막 하단 '$bottomShown'"
+}
+
 function Test-NoticeBoardPopup {
   param([System.Diagnostics.Process]$Game)
 
@@ -9826,7 +9930,7 @@ function Consume-Handoff {
   #  ③ none: nonce 없음(소유자 해석도 생략 - 커스텀 소유자 JSON 이 깨진 기동은 입장 뒤 자기 항목 기록 실패로 드러남, 구현 명세 ② 5절 C15) ·
   #     내 소유자를 못 만듦(커스텀 소유자 JSON 해석 실패 - [경고]) · 항목 없음 · 이미 done · 기동 모드와 항목 단계 불일치(재개 env 인데 retry
   #     단계가 아님 / 재개 env 없이 retry 단계 - [경고])
-  #  ④ next = 재개 아님 · reentered · nextOwner 일치(applied 무관) / own = 재개 아님 · entered · owner 일치 / resume = 재개 · retry 단계 ·
+  #  ④ next = 재개 아님 · reentered · nextOwner 일치(applied 무관 · 추론 재입장 표지 reenteredBy 도 옮김) / own = 재개 아님 · entered · owner 일치 / resume = 재개 · retry 단계 ·
   #     owner 일치 · applied 밖(Stage · At · RetryClicks 도 남김) / 그 밖(소유자·세대·실행 id 불일치 = 지난 기록 · 다른 단계)은 none
   # 내 소유자 = 커스텀은 GUI 가 넘긴 소유자 JSON 의 5필드 + 세대(ConvertTo-AbyssJournalOwner - 클리어 완료 기록과 같은 출처), 비커스텀은 { runId }.
   # Role none 은 Nonce 를 빈 값으로 둡니다 - 받은 nonce 는 판정에만 쓰고 열쇠는 입장 뒤 자기 항목을 만들 때 채웁니다. 마무리 실행 표지
@@ -9894,6 +9998,9 @@ function Consume-Handoff {
     $script:handoff.Role = 'next'
     $script:handoff.Nonce = $receivedNonce
     $script:handoff.AfterEntry = $entryAfterEntry
+    # 추론 재입장 표지(재입장대기_클리어화면 설계 7.2) - 칸이 없는 항목(정상 재입장 · 옛 항목)은 $null 이라 '' 입니다. 본류 클리어 화면 시작이 이 값으로
+    # 전이 확인 루프(Invoke-AbyssPromptTimeoutClearTouch)를 고릅니다
+    $script:handoff.ReenteredBy = [string]$handoffEntry.reenteredBy
     return 'ok'
   }
   if ((-not $resumeLaunch) -and ($entryStage -eq 'entered') -and
@@ -10253,6 +10360,40 @@ function Set-AbyssJournalReentered {
   }
   # 문구는 -f 식이 아니라 문자열로 둡니다(워커 로그 심각도 회귀가 문자열 인자만 분류)
   Write-RunLog "[경고] 재입장 완료 기록을 저장하지 못했습니다 (${failureKind}) - 재입장 완료 줄을 남기고 이어 갑니다"
+}
+
+function Set-AbyssJournalReenteredBy {
+  # 추론 재입장 표지(reenteredBy) - 워커 자신의 '다시 하기' 클릭 뒤 재입장 대기(원 워커 호출 B · 재개 워커의 재클릭 뒤 호출 D)가 던전 안 2연속을 못 본 채 끝났지만 끝 화면이 새 판의 클리어 화면(엄격 S 2연속)이라
+  # '새 판에 들어가 클리어까지 끝났다' 고 추론해 넘길 때, 재입장 완료 기록보다 **먼저** 따로 저장합니다(재입장대기_클리어화면 설계 7.1). 다음 워커(Role next)는
+  # 이 표지로 클리어 화면 시작을 전이 확인 루프(Invoke-AbyssPromptTimeoutClearTouch)로 받습니다. stage 와 한 저장에 넣지 않는 이유: 그 저장이 실패하면 GUI 가
+  # 재입장 완료 줄의 nonce 로 단계만 보정해(위 Set-AbyssJournalReentered 주석) 표지 없는 next 가 생깁니다 - 부르는 쪽은 이 저장이 성공했을 때만 완료 줄을 냅니다.
+  # GUI 는 항목을 칸 단위로 고쳐 써(Set-AbyssJournalProperty) 단계 보정 뒤에도 이 칸이 남습니다.
+  # -Expect = 그 항목이 있고 stage retry-attempt 또는 retry-clicked(재입장 완료 기록과 같은 조건). 바꾸는 것 = reenteredBy 칸(없으면 새로 만듦).
+  # 반환 = 저장 태그 - changed 만 성공. 실패 로그와 대체 출구는 부르는 쪽(Complete-AbyssPromptTimeoutHandoff) 몫입니다
+  param([string]$Nonce, [string]$Value)
+  $markNonce = $Nonce
+  $markValue = $Value
+  $expect = {
+    param($journal)
+    $markReady = $false
+    foreach ($markEntry in @($journal.entries)) {
+      $markReady = $markReady -or (($null -ne $markEntry) -and ([string]$markEntry.nonce -eq $markNonce) -and
+        (([string]$markEntry.stage -eq 'retry-attempt') -or ([string]$markEntry.stage -eq 'retry-clicked')))
+    }
+    return $markReady
+  }.GetNewClosure()
+  $mutator = {
+    param($journal, $change)
+    foreach ($markEntry in @($journal.entries)) {
+      if (($null -eq $markEntry) -or ([string]$markEntry.nonce -ne $markNonce)) { continue }
+      Set-AbyssJournalProperty -Object $markEntry -Name 'reenteredBy' -Value $markValue
+      $change.Changed = $true
+    }
+  }.GetNewClosure()
+  $record = Update-AbyssJournal -Path $abyssJournalPath -Mutator $mutator -Expect $expect
+  # 잠금 아래 재판독이 직전본·임시본으로 복구했으면 저장소가 그 경고를 돌려줍니다 - 로그는 호출부 몫(저장소 계약)
+  foreach ($recordWarning in @($record.Warnings)) { Write-RunLog ([string]$recordWarning) }
+  return [string]$record.Tag
 }
 
 function Invoke-NormalDungeonCycle {
@@ -15958,13 +16099,20 @@ function Wait-AbyssReentry {
 
   # 어비스 재입장 대기 (구현 명세 ④ · 설계 v11 R5 2·3절). 머리 주석 여섯 항목(설계 v11 R5 12절):
   #  ① 회전 순서: 서두(메타 비움 · 필드 모양 연속 이어받기) → ① 동결 → ② 조작 양보 → ③ 탐침 복구 뒤 회전 → ④ 팝업 스윕 → ⑤ 판독(하단 → 패널 → HUD →
-  #     추적기 → (필드 결과 켬 · 필드 모양 회전만) 선택 화면 → ESC 메뉴 · 상세는 읽지 않음) → ⑥ 간접 양보 리셋 → ⑦ 유효성 → ⑧ 분류·던전 안 연속·
+  #     추적기 → (필드 결과 켬 · 필드 모양 회전만) 선택 화면 → ESC 메뉴 · 상세는 읽지 않음. 하단이 클리어 화면이고 확신 단계 weak 인 회전만 하단 다음에
+  #     점수표 - 재입장대기_클리어화면 7.4) → ⑥ 간접 양보 리셋 → ⑦ 유효성 → ⑧ 분류·던전 안 연속·
   #     패널 관측·필드 확정·계측 → ⑨ 결론(같은 회전의 마감보다 먼저) → ⑩ 마감(파티원 시계 - 양보·캡처 실패 차분, 되돌림 없음) → (⑪ 클릭 - 구현 단위
   #     ⑥d 의 팝업 도전 자리) → ⑫ 대기(굶김 0 · 복구 2초 · 그 밖 700ms). 조작 생략·아직 캡처 실패 중인 회전은 마감을 확정하지 않습니다(규칙 4·15).
   #     동결 블록은 여러 줄·단독 줄 continue 입니다(동결 지점 계수 규칙)
-  #  ② 결과: @{ Result; LastKind; PanelSeen } 하나 - Result 'entered'(던전 안 2연속) / 'timeout'(조정 마감 - LastKind = 마지막 유효 분류) /
+  #  ② 결과: @{ Result; LastKind; PanelSeen; PromptStreak } 하나 - Result 'entered'(던전 안 2연속) / 'timeout'(조정 마감 - LastKind = 마지막 유효 분류) /
   #     (보고 켬) 'cancelled'(패널류를 본 뒤의 3버튼) · 'reclick'(패널류 없이 무변화 창이 지난 3버튼) / (필드 결과 켬) 'field-cancelled'(필드 확정 W -
-  #     재매칭 패널에서 ESC 로 매칭을 끊으면 게임이 필드로 내보냄, 2026-10-28 관측 2 · 구현 단위 5b-8). 재클릭·이어받기·정지 문구는 호출부
+  #     재매칭 패널에서 ESC 로 매칭을 끊으면 게임이 필드로 내보냄, 2026-10-28 관측 2 · 구현 단위 5b-8). 재클릭·이어받기·정지 문구는 호출부.
+  #     PromptStreak = 끝의 엄격 클리어 화면 연속(분류 prompt ∧ 하단 확신 단계 strong, 또는 weak ∧ 점수표 - Get-AbyssClearPromptTextLevel). 결론에는 쓰지
+  #     않고(prompt 는 지금처럼 관측 지속), Complete-AbyssRetrySelection 의 시간 초과 갈래(원 워커 호출 B · 재개 워커의 재클릭 뒤 호출 D - 같은 함수)가
+  #     '새 판이 클리어까지 끝났다' 는 추론에만 씁니다(재입장대기_클리어화면 설계 7.1 · 8.9).
+  #     끊김: ② 조작 양보 · ③ 탐침 복구 뒤 · ④ 스윕 참(모든 갈래) · ⑥ 간접 양보 · ⑦ 판독 도중 캡처 실패 · prompt 아닌 유효 분류 · 엄격 아닌 prompt (① 동결
+  #     구간은 늘 ⑦·④ 실패로 시작해 ③ 으로 끝나 따로 끊지 않음 - 동결 블록은 표준 다섯 요소 그대로) - 그래서 시간 초과 순간 2 이상이면 그 시간 초과 회전
+  #     자체가 유효하게 읽은 엄격 클리어 화면 회전입니다(설계 6.1)
   #  ③ 패널 관측 창: 이 호출 1회 + -PanelSeen(호출부가 그 판에서 이미 본 자기 표본). 동결·양보·스윕을 넘어 유지합니다 - 양보 중 사용자가 매칭을
   #     취소해도 그 전에 본 패널이 증거입니다. journal 에 쓰지 않습니다
   #  ④ resume 유예의 근거: 재개 시계가 이미 지났어도 설계 v10 재개 표의 던전 안(다음 유효 표본 하나 더)·3버튼(무변화 창) 행이 서야 수동 재개가
@@ -15975,7 +16123,8 @@ function Wait-AbyssReentry {
   #     미룬 회전부터 무변화 창 길이 안에서만(판독 실패 ↔ 탐침 복구가 이어져도 끝나게 - 되돌림은 표식만이라 이 길이는 호출당 하나). 3버튼과 첫 유효
   #     회전 전(캡처 실패로 아직 한 번도 못 읽은 회전)은 무변화 창 안에서만 - 판정식은 Resolve-AbyssResumeGrace 한 곳입니다
   #  ⑤ 관찰 전용: 클릭·키·이벤트 정리·journal·exit 가 없습니다. 권장 인원 팝업 도전은 구현 단위 ⑥d 가 -ChallengeFewMembers 를 명시한 호출에만 더합니다
-  #     (클릭 직전 새 판독의 팝업 서명 + '나가기' 없음 + 조정 3초 재도전 - HEAD 의 3초 Space 반복을 대신함)
+  #     (클릭 직전 새 판독의 팝업 서명 + '나가기' 없음 + 조정 3초 재도전 - HEAD 의 3초 Space 반복을 대신함). 진단(재입장대기_클리어화면 A - 로그 전용 · 판정 무관):
+  #     분류별 수·판독 없는 회전 수를 세어 시간 초과 때 집계 1줄, 결론 없이 조정 $abyssReentryDiagSeconds 초가 지나면 진단 캡처 1장 + 집계 1줄(Format-AbyssReentryDiagSummary)
   #  ⑥ 창 좌표 throw: 창 좌표를 못 읽은 캡처 실패(원인 gameWindowGone) 중의 두 문구 - 공용 판독(캡처 실패를 등록한 뒤 던짐)과 스윕 예비 좌표
   #     클릭(방어선 - 스윕의 주간 리셋 경로는 캡처 실패 게이트(구현 단위 ④′)가 클릭 전에 끊음) - 만 catch 하나에서 정확 일치로 받아 다음 회전 동결로 보냅니다. 그 밖의 예외는 그대로 다시 던집니다 -
   #     이어받기 선분기 자신의 판독(B2 단계 앞)·시작 패널 대기 등 기존 루프는 받지 않습니다 - 선분기 B2 단계는 구현 단위 ⑤a 부터 이 함수라 받습니다(설계 v11 R5 3.7 · 구현 명세 ④ B-4)
@@ -15998,6 +16147,15 @@ function Wait-AbyssReentry {
   $probeRecovered = $false
   # 계측 (로그 전용 - 판정·조건문에 쓰지 않습니다. 이어받기 선분기와 같은 규칙)
   $runUnknown = 0; $runField = 0; $runFieldSince = $null; $runBreaks = 0; $runSerial = $script:captureFailSerial
+  # 진단 계측 (재입장대기_클리어화면 A1 - 로그 전용 · 판정 무관. 2026-11-16 14:19 정지는 이 기록이 없어 300초 동안 무엇을 봤는지 확정하지 못했음)
+  $diagKindCounts = @{}
+  $diagYieldTurns = 0; $diagSweepTurns = 0; $diagRecoveredTurns = 0; $diagReadFailTurns = 0; $diagInsideMax = 0
+  $lastBottomText = ''    # 마지막 유효 회전의 하단 판독
+  $lastTrackerText = ''   # 이 대기 안 마지막 유효 HUD 회전의 추적기 판독 (그런 회전이 없으면 '' - 대기 밖의 옛 판독을 요약에 섞지 않음)
+  $diagClock = New-AbyssMemberClock -LimitSeconds $abyssReentryDiagSeconds   # 중간 진단 시계 (A3 - 양보·캡처 실패 차분은 시계가 더함)
+  $diagCaptured = $false
+  # 끝의 엄격 클리어 화면 연속 (결과 PromptStreak - 위 ② 의 끊김 규칙)
+  $promptStreak = 0
   while ($true) {
     # 서두 - 규칙 4: 직전 회전 클릭의 생략 메타가 남아 스윕 분류가 오발동하지 않게 비웁니다
     $turnSerial = $script:captureFailSerial
@@ -16008,7 +16166,8 @@ function Wait-AbyssReentry {
     $fieldAt = $turnStart                # 필드 표본 시각 - ⑥ 간접 양보 회전에서만 양보 뒤 새 시각으로 덮음
     $sweepStarved = $false
     $turnRecovered = $false
-    # ① 동결 (규칙 15) - 마감은 되돌리지 않습니다(시계가 캡처 실패 차분을 더함). 던전 안 연속·패널 관측 유지
+    # ① 동결 (규칙 15) - 마감은 되돌리지 않습니다(시계가 캡처 실패 차분을 더함). 던전 안 연속·패널 관측 유지. 클리어 화면 연속은 이 블록에서 따로 끊지 않습니다 -
+    #    동결은 늘 ⑦ 판독 도중 실패나 ④ 스윕 실패로 시작해(그 자리에서 이미 0) ③ 탐침 복구 뒤 회전으로 끝나므로(거기서 다시 0) 관측 공백 앞뒤가 한 연속이 되지 않습니다
     if ($script:screenCaptureFailing) {
       Test-SafeStopDuringCaptureFail
       Start-Sleep -Seconds 2
@@ -16021,14 +16180,18 @@ function Wait-AbyssReentry {
     if (Test-UserRecentlyActive) {
       if ($insideStreak -gt 0) { $insideGraceRun = 0; $insideGraceReverted = $true }
       $insideStreak = 0
+      $promptStreak = 0
       $runBreaks++
+      $diagYieldTurns++
       Wait-UserYieldEnd -Game $Game -Context $Context
       continue
     }
     if ($probeRecovered) {
-      # ③ 탐침 복구 뒤 회전 - 스윕·판독 없이 마감만 보고 2초 뒤 다음 회전 (조작이면 위 게이트가 먼저 받고 표식은 남음)
+      # ③ 탐침 복구 뒤 회전 - 스윕·판독 없이 마감만 보고 2초 뒤 다음 회전 (조작이면 위 게이트가 먼저 받고 표식은 남음). 클리어 화면 연속은 끊음
       $probeRecovered = $false
       $turnRecovered = $true
+      $promptStreak = 0
+      $diagRecoveredTurns++
     }
     try {
       # ④ 팝업 스윕 (순위 1) - 참이면 이 회전은 판독하지 않고 생략 사유로 가릅니다 (스윕이 판독 전 커서를 창 밖으로 뺌)
@@ -16040,7 +16203,9 @@ function Wait-AbyssReentry {
         # 봄). 전송·커서 미확인·캡처 실패('counted'·'starved'·'freeze'·'recovered')가 끊은 연속은 그대로 한 번 - 스윕 안 커서 대피 양보가 함께 났어도 끊은 것은 팝업 처리
         if (($sweepTurn.Action -eq 'yield') -and ($insideStreak -gt 0)) { $insideGraceRun = 0; $insideGraceReverted = $true }
         $insideStreak = 0
+        $promptStreak = 0
         $runBreaks++
+        $diagSweepTurns++
         if ($sweepTurn.Action -eq 'freeze' -or $sweepTurn.Action -eq 'yield' -or $sweepTurn.Action -eq 'counted') {
           continue
         }
@@ -16052,6 +16217,10 @@ function Wait-AbyssReentry {
       if ((-not $sweepStarved) -and (-not $turnRecovered)) {
         $promptNow = Test-DungeonClearPrompt -Game $Game
         $bottomText = [string]$script:lastClearPromptText
+        # 클리어 화면 확신 단계 (재입장대기_클리어화면 설계 7.4) - 하단이 weak 일 때만 같은 회전의 점수표를 읽습니다(⑤ 안이라 ⑦ 유효성이 그 판독까지 덮음 - 규칙 15)
+        $promptLevel = Get-AbyssClearPromptTextLevel -Text $bottomText
+        $promptScoreOk = $false
+        if ($promptNow -and ($promptLevel -eq 'weak')) { $promptScoreOk = Test-AbyssClearScoreText -Text (Read-AbyssClearScoreText -Game $Game) }
         $panelKind = Get-AbyssPanelKind -Game $Game
         $hudNow = Test-HomeEndEscHud -Game $Game
         $questNow = $(if ($hudNow) { Test-InDungeonQuest -Game $Game } else { $false })
@@ -16076,10 +16245,13 @@ function Wait-AbyssReentry {
       if ([double]$script:userYieldTotalMs -ne $turnYieldMs) {
         if ($insideStreak -gt 0) { $insideGraceRun = 0; $insideGraceReverted = $true }
         $insideStreak = 0
+        $promptStreak = 0
         $settleAlive = $false; $fieldAt = Get-Date   # 필드 연속도 끊고 이 회전의 필드 표본은 양보 뒤 새 시각에서 1표본으로 다시 시작 (설계 v11 R5 2.1 ⑥ - 양보 시간이 W 에 들지 않게)
       }
-      # ⑦ 유효성 - 아직 실패 중이면 다음 회전 ① 동결, 판독 도중 실패했다가 이미 복구면 복구 회전(판정 없이 마감만)
+      # ⑦ 유효성 - 아직 실패 중이면 다음 회전 ① 동결, 판독 도중 실패했다가 이미 복구면 복구 회전(판정 없이 마감만). 둘 다 클리어 화면 연속을 끊음
       if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) {
+        $promptStreak = 0
+        $diagReadFailTurns++
         $turnRecovered = -not $script:screenCaptureFailing
         if (-not $turnRecovered) {
           continue
@@ -16098,6 +16270,15 @@ function Wait-AbyssReentry {
           $insideStreak = 0
           $insideSince = $null
         }
+        # 끝의 엄격 클리어 화면 연속 (결과 PromptStreak - 결론에 쓰지 않음, 위 ② 의 끊김 규칙): 분류 prompt ∧ (strong ∨ (weak ∧ 점수표))만 잇습니다
+        $promptStrict = (($screen -eq 'prompt') -and (($promptLevel -eq 'strong') -or (($promptLevel -eq 'weak') -and $promptScoreOk)))
+        $promptStreak = $(if ($promptStrict) { $promptStreak + 1 } else { 0 })
+        # 진단 계측 (로그 전용 - 조건문 없이 갱신)
+        $diagKindCounts[$screen] = 1 + [int]$diagKindCounts[$screen]
+        $diagInsideMax = [Math]::Max($diagInsideMax, $insideStreak)
+        $lastBottomText = $bottomText
+        # 추적기는 이 회전에 HUD 가 읽혀 Test-InDungeonQuest 가 돌았을 때만 받습니다 - 전역은 이 대기 밖(직전 판 클리어 대기 등)의 옛 판독일 수 있습니다
+        if ($hudNow) { $lastTrackerText = [string]$script:lastQuestTrackerText }
         if (@('popup', 'ready', 'matching', 'entry-waiting') -contains $screen) { $panelObserved = $true }
         if ($ReportRewardReturn -and ($screen -eq 'popup') -and (-not $popupNoticed)) {
           $popupNoticed = $true
@@ -16145,6 +16326,15 @@ function Wait-AbyssReentry {
         if ($result) { break }
       }
     }
+    # 중간 진단 (재입장대기_클리어화면 A3 - 로그 전용): 결론 없이 조정 $abyssReentryDiagSeconds 초가 지나면 한 번만 캡처 + 집계 1줄. 표식은 호출 전에 세웁니다
+    # (재시도 없음). Write-LifeDiagnostics 는 캡처 실패를 등록하지 않고 실패를 자기 catch 로 삼켜, 이 회전의 아래 마감 판정에 새 실패가 섞이지 않습니다
+    if ((-not $diagCaptured) -and (Test-AbyssMemberClockExpired -Clock $diagClock)) {
+      $diagCaptured = $true
+      Write-LifeDiagnostics -Game $Game -Context "$Context ${abyssReentryDiagSeconds}초 경과(입장 미확정)" -CaptureOnly
+      Write-RunLog (Format-AbyssReentryDiagSummary -Context $Context -Stage "중간 ${abyssReentryDiagSeconds}초" -KindCounts $diagKindCounts -InsideMax $diagInsideMax `
+          -LastKind $lastKind -PromptStreak $promptStreak -YieldTurns $diagYieldTurns -SweepTurns $diagSweepTurns `
+          -RecoveredTurns $diagRecoveredTurns -ReadFailTurns $diagReadFailTurns -TrackerText $lastTrackerText -BottomText $lastBottomText)
+    }
     # ⑩ 마감 - 유효·굶김·복구·탐침 복구 뒤 회전이 봅니다 (조정 시간 - 양보·캡처 실패 제외, 경계 -ge)
     if (Test-AbyssMemberClockExpired -Clock $reentryClock) {
       $graceHold = $false
@@ -16160,6 +16350,10 @@ function Wait-AbyssReentry {
         $graceHold = ($graceWindow -ne '')
       }
       if (-not $graceHold) {
+        # 시간 초과 집계 (재입장대기_클리어화면 A2 - 로그 전용): 무엇을 보며 기다렸는지 남깁니다(호출부의 정지·추론 판단보다 먼저)
+        Write-RunLog (Format-AbyssReentryDiagSummary -Context $Context -Stage '시간 초과' -KindCounts $diagKindCounts -InsideMax $diagInsideMax `
+            -LastKind $lastKind -PromptStreak $promptStreak -YieldTurns $diagYieldTurns -SweepTurns $diagSweepTurns `
+            -RecoveredTurns $diagRecoveredTurns -ReadFailTurns $diagReadFailTurns -TrackerText $lastTrackerText -BottomText $lastBottomText)
         $result = 'timeout'
         break
       }
@@ -16173,7 +16367,7 @@ function Wait-AbyssReentry {
     }
     Start-Sleep -Milliseconds 700
   }
-  return @{ Result = $result; LastKind = $lastKind; PanelSeen = $panelObserved }
+  return @{ Result = $result; LastKind = $lastKind; PanelSeen = $panelObserved; PromptStreak = $promptStreak }
 }
 
 function Wait-AbyssOtherSelection {
@@ -16641,7 +16835,8 @@ function Complete-AbyssRetrySelection {
   # '다시 하기' 경로의 끝 (구현 명세 ⑤b4 1.3 · 설계 v11 R5 2.7·3.1 · R1 2.2 · R6 3.1 ①·3.5 ①②). 클릭 루프 결과와 재입장 대기(원 워커 호출 B · 재개 호출 D - 보고 켬 · 모드 예산)로 끝을 가릅니다:
   #  'sent' → 재입장 대기: 'entered' → 재입장 완료 끝(11/0) / 'reclick' → 그 판의 전송(-PriorSends 포함)이 2 미만이면 클릭 루프 다시(commit 뒤 - 재검사 없음), 2 면 폴백 ① /
   #     'cancelled' → '다른 던전 가기' 끝 rematch-cancelled(코드 4) / 'field-cancelled' → 입력 없이 정지(코드 4 - 우연한 만남만, 구현 단위 5b-8) /
-  #     'timeout' → 시간 초과 정지(코드 4)
+  #     'timeout' → 시간 초과 정지(코드 4) - 단 끝 분류 prompt ∧ PromptStreak 2 이상이면 추론 재입장 끝(Complete-AbyssPromptTimeoutHandoff - 표지 저장 성공 시
+  #     재입장 완료 끝 11/0, 실패 시 이 시간 초과 정지 · 재입장대기_클리어화면 설계 7.1)
   #  'no-pair'·'skipped' → 폴백 ① '다른 던전 가기'(ready - 다음 판은 같은 항목이라 같은 입장 방식) / 'unconfirmed' → 진단 · 코드 4 /
   #  'record-failed'·'safe-stop'·'last' → 그 값을 돌려줍니다(부르는 쪽이 지금 끝 줄 = 옛 나가기 - 구현 명세 ⑤b2 1.4 legacy-exit · 멈출 때는 '나가기' 로 필드, ⑤b6 ·
   #     사용자 결정 2026-10-26 ①. 'safe-stop'·'last' 는 commit 전 첫 시도에서만 나옵니다). 재개는 Complete-AbyssResumeWait 가 받습니다
@@ -16677,6 +16872,12 @@ function Complete-AbyssRetrySelection {
       Stop-AbyssReentryFieldCancelled
     }
     if ($reentryResult -eq 'timeout') {
+      # 끝 화면이 새 판의 클리어 화면(엄격 클리어 화면 2연속 - 시간 초과 회전 포함)이면 '입장은 놓쳤지만 새 판에 들어가 클리어까지 끝났다' 로 추론해
+      # 넘깁니다(재입장대기_클리어화면 설계 7.1 · 2026-11-16 14:19 관측 - 정지 캡처가 새 판 클리어 화면). 표지 저장에 성공했을 때만 넘기고(돌아오지 않음),
+      # 실패면 [경고] 뒤 돌아와 아래 지금의 시간 초과 정지로 끝납니다
+      if (([string]$reentry.LastKind -eq 'prompt') -and ([int]$reentry.PromptStreak -ge 2)) {
+        Complete-AbyssPromptTimeoutHandoff -Game $Game -Nonce $Nonce
+      }
       Stop-AbyssReentryTimeout -Game $Game
     }
     # 'reclick' - 패널 없이 3버튼이 무변화 창 동안 그대로(설계 v10 재클릭 요청). 판당 전송 2 가 상한(설계 v10 - 원 워커는 지역 카운터)
@@ -16703,6 +16904,239 @@ function Complete-AbyssInsideHandoff {
     exit 11
   }
   exit 0
+}
+
+function Complete-AbyssPromptTimeoutHandoff {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$Nonce                             # 그 판 기록의 nonce (원 워커 = 클리어 기록이 돌려준 값)
+  )
+
+  # 추론 재입장 끝 (재입장대기_클리어화면 설계 7.1 · 8.9 · 2026-11-16 14:19 정지 대응). 워커 자신의 '다시 하기' 클릭 뒤 재입장 대기(원 워커 호출 B · 재개 워커의
+  # 재클릭 뒤 호출 D - 둘 다 Complete-AbyssRetrySelection 이 부름)가 던전 안 2연속을 못 본 채 시간 초과로 끝났지만
+  # 끝 화면이 새 판의 클리어 화면(엄격 2연속)일 때만 부릅니다 - 그날 정지 캡처가 그 화면이었고(새 판에 들어가 클리어까지 끝났는데 워커가 입장을 놓침) 4시간 넘게 멈춰 있었습니다.
+  #  ① 표지(reenteredBy 'prompt-timeout')를 따로 먼저 저장 - 실패면 [경고] 1줄 뒤 돌아갑니다(부르는 쪽이 지금의 시간 초과 정지 코드 4). 표지 없이 넘기면 다음 워커가
+  #     정상 next 로 클리어 화면을 받아, 옛 보상 화면 오독 때 이미 계상된 판을 또 계상하는 길이 열립니다(설계 리뷰 2차)
+  #  ② 진단 캡처 + 안내 1줄 → ③ Complete-AbyssInsideHandoff(재입장 완료 기록 · 지정 시각 안내 · 표지 줄 · 코드 11/0 - 돌아오지 않음). 계상은 정상 재입장과 같습니다:
+  #     직전 판 = 컨트롤 패널이 표지 줄에서 1회, 새 판 = 다음 워커가 클리어 화면 → 보상 화면 전이를 본 뒤에만 1회(Invoke-AbyssPromptTimeoutClearTouch)
+  $markTag = Set-AbyssJournalReenteredBy -Nonce $Nonce -Value 'prompt-timeout'
+  if ($markTag -ne 'changed') {
+    $failureKind = switch ($markTag) {
+      'locked' { '파일 사용 중' }
+      'corrupt' { '파일 손상' }
+      default { '기록 실패' }
+    }
+    # 문구는 -f 식이 아니라 문자열로 둡니다(워커 로그 심각도 회귀가 문자열 인자만 분류)
+    Write-RunLog "[경고] 클리어 화면 추론 표지를 저장하지 못했습니다 (${failureKind}) - 넘기지 않고 입장 대기 시간 초과로 정지합니다"
+    return
+  }
+  Write-LifeDiagnostics -Game $Game -Context "'다시 하기' 뒤 입장 대기 끝 클리어 화면" -CaptureOnly
+  Write-RunLog "[어비스] 재입장 대기 끝에 새 판의 클리어 화면(화면을 터치)이 이어 보입니다 - 입장 확인은 놓쳤지만 새 판에 들어가 클리어까지 끝난 것으로 보고 넘깁니다 (다음 실행이 클리어 화면을 눌러 보상 화면을 확인한 뒤에만 '나가기'로 마무리하고 그 판을 1회 계상합니다)"
+  Complete-AbyssInsideHandoff -Nonce $Nonce
+}
+
+function Invoke-AbyssPromptTimeoutClearTouch {
+  param(
+    [System.Diagnostics.Process]$Game,
+    [string]$Context = '추론 재입장 클리어 화면 터치'   # 양보 안내 문맥 (Wait-UserYieldEnd)
+  )
+
+  # 추론 재입장 클리어 화면 시작의 전이 확인 터치 루프 (재입장대기_클리어화면 설계 7.3′ · 설계 리뷰 3차). 넘겨받은 항목이 추론 재입장 표지(reenteredBy
+  # 'prompt-timeout')인 next 기동의 본류 클리어 화면 시작만 부릅니다(Complete-AbyssPromptTimeoutClearTouch 통해). 머리 주석 다섯:
+  #  ① 회전 순서는 Invoke-AbyssRetryClick 과 같은 골격 - 서두(메타·이 회전 판독값 비움) → ① 동결 → ② 조작 양보 → ③ 탐침 복구 뒤 → ④ 팝업 스윕 → ⑤ 판독
+  #     (보상 3버튼 → 클리어 문구(하단 판독문 겸함) → (weak 일 때만) 점수표 → 패널) → ⑦ 유효성 → ⑨ 결론(같은 회전의 마감보다 먼저) → ⑩ 마감 → ⑪ 클릭 →
+  #     ⑫ 대기(굶김 0 · 복구 2초 · 그 밖 700ms). ⑥(간접 양보)이 없는 이유: 이어 세는 표본이 없고 클릭은 늘 그 회전 판독 뒤입니다
+  #  ② 전이 계약: 'transition' = 클릭 전 유효 판독에서 보상 음성 → 같은 유효 회전에서 엄격 클리어 화면(Get-AbyssClearPromptTextLevel strong, 또는 weak ∧
+  #     점수표) ∧ 패널 없음일 때 클리어 중앙 클릭 → 전송 확인 → 그 전송 뒤의 유효 판독에서 보상 양성 ∧ 패널 없음. 공용 Invoke-ClickUntil 을 쓰지 않는 이유:
+  #     첫 회전에서 클릭보다 먼저 조건을 봐, 바깥 사전 검사의 판독만 실패하면 클릭 없이 옛 보상 화면으로 성공합니다(설계 리뷰 3차)
+  #  ③ 결과(문자열): 'transition' / 'reward-before-click'(전송 전에 보상 양성 - 옛 보상 화면일 수 있음) / 'skipped'(첫 전송 전 커서 미확인 3회 - 전송 뒤의
+  #     재클릭 커서 미확인은 결론을 바꾸지 않고 전이·마감을 기다림) / 'timeout'(조정 마감).
+  #     재클릭은 엄격 클리어 화면이 그대로이고 마지막 전송에서 3초 지났을 때만(지금 S 갈래의 3초 재클릭과 같은 간격 - 등급 연출 중 터치가 무시되는 관측)
+  #  ④ 마감 = 파티원 시계 하나($timeoutExit + 15 - 지금 S 갈래와 같은 예산) - 진입부터 세고 되돌리지 않습니다(양보·캡처 실패 차분만 더함). 마감 회전은 누르지 않습니다
+  #  ⑤ 창 좌표 throw 는 두 문구만 catch 하나에서 정확 일치로 받습니다(공용 판독 · 스윕 예비 좌표 클릭) - 그 밖은 다시 던짐
+  #  ⑥ 비전이 끝에는 [진단] 집계 1줄(로그 전용 - 설계 8.7): 유효 회전의 분류(보상 → 패널 → 엄격 → 느슨 → 그 밖, 서로 배타라 합계 = 유효 회전) · 전송 · 클릭 조작 생략(유효
+  #     회전 안의 일 - 판독 없는 회전과 따로) · 커서 미확인(전송 전/뒤) · 판독 없는 회전(② 양보 · ④ 스윕 · ③ 탐침 복구 · ⑦ 판독 실패) · 마지막 유효 회전의 하단 판독.
+  #     결론은 결과 변수 + break 로 루프 밖 한 곳에서 돌려줍니다(진단 줄을 빠뜨리지 않게)
+  $touchClock = New-AbyssMemberClock -LimitSeconds ($timeoutExit + 15)
+  $clickSent = $false
+  $lastSentAt = $null
+  $cursorMisses = 0          # 첫 전송 전 커서 미확인 ('skipped' 예산)
+  $cursorMissesAfter = 0     # 전송 뒤 재클릭의 커서 미확인 (진단 전용 - 결론을 바꾸지 않음)
+  $sweepStreak = 0
+  $probeRecovered = $false
+  $touchResult = ''
+  # 진단 계측 (로그 전용 - 판정·조건문에 쓰지 않습니다)
+  $diagKindCounts = @{}
+  $diagYieldTurns = 0; $diagSweepTurns = 0; $diagRecoveredTurns = 0; $diagReadFailTurns = 0; $diagSends = 0; $diagClickYields = 0
+  $lastBottomText = ''
+  while ($true) {
+    # 서두 - 규칙 4: 직전 회전 클릭의 생략 메타와 직전 회전의 판독값을 비웁니다(복구 회전이 옛 판독으로 누르지 않게)
+    $turnSerial = $script:captureFailSerial
+    $script:lastClickSkipReason = ''
+    $sweepStarved = $false
+    $turnRecovered = $false
+    $turnValid = $false
+    $strictNow = $false
+    $exitNow = $false
+    $promptNow = $false
+    $bottomNow = ''
+    $promptLevel = 'none'
+    $promptScoreOk = $false
+    $panelKind = 'none'
+    # ① 동결 (규칙 15) - 마감은 되돌리지 않습니다(시계가 캡처 실패 차분을 더함)
+    if ($script:screenCaptureFailing) {
+      Test-SafeStopDuringCaptureFail
+      Start-Sleep -Seconds 2
+      [void](Test-CaptureRecovered -Game $Game)
+      $probeRecovered = -not $script:screenCaptureFailing
+      continue
+    }
+    # ② 조작 양보 (규칙 4) - 시간 상한 없음. 마감은 다음 마감 판정에서 시계가 양보 차분을 더함
+    if (Test-UserRecentlyActive) {
+      $diagYieldTurns++
+      Wait-UserYieldEnd -Game $Game -Context $Context
+      continue
+    }
+    if ($probeRecovered) {
+      # ③ 탐침 복구 뒤 회전 - 스윕·판독 없이 마감만 보고 2초 뒤 다음 회전
+      $probeRecovered = $false
+      $turnRecovered = $true
+      $diagRecoveredTurns++
+    }
+    try {
+      # ④ 팝업 스윕 (순위 1 - 판독 전 커서를 창 밖으로 뺌). 참이면 이 회전은 판독·클릭하지 않고 생략 사유로 가릅니다
+      if ((-not $turnRecovered) -and (Invoke-PurchasePopupSweep -Game $Game)) {
+        $diagSweepTurns++
+        $sweepTurn = Resolve-AbyssMemberSweepTurn -CaptureFailingNow $script:screenCaptureFailing -CaptureFailedInTurn ($script:captureFailSerial -ne $turnSerial) `
+          -Performed $script:lastClickPerformed -SkipReason $script:lastClickSkipReason -Streak $sweepStreak -Limit $memberSweepStreakLimit
+        $sweepStreak = [int]$sweepTurn.Streak
+        if ($sweepTurn.Action -eq 'freeze' -or $sweepTurn.Action -eq 'yield' -or $sweepTurn.Action -eq 'counted') {
+          continue
+        }
+        $sweepStarved = ($sweepTurn.Action -eq 'starved')
+        $turnRecovered = ($sweepTurn.Action -eq 'recovered')
+      }
+      # ⑤ 판독 (순서 고정 - 보상 3버튼이 결론을, 클리어 문구·점수표가 클릭 조건을, 패널이 클릭 앞 마지막 게이트를 줍니다). 하단 판독문은 이 회전의 지역값으로 받습니다
+      if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+        $exitNow = Test-ExitButton -Game $Game
+        $promptNow = Test-DungeonClearPrompt -Game $Game
+        $bottomNow = [string]$script:lastClearPromptText
+        $promptLevel = Get-AbyssClearPromptTextLevel -Text $bottomNow
+        if ($promptNow -and ($promptLevel -eq 'weak')) { $promptScoreOk = Test-AbyssClearScoreText -Text (Read-AbyssClearScoreText -Game $Game) }
+        $panelKind = Get-AbyssPanelKind -Game $Game
+      }
+    } catch {
+      # 창 좌표 throw 제한 catch - 캡처 실패(원인 gameWindowGone) 중의 두 문구(공용 판독 · 스윕 예비 좌표 클릭)만 정확 일치로 받습니다(아래 ⑦ 이 다음 회전 동결로 보냄)
+      if (-not ($script:screenCaptureFailing -and ($script:captureFailCause -eq 'gameWindowGone') -and (@('OCR용 게임 창 좌표를 읽지 못했습니다.', '게임 창 좌표를 읽지 못했습니다.') -contains $_.Exception.Message))) {
+        throw
+      }
+    }
+    if ((-not $sweepStarved) -and (-not $turnRecovered)) {
+      # ⑦ 유효성 - 아직 실패 중이면 다음 회전 ① 동결, 판독 도중 실패했다가 이미 복구면 복구 회전(판정·클릭 없이 마감만)
+      if ($script:screenCaptureFailing -or $script:captureFailSerial -ne $turnSerial) {
+        $diagReadFailTurns++
+        $turnRecovered = -not $script:screenCaptureFailing
+        if (-not $turnRecovered) {
+          continue
+        }
+      } else {
+        $sweepStreak = 0
+        $turnValid = $true
+        $lastBottomText = $bottomNow
+        $strictNow = ($promptNow -and ($panelKind -eq 'none') -and (($promptLevel -eq 'strong') -or (($promptLevel -eq 'weak') -and $promptScoreOk)))
+        # 진단 분류 (유효 회전만 · 서로 배타 - 보상 → 패널 → 엄격 → 느슨 → 그 밖)
+        $diagKind = $(if ($exitNow -and ($panelKind -eq 'none')) { 'reward' } elseif ($panelKind -ne 'none') { 'panel' } elseif ($strictNow) { 'strict' } elseif ($promptNow) { 'loose' } else { 'other' })
+        $diagKindCounts[$diagKind] = 1 + [int]$diagKindCounts[$diagKind]
+        # ⑨ 결론 - 같은 회전의 마감보다 먼저: 보상 3버튼 ∧ 패널 없음이면 전송 뒤에는 전이 성공, 전송 전에는 옛 보상 화면일 수 있어 실패
+        if ($exitNow -and ($panelKind -eq 'none')) {
+          $touchResult = $(if ($clickSent) { 'transition' } else { 'reward-before-click' })
+          break
+        }
+      }
+    }
+    # ⑩ 마감 - 유효·굶김·복구·탐침 복구 뒤 회전이 봅니다 (조정 시간, 경계 -ge). 마감 회전은 누르지 않습니다
+    if (Test-AbyssMemberClockExpired -Clock $touchClock) {
+      $touchResult = 'timeout'
+      break
+    }
+    # ⑪ 클릭 - 이 회전이 유효하고 엄격 클리어 화면이며(보상 음성은 위 ⑨ 를 지나 온 것으로 보장) 첫 전송이거나 마지막 전송에서 3초 지났을 때
+    if ($turnValid -and $strictNow -and ((-not $clickSent) -or (((Get-Date) - $lastSentAt).TotalSeconds -ge 3))) {
+      $script:lastClickSkipReason = ''
+      Focus-Game -Game $Game
+      Click-GamePoint -Game $Game -ReferenceX $ptClearCenter[0] -ReferenceY $ptClearCenter[1]
+      if ($script:lastClickPerformed) {
+        if (-not $clickSent) { Write-RunLog '[어비스] 클리어 화면 터치 전송 - 보상 화면이 나오는지 확인합니다 (추론 재입장)' }
+        $clickSent = $true
+        $lastSentAt = Get-Date
+        $diagSends++
+      } elseif ($script:lastClickSkipReason -eq 'user-active') {
+        # 조작 생략은 예산 미소모 - 양보 뒤 새 판독으로만 누릅니다(옛 판독으로 재클릭 금지 - 규칙 4)
+        $diagClickYields++
+        Wait-UserYieldEnd -Game $Game -Context $Context
+        continue
+      } elseif (-not $clickSent) {
+        # 커서 미확인은 첫 전송 전에만 예산을 씁니다(규칙 4 - 자동화 자신의 실패). 이미 누른 뒤의 재클릭 실패는 아래 갈래 - 결론을 바꾸지 않습니다(다관점 리뷰 P3)
+        $cursorMisses++
+        if ($cursorMisses -ge 3) {
+          $touchResult = 'skipped'
+          break
+        }
+      } else {
+        $cursorMissesAfter++
+      }
+    }
+    # ⑫ 대기 - 굶김 회전은 스윕이 이미 기다렸고, 복구 회전은 2초, 그 밖은 700ms
+    if ($sweepStarved) { continue }
+    if ($turnRecovered) {
+      Start-Sleep -Seconds 2
+      continue
+    }
+    Start-Sleep -Milliseconds 700
+  }
+  if ($touchResult -ne 'transition') {
+    Write-RunLog (Format-AbyssTouchDiagSummary -Result $touchResult -KindCounts $diagKindCounts -Sends $diagSends -ClickYields $diagClickYields -CursorMissesBefore $cursorMisses `
+        -CursorMissesAfter $cursorMissesAfter -YieldTurns $diagYieldTurns -SweepTurns $diagSweepTurns -RecoveredTurns $diagRecoveredTurns `
+        -ReadFailTurns $diagReadFailTurns -BottomText $lastBottomText)
+  }
+  return $touchResult
+}
+
+function Complete-AbyssPromptTimeoutClearTouch {
+  param([System.Diagnostics.Process]$Game)
+
+  # 추론 재입장 클리어 화면 시작의 터치 (재입장대기_클리어화면 설계 7.3′ · 8.8). 전이를 봤으면('transition') 돌아가 본류 S 갈래가 마커·클리어 완료 기록·'나가기'로
+  # 마무리하고, 그 밖이면 진단 캡처 + 결과별 [완료] 1줄 + 코드 4. 넘겨받은 항목은 앞 워커의 재입장 완료에서 이미 계상됐고(applied) 컨트롤 패널의 코드 4 기록 규칙이
+  # applied 를 건너뛰어 이 정지는 계상이 없습니다. 기록을 닫는지는 결과로 갈립니다:
+  #  - 'reward-before-click' = 선분기 next × 3버튼(Invoke-AbyssHandoffStart)과 같은 사실(넘겨받은 판에서 이 워커가 누르기 전에 보상 화면을 봄) → 같은 놓아줌 표지
+  #    ' (release)' 로 넘긴 기록을 닫습니다. 다음 시작은 Role none(커스텀 = 정리 전용 뒤 같은 항목 / 비커스텀 = 이 보상 화면 마무리 · 1회 계상)
+  #  - 'skipped'(첫 전송 전 커서 미확인 3회) · 'timeout' = 클리어 전 정지라 넘긴 기록을 열어 둡니다(KeepLaunched). 커스텀은 다음 시작이 같은 항목·표지를 다시
+  #    받아 이 확인부터 하고, 비커스텀은 시작마다 실행 id 가 새로 나 이어받지 못해(Role none) 그 시작이 화면을 마무리합니다(클리어·보상 화면이면 1회 계상 - 기존 정책)
+  # 코드 1 로 끝내지 않는 이유: 재입장 기록 뒤 코드 1 은 컨트롤 패널이 다음 워커를 다시 띄우는 계약이라 같은 가짜 화면에서 재기동·클릭이 되풀이됩니다(설계 리뷰 2차).
+  # [완료] 문구는 이 함수 안에 둡니다 - 본류 S 갈래 본문의 [완료] 는 '어비스 선택 화면 복귀 완료' 하나라는 회귀 단언이 있습니다. 문구는 갈래마다 통째 문자열입니다
+  # (워커 로그 심각도 회귀가 문자열 인자만 분류)
+  $touchResult = Invoke-AbyssPromptTimeoutClearTouch -Game $Game
+  if ($touchResult -eq 'transition') { return }
+  Write-LifeDiagnostics -Game $Game -Context "추론 재입장 클리어 화면 터치 ($touchResult)" -CaptureOnly
+  if ($touchResult -eq 'reward-before-click') {
+    if ($script:customMode) {
+      Write-RunLog '[완료] 클리어 화면으로 추론해 넘겨받은 판인데 누르기 전부터 보상 화면이 보여 새 판의 클리어로 확인하지 못했습니다 - 계상 없이 정지합니다 (이 판은 계상되지 않으며, 다음 시작은 정리 전용(코드 10) 뒤 같은 항목을 다시 돕니다) (release)'
+    } else {
+      Write-RunLog '[완료] 클리어 화면으로 추론해 넘겨받은 판인데 누르기 전부터 보상 화면이 보여 새 판의 클리어로 확인하지 못했습니다 - 계상 없이 정지합니다 (다음 시작이 이 보상 화면을 마무리하며 그때 1회 계상합니다) (release)'
+    }
+  } elseif ($touchResult -eq 'skipped') {
+    if ($script:customMode) {
+      Write-RunLog '[완료] 클리어 화면으로 추론해 넘겨받은 판의 클리어 화면을 커서 미확인으로 누르지 못했습니다 - 계상 없이 정지합니다 (다음 시작이 같은 판을 이어받아 화면부터 다시 확인합니다)'
+    } else {
+      Write-RunLog '[완료] 클리어 화면으로 추론해 넘겨받은 판의 클리어 화면을 커서 미확인으로 누르지 못했습니다 - 계상 없이 정지합니다 (다시 시작하면 그 시작이 이 화면을 마무리하며, 클리어·보상 화면이면 그때 1회 계상합니다)'
+    }
+  } else {
+    if ($script:customMode) {
+      Write-RunLog "[완료] 클리어 화면으로 추론해 넘겨받은 판인데 클리어 화면이 이어지지 않거나 눌러도 $($timeoutExit + 15)초 안에 보상 화면이 나오지 않았습니다 - 계상 없이 정지합니다 (다음 시작이 같은 판을 이어받아 화면부터 다시 확인합니다)"
+    } else {
+      Write-RunLog "[완료] 클리어 화면으로 추론해 넘겨받은 판인데 클리어 화면이 이어지지 않거나 눌러도 $($timeoutExit + 15)초 안에 보상 화면이 나오지 않았습니다 - 계상 없이 정지합니다 (다시 시작하면 그 시작이 이 화면을 마무리하며, 클리어·보상 화면이면 그때 1회 계상합니다)"
+    }
+  }
+  exit 4
 }
 
 function Stop-AbyssReentryTimeout {
@@ -16742,7 +17176,7 @@ function Complete-AbyssResumeStop {
 function Complete-AbyssResumeWait {
   param(
     [System.Diagnostics.Process]$Game,
-    [hashtable]$Reentry                        # 재개 시작 대기(호출 C)의 반환 @{ Result; LastKind; PanelSeen }
+    [hashtable]$Reentry                        # 재개 시작 대기(호출 C)의 반환 @{ Result; LastKind; PanelSeen; PromptStreak } (PromptStreak 는 C 에서 읽지 않음)
   )
 
   # 재개 시작 대기의 끝 (구현 명세 ⑤c · 설계 v11 R5 3.1 ⑤ resume 행 · R3 3.2 ③④ · R6 3.5). 돌아오지 않습니다 - 모든 길이 안에서 exit 입니다(재개는 본류로 돌아가지 않음).
@@ -20651,7 +21085,12 @@ try {
   # 아침 6시 리셋 후 뜨는 출석/이벤트/데일리 팝업(스텔라 픽 등)이 화면을 덮고 있으면
   # 자동으로 넘깁니다. 던전/사냥터 흐름도 이 화면에 막혀 시작하지 못하므로
   # 콘텐츠 분기보다 먼저 처리합니다. (넘긴 뒤에는 시작 상태를 다시 읽습니다)
-  if (Clear-EventOverlay -Game $game) {
+  # 단, 추론 재입장 클리어 화면 시작(Role next ∧ 표지 'prompt-timeout' ∧ 선분기 결론 'prompt')은 건너뜁니다(재입장대기_클리어화면 설계 8.6): 정리 안
+  # Test-KnownScreen 의 클리어 문구 판독 1회가 흔들려 클리어 화면을 놓치면 이벤트 루프가 클리어 중앙을 눌러 보상 화면으로 넘기고(08-02 클리어 화면을 이벤트로 오인한
+  # 중앙 클릭 · 07-19 같은 화면의 판독 흔들림 관측), 뒤의 전이 확인 터치 루프가 '누르기 전 보상' 으로 계상 없이 멈춥니다. 덮는 팝업은 터치 루프의 팝업 스윕이 받습니다
+  $skipEventOverlay = (([string]$script:handoff.Role -eq 'next') -and ([string]$script:handoff.ReenteredBy -eq 'prompt-timeout') -and
+    ([string]$script:handoff.StartScreen -eq 'prompt'))
+  if ((-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)) {
     # 이어받기 역할이 있는 기동(Role ≠ none)은 다시 읽지 않습니다 - 시작 화면은 선분기 결론이 정했고, 아래 클리어 문구 판독 자리에서 그 결론을 대입합니다
     # (구현 명세 ② 2.6 · 설계 v11 R4 4.1·4.3 - 정리 자체는 모든 역할이 거치고, 결론 화면 넷은 알려진 화면이라 누를 것이 없습니다)
     if ($roleNone) { $startExitDetected = Test-ExitButton -Game $game }
@@ -20902,11 +21341,17 @@ try {
   if ($startClearDetected) {
     Write-RunLog '[어비스] 시작: 클리어 화면 감지 - 마무리부터 진행'
     Write-RunLog '[어비스] 클리어 화면 터치'
-    # 등급 연출 중에는 터치가 무시될 수 있어(다른 PC 실측: 터치 후에도 '화면을 터치'가
-    # 그대로 남음) 나가기 버튼이 보일 때까지 3초 간격으로 다시 터치합니다.
-    Invoke-ClickUntil -Game $game -Point $ptClearCenter -Description '클리어 화면 터치(나가기 버튼 표시)' `
-      -TimeoutSeconds ($timeoutExit + 15) -ReclickEverySeconds 3 -Condition { Test-ExitButton -Game $game } `
-      -SourceCondition { Test-DungeonClearPrompt -Game $game }
+    if (([string]$script:handoff.Role -eq 'next') -and ([string]$script:handoff.ReenteredBy -eq 'prompt-timeout')) {
+      # 추론 재입장(앞 워커의 재입장 대기가 입장을 못 본 채 클리어 화면으로 넘긴 판)은 클릭 전 보상 음성 → 엄격 클리어 화면에서 클릭 전송 → 그 뒤 보상 양성의
+      # 전이를 본 뒤에만 아래 계상으로 갑니다 - 아니면 그 함수가 계상 없이 코드 4 로 멈춥니다(재입장대기_클리어화면 설계 7.3′)
+      Complete-AbyssPromptTimeoutClearTouch -Game $game
+    } else {
+      # 등급 연출 중에는 터치가 무시될 수 있어(다른 PC 실측: 터치 후에도 '화면을 터치'가
+      # 그대로 남음) 나가기 버튼이 보일 때까지 3초 간격으로 다시 터치합니다.
+      Invoke-ClickUntil -Game $game -Point $ptClearCenter -Description '클리어 화면 터치(나가기 버튼 표시)' `
+        -TimeoutSeconds ($timeoutExit + 15) -ReclickEverySeconds 3 -Condition { Test-ExitButton -Game $game } `
+        -SourceCondition { Test-DungeonClearPrompt -Game $game }
+    }
     Write-RunLog '[어비스] 나가기 버튼 감지'
     if ($script:customMode -and -not $script:customCleanupOnly) { [void](Write-CustomClearMarker) }
     # 이어받은 own·next 항목의 판을 이 클리어 화면에서 마무리합니다 - 위 보상 화면 시작과 같은 자리('마커 → 클리어 완료 기록 → 나가기 헬퍼', 구현 명세 ② 2.6).

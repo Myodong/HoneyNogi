@@ -207,7 +207,7 @@ Check-Equal '배선(⑥a 구현 리뷰 1차 P1 · ⑥e 2.13): 시작 패널 판�
 #   (반환 = 내부 오류). 그래서 시작 패널 대기의 옛 파티원 제외 항(-not $abyssPartyMemberRun)은 지웠습니다 - 파티원은 거기까지 오지 않습니다
 $dispatchAt = $src.IndexOf('if ($abyssPartyMemberRun) {')
 Check-Equal '배선(⑥e 2.11): 파티원 디스패치 - 기타 분기 뒤·Clear-EventOverlay 앞, customMode·customSpecInvalid 제외, 호출 뒤 throw, 옛 디스패치·시작 패널 대기 제외 항 0건' (
-  ($dispatchAt -gt $src.IndexOf('Invoke-NyanMerchantRun -Game $game')) -and ($dispatchAt -lt $src.IndexOf('if (Clear-EventOverlay -Game $game) {')) -and
+  ($dispatchAt -gt $src.IndexOf('Invoke-NyanMerchantRun -Game $game')) -and ($dispatchAt -lt $src.IndexOf('if ((-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game)) {')) -and
   ($src.IndexOf('$abyssPartyMemberRun = ') -lt $dispatchAt) -and
   ([bool]($src -match '\$abyssPartyMemberRun = \(\(-not \$script:customMode\) -and \(-not \$script:customSpecInvalid\) -and')) -and
   ([bool]($src -match 'if \(\$abyssPartyMemberRun\) \{\s*Invoke-AbyssPartyMemberCycle -Game \$game\s*throw ')) -and

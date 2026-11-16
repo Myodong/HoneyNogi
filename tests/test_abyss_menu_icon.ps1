@@ -239,9 +239,11 @@ $globalTrackerSites = [string[]]@($diagnosticVariables | Where-Object { $_.Varia
 [Array]::Sort($globalTrackerSites, [StringComparer]::Ordinal)
 $foundLogCalls = @(if ($foundBlocks.Count -eq 1) { $foundBlocks[0].Clauses[0].Item2.FindAll({ param($node) ($node -is [System.Management.Automation.Language.CommandAst]) -and ($node.GetCommandName() -eq 'Write-RunLog') }, $true) })
 $foundLogSnapshotRefs = @(if ($foundLogCalls.Count -eq 1) { $foundLogCalls[0].FindAll({ param($node) ($node -is [System.Management.Automation.Language.VariableExpressionAst]) -and ($node.VariablePath.UserPath -eq 'fieldProvenTrackerText') }, $true) })
-Check-Equal 'B11: 찾음 로그(found 블록의 Write-RunLog 1개)는 스냅숏 $fieldProvenTrackerText 를 1회 쓰고, 전역 $script:lastQuestTrackerText 는 최상위 초기화·Test-InDungeonQuest 대입·복귀 루프 스냅숏 읽기 3곳뿐 (설계 6.4 - W 를 확정한 표본, 변이 V18c)' `
+# 2026-11-16 재입장대기_클리어화면 A2: 재입장 대기(Wait-AbyssReentry)의 진단 요약 줄도 그 회전에 HUD 가 읽혔을 때만(⑧ 유효 회전 · Test-InDungeonQuest 가 방금 남긴 판독)
+#   전역을 지역 스냅숏으로 받습니다 - 읽기 1곳 · 판정식 밖(위 판정식 0회 단언이 함께 봄). 요약 시점에 전역을 바로 읽으면 대기 밖(직전 판 클리어 대기)의 옛 판독이 찍힙니다
+Check-Equal 'B11: 찾음 로그(found 블록의 Write-RunLog 1개)는 스냅숏 $fieldProvenTrackerText 를 1회 쓰고, 전역 $script:lastQuestTrackerText 는 최상위 초기화·Test-InDungeonQuest 대입·복귀 루프 스냅숏 읽기·재입장 대기 진단 스냅숏 읽기 4곳뿐 (설계 6.4 - W 를 확정한 표본, 변이 V18c · 재입장대기_클리어화면 A2)' `
   ('찾음 로그 {0}개·스냅숏 참조 {1}회 / 전역 {2}' -f $foundLogCalls.Count, $foundLogSnapshotRefs.Count, ($globalTrackerSites -join ', ')) `
-  '찾음 로그 1개·스냅숏 참조 1회 / 전역 (최상위):쓰기, Return-ToAbyssSelection:읽기, Test-InDungeonQuest:쓰기'
+  '찾음 로그 1개·스냅숏 참조 1회 / 전역 (최상위):쓰기, Return-ToAbyssSelection:읽기, Test-InDungeonQuest:쓰기, Wait-AbyssReentry:읽기'
 
 # ── 셋업 2: 시작 Add-Type 원문 그대로 컴파일(인자 추가 없음 - 운영과 같은 명령, 설계 3.6·B6) → 함수 추출 → 모의 ──
 Invoke-Expression $startAddTypeText

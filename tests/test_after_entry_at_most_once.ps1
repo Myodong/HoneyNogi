@@ -745,10 +745,11 @@ $config = ([pscustomobject]@{ afterEntry = [pscustomobject]@{ keyDelayMs = 500 }
 # 첫 알 수 없음 회전에서 이벤트 정리를 부르는 등 모형이 소스와 달라집니다. 재입장 대기의 무변화 창($abyssReclickQuietSeconds - 구현 단위 ⑤a 부터 선분기 B2 단계가
 # 그 함수를 부름)도 같은 이유로 소스 대입 그대로입니다(보고 끔 호출이라 결과는 같음 - 구현 명세 ④ C3). 복귀 전체 상한($abyssReturnTotalLimitSeconds - 구현 단위 복귀 연장)이 빠지면
 # 연장 예산이 음수라 복귀 루프가 조용히 연장 0 으로 돕니다. 재개 시계의 혼자하기 예산($timeoutEntry - 구현 명세 ⑤c RK1 · Get-AbyssReentryLimitSeconds)이 빠지면 재개 시계가
-# 0초로 돌아 시작 줄 예산이 0 으로 찍히고 유예만으로 끝납니다
+# 0초로 돌아 시작 줄 예산이 0 으로 찍히고 유예만으로 끝납니다. 재입장 대기의 중간 진단 시각($abyssReentryDiagSeconds - 재입장대기_클리어화면 A3)이 빠지면 0초 시계라
+# 대기의 첫 회전에 진단 캡처·집계 줄이 찍힙니다
 foreach ($settingLeft in @('$timeoutClear', '$timeoutExit', '$timeoutHud', '$timeoutAbyssMenu', '$timeoutAbyssSelect', '$timeoutPartyMatch',
         '$memberFieldSettleSeconds', '$memberUnknownOverlaySeconds', '$memberSweepStreakLimit', '$ptClearCenter', '$afterEntryDelayMs', '$abyssReclickQuietSeconds',
-        '$abyssReturnTotalLimitSeconds', '$timeoutEntry')) {
+        '$abyssReentryDiagSeconds', '$abyssReturnTotalLimitSeconds', '$timeoutEntry')) {
     $settingAssign = @($workerAst.EndBlock.Statements | Where-Object { ($_ -is [AssignmentStatementAst]) -and ($_.Left.Extent.Text -eq $settingLeft) }) | Select-Object -First 1
     if ($null -eq $settingAssign) { $extractionProblems.Add("워커 최상위 값 대입 $settingLeft 을(를) 찾지 못했습니다"); continue }
     try { Invoke-Expression $settingAssign.Extent.Text } catch { $extractionProblems.Add("워커 값 대입 $settingLeft 실행 실패: $($_.Exception.Message)") }

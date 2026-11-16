@@ -1319,7 +1319,7 @@ $workerText = [IO.File]::ReadAllText($workerPath)
 Assert-Case '배선: 메인 흐름 life 분기 존재' ($workerText -match "if \(\`$mainCategory -eq 'life'\) \{\s*\r?\n\s*Invoke-LifeGatherCycle -Game \`$game") 'True'
 # 생활 분기는 Clear-EventOverlay(생활 창을 알 수 없는 화면으로 오판 가능)보다 앞이어야 함 - 리뷰 조건
 $lifeBranchIndex = $workerText.IndexOf('Invoke-LifeGatherCycle -Game $game')
-$eventOverlayIndex = $workerText.IndexOf('if (Clear-EventOverlay -Game $game)')
+$eventOverlayIndex = $workerText.IndexOf('if ((-not $skipEventOverlay) -and (Clear-EventOverlay -Game $game))')   # 2026-11-16 재입장대기_클리어화면 8.6 - 이벤트 정리 if 조건에 추론 재입장 건너뜀
 Assert-Case '배선: 생활 분기가 메인 이벤트 정리보다 앞' (($lifeBranchIndex -ge 0) -and ($eventOverlayIndex -gt $lifeBranchIndex)) 'True'
 Assert-Case '배선: 사이클 초입 생활 창 정리 → 이벤트 정리 순서' ($workerText -match '\[void\]\(Close-LifeOpenWindows -Game \$Game\)\s*\r?\n\s*\[void\]\(Clear-EventOverlay -Game \$Game\)') 'True'
 # 초기 확인 루프에도 팝업 방어를 넣었습니다 - 공지 게시판이 트래커를 가리면 진행 중인 채집을
@@ -1379,8 +1379,11 @@ Assert-Case '배선: 캡처 실패 대기에도 사이클 한도 적용' ($worke
 # 2026-10-24 구현 명세 ⑤b4 3.4 +1: 어비스 '다시 하기' 클릭 루프(Invoke-AbyssRetryClick - 함수 매개변수 $Game · 워커 안 호출은 끝 함수 Complete-AbyssRetrySelection 안 1,
 #   본류 배선은 5b-5)의 서두 동결 블록이 이번 회전 탐침 [void](Test-CaptureRecovered -Game $Game) 를 부릅니다(주석 포함 원문을 세어 본류 호출 0 이어도 듦) → 25곳.
 #   그 탐침을 지우는 변이는 이 개수가 24 가 됩니다.
-Assert-Case '배선: 캡처 실패 대기 복구 탐침 25곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 D·P 2 + 어비스 복귀 루프 동결 1 + 어비스 이어받기 시작 선분기 1 + 어비스 재입장 대기 1 + 어비스 다른 던전 가기 대기 1 + 어비스 다시 하기 클릭 루프 1 + 사망 화면 퇴장 1 + 검증 종료 루프 1 + 냥코인 뽑기 3 + 양보 후 판정 2 + 시작부 팝업 정리(던전·사냥터) 2)' `
-  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '25'   # 2026-10-24 ⑤b4 24 → 25 (위 주석) / 2026-10-23 ⑤b3 23 → 24 (위 주석) / 2026-10-18 ④′ 21 → 23 (위 주석) / 2026-10-18 ④ 2.1 20 → 21 (위 주석) / 2026-10-13 ② 2.5 19 → 20 (위 주석) / 2026-09-30 ⑥e 20 → 19 / 2026-09-26 ⑥a 파티원 클리어 S 터치 루프·파티원 시작 판정 동결 +2 / 2026-09-13 냥코인 PURCHASE_WAIT 동결 +1
+# 2026-11-16 재입장대기_클리어화면 7.3′ +1: 추론 재입장 클리어 화면 터치 루프(Invoke-AbyssPromptTimeoutClearTouch - 함수 매개변수 $Game · 워커 안 호출은 끝 함수
+#   Complete-AbyssPromptTimeoutClearTouch 안 1, 본류 S 갈래가 표지 'prompt-timeout' 일 때만 그 끝 함수를 부름)의 서두 동결 블록이 이번 회전 탐침
+#   [void](Test-CaptureRecovered -Game $Game) 를 부릅니다 → 26곳. 그 탐침을 지우는 변이는 이 개수가 25 가 됩니다.
+Assert-Case '배선: 캡처 실패 대기 복구 탐침 26곳 (생활 5 + 던전·사냥터 4 + 어비스 파티원 D·P 2 + 어비스 복귀 루프 동결 1 + 어비스 이어받기 시작 선분기 1 + 어비스 재입장 대기 1 + 어비스 다른 던전 가기 대기 1 + 어비스 다시 하기 클릭 루프 1 + 어비스 추론 재입장 클리어 터치 1 + 사망 화면 퇴장 1 + 검증 종료 루프 1 + 냥코인 뽑기 3 + 양보 후 판정 2 + 시작부 팝업 정리(던전·사냥터) 2)' `
+  ([regex]::Matches($workerText, '\[void\]\(Test-CaptureRecovered -Game \$Game\)').Count) '26'   # 2026-11-16 재입장대기_클리어화면 25 → 26 (위 주석) / 2026-10-24 ⑤b4 24 → 25 (위 주석) / 2026-10-23 ⑤b3 23 → 24 (위 주석) / 2026-10-18 ④′ 21 → 23 (위 주석) / 2026-10-18 ④ 2.1 20 → 21 (위 주석) / 2026-10-13 ② 2.5 19 → 20 (위 주석) / 2026-09-30 ⑥e 20 → 19 / 2026-09-26 ⑥a 파티원 클리어 S 터치 루프·파티원 시작 판정 동결 +2 / 2026-09-13 냥코인 PURCHASE_WAIT 동결 +1
 # 메뉴 시퀀스의 판독+입력 구간(목록 정렬 / 대상 탐색)도 캡처가 살아 있을 때만 진행해야 합니다.
 # 없으면 0행 판독을 '목록 소멸'로 오인해 미발견 정지(exit 4)로 직행합니다 (2026-08-07 감사 high)
 Assert-Case '배선: 판독 앞 캡처 생존 대기 3곳(빠른 확인/정렬/탐색)' `

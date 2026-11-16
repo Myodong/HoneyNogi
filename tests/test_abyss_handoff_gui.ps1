@@ -2380,6 +2380,26 @@ function Test-CaseExitPlain {
     Assert-Case 'H10′ 필수 기록(retry-clicked → reentered 보정) 직후 본 파일: 최상위 savedBy worker:1234 → gui · seq 5 → 6 · 항목 단계 reentered · 항목에 savedBy 필드 없음 · 다음 판 기동 1' `
         ('{0} → {1} · {2} · {3} · {4} · {5}' -f $savedByBefore, $script:savedBySnapshot.savedBy, $script:savedBySnapshot.seq, $snapshotEntry.stage,
             [int]($null -ne $snapshotEntry.PSObject.Properties['savedBy']), $row.Launches) 'worker:1234 → gui · 6 · reentered · 0 · 1'
+    # H10″ 클리어 화면 추론 표지(항목 칸 reenteredBy = 'prompt-timeout' - 재입장대기_클리어화면 설계 7.1 · 7.3′ 끝): 원 워커가 재입장 대기 끝의 클리어 화면으로 넘길 때
+    #      표지를 따로 먼저 저장하고(Set-AbyssJournalReenteredBy) 재입장 완료로 끝냅니다. GUI 필수 기록이 그 항목을 다시 저장해도 표지가 남아야 다음 워커(Consume-Handoff)가
+    #      전이 확인 터치 루프로 갑니다 - mutator 는 stage · nextOwner · launchState · applied 만 칸 단위로 고치고(Set-AbyssJournalProperty) 다른 칸은 그대로 왕복합니다
+    #      (ConvertTo-AbyssJournalNormalized). (가) 워커 기록 성공 = 이미 reentered (나) 워커 기록 실패 = retry-clicked 를 log 출처가 reentered 로 보정
+    $markedRows = @(
+        @{ N = '(가) reentered'; Stage = 'reentered'; Warn = 0 }
+        @{ N = '(나) retry-clicked → 보정'; Stage = 'retry-clicked'; Warn = 1 }
+    )
+    $markedTexts = foreach ($markedRow in $markedRows) {
+        $markedEntry = New-FixtureEntry -Stage $markedRow.Stage -Owner $runOwner -Nonce $NONCE_A
+        Set-AbyssJournalProperty -Object $markedEntry -Name 'reenteredBy' -Value 'prompt-timeout'
+        Initialize-HandoffRow -Entries @($markedEntry)
+        $row = Invoke-HandoffTick -ExitCode 0 -Reason $reasonA
+        $savedEntry = @(@($row.Journal.entries) | Where-Object { ($null -ne $_) -and ([string]$_.nonce -eq $NONCE_A) })[0]
+        '{0}: {1} · 표지 [{2}] · 경고 {3} · {4}/{5}' -f $markedRow.N, (Get-EntryText $row.Journal $NONCE_A), [string]$savedEntry.reenteredBy,
+            @(@($row.Flow -split ' / ') | Where-Object { $_ -ceq ('gui|' + $IH_LOG_WARNING) }).Count, $row.Kind, $row.Nonce
+    }
+    Assert-Case "H10″ 표지 'prompt-timeout' 항목 → GUI 필수 기록(보정 포함) 뒤에도 표지 그대로 · reentered/launched/적용 · 다음 판 기동 next/NA ((나) 만 [경고] 1)" `
+        (@($markedTexts) -join ' || ') `
+        ((@($markedRows | ForEach-Object { '{0}: reentered/launched/1 · 표지 [prompt-timeout] · 경고 {1} · next/NA' -f $_.N, $_.Warn })) -join ' || ')
     # H11 log 출처 · 코드 11 + 안전 중지 → 보정·[경고] → 마무리 실행 '안전 중지'
     Initialize-HandoffRow -Entries @($clicked) -StopRequested $true
     $row = Invoke-HandoffTick -ExitCode 11 -Reason $reasonA
@@ -5924,7 +5944,8 @@ function Test-CaseKeepLaunchOnStop {
     #     참) = ⑱′ N9′(next 3버튼 - S17) · O4‴(own B2 마감 - S18, 닫기 실패라 항목이 열린 모형) · O4⁗(own 새 항목 생성 실패 - S20, 닫기 실패 변형: 열림 / 닫기 성공 변형:
     #     이미 done 이라 그대로)의 (GUI 틱). 사유 = 워커 원문(선분기 함수의 문구 - 워커 꼬리 칸이 원문의 표지를 봄) · 창 [완료] 줄은 꼬리 뺀 본문(G3 - 숨김 H12)
     #     S17 원문은 구현 단위 ⑤d 뒤에도 그대로 있어 기대값이 같습니다 - 그 정지로 오는 것은 next 의 3버튼 시작뿐이고 클리어 화면(S) 시작은 그 판의 마무리(코드 0 - N9s)
-    $s17Reason = Get-WorkerDoneReason -Fragment '다음 시작은 정리 전용(코드 10) 뒤 같은 항목을 다시 돕니다'
+    # S17 는 선분기 안 문구 - 같은 꼬리를 추론 재입장 터치 끝 함수의 reward-before-click 커스텀 줄도 써서(재입장대기_클리어화면 8.8) 함수로 좁힙니다
+    $s17Reason = Get-WorkerDoneReason -Fragment '다음 시작은 정리 전용(코드 10) 뒤 같은 항목을 다시 돕니다' -InFunction 'Invoke-AbyssHandoffStart'
     $s18Reason = Get-WorkerDoneReason -Fragment '{b2Label} 에서 시작해' -Values @{ b2Label = $GUI_TICK_B2_LABEL; timeoutPartyMatch = $GUI_TICK_TPM }
     $s20Reason = Get-WorkerDoneReason -Fragment '입장 기록 실패 - 재화 중복 소모를 막기 위해' -InFunction 'Invoke-AbyssHandoffStart'
     $ownClosedReady = New-FixtureEntry -Stage 'entered' -Owner $fixture.FiveNow -Generation $H_GENERATION -LaunchState 'done' -Section $ABYSS_SECTION -Nonce $NONCE_A
@@ -5951,6 +5972,31 @@ function Test-CaseKeepLaunchOnStop {
     $row = Invoke-HandoffTick -ExitCode 4 -Reason ($CODE4_REASON + ' (release)')
     Assert-Case "KP5′ 짧은 사유 + ' (release)' → 상태줄 꼬리 0 · 창 [완료] 줄 꼬리 0 · NB done" `
         ('{0} · [{1}] · {2}' -f ((Get-StopEvents $row) -join ' / '), (Get-DoneWindowLine $row), (Get-EntryText $row.Journal $NONCE_B)) ('{0} · [{1}] · reentered/done/1' -f $C4_STOP, $CODE4_REASON)
+    # KP5″ 추론 재입장 터치 끝의 정지(재입장대기_클리어화면 설계 8.8 · 설계 합의 조건 - 2026-11-16). 넘긴 NB 는 앞 워커의 재입장 완료에서 이미 applied 라 코드 4 기록 규칙이
+    #     건너뛰어 계상 0. reward-before-click = 선분기 next × 3버튼과 같은 사실이라 같은 놓아줌 표지 → NB done → 다음 시작 none / skipped(timeout 도 같은 갈래 - 문구에
+    #     초 자리가 있어 원문 캡처는 skipped 로) = 클리어 전 정지라 표지 없음 → NB launched 그대로(KeepLaunched) → 커스텀은 다음 시작이 같은 항목 next/NB, 비커스텀은
+    #     새 실행 id 라 받지 못해 none. 사유 = 워커 원문의 커스텀·비커스텀 줄
+    $touchEndPlainNext = New-FixtureEntry -Stage 'reentered' -Owner $runOwner -NextOwner $runOwner -LaunchState 'launched' -Nonce $NONCE_B
+    $touchCases = @(
+        @{ N = 'reward-before-click 커스텀'; Custom = $true; Fragment = '누르기 전부터 보상 화면이 보여 새 판의 클리어로 확인하지 못했습니다 - 계상 없이 정지합니다 (이 판은'; Want = 'reentered/done/1 · 계상 0 · 워커 꼬리 1 → none/' }
+        @{ N = 'reward-before-click 비커스텀'; Custom = $false; Fragment = '누르기 전부터 보상 화면이 보여 새 판의 클리어로 확인하지 못했습니다 - 계상 없이 정지합니다 (다음 시작이'; Want = 'reentered/done/1 · 계상 0 · 워커 꼬리 1 → none/' }
+        @{ N = 'skipped 커스텀'; Custom = $true; Fragment = '커서 미확인으로 누르지 못했습니다 - 계상 없이 정지합니다 (다음 시작이 같은 판을'; Want = 'reentered/launched/1 · 계상 0 · 워커 꼬리 0 → next/NB' }
+        @{ N = 'skipped 비커스텀'; Custom = $false; Fragment = '커서 미확인으로 누르지 못했습니다 - 계상 없이 정지합니다 (다시 시작하면'; Want = 'reentered/launched/1 · 계상 0 · 워커 꼬리 0 → none/' }
+    )
+    $touchTexts = foreach ($touchCase in $touchCases) {
+        $touchReason = Get-WorkerDoneReason -Fragment $touchCase.Fragment -InFunction 'Complete-AbyssPromptTimeoutClearTouch'
+        if ($touchCase.Custom) {
+            Initialize-HandoffRow -Custom $true -DiskContext $fixture.Now -Entries @($nextEntry) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
+        } else {
+            Initialize-HandoffRow -Entries @($touchEndPlainNext) -Applied @($NONCE_B) -LaunchKind 'next' -LaunchNonce $NONCE_B
+        }
+        $touchRow = Invoke-HandoffTick -ExitCode 4 -Reason $touchReason
+        $touchNext = $(if ($touchCase.Custom) { Invoke-NextStartAfterTick } else { Invoke-NextStartAfterTick -RunId 'run-H2' })
+        '{0}: {1} · 계상 {2} · 워커 꼬리 {3} → {4}/{5}' -f $touchCase.N, (Get-EntryText $touchRow.Journal $NONCE_B), $touchRow.Completed, [int]$touchReason.EndsWith(' (release)'),
+            $touchNext.Kind, $touchNext.HandoffNonce
+    }
+    Assert-Case 'KP5″ 추론 재입장 터치 끝 정지 → 계상 0 · reward-before-click 은 놓아줌(NB done → 다음 시작 none) · skipped 는 열어 둠(커스텀 next/NB · 비커스텀 새 실행 none)' `
+        ($touchTexts -join ' || ') ((@($touchCases | ForEach-Object { '{0}: {1}' -f $_.N, $_.Want })) -join ' || ')
 
     # KP6 클리어 근거가 있는 코드 4 → 계상 1 · 넘긴 nonce done(지금 그대로): 커스텀 own NA + 지금 항목의 유효 완료 마커(마커 경로 · 전진 1 · 마커 정리 1) || 비커스텀 next NB +
     #     이 실행의 클리어 기록 NC(기록 경로 · 그 기록 소비)

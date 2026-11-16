@@ -989,8 +989,9 @@ $hideUnknownSeconds = [string]$hideConstants['memberUnknownOverlaySeconds']
 # ① 꼬리 6종 - 워커에서 그 꼬리를 담은 문자열 노드 전부를 캡처합니다(명세 ② 2.7 G3 의 낱말 그대로)
 $doneTailKinds = [ordered]@{ H1 = ' (selection-overlay)'; H2 = ' (menu-overlay)'; H3 = ' (locked)'; H4 = ' (start-unknown)'; H5 = ' (ownFreshEntry)'; H12 = ' (release)' }
 # 꼬리별 워커 문자열 수 = 명세 ② 2.5 선분기 로그 줄 표 · 2.1 Consume-Handoff 표 그대로: H1 S9·S10·S13·S14 / H2 S11·S12 / H3 Consume-Handoff ③·④ / H4 S15·S16 /
-# H5 S6 / H12 S17 두 변형·S18·S20(본류 키 지점의 같은 생성 실패 줄은 꼬리 0 - 명세 ② P22). 뒤 단위가 표지 줄을 더하면 이 수를 함께 손볼 것
-$doneTailWant = [ordered]@{ H1 = 4; H2 = 2; H3 = 2; H4 = 2; H5 = 1; H12 = 4 }
+# H5 S6 / H12 S17 두 변형·S18·S20(본류 키 지점의 같은 생성 실패 줄은 꼬리 0 - 명세 ② P22) + 추론 재입장 터치 끝 함수 reward-before-click 커스텀·비커스텀 두 줄
+# (2026-11-16 재입장대기_클리어화면 설계 8.8 - 선분기 next × 3버튼과 같은 사실이라 같은 놓아줌 표지). 뒤 단위가 표지 줄을 더하면 이 수를 함께 손볼 것
+$doneTailWant = [ordered]@{ H1 = 4; H2 = 2; H3 = 2; H4 = 2; H5 = 1; H12 = 6 }
 # 비슷한 낱말 - 그대로여야 함(꼬리 낱말 뒤 덧붙임 · 앞부분만 · 대소문자만 다름. 앞 둘은 ⑯ W9·W12 의 근접 낱말 '(start-unknown-x)'·'(start)'·'(released)'·
 # '(release-x)' 와 같은 모양, 셋째는 G3 의 '정확한 낱말' - 판별(Get-WorkerDoneMarkers 의 Contains)도 대소문자를 가립니다)
 $doneTailNearWords = @{
@@ -1008,7 +1009,7 @@ foreach ($doneTailId in @($doneTailKinds.Keys)) {
          $node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) -and
         ([string]$node.Value).Contains($doneTailText) }, $true))
 }
-Check-Equal '워커: 꼬리 6종을 담은 문자열 수 = 명세 ② 표 (H1 S9·S10·S13·S14 · H2 S11·S12 · H3 Consume-Handoff ③④ · H4 S15·S16 · H5 S6 · H12 S17 두 변형·S18·S20)' `
+Check-Equal '워커: 꼬리 6종을 담은 문자열 수 = 명세 ② 표 (H1 S9·S10·S13·S14 · H2 S11·S12 · H3 Consume-Handoff ③④ · H4 S15·S16 · H5 S6 · H12 S17 두 변형·S18·S20 + 추론 재입장 터치 끝 reward-before-click 두 줄)' `
   ((@($doneTailKinds.Keys) | ForEach-Object { '{0}={1}' -f $_, @($doneTailNodes[$_]).Count }) -join ' ') `
   ((@($doneTailKinds.Keys) | ForEach-Object { '{0}={1}' -f $_, $doneTailWant[$_] }) -join ' ')
 $doneTailShapeProblems = @(foreach ($doneTailId in @($doneTailKinds.Keys)) {
